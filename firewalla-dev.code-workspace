@@ -1,0 +1,41 @@
+{
+  "folders": [
+    {
+      "path": ".",
+    },
+    {
+      "path": "../core",
+    },
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Auto-Link Firewalla",
+        "type": "shell",
+        "command": "mkdir -p /workspaces/core/config/custom_components && ln -snf /workspaces/firewalla-ha/custom_components/firewalla /workspaces/core/config/custom_components/firewalla",
+        "runOptions": {
+          "runOn": "folderOpen",
+        },
+      },
+      {
+        "label": "Ruff",
+        "type": "shell",
+        "command": "python -m ruff check .",
+      },
+      {
+        "label": "MyPy",
+        "type": "shell",
+        "command": "python -m mypy custom_components/firewalla",
+      },
+      {
+        "label": "Pytest",
+        "type": "shell",
+        "command": "python -m pytest tests/ -v",
+      },
+    ],
+  },
+}

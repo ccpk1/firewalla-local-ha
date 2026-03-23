@@ -1,0 +1,23 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This Firewalla host is already configured."
+    },
+    "step": {
+      "reconfigure": {
+        "data": {
+          "host": "Host"
+        },
+        "description": "Update the host used for this Firewalla scaffold entry.",
+        "title": "Reconfigure Firewalla"
+      },
+      "user": {
+        "data": {
+          "host": "Host"
+        },
+        "description": "Add the Firewalla host for this starter integration scaffold.",
+        "title": "Connect Firewalla"
+      }
+    }
+  }
+}

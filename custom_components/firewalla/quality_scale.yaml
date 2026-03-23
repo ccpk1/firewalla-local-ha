@@ -1,0 +1,94 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: No custom actions are provided yet.
+  appropriate-polling: done
+  brands:
+    status: todo
+    comment: Add branded assets before release.
+  common-modules: done
+  config-flow-test-coverage:
+    status: todo
+    comment: Expand tests once connection validation is implemented.
+  config-flow: done
+  dependency-transparency: done
+  docs-actions:
+    status: exempt
+    comment: No custom actions are provided yet.
+  docs-high-level-description: done
+  docs-installation-instructions:
+    status: todo
+    comment: Publish user-facing installation steps with authentication details.
+  docs-removal-instructions:
+    status: todo
+    comment: Add removal instructions once the integration is installable by users.
+  entity-event-setup:
+    status: exempt
+    comment: No entities exist yet.
+  entity-unique-id:
+    status: exempt
+    comment: No entities exist yet.
+  has-entity-name:
+    status: exempt
+    comment: No entities exist yet.
+  runtime-data: done
+  test-before-configure:
+    status: todo
+    comment: Add live connection validation when the real API client is wired.
+  test-before-setup: done
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions:
+    status: exempt
+    comment: No custom actions are provided yet.
+  config-entry-unloading: done
+  docs-data-update:
+    status: todo
+    comment: Document polling behavior when real data fetching exists.
+  entity-unavailable:
+    status: exempt
+    comment: No entities exist yet.
+  log-when-unavailable:
+    status: exempt
+    comment: No live API communication exists yet.
+  parallel-updates: done
+  reauthentication-flow:
+    status: todo
+    comment: Add once Firewalla authentication requirements are known.
+  reconfigure-flow: done
+
+  # Gold
+  devices:
+    status: todo
+    comment: Add device registry support with the first entity platform.
+  diagnostics: done
+  discovery:
+    status: todo
+    comment: Add discovery if Firewalla supports a reliable discovery mechanism.
+  entity-category:
+    status: exempt
+    comment: No entities exist yet.
+  entity-disabled-by-default:
+    status: exempt
+    comment: No entities exist yet.
+  entity-translations:
+    status: exempt
+    comment: No entities exist yet.
+  exception-translations:
+    status: todo
+    comment: Add translated user-facing exceptions with the first service or platform.
+  icon-translations:
+    status: exempt
+    comment: No entities exist yet.
+  stale-devices:
+    status: exempt
+    comment: No devices exist yet.
+
+  # Platinum
+  async-dependency:
+    status: done
+    comment: The scaffold uses aiohttp and async coordinator patterns only.
+  inject-websession: done
+  strict-typing: done
