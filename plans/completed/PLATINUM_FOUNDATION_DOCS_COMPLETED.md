@@ -8,7 +8,7 @@
 - Primary outcome: Create durable `docs/ARCHITECTURE.md` and `docs/DEVELOPMENT_STANDARDS.md` documents that define a minimal, typed, constants-first, localization-ready foundation for this repository.
 - Why now: The scaffold is intentionally small, but implementation work should not proceed without a documented architecture boundary and coding standards baseline.
 - Strategic context confirmed during research:
-  - the GitHub repository name is `firewalla-ha`
+  - the GitHub repository name is `firewalla-local-ha`
   - the Home Assistant UI name is `Firewalla Local`
   - the target internal domain is `firewalla_local`
   - first-time pairing uses QR data to negotiate a local-only ETP token exchange over LAN
@@ -65,7 +65,7 @@ Goal: Define what the first architecture and standards docs must cover, what the
   - `docs/DEVELOPMENT_STANDARDS.md`
 - [x] Document a terminology contract for this repo so future docs clearly distinguish Home Assistant entities from integration data, runtime objects, and configuration data.
 - [x] Resolve the naming decision that affects future documentation and architecture language:
-  - GitHub repo: `firewalla-ha`
+  - GitHub repo: `firewalla-local-ha`
   - Home Assistant UI name: `Firewalla Local`
   - target internal domain and package path: `firewalla_local`
   - pure internal API boundary lives under `custom_components/firewalla_local/api/`

@@ -47,7 +47,7 @@ pyproject.toml
 Use the workspace file:
 
 ```text
-/workspaces/firewalla-ha/firewalla-dev.code-workspace
+/workspaces/firewalla-local-ha/firewalla-dev.code-workspace
 ```
 
 The workspace includes Home Assistant Core and an auto-link task for:

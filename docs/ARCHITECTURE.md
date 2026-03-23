@@ -8,7 +8,7 @@ It exists to keep the repository minimal, typed, and maintainable while the runt
 
 ## Product naming
 
-- GitHub repository name: `firewalla-ha`
+- GitHub repository name: `firewalla-local-ha`
 - Home Assistant UI name: `Firewalla Local`
 - Home Assistant integration domain: `firewalla_local`
 - Home Assistant package path target: `custom_components/firewalla_local/`
