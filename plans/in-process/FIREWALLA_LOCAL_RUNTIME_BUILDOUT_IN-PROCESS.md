@@ -82,7 +82,9 @@ Goal: Define the implementation sequence and module responsibilities for local p
 
 Gate note: Phase 2 must prove the protocol path in the pure `api/` boundary first. Home Assistant orchestration should not be used to compensate for unclear protocol behavior.
 
-- [ ] Define the pairing sequence from QR JSON input through local credential establishment, including which steps run in async code versus the executor.
+Support note: See `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE2_PAIRING_SEQUENCE.md` for the pairing sequence, async or executor boundaries, and explicit protocol assumptions.
+
+- [x] Define the pairing sequence from QR JSON input through local credential establishment, including which steps run in async code versus the executor.
 - [ ] Define the `cryptography` usage boundaries for RSA generation, PKCS#8 private PEM serialization, and SPKI public PEM serialization.
 - [ ] Define the request-signing and HTTP client responsibilities inside `api/client.py` and related modules.
 - [ ] Define the duration parsing contract for time-bounded rule actions:
