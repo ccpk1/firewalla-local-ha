@@ -14,9 +14,9 @@
     "version": "2.0.0",
     "tasks": [
       {
-        "label": "Auto-Link Firewalla",
+        "label": "Auto-Link Firewalla Local",
         "type": "shell",
-        "command": "mkdir -p /workspaces/core/config/custom_components && ln -snf /workspaces/firewalla-ha/custom_components/firewalla /workspaces/core/config/custom_components/firewalla",
+        "command": "mkdir -p /workspaces/core/config/custom_components && ln -snf /workspaces/firewalla-ha/custom_components/firewalla_local /workspaces/core/config/custom_components/firewalla_local",
         "runOptions": {
           "runOn": "folderOpen",
         },
@@ -29,7 +29,7 @@
       {
         "label": "MyPy",
         "type": "shell",
-        "command": "python -m mypy custom_components/firewalla",
+        "command": "python -m mypy custom_components/firewalla_local",
       },
       {
         "label": "Pytest",

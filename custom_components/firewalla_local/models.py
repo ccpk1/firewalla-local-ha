@@ -1,4 +1,4 @@
-"""Typed models for Firewalla."""
+"""Typed models for Firewalla Local."""
 
 from __future__ import annotations
 

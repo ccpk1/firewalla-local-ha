@@ -1,4 +1,4 @@
-"""Tests for Firewalla setup."""
+"""Tests for Firewalla Local setup."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.firewalla.const import DOMAIN
+from custom_components.firewalla_local.const import DOMAIN
 
 
 async def test_setup_entry(hass: HomeAssistant) -> None:
     """Test setting up the scaffold entry."""
     entry = MockConfigEntry(
         domain=DOMAIN,
-        title="Firewalla firewalla.local",
+        title="Firewalla Local firewalla.local",
         data={CONF_HOST: "firewalla.local"},
     )
     entry.add_to_hass(hass)

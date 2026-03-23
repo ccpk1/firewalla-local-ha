@@ -1,4 +1,4 @@
-"""DataUpdateCoordinator for Firewalla."""
+"""DataUpdateCoordinator for Firewalla Local."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .models import FirewallaSystemInfo
 
 
 class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaSystemInfo]):
-    """Coordinate Firewalla data updates."""
+    """Coordinate Firewalla Local data updates."""
 
     def __init__(
         self,
@@ -33,11 +33,11 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaSystemInfo])
         )
 
     async def _async_update_data(self) -> FirewallaSystemInfo:
-        """Fetch data from Firewalla."""
+        """Fetch data from Firewalla Local."""
         try:
             return await self.client.async_get_system_info()
         except FirewallaApiError as err:
-            raise UpdateFailed(f"Unable to fetch Firewalla data: {err}") from err
+            raise UpdateFailed(f"Unable to fetch Firewalla Local data: {err}") from err
 
 
 @dataclass(slots=True)

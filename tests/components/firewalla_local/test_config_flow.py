@@ -1,4 +1,4 @@
-"""Tests for the Firewalla config flow."""
+"""Tests for the Firewalla Local config flow."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.firewalla.const import DOMAIN
+from custom_components.firewalla_local.const import DOMAIN
 
 
 async def test_user_flow_creates_entry(hass) -> None:
@@ -26,7 +26,7 @@ async def test_user_flow_creates_entry(hass) -> None:
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Firewalla firewalla.local"
+    assert result["title"] == "Firewalla Local firewalla.local"
     assert result["data"] == {CONF_HOST: "firewalla.local"}
 
 
@@ -34,7 +34,7 @@ async def test_duplicate_host_aborts(hass) -> None:
     """Test duplicate hosts are rejected."""
     existing_entry = MockConfigEntry(
         domain=DOMAIN,
-        title="Firewalla firewalla.local",
+        title="Firewalla Local firewalla.local",
         data={CONF_HOST: "firewalla.local"},
     )
     existing_entry.add_to_hass(hass)

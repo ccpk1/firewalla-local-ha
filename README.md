@@ -1,4 +1,4 @@
-# Firewalla Home Assistant Scaffold
+# Firewalla Local Home Assistant scaffold
 
 This repository is a private starter scaffold for a Firewalla Home Assistant
 custom integration.
@@ -7,11 +7,16 @@ It is intentionally small. The goal is to start with the minimum structure that
 keeps the codebase clean, typed, translation-ready, and easy to grow toward Home
 Assistant platinum quality.
 
+The durable project rules now live in:
+
+- `docs/ARCHITECTURE.md`
+- `docs/DEVELOPMENT_STANDARDS.md`
+
 ## What is in place
 
 - Standalone custom component repository layout
 - Separate VS Code workspace that opens this repo with Home Assistant Core
-- Link target for `core/config/custom_components/firewalla`
+- Link target for `core/config/custom_components/firewalla_local`
 - UI config flow scaffold
 - Typed runtime data and coordinator scaffold
 - Diagnostics scaffold
@@ -29,8 +34,10 @@ Assistant platinum quality.
 ## Repository layout
 
 ```text
-custom_components/firewalla/
-tests/components/firewalla/
+custom_components/firewalla_local/
+tests/components/firewalla_local/
+docs/ARCHITECTURE.md
+docs/DEVELOPMENT_STANDARDS.md
 firewalla-dev.code-workspace
 pyproject.toml
 ```
@@ -46,13 +53,13 @@ Use the workspace file:
 The workspace includes Home Assistant Core and an auto-link task for:
 
 ```text
-/workspaces/core/config/custom_components/firewalla
+/workspaces/core/config/custom_components/firewalla_local
 ```
 
 ## Suggested next implementation order
 
-1. Replace the placeholder client in `api.py` with the real Firewalla transport
-2. Add one platform, likely diagnostics-first sensors or device tracker data
-3. Add config flow connection testing and reauthentication
-4. Add integration tests around setup, diagnostics, and entity behavior
-5. Tighten the quality scale checklist as features land
+1. Replace the placeholder client with the pure `api/` submodule and real local transport
+2. Add initial pairing, options flow, and reauthentication behavior
+3. Add rule-backed entities and coordinator-driven state updates
+4. Add timed rule pause service support
+5. Expand integration tests around setup, diagnostics, reauth, services, and entity behavior

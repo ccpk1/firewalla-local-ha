@@ -19,7 +19,7 @@ rules:
   docs-high-level-description: done
   docs-installation-instructions:
     status: todo
-    comment: Publish user-facing installation steps with authentication details.
+    comment: Publish user-facing installation steps covering local pairing, key generation, and options flow behavior.
   docs-removal-instructions:
     status: todo
     comment: Add removal instructions once the integration is installable by users.
@@ -35,7 +35,7 @@ rules:
   runtime-data: done
   test-before-configure:
     status: todo
-    comment: Add live connection validation when the real API client is wired.
+    comment: Add local pairing and signed API validation when the real API client is wired.
   test-before-setup: done
   unique-config-entry: done
 
@@ -46,7 +46,7 @@ rules:
   config-entry-unloading: done
   docs-data-update:
     status: todo
-    comment: Document polling behavior when real data fetching exists.
+    comment: Document coordinator polling behavior and the no-local-cache storage contract when real data fetching exists.
   entity-unavailable:
     status: exempt
     comment: No entities exist yet.
@@ -56,13 +56,13 @@ rules:
   parallel-updates: done
   reauthentication-flow:
     status: todo
-    comment: Add once Firewalla authentication requirements are known.
+    comment: Add the one-retry 401 to reauth path once the real API client is wired.
   reconfigure-flow: done
 
   # Gold
   devices:
     status: todo
-    comment: Add device registry support with the first entity platform.
+    comment: Add device registry support using the immutable license identity with the first entity platform.
   diagnostics: done
   discovery:
     status: todo
@@ -78,7 +78,7 @@ rules:
     comment: No entities exist yet.
   exception-translations:
     status: todo
-    comment: Add translated user-facing exceptions with the first service or platform.
+    comment: Add translated user-facing exceptions for auth, repair, and platform errors with the first entity platform.
   icon-translations:
     status: exempt
     comment: No entities exist yet.

@@ -1,18 +1,14 @@
-"""API client scaffolding for Firewalla."""
+"""Client scaffolding for the Firewalla Local API boundary."""
 
 from __future__ import annotations
 
 from aiohttp import ClientSession
 
-from .models import FirewallaSystemInfo
-
-
-class FirewallaApiError(Exception):
-    """Raise when the Firewalla API cannot be queried."""
+from ..models import FirewallaSystemInfo
 
 
 class FirewallaApiClient:
-    """Very small client scaffold for future Firewalla API work."""
+    """Very small client scaffold for future Firewalla Local API work."""
 
     def __init__(self, session: ClientSession, host: str) -> None:
         """Initialize the client."""
@@ -27,7 +23,7 @@ class FirewallaApiClient:
         """
         return FirewallaSystemInfo(
             host=self.host,
-            name="Firewalla",
+            name="Firewalla Local",
             model=None,
             serial_number=None,
             software_version=None,

@@ -1,0 +1,14 @@
+pause_rule:
+  name: Pause rule
+  description: Pause a Firewalla Local rule for a requested duration.
+  fields:
+    rule_target:
+      required: true
+      example: "rule-uuid"
+      selector:
+        text:
+    duration:
+      required: true
+      example: "30m"
+      selector:
+        text:

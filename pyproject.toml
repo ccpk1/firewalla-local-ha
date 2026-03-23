@@ -37,4 +37,4 @@ python_version = "3.14"
 strict = true
 warn_unused_ignores = true
 show_error_codes = true
-files = ["custom_components/firewalla"]
+files = ["custom_components/firewalla_local"]

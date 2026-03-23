@@ -1,4 +1,4 @@
-"""Config flow for Firewalla."""
+"""Config flow for Firewalla Local."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _normalize_host(host: str) -> str:
 
 
 class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Firewalla."""
+    """Handle a config flow for Firewalla Local."""
 
     VERSION = 1
     MINOR_VERSION = 1
@@ -39,7 +39,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             self.host = host
             self._async_abort_entries_match({CONF_HOST: host})
             return self.async_create_entry(
-                title=f"Firewalla {host}",
+                title=f"Firewalla Local {host}",
                 data={CONF_HOST: host},
             )
 

@@ -1,4 +1,4 @@
-"""The Firewalla integration."""
+"""The Firewalla Local integration."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ PLATFORMS: list[Platform] = []
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) -> bool:
-    """Set up Firewalla from a config entry."""
+    """Set up Firewalla Local from a config entry."""
     client = FirewallaApiClient(
         session=async_get_clientsession(hass),
         host=entry.data[CONF_HOST],
@@ -35,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) -> bool:
-    """Unload a Firewalla config entry."""
+    """Unload a Firewalla Local config entry."""
     if not PLATFORMS:
         return True
 

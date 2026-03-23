@@ -8,15 +8,15 @@
         "data": {
           "host": "Host"
         },
-        "description": "Update the host used for this Firewalla scaffold entry.",
-        "title": "Reconfigure Firewalla"
+        "description": "Update the host used for this Firewalla Local scaffold entry.",
+        "title": "Reconfigure Firewalla Local"
       },
       "user": {
         "data": {
           "host": "Host"
         },
-        "description": "Add the Firewalla host for this starter integration scaffold.",
-        "title": "Connect Firewalla"
+        "description": "Add the Firewalla Local host for this starter integration scaffold.",
+        "title": "Connect Firewalla Local"
       }
     }
   }

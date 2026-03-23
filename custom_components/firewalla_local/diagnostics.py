@@ -1,4 +1,4 @@
-"""Diagnostics support for Firewalla."""
+"""Diagnostics support for Firewalla Local."""
 
 from __future__ import annotations
 
