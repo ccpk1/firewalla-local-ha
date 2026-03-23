@@ -1,3 +1,18 @@
+get_runtime_inventory:
+  name: Get runtime inventory
+  description: Return the current Firewalla runtime objects as markdown and structured data.
+  fields:
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
 pause_rule:
   name: Pause rule
   description: Pause a Firewalla Local rule for a requested duration.

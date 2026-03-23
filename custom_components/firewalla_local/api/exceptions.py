@@ -1,5 +1,23 @@
 """Custom API exceptions for Firewalla Local."""
 
+from __future__ import annotations
+
 
 class FirewallaApiError(Exception):
-    """Raise when the Firewalla Local API cannot be queried."""
+    """Base error for Firewalla Local API failures."""
+
+
+class FirewallaAuthError(FirewallaApiError):
+    """Raise when Firewalla authentication fails."""
+
+
+class FirewallaConnectionError(FirewallaApiError):
+    """Raise when Firewalla cannot be reached over the network."""
+
+
+class FirewallaProtocolError(FirewallaApiError):
+    """Raise when Firewalla returns an unexpected protocol payload."""
+
+
+class FirewallaValidationError(FirewallaApiError):
+    """Raise when user-supplied Firewalla input is invalid."""

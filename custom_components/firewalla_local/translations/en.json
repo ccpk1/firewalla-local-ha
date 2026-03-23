@@ -1,22 +1,47 @@
 {
   "config": {
     "abort": {
-      "already_configured": "This Firewalla host is already configured."
+      "already_configured": "This Firewalla box is already configured."
+    },
+    "error": {
+      "cannot_connect": "The Firewalla pairing or local connection test failed.",
+      "invalid_qr": "The Firewalla QR JSON or local IP address is invalid.",
+      "wrong_account": "The new QR code belongs to a different Firewalla box."
     },
     "step": {
+      "reauth_confirm": {
+        "data": {
+          "host": "Local hostname or IP address",
+          "qr_json": "Raw QR JSON"
+        },
+        "description": "Paste a fresh Additional Pairing QR JSON payload to refresh this Firewalla connection. The local address defaults to fire.walla, but you can override it.",
+        "title": "Reconnect Firewalla Local"
+      },
       "reconfigure": {
         "data": {
-          "host": "Host"
+          "host": "Local hostname or IP address"
         },
-        "description": "Update the host used for this Firewalla Local scaffold entry.",
+        "description": "Update the local hostname or IP address used for this Firewalla box.",
         "title": "Reconfigure Firewalla Local"
       },
       "user": {
         "data": {
-          "host": "Host"
+          "host": "Local hostname or IP address",
+          "qr_json": "Raw QR JSON"
         },
-        "description": "Add the Firewalla Local host for this starter integration scaffold.",
+        "description": "Enter the Firewalla local hostname or IP address and paste the raw Additional Pairing QR JSON. The recommended default is fire.walla.",
         "title": "Connect Firewalla Local"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "selected_rule_ids": "Rules to expose"
+        },
+        "description": "Select which discovered Firewalla rules should be exposed for future entity surfaces.",
+        "title": "Rule selection"
       }
     }
   }

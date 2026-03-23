@@ -6,6 +6,19 @@ This document defines the durable architecture contract for the Firewalla Local 
 
 It exists to keep the repository minimal, typed, and maintainable while the runtime implementation grows from the current scaffold into a real local-only integration.
 
+## Project status and disclaimer
+
+This repository is an independent Home Assistant integration project.
+
+It is not affiliated with, endorsed by, or supported by Firewalla.
+
+The security and architecture guidance in this document reflects the
+maintainer's current technical view of the protocol behavior, operational
+trade-offs, and deployment risks. It should not be read as official vendor
+documentation or as a vendor security statement.
+
+Use this project at your own risk.
+
 ## Product naming
 
 - GitHub repository name: `firewalla-local-ha`
@@ -15,12 +28,12 @@ It exists to keep the repository minimal, typed, and maintainable while the runt
 
 ## Mission
 
-The integration provides local-only access to a Firewalla box from Home Assistant.
+The integration provides local runtime access to a Firewalla box from Home Assistant.
 
 The MVP architecture is responsible for:
 
-- local QR-based pairing
-- local credential establishment
+- cloud-provisioned QR-based pairing
+- durable local credential establishment
 - signed local REST communication over port `8833`
 - coordinator-backed rule discovery and synchronization
 - Home Assistant configuration, reauthentication, diagnostics, and entity wiring
@@ -41,13 +54,117 @@ The architecture is not responsible for introducing unnecessary layers, external
 
 The architecture assumes the following are settled inputs:
 
-- first-time pairing is local-only and starts from the Firewalla QR JSON payload
+- first-time pairing starts from the Firewalla QR JSON payload but uses a split architecture:
+	- cloud provisioning through `login/eptoken` and `ept/rendezvous/me`
+	- local runtime over `http://{local_ip}:8833/v1/encipher/message/{gid}`
 - the QR payload includes fields such as `gid`, `seed`, `license`, `ek`, and `ipaddress`
-- local box communication uses signed HTTP GET and POST requests on port `8833`
-- local rule polling endpoints are valid MVP inputs for coordinator-backed synchronization
+- local box communication uses encrypted HTTP POST requests on port `8833`
+- local runtime credentials are `gid`, `eid`, `aid`, and the decrypted symmetric key
 - cryptographic signing and key generation require SPKI public PEM and PKCS#8 private PEM handling
 
 The architecture treats unresolved mutation details as feature-level questions, not transport-level questions.
+
+## Security posture
+
+This section explains the high-level security approach behind the integration
+and the trade-offs that come with it.
+
+### Split architecture: cloud provisioning and local runtime
+
+The current architecture is intentionally split into two stages.
+
+- Provisioning is cloud-brokered. Initial pairing uses the Firewalla QR payload
+	plus Firewalla cloud endpoints to establish local trust material and recover
+	the durable symmetric key required for local messaging.
+- Runtime is local-first. Day-to-day communication is designed around LAN
+	access to the box on port `8833` once local credentials have been
+	established.
+- The integration architecture does not depend on storing a Firewalla account
+	password in Home Assistant.
+- If the paired local credentials remain valid, the architecture expects normal
+	runtime polling and control to continue without depending on a permanent
+	cloud control path after provisioning.
+
+This split is a pragmatic compromise between Firewalla's pairing model and Home
+Assistant's preference for durable local runtime control.
+
+### Local HTTP and encrypted payloads
+
+The local runtime uses HTTP on port `8833`, not HTTPS.
+
+That matters because transport security and payload security are not the same
+thing.
+
+- The current protocol evidence in this repository, including `poc.py` and the
+	local API client implementation, shows application-layer encryption of the
+	request and response payloads before they cross the network.
+- The current implementation path uses AES-256-CBC encrypted payloads wrapped
+	in JSON and sent to the Encipher message endpoint.
+- This design reduces exposure of raw firewall state and control payloads on
+	the LAN, but it is not a substitute for a trusted network or for good local
+	segmentation practices.
+
+Observed message envelopes also include timestamps and unique message
+identifiers. The integration preserves that shape, but this document does not
+treat those fields alone as a complete replay-protection guarantee.
+
+### Stored credentials and host security
+
+Home Assistant persists config entries on disk through its own storage system.
+
+For this integration, the architecture currently expects the durable local
+connection material to include values such as:
+
+- `license`
+- `local_ip`
+- `gid`
+- `eid`
+- `aid`
+- the decrypted symmetric key used for local runtime access
+
+Those values are materially sensitive.
+
+They are still narrower in scope than a Firewalla account password, but a host
+compromise could expose enough credential material to control or observe the
+paired box through the local runtime path.
+
+If you no longer trust the Home Assistant host that was paired to the box, the
+maintainer's recommended response is to revoke that pairing from the Firewalla
+mobile app and create a new pairing. Exact menu labels can vary by app
+version, so this document does not treat any specific UI path as a stable API
+contract.
+
+### Diagnostics and log exposure
+
+The current repository already treats diagnostics and logs as sensitive output
+surfaces.
+
+- `custom_components/firewalla_local/diagnostics.py` redacts `aid`, `eid`,
+	`gid`, `license`, `local_ip`, and `symmetric_key` from exported diagnostics.
+- `docs/DEVELOPMENT_STANDARDS.md` forbids logging QR payloads, PEM material,
+	tokens, signatures, or decrypted sensitive payload data.
+- The architecture expects troubleshooting output to focus on failure class,
+	HTTP status, and protocol behavior rather than secret values.
+
+This is an area where host security still matters: safe logging reduces casual
+exposure, but it does not make a compromised Home Assistant host safe.
+
+### Recommended deployment posture
+
+The maintainer's recommendation is to treat this integration as trusted-network
+software.
+
+- Keep the Home Assistant host on your trusted management or core LAN.
+- Isolate untrusted IoT devices onto a separate VLAN or equivalent network
+	segment.
+- Use Firewalla rules to prevent untrusted device segments from initiating
+	traffic toward the Home Assistant host when your deployment allows it.
+- Do not expose Home Assistant directly to the public internet without a secure
+	remote-access design.
+
+This guidance is opinionated and conservative by design. It reflects the
+maintainer's view that local encrypted payloads are useful, but they do not
+eliminate the need for standard LAN hardening and host security.
 
 ## Identity contract
 
@@ -124,9 +241,10 @@ Permitted data:
 
 - `license`
 - `gid`
-- Firewalla IP address
-- generated `private.pem`
-- generated `public.pem`
+- `eid`
+- `aid`
+- Firewalla local IP address
+- decrypted symmetric key
 
 #### `ConfigEntry.options`
 

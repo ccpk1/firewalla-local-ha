@@ -6,9 +6,6 @@
     {
       "path": "../core",
     },
-    {
-      "path": "..",
-    },
   ],
   "settings": {
     "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",

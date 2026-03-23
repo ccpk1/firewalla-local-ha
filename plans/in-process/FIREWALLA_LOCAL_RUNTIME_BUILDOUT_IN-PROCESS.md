@@ -8,6 +8,30 @@
 - Primary outcome: Define the executable implementation plan that turns the documented Firewalla Local architecture into the first real runtime integration under the `firewalla_local` package layout.
 - Why now: The foundation docs are complete, and implementation should now follow a concrete runtime plan instead of growing from the legacy scaffold ad hoc.
 
+## Current execution state
+
+Implemented and verified in the repository:
+
+- clean domain and package cutover to `firewalla_local`
+- pure local API boundary under `custom_components/firewalla_local/api/`
+- cloud bootstrap plus local runtime proof carried into the real integration codepath
+- config flow pairing against the live protocol, including local runtime validation before entry creation
+- reauthentication with fresh QR input and reconfigure support for host updates
+- options flow for persisted rule selection using readable normalized rule labels
+- coordinator-backed typed runtime snapshots with normalized system and policy-rule state
+- log-once unavailability and recovery behavior in the coordinator
+- runtime inventory reporting and a response-returning Home Assistant service for live inspection
+- typed timing fields on normalized policy rules, including temporary-rule derivation based on current evidence
+- focused tests covering client normalization, config flow behavior, runtime service behavior, and inventory reporting
+
+Still open and driving the next implementation slice:
+
+- write-path confirmation for the local v1 mutation contract
+- duration parsing and `resumeTs` payload generation for time-bounded actions
+- first rule-backed switch entities
+- real mutation services, including `pause_rule`
+- final test-matrix expansion around mutation behavior and entity registry stability
+
 ## Critical execution note
 
 This initiative assumes a pristine buildout path.
@@ -85,19 +109,21 @@ Gate note: Phase 2 must prove the protocol path in the pure `api/` boundary firs
 Support note: See `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE2_PAIRING_SEQUENCE.md` for the pairing sequence, async or executor boundaries, and explicit protocol assumptions.
 
 - [x] Define the pairing sequence from QR JSON input through local credential establishment, including which steps run in async code versus the executor.
-- [ ] Define the `cryptography` usage boundaries for RSA generation, PKCS#8 private PEM serialization, and SPKI public PEM serialization.
-- [ ] Define the request-signing and HTTP client responsibilities inside `api/client.py` and related modules.
+- [x] Define the `cryptography` usage boundaries for RSA generation, PKCS#8 private PEM serialization, and SPKI public PEM serialization.
+- [x] Define the request-signing and HTTP client responsibilities inside `api/client.py` and related modules.
 - [ ] Define the duration parsing contract for time-bounded rule actions:
   - accept user-facing duration strings such as `30m`, `4h`, or `2d 4h 30m`
   - parse the duration string into a total offset from the current system time
   - convert the result into the exact `resumeTs` Unix epoch integer required by the Firewalla payload
   - place the parser either in a pure utility module or within the `api/` boundary, not in Home Assistant orchestration code
-- [ ] Define the one-retry auth contract in executable terms:
+- [x] Define the one-retry auth contract in executable terms:
   - first `401` triggers one immediate retry
   - second `401` raises `FirewallaAuthError`
   - Home Assistant layer converts that to `ConfigEntryAuthFailed`
-- [ ] Define the API exception taxonomy so transport, auth, validation, and protocol failures are distinct and typed.
-- [ ] Define a fast protocol-first validation harness for the pure `api/` layer so pairing, signing, and auth behavior can be proven before Home Assistant flow and coordinator work begins.
+- [x] Define the API exception taxonomy so transport, auth, validation, and protocol failures are distinct and typed.
+- [x] Define a fast protocol-first validation harness for the pure `api/` layer so pairing, signing, and auth behavior can be proven before Home Assistant flow and coordinator work begins.
+
+Phase 2 execution note: The repository now has a working protocol-first implementation and proof path. The cloud bootstrap and local `8833` runtime flow were validated against a physical box, then carried into `config_flow.py`, `api/auth.py`, and `api/client.py`. The repo also includes `auth_smoke.py` as a bounded live validation harness built on the real integration modules. The remaining Phase 2 blocker is not pairing or auth; it is the still-unverified local mutation message contract for creating, updating, pausing, and expiring rules.
 
 ### Phase 3: Home Assistant runtime plan
 
@@ -105,19 +131,23 @@ Goal: Define how Home Assistant flows, runtime data, coordinator state, diagnost
 
 Gate note: Phase 3 must preserve the accepted Home Assistant contracts for device identity, no-floating-entities behavior, no-cache restart behavior, and reauthentication. The HA layer is orchestration only, not a fallback mechanism for protocol uncertainty.
 
-- [ ] Define the config flow plan for QR ingestion, connection testing, identity assignment from `license`, and config entry creation.
-- [ ] Define the reconfigure flow plan so mutable connection details such as host or IP can be updated without re-pairing or identity churn.
+- [x] Define the config flow plan for QR ingestion, connection testing, identity assignment from `license`, and config entry creation.
+- [x] Define the reconfigure flow plan so mutable connection details such as host or IP can be updated without re-pairing or identity churn.
   - updating `ConfigEntry.data["ipaddress"]` must not automatically regenerate keys or trigger re-pairing unless the box actively rejects the existing credentials
-- [ ] Define the options flow plan for mutable user preferences, including selected rule UUIDs, timed-control preferences if needed, and future feature toggles.
-- [ ] Define the `runtime_data` shape created during `async_setup_entry`, including the API client and coordinator objects.
-- [ ] Define the coordinator data contract for normalized rule data, polling cadence, availability transitions, log-once unavailable behavior, recovery behavior, and no-cache restart behavior.
+- [x] Define the options flow plan for mutable user preferences, including selected rule UUIDs, timed-control preferences if needed, and future feature toggles.
+- [x] Define the `runtime_data` shape created during `async_setup_entry`, including the API client and coordinator objects.
+- [x] Define the coordinator data contract for normalized rule data, polling cadence, availability transitions, log-once unavailable behavior, recovery behavior, and no-cache restart behavior.
 - [ ] Define the entity and service contract for rule control:
   - entities are strictly binary switch entities for on or off behavior
+  - switch entities are rule-backed, not group-backed; the entity identity is the concrete rule effect plus scope, for example `block internet for KADEN`
+  - groups, users, and networks act as rule scope or applicability metadata, not as switch entities on their own
   - time-bounded pause actions are not native entity controls
   - time-bounded pause actions are exposed exclusively through a custom Home Assistant service such as `firewalla_local.pause_rule`
   - the custom service accepts the rule target and a duration string, then resolves that duration into the `resumeTs` payload field
 - [ ] Define the first entity plan, including which rule-backed switch entities are created, how unique IDs are derived, how all entities attach to the license-anchored device entry, and how the switch surface coordinates with the time-bounded pause service.
-- [ ] Define the diagnostics plan, including which config entry fields and runtime payloads are exposed and how Home Assistant redaction helpers are applied.
+- [x] Define the diagnostics plan, including which config entry fields and runtime payloads are exposed and how Home Assistant redaction helpers are applied.
+
+Phase 3 execution note: The current implementation now provisions real local credentials during config flow, validates the local runtime before creating the entry, supports reauth with a fresh QR payload, supports host reconfigure, and ships an options flow that persists selected rule IDs from the live coordinator snapshot. The coordinator populates typed `FirewallaRuntimeSnapshot` data containing normalized `system_info`, `policy_rules`, and `exception_rule_count`, and it now logs local-runtime outages once and recovery once when polling succeeds again. Runtime inventory reporting is available both as structured data and markdown through the `get_runtime_inventory` response service. Rule entities and service-layer mutation remain to be defined and implemented.
 
 ### Phase 4: Validation and implementation handoff
 
@@ -134,7 +164,7 @@ Gate note: Phase 4 must optimize for fast iteration. Pure `api/` unit tests shou
   - entity availability and recovery behavior
   - diagnostics redaction
   - device and entity registry stability
-- [ ] Define the minimum code-quality gates for the first implementation pass:
+- [x] Define the minimum code-quality gates for the first implementation pass:
   - `python -m ruff check .`
   - `python -m ruff format .`
   - `python -m mypy custom_components/firewalla_local`
@@ -143,6 +173,8 @@ Gate note: Phase 4 must optimize for fast iteration. Pure `api/` unit tests shou
 - [ ] Include the custom service implementation surface in the builder handoff, including `services.yaml`, service schema, duration parsing, and service tests.
 - [ ] Record any remaining protocol unknowns as explicit implementation risks, not as hidden assumptions.
 - [ ] Split the validation plan into a fast lane for pure `api/` unit tests and a slower lane for Home Assistant integration tests.
+
+Phase 4 execution note: Focused validation is now in place for the implemented runtime slices. Recent work has passed Ruff, MyPy, and targeted pytest coverage for client normalization, config flow, setup and service behavior, and runtime inventory reporting. The remaining handoff work is centered on the first write-path slice: mutation payload confirmation, duration parsing, service schema finalization, and entity platform scope.
 
 ## Validation strategy
 

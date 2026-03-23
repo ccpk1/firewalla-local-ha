@@ -1,7 +1,12 @@
-# Firewalla Local Home Assistant scaffold
+# Firewalla Local Home Assistant integration
 
-This repository is a private starter scaffold for a Firewalla Home Assistant
-custom integration.
+This repository is a standalone Home Assistant custom integration project for
+Firewalla.
+
+It is an independent community project. It is not affiliated with, endorsed
+by, or supported by Firewalla.
+
+Use it at your own risk.
 
 It is intentionally small. The goal is to start with the minimum structure that
 keeps the codebase clean, typed, translation-ready, and easy to grow toward Home
@@ -11,6 +16,14 @@ The durable project rules now live in:
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT_STANDARDS.md`
+
+## Security and support posture
+
+- Vulnerability reporting guidance lives in `SECURITY.md`
+- The high-level security approach, trade-offs, and awareness notes live in
+	`docs/ARCHITECTURE.md`
+- This repository should not be treated as an official Firewalla integration
+	or as a Firewalla support channel
 
 ## What is in place
 

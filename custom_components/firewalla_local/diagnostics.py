@@ -5,18 +5,21 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .coordinator import FirewallaConfigEntry
 
+TO_REDACT = {"aid", "eid", "gid", "host", "license", "symmetric_key"}
+
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: FirewallaConfigEntry
+    _hass: HomeAssistant, entry: FirewallaConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     return {
-        "entry_data": dict(entry.data),
-        "system_info": (
+        "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
+        "runtime_snapshot": (
             asdict(entry.runtime_data.coordinator.data)
             if entry.runtime_data.coordinator.data is not None
             else None
