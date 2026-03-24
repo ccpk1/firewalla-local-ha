@@ -1,5 +1,13 @@
 {
   "entity": {
+    "sensor": {
+      "latest_speed_test_download": {
+        "default": "mdi:speedometer"
+      },
+      "system_status": {
+        "default": "mdi:router-network"
+      }
+    },
     "switch": {
       "allow_rule": {
         "default": "mdi:shield-check",

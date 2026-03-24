@@ -47,6 +47,105 @@
     }
   },
   "entity": {
+    "sensor": {
+      "latest_speed_test_download": {
+        "name": "Latest speed test download",
+        "state_attributes": {
+          "download_megabytes": {
+            "name": "Download megabytes"
+          },
+          "isp": {
+            "name": "ISP"
+          },
+          "jitter": {
+            "name": "Jitter"
+          },
+          "latency": {
+            "name": "Latency (ms)"
+          },
+          "manual": {
+            "name": "Manual"
+          },
+          "packet_loss": {
+            "name": "Packet loss"
+          },
+          "public_ip": {
+            "name": "Public IP"
+          },
+          "server_country": {
+            "name": "Server country"
+          },
+          "server_host": {
+            "name": "Server host"
+          },
+          "server_id": {
+            "name": "Server ID"
+          },
+          "server_location": {
+            "name": "Server location"
+          },
+          "server_sponsor": {
+            "name": "Server sponsor"
+          },
+          "success": {
+            "name": "Success"
+          },
+          "tested_at": {
+            "name": "Tested at"
+          },
+          "upload_megabytes": {
+            "name": "Upload megabytes"
+          },
+          "upload_speed": {
+            "name": "Upload speed"
+          },
+          "vendor": {
+            "name": "Vendor"
+          }
+        }
+      },
+      "system_status": {
+        "name": "System status",
+        "state_attributes": {
+          "boot_complete": {
+            "name": "Boot complete"
+          },
+          "cpu_load_5m": {
+            "name": "CPU load (5 min)"
+          },
+          "cloud_connected": {
+            "name": "Cloud connected"
+          },
+          "ddns": {
+            "name": "DDNS"
+          },
+          "disk_usage_percent_by_mount": {
+            "name": "Disk usage by mount"
+          },
+          "firmware_release_type": {
+            "name": "Firmware release type"
+          },
+          "memory_free_mb": {
+            "name": "Memory free (MB)"
+          },
+          "memory_usage_percent": {
+            "name": "Memory usage (%)"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_system_boot_status": "Shows whether the Firewalla box is available and exposes system information"
+            }
+          },
+          "wan_ip": {
+            "name": "WAN IP"
+          },
+          "wan_ips": {
+            "name": "WAN IPs"
+          }
+        }
+      }
+    },
     "switch": {
       "allow_rule": {
         "name": "{rule_name}",

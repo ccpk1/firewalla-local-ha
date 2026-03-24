@@ -21,7 +21,9 @@ from ..models import (
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
+    FirewallaSpeedTestResult,
     FirewallaSystemInfo,
+    FirewallaSystemStatus,
 )
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
@@ -75,6 +77,21 @@ _RAW_SYSTEM_CPU_ID_KEY: Final = "cpuid"
 _RAW_SYSTEM_LONG_VERSION_KEY: Final = "longVersion"
 _RAW_SYSTEM_GROUP_NAME_KEY: Final = "groupName"
 _RAW_SYSTEM_DEVICE_NAME_KEY: Final = "device"
+_RAW_SYSTEM_BOOTING_COMPLETE_KEY: Final = "bootingComplete"
+_RAW_SYSTEM_CLOUD_CONNECTED_KEY: Final = "cloudConnected"
+_RAW_SYSTEM_DDNS_KEY: Final = "ddns"
+_RAW_SYSTEM_FIRMWARE_RELEASE_TYPE_KEY: Final = "firmwareReleaseType"
+_RAW_SYSTEM_PUBLIC_IP_KEY: Final = "publicIp"
+_RAW_SYSTEM_PUBLIC_IPS_KEY: Final = "publicIps"
+_RAW_SYSTEM_SYS_METRICS_KEY: Final = "sysMetrics"
+_RAW_SYSTEM_SYS_METRICS_CPU_LOAD_5_KEY: Final = "load5"
+_RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY: Final = "memUsage"
+_RAW_SYSTEM_SYS_METRICS_TOTAL_MEMORY_KEY: Final = "totalMem"
+_RAW_SYSTEM_SYS_METRICS_DISK_INFO_KEY: Final = "diskInfo"
+_RAW_SYSTEM_SYS_METRICS_DISK_MOUNT_KEY: Final = "mount"
+_RAW_SYSTEM_SYS_METRICS_DISK_CAPACITY_KEY: Final = "capacity"
+_RAW_SYSTEM_SYS_METRICS_DISK_USED_KEY: Final = "used"
+_RAW_SYSTEM_SYS_METRICS_DISK_SIZE_KEY: Final = "size"
 _RAW_CUSTOMIZED_CATEGORIES_KEY: Final = "customizedCategories"
 _RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
 _RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
@@ -91,6 +108,28 @@ _RAW_HOST_MAC_KEY: Final = "mac"
 _RAW_HOST_BACKUP_NAME_KEY: Final = "bname"
 _RAW_EXCEPTION_RULES_KEY: Final = "exceptionRules"
 _RAW_POLICY_RULES_KEY: Final = "policyRules"
+_RAW_SPEED_TEST_RESULTS_KEY: Final = "internetSpeedtestResults"
+_RAW_SPEED_TEST_CLIENT_KEY: Final = "client"
+_RAW_SPEED_TEST_RESULT_KEY: Final = "result"
+_RAW_SPEED_TEST_SERVER_KEY: Final = "server"
+_RAW_SPEED_TEST_TIMESTAMP_KEY: Final = "timestamp"
+_RAW_SPEED_TEST_MANUAL_KEY: Final = "manual"
+_RAW_SPEED_TEST_SUCCESS_KEY: Final = "success"
+_RAW_SPEED_TEST_VENDOR_KEY: Final = "vendor"
+_RAW_SPEED_TEST_PUBLIC_IP_KEY: Final = "publicIp"
+_RAW_SPEED_TEST_ISP_KEY: Final = "isp"
+_RAW_SPEED_TEST_DOWNLOAD_KEY: Final = "download"
+_RAW_SPEED_TEST_UPLOAD_KEY: Final = "upload"
+_RAW_SPEED_TEST_LATENCY_KEY: Final = "latency"
+_RAW_SPEED_TEST_JITTER_KEY: Final = "jitter"
+_RAW_SPEED_TEST_PACKET_LOSS_KEY: Final = "ploss"
+_RAW_SPEED_TEST_DOWNLOAD_MBYTES_KEY: Final = "dlMbytes"
+_RAW_SPEED_TEST_UPLOAD_MBYTES_KEY: Final = "ulMbytes"
+_RAW_SPEED_TEST_SERVER_COUNTRY_KEY: Final = "country"
+_RAW_SPEED_TEST_SERVER_HOST_KEY: Final = "host"
+_RAW_SPEED_TEST_SERVER_ID_KEY: Final = "id"
+_RAW_SPEED_TEST_SERVER_LOCATION_KEY: Final = "location"
+_RAW_SPEED_TEST_SERVER_SPONSOR_KEY: Final = "sponsor"
 
 _RAW_TAG_PREFIX_GROUP: Final = "tag"
 _RAW_TAG_PREFIX_DEVICE: Final = "dtag"
@@ -114,6 +153,14 @@ _DISABLED_TRUE_VALUES: Final = {"1", "true", "True", 1}
 _RAW_RULE_DISABLED_FALSE_VALUE: Final = 0
 _RAW_RULE_DISABLED_TRUE_VALUE: Final = 1
 _RAW_RULE_IDLE_TS_EMPTY_VALUE: Final = ""
+_SYSTEM_STATUS_PRIMARY_DISK_MOUNTS: Final = (
+    "/",
+    "/boot",
+    "/boot/efi",
+    "/var/lib/docker",
+    "/log",
+    "/data",
+)
 
 
 class FirewallaApiClient:
@@ -355,6 +402,274 @@ class FirewallaApiClient:
             serial_number=serial_number if isinstance(serial_number, str) else None,
             software_version=(
                 software_version if isinstance(software_version, str) else None
+            ),
+        )
+
+    def _build_system_status(self, data: dict[str, object]) -> FirewallaSystemStatus:
+        """Build normalized system-status state from the init payload."""
+        raw_sys_metrics = data.get(_RAW_SYSTEM_SYS_METRICS_KEY)
+        sys_metrics = raw_sys_metrics if isinstance(raw_sys_metrics, dict) else {}
+        wan_ips = self._build_wan_ips(data)
+        memory_usage_ratio = self._coerce_float(
+            sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY)
+        )
+        memory_usage_percent = self._build_memory_usage_percent(sys_metrics)
+
+        return FirewallaSystemStatus(
+            booting_complete=self._coerce_boolish(
+                data.get(_RAW_SYSTEM_BOOTING_COMPLETE_KEY)
+            ),
+            cloud_connected=self._coerce_boolish(
+                data.get(_RAW_SYSTEM_CLOUD_CONNECTED_KEY)
+            ),
+            ddns=(
+                ddns
+                if isinstance((ddns := data.get(_RAW_SYSTEM_DDNS_KEY)), str) and ddns
+                else None
+            ),
+            firmware_release_type=(
+                firmware_release_type
+                if isinstance(
+                    (
+                        firmware_release_type := data.get(
+                            _RAW_SYSTEM_FIRMWARE_RELEASE_TYPE_KEY
+                        )
+                    ),
+                    str,
+                )
+                and firmware_release_type
+                else None
+            ),
+            wan_ip=self._build_wan_ip(data, wan_ips),
+            wan_ips=wan_ips,
+            cpu_load_5m=self._coerce_float(
+                sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_CPU_LOAD_5_KEY)
+            ),
+            memory_usage_percent=memory_usage_percent,
+            memory_free_mb=self._build_memory_free_mb(sys_metrics, memory_usage_ratio),
+            disk_usage_percent_by_mount=self._build_disk_usage_percent_by_mount(
+                sys_metrics
+            ),
+        )
+
+    def _build_wan_ip(
+        self, data: dict[str, object], wan_ips: dict[str, str] | None
+    ) -> str | None:
+        """Build the primary WAN public IP from the init payload."""
+        raw_public_ip = data.get(_RAW_SYSTEM_PUBLIC_IP_KEY)
+        if isinstance(raw_public_ip, str) and raw_public_ip:
+            return raw_public_ip
+        if wan_ips:
+            return next(iter(wan_ips.values()))
+        return None
+
+    def _build_wan_ips(self, data: dict[str, object]) -> dict[str, str] | None:
+        """Build the WAN public IP map keyed by interface name."""
+        raw_public_ips = data.get(_RAW_SYSTEM_PUBLIC_IPS_KEY)
+        if not isinstance(raw_public_ips, dict):
+            return None
+
+        wan_ips = {
+            interface_name: public_ip
+            for interface_name, public_ip in raw_public_ips.items()
+            if isinstance(interface_name, str)
+            and interface_name
+            and isinstance(public_ip, str)
+            and public_ip
+        }
+        return wan_ips or None
+
+    def _build_memory_usage_percent(
+        self, sys_metrics: dict[str, object]
+    ) -> float | None:
+        """Build the memory usage percentage from the sysMetrics payload."""
+        memory_usage_ratio = self._coerce_float(
+            sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY)
+        )
+        if memory_usage_ratio is None:
+            return None
+        return round(memory_usage_ratio * 100, 1)
+
+    def _build_memory_free_mb(
+        self, sys_metrics: dict[str, object], memory_usage_ratio: float | None
+    ) -> float | None:
+        """Build free memory in megabytes from the sysMetrics payload."""
+        total_memory_mb = self._coerce_float(
+            sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_TOTAL_MEMORY_KEY)
+        )
+        if total_memory_mb is None or memory_usage_ratio is None:
+            return None
+        return round(total_memory_mb * (1 - memory_usage_ratio), 1)
+
+    def _build_disk_usage_percent_by_mount(
+        self, sys_metrics: dict[str, object]
+    ) -> dict[str, int] | None:
+        """Build a filtered disk usage map for important system mounts."""
+        raw_disk_info = sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_DISK_INFO_KEY)
+        if not isinstance(raw_disk_info, list):
+            return None
+
+        usage_by_mount: dict[str, int] = {}
+        for raw_disk in raw_disk_info:
+            if not isinstance(raw_disk, dict):
+                continue
+
+            mount = raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_MOUNT_KEY)
+            if (
+                not isinstance(mount, str)
+                or mount not in _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS
+            ):
+                continue
+
+            usage_ratio = self._coerce_float(
+                raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_CAPACITY_KEY)
+            )
+            if usage_ratio is None:
+                used = self._coerce_float(
+                    raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_USED_KEY)
+                )
+                size = self._coerce_float(
+                    raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_SIZE_KEY)
+                )
+                if used is None or size is None or size == 0:
+                    continue
+                usage_ratio = used / size
+
+            usage_by_mount[mount] = round(usage_ratio * 100)
+
+        filtered_usage = {
+            mount: usage_by_mount[mount]
+            for mount in _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS
+            if mount in usage_by_mount
+        }
+        return filtered_usage or None
+
+    def _build_latest_speed_test(
+        self, data: dict[str, object]
+    ) -> FirewallaSpeedTestResult | None:
+        """Build the latest successful internet speed-test result."""
+        raw_results = data.get(_RAW_SPEED_TEST_RESULTS_KEY)
+        if not isinstance(raw_results, list):
+            return None
+
+        successful_results: list[tuple[float, dict[str, object]]] = []
+        for raw_result in raw_results:
+            if not isinstance(raw_result, dict):
+                continue
+
+            timestamp = self._coerce_float(
+                raw_result.get(_RAW_SPEED_TEST_TIMESTAMP_KEY)
+            )
+            success = self._coerce_boolish(raw_result.get(_RAW_SPEED_TEST_SUCCESS_KEY))
+            if timestamp is None or success is not True:
+                continue
+
+            successful_results.append((timestamp, raw_result))
+
+        if not successful_results:
+            return None
+
+        latest_timestamp, latest_result = max(
+            successful_results,
+            key=lambda item: item[0],
+        )
+
+        raw_client = latest_result.get(_RAW_SPEED_TEST_CLIENT_KEY)
+        raw_measurement = latest_result.get(_RAW_SPEED_TEST_RESULT_KEY)
+        raw_server = latest_result.get(_RAW_SPEED_TEST_SERVER_KEY)
+
+        client = raw_client if isinstance(raw_client, dict) else {}
+        measurement = raw_measurement if isinstance(raw_measurement, dict) else {}
+        server = raw_server if isinstance(raw_server, dict) else {}
+
+        return FirewallaSpeedTestResult(
+            tested_at_timestamp=latest_timestamp,
+            download_mbps=self._coerce_float(
+                measurement.get(_RAW_SPEED_TEST_DOWNLOAD_KEY)
+            ),
+            upload_mbps=self._coerce_float(measurement.get(_RAW_SPEED_TEST_UPLOAD_KEY)),
+            latency_ms=self._coerce_float(measurement.get(_RAW_SPEED_TEST_LATENCY_KEY)),
+            jitter_ms=self._coerce_float(measurement.get(_RAW_SPEED_TEST_JITTER_KEY)),
+            packet_loss_percent=self._coerce_float(
+                measurement.get(_RAW_SPEED_TEST_PACKET_LOSS_KEY)
+            ),
+            download_megabytes=self._coerce_float(
+                measurement.get(_RAW_SPEED_TEST_DOWNLOAD_MBYTES_KEY)
+            ),
+            upload_megabytes=self._coerce_float(
+                measurement.get(_RAW_SPEED_TEST_UPLOAD_MBYTES_KEY)
+            ),
+            isp=(
+                isp
+                if isinstance((isp := client.get(_RAW_SPEED_TEST_ISP_KEY)), str) and isp
+                else None
+            ),
+            public_ip=(
+                public_ip
+                if isinstance(
+                    (public_ip := client.get(_RAW_SPEED_TEST_PUBLIC_IP_KEY)), str
+                )
+                and public_ip
+                else None
+            ),
+            server_country=(
+                server_country
+                if isinstance(
+                    (server_country := server.get(_RAW_SPEED_TEST_SERVER_COUNTRY_KEY)),
+                    str,
+                )
+                and server_country
+                else None
+            ),
+            server_host=(
+                server_host
+                if isinstance(
+                    (server_host := server.get(_RAW_SPEED_TEST_SERVER_HOST_KEY)), str
+                )
+                and server_host
+                else None
+            ),
+            server_id=(
+                server_id
+                if isinstance(
+                    (server_id := server.get(_RAW_SPEED_TEST_SERVER_ID_KEY)),
+                    str,
+                )
+                and server_id
+                else None
+            ),
+            server_location=(
+                server_location
+                if isinstance(
+                    (
+                        server_location := server.get(
+                            _RAW_SPEED_TEST_SERVER_LOCATION_KEY
+                        )
+                    ),
+                    str,
+                )
+                and server_location
+                else None
+            ),
+            server_sponsor=(
+                server_sponsor
+                if isinstance(
+                    (server_sponsor := server.get(_RAW_SPEED_TEST_SERVER_SPONSOR_KEY)),
+                    str,
+                )
+                and server_sponsor
+                else None
+            ),
+            manual=self._coerce_boolish(latest_result.get(_RAW_SPEED_TEST_MANUAL_KEY)),
+            success=True,
+            vendor=(
+                vendor
+                if isinstance(
+                    (vendor := latest_result.get(_RAW_SPEED_TEST_VENDOR_KEY)),
+                    str,
+                )
+                and vendor
+                else None
             ),
         )
 
@@ -817,6 +1132,8 @@ class FirewallaApiClient:
             system_info=self._build_system_info(data),
             policy_rules=self._normalize_policy_rules(data),
             exception_rule_count=self._count_exception_rules(data),
+            system_status=self._build_system_status(data),
+            latest_speed_test=self._build_latest_speed_test(data),
         )
 
     async def async_get_runtime_snapshot(self) -> FirewallaRuntimeSnapshot:

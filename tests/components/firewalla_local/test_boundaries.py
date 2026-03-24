@@ -34,7 +34,9 @@ def test_config_entry_writes_remain_in_coordinator_module() -> None:
 
 def test_platforms_do_not_call_protocol_mutations_directly() -> None:
     """Test platform files delegate mutation orchestration to managers."""
-    platform_files = [path for path in _python_files() if path.name in {"switch.py"}]
+    platform_files = [
+        path for path in _python_files() if path.name in {"sensor.py", "switch.py"}
+    ]
     offenders = [
         path.relative_to(PACKAGE_ROOT).as_posix()
         for path in platform_files

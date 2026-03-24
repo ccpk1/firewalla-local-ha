@@ -26,7 +26,7 @@ from .coordinator import (
 from .managers import FirewallaRuleManager, FirewallaSystemManager
 from .services import async_remove_services, async_setup_services
 
-PLATFORMS: list[Platform] = [Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

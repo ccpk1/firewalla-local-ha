@@ -41,6 +41,26 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                     "model": "gold",
                     "cpuid": "serial-123",
                     "longVersion": "1.0.0",
+                    "bootingComplete": True,
+                    "cloudConnected": True,
+                    "ddns": "box.example.firewalla.org",
+                    "firmwareReleaseType": "alpha",
+                    "publicIp": "23.245.207.179",
+                    "publicIps": {"eth0": "23.245.207.179"},
+                    "sysMetrics": {
+                        "load5": 2.8037109375,
+                        "memUsage": 0.7638814708714687,
+                        "totalMem": 3861.65625,
+                        "diskInfo": [
+                            {"mount": "/", "capacity": 0.29},
+                            {"mount": "/boot", "capacity": 0.18},
+                            {"mount": "/boot/efi", "capacity": 0.01},
+                            {"mount": "/var/lib/docker", "capacity": 0.03},
+                            {"mount": "/log", "capacity": 0.8},
+                            {"mount": "/data", "capacity": 0.06},
+                            {"mount": "/home", "capacity": 0.62},
+                        ],
+                    },
                     "customizedCategories": {
                         "dap_00089bfb01d9": {"name": "DAP - 00:08:9B:FB:01:D9"}
                     },
@@ -64,6 +84,73 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                         "10": {"name": "KADEN's Devices"},
                         "12": {"name": "Quarantine"},
                     },
+                    "internetSpeedtestResults": [
+                        {
+                            "client": {
+                                "isp": "Atlantic Broadband",
+                                "publicIp": "23.245.207.179",
+                            },
+                            "manual": False,
+                            "result": {
+                                "dlMbytes": 89.23129463195801,
+                                "download": 63.15821075439453,
+                                "jitter": 1.714381,
+                                "latency": 27.404289,
+                                "ploss": -1,
+                                "ulMbytes": 60.53947830200195,
+                                "upload": 51.20576858520508,
+                            },
+                            "server": {
+                                "country": "United States",
+                                "host": "speedtest-cmh.dish-wireless.com:8080",
+                                "id": "53971",
+                                "location": "Columbus, OH",
+                                "sponsor": "Boost Mobile",
+                            },
+                            "success": True,
+                            "timestamp": 1774260026.511,
+                            "vendor": "ookla",
+                        },
+                        {
+                            "client": {
+                                "isp": "Atlantic Broadband",
+                                "publicIp": "23.245.207.179",
+                            },
+                            "manual": True,
+                            "result": {
+                                "dlMbytes": 276.21396827697754,
+                                "download": 507.17651748657227,
+                                "jitter": 1.703425,
+                                "latency": 29.107863,
+                                "ploss": -1,
+                                "ulMbytes": 60.733930587768555,
+                                "upload": 49.001976013183594,
+                            },
+                            "server": {
+                                "country": "United States",
+                                "host": "speedtest-cmh.dish-wireless.com:8080",
+                                "id": "53971",
+                                "location": "Columbus, OH",
+                                "sponsor": "Boost Mobile",
+                            },
+                            "success": True,
+                            "timestamp": 1774293094.481,
+                            "vendor": "ookla",
+                        },
+                        {
+                            "client": {
+                                "isp": "Atlantic Broadband",
+                                "publicIp": "23.245.207.179",
+                            },
+                            "manual": False,
+                            "result": {
+                                "download": 1,
+                            },
+                            "success": False,
+                            "timestamp": 1774300000,
+                            "vendor": "ookla",
+                        },
+                    ],
                     "userTags": {"21": {"name": "KADEN", "affiliatedTag": "10"}},
                     "exceptionRules": [{"aid": "1"}, {"aid": "2"}],
                     "policyRules": [
@@ -135,6 +222,36 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert len(rules) == 6
     assert snapshot.system_info.name == "Firewalla"
     assert snapshot.exception_rule_count == 2
+    assert snapshot.system_status is not None
+    assert snapshot.system_status.booting_complete is True
+    assert snapshot.system_status.cloud_connected is True
+    assert snapshot.system_status.ddns == "box.example.firewalla.org"
+    assert snapshot.system_status.firmware_release_type == "alpha"
+    assert snapshot.system_status.wan_ip == "23.245.207.179"
+    assert snapshot.system_status.wan_ips == {"eth0": "23.245.207.179"}
+    assert snapshot.system_status.cpu_load_5m == 2.8037109375
+    assert snapshot.system_status.memory_usage_percent == 76.4
+    assert snapshot.system_status.memory_free_mb == 911.8
+    assert snapshot.system_status.disk_usage_percent_by_mount == {
+        "/": 29,
+        "/boot": 18,
+        "/boot/efi": 1,
+        "/var/lib/docker": 3,
+        "/log": 80,
+        "/data": 6,
+    }
+    assert snapshot.latest_speed_test is not None
+    assert snapshot.latest_speed_test.download_mbps == 507.17651748657227
+    assert snapshot.latest_speed_test.upload_mbps == 49.001976013183594
+    assert snapshot.latest_speed_test.latency_ms == 29.107863
+    assert snapshot.latest_speed_test.jitter_ms == 1.703425
+    assert snapshot.latest_speed_test.packet_loss_percent == -1
+    assert snapshot.latest_speed_test.download_megabytes == 276.21396827697754
+    assert snapshot.latest_speed_test.upload_megabytes == 60.733930587768555
+    assert snapshot.latest_speed_test.manual is True
+    assert snapshot.latest_speed_test.public_ip == "23.245.207.179"
+    assert snapshot.latest_speed_test.server_sponsor == "Boost Mobile"
+    assert snapshot.latest_speed_test.tested_at_timestamp == 1774293094.481
     assert rules[0].rule_id == "739"
     assert rules[0].enabled is False
     assert rules[0].target_name == "Kitchen speaker"
@@ -153,6 +270,56 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert rules[5].auto_delete_when_expires is True
     assert rules[5].dnsmasq_only is True
     assert rules[5].is_temporary is True
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_snapshot_omits_latest_speed_test_without_success() -> None:
+    """Test missing or failed speed tests produce a no-data speed-test state."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "device": "Firewalla",
+                    "bootingComplete": False,
+                    "cloudConnected": False,
+                    "sysMetrics": {
+                        "load5": 1.25,
+                        "memUsage": 0.25,
+                        "totalMem": 1000,
+                    },
+                    "internetSpeedtestResults": [
+                        {
+                            "manual": False,
+                            "success": False,
+                            "timestamp": 1774300000,
+                        }
+                    ],
+                    "policyRules": [],
+                    "exceptionRules": [],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    assert snapshot.system_status is not None
+    assert snapshot.system_status.booting_complete is False
+    assert snapshot.system_status.cloud_connected is False
+    assert snapshot.system_status.cpu_load_5m == 1.25
+    assert snapshot.system_status.memory_usage_percent == 25.0
+    assert snapshot.system_status.memory_free_mb == 750.0
+    assert snapshot.latest_speed_test is None
 
 
 @pytest.mark.asyncio

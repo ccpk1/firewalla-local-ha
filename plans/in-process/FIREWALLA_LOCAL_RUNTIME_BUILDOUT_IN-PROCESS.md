@@ -36,11 +36,11 @@ Phase 3b status:
 
 Still open and driving the next implementation slice:
 
-- define the explicit Phase 4 validation matrix as fast-lane pure API coverage plus slower Home Assistant integration coverage
-- write the remaining builder handoff scope file-by-file for the next mutation and platform slices so implementation work starts from a concrete backlog
-- record the remaining local mutation protocol unknowns for additional rule families as explicit risks instead of implicit assumptions
-- add the planned quality-scale closure matrix that ties each rule to concrete evidence, exemptions, or blockers
-- expand the validation matrix around broader mutation behavior, entity registry stability, and future service and platform surfaces
+- expand config-flow coverage for reconfigure validation edges, reauth failure paths, and options-flow drift cases while keeping all auth coverage internal-only and fully mocked
+- publish user-facing installation, removal, and runtime data-update documentation once the integration is ready for external users
+- add branded assets before release
+- evaluate reliable local discovery only if Firewalla exposes a durable discovery contract
+- define the next bounded runtime slice after Phase 5 instead of widening the current sensor surface opportunistically
 
 ## Critical execution note
 
@@ -87,6 +87,7 @@ Rules:
 | 3 | Home Assistant runtime plan | Flow, coordinator, entity, and diagnostics plan | Defines how the HA layer consumes the API boundary |
 | 3b | Platinum hygiene and orchestration hardening | Domain-manager and lifecycle plan | Closes the architecture gap between raw protocol transport and HA entities |
 | 4 | Validation and implementation handoff | Test plan and builder-ready scope | Makes the runtime plan executable for implementation |
+| 5 | System-monitoring sensor expansion | Bounded sensor plan for system status and speed test data | Extends the runtime model only where the decrypted local payload already proves stable fields |
 
 ## Per-phase details with checkboxes
 
@@ -276,6 +277,52 @@ Gate note: Phase 4 must optimize for fast iteration. Pure `api/` unit tests shou
 
 Phase 4 execution note: Phase 4 planning and handoff are now complete. The repository has a documented fast-lane versus slow-lane validation matrix, a file-scoped builder handoff, a concrete protocol risk register with stop/go rules, and a quality-scale closure matrix tied to current evidence and explicit defers. Remaining open items in `quality_scale.yaml` are now clearly separated into runtime blockers versus release-prep or future-protocol work rather than being mixed into architecture planning. Detailed execution scaffolding for that work lives in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`.
 
+### Phase 5: System-monitoring sensor expansion
+
+Goal: Add the first non-rule sensor surfaces by exposing a bounded set of high-value Firewalla box status fields and the latest successful internet speed test result from the confirmed local payload.
+
+Gate note: Phase 5 must remain evidence-driven. The builder must only promote fields that are clearly present in the decrypted local payload and that fit Home Assistant sensor semantics. Sensitive values such as `ddnsToken` must remain excluded, and speculative CPU, memory, disk, uptime, or thermal metrics must not be promised until the local contract is explicitly proven.
+
+Support note: See `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_SYSTEM_MONITORING_SENSORS.md` for the payload-backed field inventory, recommended sensor surfaces, non-goals, and builder guardrails.
+
+- [x] Phase 5A: Extend the typed runtime model for system-monitoring data
+  - add explicit typed models in `custom_components/firewalla_local/models.py` for the main Firewalla system-status sensor payload and the latest speed-test payload instead of exposing raw dict fragments to platform code
+  - extend `FirewallaSystemInfo` only for identity or durable box metadata that belongs on the device itself; place sensor-specific state in separate typed structures so device identity and live monitoring state remain distinct
+  - extend `FirewallaRuntimeSnapshot` so the coordinator owns normalized system-monitoring and speed-test data alongside existing rule data
+  - keep the typed contract intentionally narrow to fields already confirmed in `.artifacts/poc/20260323-174620/local_response_decrypted.json`
+  - define sensor-specific purpose values and attribute names through `custom_components/firewalla_local/const.py` rather than embedding raw strings in platform code
+  - do not add placeholder fields for CPU, memory, disk, uptime, or temperature until those values are confirmed in the local payload and their semantics are clear
+
+- [x] Phase 5B: Normalize proven payload fields in the API boundary
+  - update `custom_components/firewalla_local/api/client.py` to build the new typed system-monitoring models from the decrypted runtime payload rather than letting the sensor platform parse raw response data
+  - normalize the main system-status slice around a useful boot-state surface, using `bootingComplete` as the primary state candidate and limiting attributes to high-value proven fields such as `cloudConnected`, `ddns`, and `firmwareReleaseType`
+  - normalize the latest successful item from `internetSpeedtestResults` into a dedicated typed record, including at minimum download, upload, latency, jitter, packet loss, ISP, public IP, server details, vendor, manual flag, success state, and test timestamp
+  - define and document the selection rule for the speed-test sensor as the most recent successful result by timestamp rather than an arbitrary list position
+  - treat absent speed-test history as a normal empty-state condition instead of a setup blocker
+
+- [x] Phase 5C: Add the first sensor platform with bounded Home Assistant semantics
+  - add `custom_components/firewalla_local/sensor.py` and include `Platform.SENSOR` in entry setup only after the typed models and client normalization are in place
+  - expose one main Firewalla system sensor attached to the existing license-anchored device entry, with `bootingComplete` as the primary state and only the remaining high-value proven fields as attributes
+  - keep low-value or device-registry-duplicate fields such as `groupName`, `cpuid`, and `branch` out of the main sensor contract unless a later user-facing need justifies them
+  - expose one separate speed-test sensor whose native value is the latest download throughput and whose attributes carry the remaining latest-test details
+  - include a translation-backed `purpose` state attribute on the main system sensor so the UI explains that the entity state represents whether boot has completed, following the same pattern already used by the switch platform
+  - convert speed-test timestamps into Home Assistant-friendly datetime attributes, and keep server, ISP, public IP, upload, latency, jitter, packet-loss, vendor, and manual-run context as stable attributes
+  - define constants for sensor attribute keys, translation keys, placeholders, entity suffixes, and any purpose-state values in `custom_components/firewalla_local/const.py`
+  - add complete `custom_components/firewalla_local/translations/en.json` coverage for sensor names and state attributes, including the `purpose` attribute and its state text, instead of relying on inline user-facing strings
+  - assign appropriate translation keys, units, device classes, state classes, and entity categories only where the underlying value semantics are actually clear from the payload
+
+- [x] Phase 5D: Validate the sensor slice and update quality evidence
+  - add focused tests under `tests/components/firewalla_local/` for model normalization, empty-state handling, sensor setup, entity registry behavior, attribute stability, and latest-speed-test selection rules
+  - keep all validation internal-only and fixture-driven using the captured decrypted payload shape; no live auth or network calls are permitted for this slice
+  - verify the sensor entities expose translation-backed `purpose` metadata and constants-backed attribute names rather than raw inline strings
+  - expand diagnostics and inventory expectations only if the new typed monitoring data is intentionally included there; otherwise leave diagnostics scope unchanged
+  - update `custom_components/firewalla_local/quality_scale.yaml` comments and any affected docs or plan notes so the new sensor platform is reflected honestly
+  - explicitly record any still-unproven monitoring metrics as deferred follow-on work rather than silently widening the Phase 5 surface
+
+Phase 5 entry criteria: The work may begin immediately because the repository now has a manager-owned runtime architecture, a stable coordinator snapshot, and decrypted local-payload evidence for both box-level status fields and internet speed-test history. The required constraint is to keep the slice bounded to the proven fields documented in the Phase 5 support note.
+
+Phase 5 execution note: Phase 5 is complete. The repository now exposes a bounded system-status sensor and a latest-speed-test download sensor backed by typed runtime models, API-side normalization, constants-backed attributes, translation-backed sensor metadata, and internal-only validation. Deferred metrics remain explicitly out of scope until the local payload proves a stable contract for them.
+
 ## Validation strategy
 
 Document-only updates to plans and support notes do not require repo lint, type-check, or test runs.
@@ -292,12 +339,14 @@ Document-only updates to plans and support notes do not require repo lint, type-
 - The plan must not introduce speculative cloud fallback behavior.
 - The plan should prefer a clean rename and replacement path over wrapper-based migration.
 - The plan must identify unresolved protocol items explicitly before implementation starts.
+- Sensor-expansion planning must stay bounded to fields proven in the captured local payload and must not infer unsupported monitoring metrics.
 
 ## References
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT_STANDARDS.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`
+- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_SYSTEM_MONITORING_SENSORS.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_BUILDER_HANDOFF.md`
 - `AGENTS.md`
@@ -309,6 +358,7 @@ Document-only updates to plans and support notes do not require repo lint, type-
 - `custom_components/firewalla_local/quality_scale.yaml`
 - `tests/conftest.py`
 - `tests/components/firewalla_local/`
+- `.artifacts/poc/20260323-174620/local_response_decrypted.json`
 - `https://github.com/ccpk1/ChoreOps/blob/main/docs/QUALITY_REFERENCE.md`
 - `https://github.com/ccpk1/ChoreOps/blob/main/docs/ARCHITECTURE.md`
 - `https://github.com/ccpk1/ChoreOps/blob/main/docs/DEVELOPMENT_STANDARDS.md`

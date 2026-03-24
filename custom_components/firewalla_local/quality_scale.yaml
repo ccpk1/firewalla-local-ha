@@ -15,7 +15,7 @@ rules:
   docs-high-level-description: done
   docs-installation-instructions:
     status: todo
-    comment: Publish user-facing installation steps covering local pairing, key generation, options flow behavior, and the first switch surface.
+    comment: Publish user-facing installation steps covering local pairing, key generation, options flow behavior, and the initial sensor and switch surfaces.
   docs-removal-instructions:
     status: todo
     comment: Add removal instructions once the integration is installable by users.
@@ -56,20 +56,20 @@ rules:
     status: todo
     comment: Add discovery if Firewalla supports a reliable discovery mechanism.
   entity-category:
-    status: exempt
-    comment: The first rule-backed switch is a primary control entity.
+    status: done
+    comment: Diagnostic system-monitoring sensors use the diagnostic category while the rule-backed switch remains a primary control entity.
   entity-disabled-by-default:
     status: exempt
     comment: Entities are only created for rules the user explicitly selects in the options flow.
   entity-translations:
     status: done
-    comment: Rule-backed switch names use translation placeholders so the entity surface remains translation-backed while preserving per-rule readable names.
+    comment: Rule-backed switches and system-monitoring sensors use translation-backed names, states, and attributes without inline user-facing strings.
   exception-translations:
     status: done
     comment: Config flow and service validation now use distinct translation keys for host, QR, entry-scope, duration, and rule-target failures.
   icon-translations:
     status: done
-    comment: Rule-backed switch icons are defined in icons.json via action-specific translation keys instead of inline icon strings.
+    comment: Rule-backed switch icons and system-monitoring sensor icons are defined in icons.json instead of inline icon strings.
   stale-devices:
     status: exempt
     comment: The integration exposes one stable Firewalla device per config entry and does not dynamically remove devices.

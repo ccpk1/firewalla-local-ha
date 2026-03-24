@@ -115,6 +115,46 @@ class FirewallaSystemInfo:
     software_version: str | None
 
 
+@dataclass(slots=True)
+class FirewallaSystemStatus:
+    """Normalized system-status state for the Firewalla appliance."""
+
+    booting_complete: bool | None = None
+    cloud_connected: bool | None = None
+    ddns: str | None = None
+    firmware_release_type: str | None = None
+    wan_ip: str | None = None
+    wan_ips: dict[str, str] | None = None
+    cpu_load_5m: float | None = None
+    memory_usage_percent: float | None = None
+    memory_free_mb: float | None = None
+    disk_usage_percent_by_mount: dict[str, int] | None = None
+
+
+@dataclass(slots=True)
+class FirewallaSpeedTestResult:
+    """Normalized latest internet speed-test result."""
+
+    tested_at_timestamp: float
+    download_mbps: float | None
+    upload_mbps: float | None
+    latency_ms: float | None
+    jitter_ms: float | None
+    packet_loss_percent: float | None
+    download_megabytes: float | None
+    upload_megabytes: float | None
+    isp: str | None
+    public_ip: str | None
+    server_country: str | None
+    server_host: str | None
+    server_id: str | None
+    server_location: str | None
+    server_sponsor: str | None
+    manual: bool | None
+    success: bool
+    vendor: str | None
+
+
 @dataclass(slots=True, frozen=True)
 class FirewallaPolicyRule:
     """Normalized local policy rule data from the Firewalla init payload."""
@@ -194,6 +234,8 @@ class FirewallaRuntimeSnapshot:
     system_info: FirewallaSystemInfo
     policy_rules: tuple[FirewallaPolicyRule, ...]
     exception_rule_count: int
+    system_status: FirewallaSystemStatus | None = None
+    latest_speed_test: FirewallaSpeedTestResult | None = None
 
 
 def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:
