@@ -1,8 +1,6 @@
 rules:
   # Bronze
-  action-setup:
-    status: exempt
-    comment: No custom actions are provided yet.
+  action-setup: done
   appropriate-polling: done
   brands:
     status: todo
@@ -10,12 +8,10 @@ rules:
   common-modules: done
   config-flow-test-coverage:
     status: todo
-    comment: Expand coverage beyond the current user, reauth, setup-path, and switch tests.
+    comment: Expand coverage beyond the current user, reauth, setup-path, and switch tests. On hold due to 3rd-party authentication concerns
   config-flow: done
   dependency-transparency: done
-  docs-actions:
-    status: exempt
-    comment: No custom actions are provided yet.
+  docs-actions: done
   docs-high-level-description: done
   docs-installation-instructions:
     status: todo
@@ -37,8 +33,8 @@ rules:
 
   # Silver
   action-exceptions:
-    status: exempt
-    comment: No custom actions are provided yet.
+    status: done
+    comment: Runtime inventory and pause_rule validate entry scope, duration, and rule targets with specific service errors.
   config-entry-unloading: done
   docs-data-update:
     status: todo
@@ -66,14 +62,14 @@ rules:
     status: exempt
     comment: Entities are only created for rules the user explicitly selects in the options flow.
   entity-translations:
-    status: exempt
-    comment: Rule-backed switches are per-policy instances keyed by immutable rule IDs and do not map to a finite translated name set.
+    status: done
+    comment: Rule-backed switch names use translation placeholders so the entity surface remains translation-backed while preserving per-rule readable names.
   exception-translations:
-    status: todo
-    comment: Add translated user-facing exceptions for auth, repair, and platform errors with the first entity platform.
+    status: done
+    comment: Config flow and service validation now use distinct translation keys for host, QR, entry-scope, duration, and rule-target failures.
   icon-translations:
-    status: exempt
-    comment: The switch platform uses static icons in code and does not expose state-driven translated icons.
+    status: done
+    comment: Rule-backed switch icons are defined in icons.json via action-specific translation keys instead of inline icon strings.
   stale-devices:
     status: exempt
     comment: The integration exposes one stable Firewalla device per config entry and does not dynamically remove devices.

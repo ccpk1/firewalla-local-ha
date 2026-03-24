@@ -1,27 +1,101 @@
-"""Runtime inventory reporting for Firewalla Local."""
+"""Runtime inventory helpers for Firewalla Local."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Final, TypedDict
 
-from .models import (
+from custom_components.firewalla_local.managers.rule_manager import (
+    build_rule_management_info,
+    build_rule_review_reasons,
+    build_rule_switch_candidate_ids,
+    extract_raw_rule_extras,
+)
+from custom_components.firewalla_local.models import (
     FirewallaPolicyRule,
     format_policy_rule_label,
-    supports_rule_switch,
 )
 
-_NORMALIZED_RULE_KEYS = {
-    "action",
-    "direction",
-    "disabled",
-    "pid",
-    "purpose",
-    "scope",
-    "tag",
-    "target",
-    "target_name",
-    "type",
-}
+_RAW_POLICY_STATE_KEY: Final = "state"
+_RAW_USERS_KEY: Final = "userTags"
+_RAW_GROUPS_KEY: Final = "tags"
+_RAW_GROUP_POLICY_KEY: Final = "policy"
+_RAW_NAME_KEY: Final = "name"
+_RAW_AFFILIATED_TAG_KEY: Final = "affiliatedTag"
+_RAW_POLICY_RULES_KEY: Final = "policyRules"
+_RAW_RULE_ID_KEY: Final = "pid"
+_RAW_RULE_TAG_REFS_KEY: Final = "tag"
+_RAW_HOSTS_KEY: Final = "hosts"
+_RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
+_RAW_GROUP_USER_TAGS_KEY: Final = "userTags"
+
+_RULE_MATCH_KIND_INTERNET_SCOPE: Final = "internet_scope"
+_RULE_MATCH_KIND_TARGET_LIST: Final = "target_list"
+_RULE_MATCH_KIND_DOMAIN: Final = "domain"
+_RULE_MATCH_KIND_IP: Final = "ip"
+_RULE_MATCH_KIND_REMOTE_PORT: Final = "remote_port"
+_RULE_MATCH_KIND_LOCAL_PORT: Final = "local_port"
+_RULE_MATCH_KIND_COUNTRY: Final = "country"
+_RULE_MATCH_KIND_NETWORK: Final = "network"
+_RULE_MATCH_KIND_CATEGORY: Final = "category"
+_RULE_MATCH_KIND_OTHER: Final = "other"
+
+_RULE_TARGET_LIST_PREFIX: Final = "TL-"
+_RULE_TARGET_TAG: Final = "TAG"
+_RULE_TARGET_TYPE_CATEGORY: Final = "category"
+_RULE_TARGET_TYPE_COUNTRY: Final = "country"
+_RULE_TARGET_TYPE_DNS: Final = "dns"
+_RULE_TARGET_TYPE_IP: Final = "ip"
+_RULE_TARGET_TYPE_LOCAL_PORT: Final = "localPort"
+_RULE_TARGET_TYPE_MAC: Final = "mac"
+_RULE_TARGET_TYPE_NETWORK: Final = "network"
+_RULE_TARGET_TYPE_REMOTE_PORT: Final = "remotePort"
+
+_RULE_PURPOSE_DAP: Final = "dap"
+_RULE_PURPOSE_FAMILY: Final = "family"
+_RULE_MANAGEMENT_CLASSIFICATION_SYSTEM: Final = "system_managed"
+_RULE_MANAGEMENT_CLASSIFICATION_USER: Final = "user_managed"
+
+
+class RuntimeUserRecord(TypedDict):
+    """Normalized runtime user entry used inside inventory helpers."""
+
+    id: str
+    name: str | None
+    affiliated_group_id: str | None
+
+
+class RuntimeGroupRecord(TypedDict):
+    """Normalized runtime group entry used inside inventory helpers."""
+
+    id: str
+    name: str | None
+    policy: dict[str, object]
+    user_ids: list[str]
+    user_names: list[str]
+
+
+class RuntimeUserInventoryRecord(RuntimeUserRecord):
+    """Runtime user entry with resolved affiliated group name."""
+
+    affiliated_group_name: str | None
+
+
+class GroupPolicyControlRecord(TypedDict):
+    """Flattened group policy control record for reporting."""
+
+    group_id: object
+    group_name: object
+    policy_key: str
+    value: bool | int | float | str
+    user_names: list[str]
+
+
+class RuleMatchingInfo(TypedDict):
+    """Classified matching surface for one rule."""
+
+    kind: str
+    references_target_list: bool
+    has_readable_target_name: bool
 
 
 def _flatten_policy(value: object) -> object:
@@ -29,8 +103,10 @@ def _flatten_policy(value: object) -> object:
     if isinstance(value, bool):
         return value
     if isinstance(value, dict):
-        if "state" in value and isinstance(value["state"], bool):
-            return value["state"]
+        if _RAW_POLICY_STATE_KEY in value and isinstance(
+            value[_RAW_POLICY_STATE_KEY], bool
+        ):
+            return value[_RAW_POLICY_STATE_KEY]
         return {
             key: flattened_value
             for key, nested_value in value.items()
@@ -43,19 +119,19 @@ def _flatten_policy(value: object) -> object:
     return None
 
 
-def _build_user_index(data: dict[str, object]) -> dict[str, dict[str, object]]:
+def _build_user_index(data: dict[str, object]) -> dict[str, RuntimeUserRecord]:
     """Build a typed user index from the raw init payload."""
-    raw_user_tags = data.get("userTags")
+    raw_user_tags = data.get(_RAW_USERS_KEY)
     if not isinstance(raw_user_tags, dict):
         return {}
 
-    user_index: dict[str, dict[str, object]] = {}
+    user_index: dict[str, RuntimeUserRecord] = {}
     for user_id, raw_user in raw_user_tags.items():
         if not isinstance(user_id, str) or not isinstance(raw_user, dict):
             continue
 
-        user_name = raw_user.get("name")
-        affiliated_tag = raw_user.get("affiliatedTag")
+        user_name = raw_user.get(_RAW_NAME_KEY)
+        affiliated_tag = raw_user.get(_RAW_AFFILIATED_TAG_KEY)
         user_index[user_id] = {
             "id": user_id,
             "name": user_name if isinstance(user_name, str) else None,
@@ -67,19 +143,19 @@ def _build_user_index(data: dict[str, object]) -> dict[str, dict[str, object]]:
     return user_index
 
 
-def _build_group_inventory(data: dict[str, object]) -> list[dict[str, object]]:
+def _build_group_inventory(data: dict[str, object]) -> list[RuntimeGroupRecord]:
     """Build a readable inventory of Firewalla groups."""
-    raw_groups = data.get("tags")
+    raw_groups = data.get(_RAW_GROUPS_KEY)
     if not isinstance(raw_groups, dict):
         return []
 
     user_index = _build_user_index(data)
-    groups: list[dict[str, object]] = []
+    groups: list[RuntimeGroupRecord] = []
     for group_id, raw_group in raw_groups.items():
         if not isinstance(group_id, str) or not isinstance(raw_group, dict):
             continue
 
-        policy = raw_group.get("policy")
+        policy = raw_group.get(_RAW_GROUP_POLICY_KEY)
         flattened_policy = (
             {
                 key: flattened_value
@@ -89,7 +165,7 @@ def _build_group_inventory(data: dict[str, object]) -> list[dict[str, object]]:
             if isinstance(policy, dict)
             else {}
         )
-        raw_group_user_ids = flattened_policy.get("userTags")
+        raw_group_user_ids = flattened_policy.get(_RAW_GROUP_USER_TAGS_KEY)
         group_user_id_values = (
             raw_group_user_ids if isinstance(raw_group_user_ids, list) else []
         )
@@ -102,7 +178,7 @@ def _build_group_inventory(data: dict[str, object]) -> list[dict[str, object]]:
             if (user_record := user_index.get(user_id)) and user_record["name"]
         ]
 
-        group_name = raw_group.get("name")
+        group_name = raw_group.get(_RAW_NAME_KEY)
         groups.append(
             {
                 "id": group_id,
@@ -116,15 +192,13 @@ def _build_group_inventory(data: dict[str, object]) -> list[dict[str, object]]:
     return sorted(groups, key=lambda group: (group["name"] or "", group["id"]))
 
 
-def _build_user_inventory(data: dict[str, object]) -> list[dict[str, object]]:
+def _build_user_inventory(
+    data: dict[str, object],
+) -> list[RuntimeUserInventoryRecord]:
     """Build a readable inventory of Firewalla users."""
     user_index = _build_user_index(data)
-    group_names = {
-        group["id"]: group["name"]
-        for group in _build_group_inventory(data)
-        if isinstance(group.get("id"), str)
-    }
-    users: list[dict[str, object]] = []
+    group_names = {group["id"]: group["name"] for group in _build_group_inventory(data)}
+    users: list[RuntimeUserInventoryRecord] = []
     for user in user_index.values():
         affiliated_group_id = user["affiliated_group_id"]
         users.append(
@@ -141,32 +215,25 @@ def _build_user_inventory(data: dict[str, object]) -> list[dict[str, object]]:
 
 
 def _build_group_policy_controls(
-    groups: list[dict[str, object]],
-) -> list[dict[str, object]]:
+    groups: list[RuntimeGroupRecord],
+) -> list[GroupPolicyControlRecord]:
     """Build a flattened list of group-backed policy controls."""
-    controls: list[dict[str, object]] = []
+    controls: list[GroupPolicyControlRecord] = []
     for group in groups:
-        policy = group.get("policy")
-        if not isinstance(policy, dict):
-            continue
+        policy = group["policy"]
 
         for policy_key, policy_value in sorted(policy.items()):
-            if policy_key == "userTags":
+            if policy_key == _RAW_GROUP_USER_TAGS_KEY:
                 continue
             if not isinstance(policy_value, (bool, int, float, str)):
                 continue
 
-            raw_user_names = group.get("user_names")
-            user_names = (
-                [name for name in raw_user_names if isinstance(name, str)]
-                if isinstance(raw_user_names, list)
-                else []
-            )
+            user_names = [name for name in group["user_names"] if isinstance(name, str)]
 
             controls.append(
                 {
-                    "group_id": group.get("id"),
-                    "group_name": group.get("name"),
+                    "group_id": group["id"],
+                    "group_name": group["name"],
                     "policy_key": policy_key,
                     "value": policy_value,
                     "user_names": user_names,
@@ -176,58 +243,32 @@ def _build_group_policy_controls(
     return controls
 
 
-def _build_rule_management_info(raw_extras: dict[str, object]) -> dict[str, object]:
-    """Classify whether a rule appears user-managed or Firewalla-managed."""
-    reasons: list[str] = []
-
-    if raw_extras.get("method") == "auto":
-        reasons.append("method_auto")
-    if isinstance(raw_extras.get("alarm_type"), str):
-        reasons.append("alarm_backed_rule")
-    if isinstance(raw_extras.get("blockby"), str):
-        reasons.append("security_engine_managed")
-    if raw_extras.get("reason") == "ALARM_INTEL":
-        reasons.append("alarm_intel_reason")
-    if raw_extras.get("category") == "intel":
-        reasons.append("intel_category")
-
-    notes = raw_extras.get("notes")
-    if isinstance(notes, str) and "automatically created" in notes.casefold():
-        reasons.append("automatic_creation_note")
-
-    classification = "system_managed" if reasons else "user_managed"
-    return {
-        "classification": classification,
-        "reasons": reasons,
-    }
-
-
-def _build_rule_matching_info(rule: FirewallaPolicyRule) -> dict[str, object]:
+def _build_rule_matching_info(rule: FirewallaPolicyRule) -> RuleMatchingInfo:
     """Classify the matching object shape for one rule."""
-    if rule.target_type == "mac" and rule.target == "TAG":
-        kind = "internet_scope"
-    elif rule.target.startswith("TL-"):
-        kind = "target_list"
-    elif rule.target_type == "dns":
-        kind = "domain"
-    elif rule.target_type == "ip":
-        kind = "ip"
-    elif rule.target_type == "remotePort":
-        kind = "remote_port"
-    elif rule.target_type == "localPort":
-        kind = "local_port"
-    elif rule.target_type == "country":
-        kind = "country"
-    elif rule.target_type == "network":
-        kind = "network"
-    elif rule.target_type == "category":
-        kind = "category"
+    if rule.target_type == _RULE_TARGET_TYPE_MAC and rule.target == _RULE_TARGET_TAG:
+        kind = _RULE_MATCH_KIND_INTERNET_SCOPE
+    elif rule.target.startswith(_RULE_TARGET_LIST_PREFIX):
+        kind = _RULE_MATCH_KIND_TARGET_LIST
+    elif rule.target_type == _RULE_TARGET_TYPE_DNS:
+        kind = _RULE_MATCH_KIND_DOMAIN
+    elif rule.target_type == _RULE_TARGET_TYPE_IP:
+        kind = _RULE_MATCH_KIND_IP
+    elif rule.target_type == _RULE_TARGET_TYPE_REMOTE_PORT:
+        kind = _RULE_MATCH_KIND_REMOTE_PORT
+    elif rule.target_type == _RULE_TARGET_TYPE_LOCAL_PORT:
+        kind = _RULE_MATCH_KIND_LOCAL_PORT
+    elif rule.target_type == _RULE_TARGET_TYPE_COUNTRY:
+        kind = _RULE_MATCH_KIND_COUNTRY
+    elif rule.target_type == _RULE_TARGET_TYPE_NETWORK:
+        kind = _RULE_MATCH_KIND_NETWORK
+    elif rule.target_type == _RULE_TARGET_TYPE_CATEGORY:
+        kind = _RULE_MATCH_KIND_CATEGORY
     else:
-        kind = "other"
+        kind = _RULE_MATCH_KIND_OTHER
 
     return {
         "kind": kind,
-        "references_target_list": rule.target.startswith("TL-"),
+        "references_target_list": rule.target.startswith(_RULE_TARGET_LIST_PREFIX),
         "has_readable_target_name": rule.target_name is not None,
     }
 
@@ -242,7 +283,7 @@ def _build_target_list_references(
         target = rule.get("target")
         if not isinstance(target, str):
             continue
-        if not target.startswith("TL-"):
+        if not target.startswith(_RULE_TARGET_LIST_PREFIX):
             continue
 
         entry = target_lists.setdefault(
@@ -291,80 +332,26 @@ def _build_target_list_references(
     return sorted(target_lists.values(), key=lambda entry: str(entry["target_list_id"]))
 
 
-def _is_rule_switch_candidate(
-    rule: FirewallaPolicyRule,
-    review_reasons: list[str],
-    management: dict[str, object],
-) -> bool:
-    """Return whether a rule looks like a good first switch candidate."""
-    return (
-        supports_rule_switch(rule)
-        and management.get("classification") == "user_managed"
-        and not review_reasons
-    )
-
-
-def _build_rule_review_reasons(
-    rule: FirewallaPolicyRule, raw_rule: dict[str, Any]
-) -> list[str]:
-    """Return heuristic review reasons for rules that still look opaque."""
-    reasons: list[str] = []
-    raw_tags = raw_rule.get("tag")
-
-    if rule.target_type in {"category", "network", "mac"} and rule.target_name is None:
-        reasons.append("missing_readable_target_name")
-    if rule.target == "TAG" and rule.target_name is None:
-        reasons.append("missing_tag_target_resolution")
-    if (
-        isinstance(raw_tags, list)
-        and raw_tags
-        and not rule.applies_to
-        and not (rule.target == "TAG" and rule.target_name)
-    ):
-        reasons.append("missing_scope_resolution")
-    if rule.target.startswith("TL-"):
-        reasons.append("target_list_reference")
-        if rule.target_name is None:
-            reasons.append("missing_target_list_name")
-
-    return reasons
-
-
-def _extract_raw_rule_extras(raw_rule: dict[str, Any]) -> dict[str, object]:
-    """Return non-normalized raw rule fields for debugging and protocol study."""
-    extras: dict[str, object] = {}
-    for key, value in raw_rule.items():
-        if key in _NORMALIZED_RULE_KEYS:
-            continue
-
-        flattened_value = _flatten_policy(value)
-        if flattened_value is None:
-            continue
-
-        extras[key] = flattened_value
-
-    return extras
-
-
 def build_runtime_inventory_report(
     payload: dict[str, object],
     policy_rules: tuple[FirewallaPolicyRule, ...],
 ) -> dict[str, object]:
     """Build a mapping report for groups, users, and normalized rules."""
-    raw_policy_rules = payload.get("policyRules")
-    raw_rule_index: dict[str, dict[str, Any]] = {}
+    raw_policy_rules = payload.get(_RAW_POLICY_RULES_KEY)
+    raw_rule_index: dict[str, dict[str, object]] = {}
     if isinstance(raw_policy_rules, list):
         raw_rule_index = {
-            raw_rule["pid"]: raw_rule
+            raw_rule[_RAW_RULE_ID_KEY]: raw_rule
             for raw_rule in raw_policy_rules
             if isinstance(raw_rule, dict) and isinstance(raw_rule.get("pid"), str)
         }
     groups = _build_group_inventory(payload)
     users = _build_user_inventory(payload)
-    raw_hosts = payload.get("hosts")
-    raw_networks = payload.get("networkProfiles")
+    raw_hosts = payload.get(_RAW_HOSTS_KEY)
+    raw_networks = payload.get(_RAW_NETWORK_PROFILES_KEY)
     host_count = len(raw_hosts) if isinstance(raw_hosts, list) else 0
     network_count = len(raw_networks) if isinstance(raw_networks, dict) else 0
+    candidate_rule_ids = build_rule_switch_candidate_ids(payload, policy_rules)
 
     rules: list[dict[str, object]] = []
     rules_needing_review: list[dict[str, object]] = []
@@ -377,11 +364,11 @@ def build_runtime_inventory_report(
     family_rules: list[dict[str, object]] = []
     for rule in policy_rules:
         raw_rule = raw_rule_index.get(rule.rule_id, {})
-        review_reasons = _build_rule_review_reasons(rule, raw_rule)
-        raw_extras = _extract_raw_rule_extras(raw_rule)
-        management = _build_rule_management_info(raw_extras)
+        review_reasons = build_rule_review_reasons(rule, raw_rule)
+        raw_extras = extract_raw_rule_extras(raw_rule)
+        management = build_rule_management_info(raw_extras)
         matching = _build_rule_matching_info(rule)
-        raw_tag_refs = raw_rule.get("tag")
+        raw_tag_refs = raw_rule.get(_RAW_RULE_TAG_REFS_KEY)
         tag_refs = (
             [tag_ref for tag_ref in raw_tag_refs if isinstance(tag_ref, str)]
             if isinstance(raw_tag_refs, list)
@@ -414,19 +401,19 @@ def build_runtime_inventory_report(
             "review_reasons": review_reasons,
         }
         rules.append(rule_record)
-        if management["classification"] == "system_managed":
+        if management["classification"] == _RULE_MANAGEMENT_CLASSIFICATION_SYSTEM:
             system_managed_rules.append(rule_record)
         else:
             user_managed_rules.append(rule_record)
-        if rule.purpose == "dap":
+        if rule.purpose == _RULE_PURPOSE_DAP:
             dap_rules.append(rule_record)
-        elif rule.purpose == "family":
+        elif rule.purpose == _RULE_PURPOSE_FAMILY:
             family_rules.append(rule_record)
-        elif management["classification"] == "user_managed":
+        elif management["classification"] == _RULE_MANAGEMENT_CLASSIFICATION_USER:
             visible_rules.append(rule_record)
             if rule.enabled:
                 visible_enabled_rules.append(rule_record)
-        if _is_rule_switch_candidate(rule, review_reasons, management):
+        if rule.rule_id in candidate_rule_ids:
             rule_switch_candidates.append(rule_record)
         if review_reasons:
             rules_needing_review.append(rule_record)

@@ -1,0 +1,18 @@
+{
+  "entity": {
+    "switch": {
+      "allow_rule": {
+        "default": "mdi:shield-check",
+        "state": {
+          "off": "mdi:shield-off"
+        }
+      },
+      "block_rule": {
+        "default": "mdi:shield-lock",
+        "state": {
+          "off": "mdi:shield-off"
+        }
+      }
+    }
+  }
+}

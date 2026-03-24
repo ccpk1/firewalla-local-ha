@@ -27,6 +27,7 @@ from custom_components.firewalla_local.const import (
     DEFAULT_FIREWALLA_HOST,
     DOMAIN,
 )
+from custom_components.firewalla_local.managers import FirewallaRuleManager
 from custom_components.firewalla_local.models import (
     FirewallaPolicyRule,
     FirewallaRuntimeSnapshot,
@@ -134,7 +135,7 @@ async def test_duplicate_license_aborts(hass) -> None:
 
 
 async def test_invalid_qr_shows_form_error(hass) -> None:
-    """Test invalid QR input is rejected before provisioning starts."""
+    """Test an invalid host is rejected before provisioning starts."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
@@ -144,6 +145,25 @@ async def test_invalid_qr_shows_form_error(hass) -> None:
         result["flow_id"],
         user_input={
             CONF_HOST: "",
+            CONF_QR_JSON: "not-json",
+        },
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_host"}
+
+
+async def test_invalid_qr_shows_qr_error(hass) -> None:
+    """Test malformed QR JSON returns the QR validation error."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_HOST: DEFAULT_FIREWALLA_HOST,
             CONF_QR_JSON: "not-json",
         },
     )
@@ -524,4 +544,97 @@ async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
                 "use_bf": True,
             }
         ],
+    }
+
+
+async def test_options_flow_uses_manager_candidate_logic_for_rule_choices(hass) -> None:
+    """Test the options flow matches runtime inventory candidate eligibility."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_SELECTED_RULE_IDS: []},
+    )
+    snapshot = FirewallaRuntimeSnapshot(
+        system_info=FirewallaSystemInfo(
+            host="fire.walla",
+            name="Firewalla",
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        policy_rules=(
+            FirewallaPolicyRule(
+                rule_id="736",
+                action="block",
+                target="TAG",
+                target_type="mac",
+                direction="bidirection",
+                enabled=True,
+                purpose=None,
+                scope=(),
+                tag_refs=("tag:10",),
+                target_name="KADEN's Devices (KADEN)",
+            ),
+            FirewallaPolicyRule(
+                rule_id="742",
+                action="allow",
+                target="TL-56d856bb-efdc-4894-8e5f-c483555e09f6",
+                target_type="category",
+                direction="outbound",
+                enabled=True,
+                purpose=None,
+                scope=(),
+                tag_refs=("tag:10",),
+                target_name="Streaming allow list",
+                applies_to=("KADEN's Devices (KADEN)",),
+            ),
+        ),
+        exception_rule_count=0,
+    )
+    rule_manager = FirewallaRuleManager(
+        coordinator=SimpleNamespace(data=snapshot),
+        entry=entry,
+        client=SimpleNamespace(),
+    )
+    rule_manager.handle_refresh(
+        {
+            "policyRules": [
+                {
+                    "pid": "736",
+                    "action": "block",
+                    "target": "TAG",
+                    "type": "mac",
+                    "tag": ["tag:10"],
+                },
+                {
+                    "pid": "742",
+                    "action": "allow",
+                    "target": "TL-56d856bb-efdc-4894-8e5f-c483555e09f6",
+                    "type": "category",
+                    "tag": ["tag:10"],
+                },
+            ]
+        },
+        snapshot,
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(data=snapshot),
+        rule_manager=rule_manager,
+    )
+
+    options_flow = FirewallaOptionsFlow(entry)
+    preview_result = await options_flow.async_step_init()
+    field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
+
+    assert field.options == {
+        "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)"
     }

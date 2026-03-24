@@ -4,240 +4,262 @@
 
 This document defines the durable architecture contract for the Firewalla Local Home Assistant integration.
 
-It exists to keep the repository minimal, typed, and maintainable while the runtime implementation grows from the current scaffold into a real local-only integration.
-
-## Project status and disclaimer
-
-This repository is an independent Home Assistant integration project.
-
-It is not affiliated with, endorsed by, or supported by Firewalla.
-
-The security and architecture guidance in this document reflects the
-maintainer's current technical view of the protocol behavior, operational
-trade-offs, and deployment risks. It should not be read as official vendor
-documentation or as a vendor security statement.
-
-Use this project at your own risk.
+It describes how the repository is built, where responsibilities belong, and which constraints must remain true as the integration grows.
 
 ## Product naming
 
 - GitHub repository name: `firewalla-local-ha`
 - Home Assistant UI name: `Firewalla Local`
 - Home Assistant integration domain: `firewalla_local`
-- Home Assistant package path target: `custom_components/firewalla_local/`
+- Home Assistant package path: `custom_components/firewalla_local/`
 
 ## Mission
 
 The integration provides local runtime access to a Firewalla box from Home Assistant.
 
-The MVP architecture is responsible for:
+The architecture supports:
 
-- cloud-provisioned QR-based pairing
-- durable local credential establishment
+- QR-based pairing and credential establishment
 - signed local REST communication over port `8833`
-- coordinator-backed rule discovery and synchronization
-- Home Assistant configuration, reauthentication, diagnostics, and entity wiring
+- coordinator-backed runtime polling
+- rule-backed Home Assistant entities and services
+- diagnostics, reauthentication, and repair-ready user flows
 
-The architecture is not responsible for introducing unnecessary layers, external repositories, or speculative protocol abstractions.
+The architecture does not support speculative fallback paths, duplicate runtime layers, or convenience abstractions that blur ownership boundaries.
 
-## Terminology
+## Quality references
 
-- Device: The physical Firewalla hardware represented in the Home Assistant device registry
-- Config entry: The Home Assistant configuration record for one paired Firewalla box
-- API submodule: The pure internal module tree under `custom_components/firewalla_local/api/` that handles protocol work without importing `homeassistant.*`
-- Coordinator: The Home Assistant update coordinator that converts API results into integration state
-- Entity: A Home Assistant entity derived from coordinated Firewalla state
-- Connection parameters: Values required to communicate with the box, such as host details and `gid`
-- Identity anchor: The immutable value used to tie the Home Assistant device and config entry to the physical hardware
+Use these documents together:
 
-## Verified protocol baseline
+- `docs/ARCHITECTURE.md`: structural contracts and ownership boundaries
+- `docs/DEVELOPMENT_STANDARDS.md`: coding, typing, translation, and lifecycle rules
+- `docs/QUALITY_REFERENCE.md`: compact mapping from quality expectations to repository evidence
 
-The architecture assumes the following are settled inputs:
+## Lexicon standards
 
-- first-time pairing starts from the Firewalla QR JSON payload but uses a split architecture:
-	- cloud provisioning through `login/eptoken` and `ept/rendezvous/me`
-	- local runtime over `http://{local_ip}:8833/v1/encipher/message/{gid}`
-- the QR payload includes fields such as `gid`, `seed`, `license`, `ek`, and `ipaddress`
-- local box communication uses encrypted HTTP POST requests on port `8833`
-- local runtime credentials are `gid`, `eid`, `aid`, and the decrypted symmetric key
-- cryptographic signing and key generation require SPKI public PEM and PKCS#8 private PEM handling
+Use terms consistently across code, documentation, diagnostics, and review.
 
-The architecture treats unresolved mutation details as feature-level questions, not transport-level questions.
+| Term | Meaning |
+| --- | --- |
+| Device | The physical Firewalla box represented in the Home Assistant device registry |
+| Config entry | The Home Assistant configuration record for one paired Firewalla box |
+| Domain | The Home Assistant integration domain `firewalla_local` only |
+| Rule | A normalized Firewalla policy rule from runtime data |
+| Item type / record type | A Firewalla data category such as a rule, tag, host, or network profile |
+| Rule template | The persisted matching contract used to find the intended live rule even if the live rule ID changes |
+| Runtime snapshot | The coordinator-owned normalized in-memory view of the current Firewalla state |
+| Registry | The manager-owned indexed runtime structure derived from the raw Firewalla payload |
+| Scope metadata | Networks, devices, tags, targets, and related applicability data that describe a rule but are not standalone entities |
+| Entity | A Home Assistant platform object only |
+| Unique ID | The stable Home Assistant registry identifier supplied by the integration |
+| Entity ID | The Home Assistant registry string generated and owned by Home Assistant |
+| Identity anchor | The immutable value used to tie the config entry and device to the physical box |
 
-## Security posture
+Critical rule:
 
-This section explains the high-level security approach behind the integration
-and the trade-offs that come with it.
+- never use `entity` to refer to a Firewalla rule, target, network, tag, or other normalized runtime record
+- never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
 
-### Split architecture: cloud provisioning and local runtime
+## Protocol baseline
 
-The current architecture is intentionally split into two stages.
+The repository assumes the following protocol facts:
 
-- Provisioning is cloud-brokered. Initial pairing uses the Firewalla QR payload
-	plus Firewalla cloud endpoints to establish local trust material and recover
-	the durable symmetric key required for local messaging.
-- Runtime is local-first. Day-to-day communication is designed around LAN
-	access to the box on port `8833` once local credentials have been
-	established.
-- The integration architecture does not depend on storing a Firewalla account
-	password in Home Assistant.
-- If the paired local credentials remain valid, the architecture expects normal
-	runtime polling and control to continue without depending on a permanent
-	cloud control path after provisioning.
+- first-time pairing begins from the Firewalla QR JSON payload
+- provisioning uses the required cloud-assisted bootstrap sequence
+- local runtime communication uses encrypted HTTP POST requests to `http://{local_ip}:8833/v1/encipher/message/{gid}`
+- local runtime credentials include `gid`, `eid`, `aid`, and the decrypted symmetric key
+- key generation and signing require SPKI public PEM and PKCS#8 private PEM handling
 
-This split is a pragmatic compromise between Firewalla's pairing model and Home
-Assistant's preference for durable local runtime control.
-
-### Local HTTP and encrypted payloads
-
-The local runtime uses HTTP on port `8833`, not HTTPS.
-
-That matters because transport security and payload security are not the same
-thing.
-
-- The current protocol evidence in this repository, including `poc.py` and the
-	local API client implementation, shows application-layer encryption of the
-	request and response payloads before they cross the network.
-- The current implementation path uses AES-256-CBC encrypted payloads wrapped
-	in JSON and sent to the Encipher message endpoint.
-- This design reduces exposure of raw firewall state and control payloads on
-	the LAN, but it is not a substitute for a trusted network or for good local
-	segmentation practices.
-
-Observed message envelopes also include timestamps and unique message
-identifiers. The integration preserves that shape, but this document does not
-treat those fields alone as a complete replay-protection guarantee.
-
-### Stored credentials and host security
-
-Home Assistant persists config entries on disk through its own storage system.
-
-For this integration, the architecture currently expects the durable local
-connection material to include values such as:
-
-- `license`
-- `local_ip`
-- `gid`
-- `eid`
-- `aid`
-- the decrypted symmetric key used for local runtime access
-
-Those values are materially sensitive.
-
-They are still narrower in scope than a Firewalla account password, but a host
-compromise could expose enough credential material to control or observe the
-paired box through the local runtime path.
-
-If you no longer trust the Home Assistant host that was paired to the box, the
-maintainer's recommended response is to revoke that pairing from the Firewalla
-mobile app and create a new pairing. Exact menu labels can vary by app
-version, so this document does not treat any specific UI path as a stable API
-contract.
-
-### Diagnostics and log exposure
-
-The current repository already treats diagnostics and logs as sensitive output
-surfaces.
-
-- `custom_components/firewalla_local/diagnostics.py` redacts `aid`, `eid`,
-	`gid`, `license`, `local_ip`, and `symmetric_key` from exported diagnostics.
-- `docs/DEVELOPMENT_STANDARDS.md` forbids logging QR payloads, PEM material,
-	tokens, signatures, or decrypted sensitive payload data.
-- The architecture expects troubleshooting output to focus on failure class,
-	HTTP status, and protocol behavior rather than secret values.
-
-This is an area where host security still matters: safe logging reduces casual
-exposure, but it does not make a compromised Home Assistant host safe.
-
-### Recommended deployment posture
-
-The maintainer's recommendation is to treat this integration as trusted-network
-software.
-
-- Keep the Home Assistant host on your trusted management or core LAN.
-- Isolate untrusted IoT devices onto a separate VLAN or equivalent network
-	segment.
-- Use Firewalla rules to prevent untrusted device segments from initiating
-	traffic toward the Home Assistant host when your deployment allows it.
-- Do not expose Home Assistant directly to the public internet without a secure
-	remote-access design.
-
-This guidance is opinionated and conservative by design. It reflects the
-maintainer's view that local encrypted payloads are useful, but they do not
-eliminate the need for standard LAN hardening and host security.
+Transport questions and mutation-surface questions are separate concerns. Unverified mutation details do not justify weakening the protocol boundary.
 
 ## Identity contract
 
-The immutable Home Assistant device identity is the QR `license` value.
+The immutable Home Assistant identity anchor is the QR `license` value.
 
 Rules:
 
 - `license` is the primary device registry identity anchor
-- `license` is the config-entry identity anchor unless a later Home Assistant constraint forces a more specific split
-- `gid` is not a device identity and must never be used as the Home Assistant device registry identifier
+- `license` is the config-entry identity anchor
+- `gid` is a connection parameter, not a device identifier
 - IP addresses and hostnames must never be used as unique identifiers
-- `gid` remains a required connection parameter for API communication
+- entity unique IDs must remain stable across IP changes, host changes, and re-pairing that preserves the same box identity
 
-This rule exists so entity and device identity survive re-pairing, IP changes, and local recovery scenarios.
+This rule keeps registry identity independent from mutable connection details.
 
-## Architecture posture
+## Layered architecture
 
-The integration uses coordinator-centered Home Assistant wiring backed by a mandatory pure internal API submodule.
+The integration is built as a small layered system with explicit ownership and concrete module homes.
 
-Target structure:
+### Directory layout
 
-- `custom_components/firewalla_local/__init__.py`
-- `custom_components/firewalla_local/config_flow.py`
-- `custom_components/firewalla_local/coordinator.py`
-- `custom_components/firewalla_local/const.py`
-- `custom_components/firewalla_local/models.py`
-- `custom_components/firewalla_local/diagnostics.py`
+The runtime should converge on named directories with clear ownership:
+
 - `custom_components/firewalla_local/api/`
-- platform modules as needed
+	- `client.py`
+	- `auth.py`
+	- `crypto.py`
+	- `exceptions.py`
+	- `models.py` when protocol-only structures justify it
+- `custom_components/firewalla_local/managers/`
+	- `__init__.py`
+	- `base_manager.py`
+	- `system_manager.py`
+	- `rule_manager.py`
+	- additional manager files only when a separate orchestration boundary is justified
+- `custom_components/firewalla_local/helpers/`
+	- `entity_helpers.py`
+	- `service_helpers.py`
+	- `runtime_inventory.py` if inventory reporting remains a read-only helper over manager-owned registry data
+	- additional Home Assistant-aware helper modules only when shared runtime glue clearly belongs outside a manager or platform file
+- `custom_components/firewalla_local/utils/`
+	- pure utility modules such as duration parsing or other framework-independent helpers
+- `custom_components/firewalla_local/`
+	- `coordinator.py`
+	- `entity.py`
+	- `models.py`
+	- platform files
+	- flow files
+	- diagnostics and service entry points
 
-The `api/` tree is the only place where crypto, signing, low-level auth, and HTTP transport logic should live.
+### Layer responsibilities
 
-## Runtime boundaries
+| Layer | Home Assistant imports | Owns state mutation | Owns protocol work | Responsibility |
+| --- | --- | --- | --- | --- |
+| `api/` | No | No | Yes | Crypto, auth, transport, request and response handling |
+| coordinator | Yes | Config-entry writes only | No | Routing, refresh orchestration, availability handling, config-entry updates, and raw payload handoff |
+| `managers/` | Yes | Yes | No | Rule matching, registry indexing, lifecycle reconciliation, command orchestration, optimistic updates |
+| `helpers/` | Yes | No | No | Shared Home Assistant-aware lookup, registry, entity, and service helper functions |
+| `utils/` | No | No | No | Pure framework-independent helper functions |
+| entities and services | Yes | No | No | Presentation surfaces and user interaction entry points |
+| models | No, unless explicitly HA-specific | No | No | Typed structures and normalized data models |
 
-### Home Assistant layer
+### Architectural rules
 
-Files in the integration root handle:
+- `custom_components/firewalla_local/api/` is the only protocol boundary
+- nothing in `api/` may import `homeassistant.*`
+- the coordinator is primarily a router and refresh orchestrator, not a business-logic owner
+- the coordinator may schedule refreshes, track availability, own config-entry writes, and hand raw or normalized refresh inputs to the manager layer
+- config-entry writes belong to the coordinator because the coordinator owns the integration instance lifecycle and reload semantics
+- `managers/` is the single source of truth for rule resolution and command orchestration
+- at minimum the runtime should have:
+	- `SystemManager` for config-entry-scoped lifecycle, device lifecycle, entity lifecycle, and shared orchestration concerns
+	- `RuleManager` for rule resolution, registry indexing, command handling, optimistic updates, and read-model generation for rule-backed surfaces
+- `helpers/` contains Home Assistant-aware shared helper code only and must not become a second manager layer
+- `utils/` contains pure functions only and must not import `homeassistant.*`
+- entities must consume manager-owned resolved state and must not re-implement matching, filtering, or mutation payload construction
+- services must delegate to manager methods and must not become a second business-logic path
+- models should stay typed and lightweight rather than accumulating orchestration logic
+- shared report code such as runtime inventory must not live as an unowned root module; it must belong either to the owning manager or to a clearly named helper module built around manager-owned data
+- multi-instance behavior must be designed in from the start rather than retrofitted later
 
-- config entry lifecycle
-- config flow and reauth flow
-- coordinator state management
-- platform entity creation
-- diagnostics exports
-- Home Assistant exceptions and translations
+## Runtime boundary details
 
-### Pure API submodule
+### API boundary
 
-Files under `custom_components/firewalla_local/api/` handle:
+Files under `custom_components/firewalla_local/api/` own:
 
 - key generation
 - PEM serialization and signing
-- request construction
-- HTTP session interactions with the Firewalla box
+- HTTP transport
+- request envelope construction
 - protocol response parsing
-- custom API exception definitions
+- API exception taxonomy
 
-Files under `api/` must not import `homeassistant.*`.
+The API layer returns typed integration-facing results and raises typed integration exceptions.
+
+### Coordinator boundary
+
+The coordinator owns:
+
+- routing refresh outputs into the runtime layer
+- runtime polling cadence
+- refresh timing and availability transitions
+- config-entry data and options updates
+- update-listener and reload routing for entry-scoped configuration changes
+- conversion of raw client responses into the current runtime snapshot input
+- log-once unavailable and log-once recovery behavior
+
+The coordinator does not own:
+
+- rule-template matching
+- entity selection logic
+- service dispatch
+- dynamic entity reconciliation
+- optimistic command behavior
+
+The coordinator is the runtime router between the API boundary and the manager-owned orchestration layer.
+
+The coordinator is also the owner of config-entry writes because config-entry mutation is part of integration instance lifecycle management rather than rule-specific business logic.
+
+### Manager boundary
+
+Manager modules under `custom_components/firewalla_local/managers/` own:
+
+- rule-template matching
+- normalized registry construction and indexing
+- lookup helpers for rule-backed surfaces
+- write-path orchestration for enable, disable, pause, create, update, and delete operations
+- optimistic in-memory state updates after successful commands
+- reconciliation when options change or backing rules disappear
+- shared lifecycle policy for add, update, remove, and orphan handling
+
+At minimum:
+
+- `SystemManager` owns shared system concerns that cut across platforms or rule actions, including device lifecycle, entity lifecycle, startup or reload coordination, and other entry-scoped orchestration that should not live in the coordinator
+- `RuleManager` owns rule-specific behavior, including registry indexing, rule-template matching, runtime inventory inputs, and rule-command orchestration
+
+Manager methods are the single write and mutation path for runtime behavior above the API layer.
+
+Cross-manager rules:
+
+- direct cross-manager writes are forbidden
+- cross-manager orchestration must use explicit entry-scoped signaling or clearly defined coordinator-managed routing contracts when more than one manager reacts to the same transition
+- direct read-only calls between managers are acceptable only when they do not create hidden mutation coupling
+- managers must not reach into each other's private state or bypass the owning manager's public contract
+
+### Helper boundary
+
+Helper modules under `custom_components/firewalla_local/helpers/` own shared Home Assistant-aware support code such as:
+
+- entity lookup helpers
+- service-input normalization helpers
+- shared `DeviceInfo` and registry helper logic when that logic does not belong in a manager
+- read-only report helpers such as runtime inventory rendering, but only when the underlying data contract is owned by a manager
+
+Helpers may depend on Home Assistant, but they must not become business-logic owners or alternate write paths.
+
+### Utility boundary
+
+Utility modules under `custom_components/firewalla_local/utils/` own pure framework-independent helpers such as:
+
+- duration parsing
+- value normalization helpers
+- other reusable pure functions
+
+Utilities must not import `homeassistant.*`.
+
+### Entity and service boundary
+
+Entities and services own:
+
+- exposing manager-backed state to Home Assistant
+- validating Home Assistant-facing inputs
+- mapping failures into translation-ready Home Assistant exceptions
+- attaching all surfaces to the correct device and config-entry scope
+
+They do not own command construction, direct protocol calls, or duplicated rule-resolution logic.
 
 ## Storage and state contract
 
-To ensure Home Assistant performance and prevent disk I/O bottlenecks, data must be strictly isolated into three tiers.
+Firewalla state is split into three tiers.
 
 ### Tier 1: Config entry
 
-The config entry is persisted to disk through Home Assistant storage and must store only the data required to reconnect to the device or render the user's preferred entities.
-
-It is strictly divided into two mappings.
+The config entry stores only durable connection material and user preferences.
 
 #### `ConfigEntry.data`
 
-`ConfigEntry.data` contains immutable connection material populated during initial setup.
-
-Permitted data:
+Permitted durable connection material:
 
 - `license`
 - `gid`
@@ -248,109 +270,157 @@ Permitted data:
 
 #### `ConfigEntry.options`
 
-`ConfigEntry.options` contains mutable user preferences populated through the Home Assistant options flow.
+Permitted user preferences:
 
-Permitted data:
-
-- the list of Firewalla rule UUIDs selected for exposure as Home Assistant switch entities
-- future user-controlled sensor or entity enablement preferences
+- selected rule templates or equivalent durable selection inputs
+- future user-controlled feature enablement and presentation preferences
 
 Rules:
 
-- `ConfigEntry.data` must mutate rarely
-- `ConfigEntry.options` must contain preferences only
-- dynamic API responses must never be written to either config entry mapping
-- live device state must never be written to either config entry mapping
-- the full discovered rule list must never be written to either config entry mapping
+- `ConfigEntry.data` contains connection material only
+- `ConfigEntry.options` contains user preferences only
+- the integration must not persist live runtime payloads into the config entry
+- the integration must not persist the full discovered rule list into the config entry
 
 ### Tier 2: Runtime data
 
-Runtime data is in-memory state created during `async_setup_entry` and does not survive a reboot.
+`entry.runtime_data` contains live objects only.
 
-Permitted data:
+Permitted runtime objects:
 
-- the instantiated `FirewallaApiClient`
-- the `DataUpdateCoordinator` instance
-
-Rules:
-
-- runtime data holds live objects only
-- runtime data is recreated on setup
-- runtime data is not a persistence layer
-
-### Tier 3: Coordinator cache
-
-The live Firewalla state exists only in the in-memory coordinator cache.
-
-Examples:
-
-- active rules
-- blocked IPs
-- alarms
-- other large API payloads
+- API client
+- coordinator
+- manager and related runtime collaborators
 
 Rules:
 
-- Firewalla state must be fetched fresh from the local API
-- the integration must not create custom storage files to cache Firewalla state between reboots
-- if Home Assistant restarts, the coordinator simply performs a fresh poll
-- entities consume normalized coordinator data and never perform protocol work directly
+- runtime data is rebuilt during setup
+- runtime data is never treated as durable storage
 
-## Dependency contract
+### Tier 3: In-memory runtime snapshot and registry
 
-The integration must depend on the `cryptography` package.
+Live Firewalla state exists only in memory.
 
 Rules:
 
-- `cryptography` is the required library for RSA key generation and PKCS#8/SPKI serialization
-- no fallback crypto library should be designed into the architecture
-- the dependency must be declared in `manifest.json`
-- tests and typing expectations must reflect the presence of this dependency
+- the coordinator owns the current runtime snapshot
+- the manager owns the indexed registry derived from the current raw payload or normalized snapshot input
+- the repository must not create custom storage files to cache live Firewalla state between reboots
+- restart behavior is always fresh poll plus reconstruction of runtime objects
 
-## Reauthentication contract
+## Normalized registry pipeline
 
-Authentication failure follows the one-retry rule.
+The integration must normalize the Firewalla init payload once per refresh path and expose a shared indexed registry for consumers.
 
 Rules:
 
-- the API client may retry once immediately after a `401 Unauthorized`
-- if the immediate retry also returns `401 Unauthorized`, the API layer must raise `FirewallaAuthError`
-- the Home Assistant layer must convert `FirewallaAuthError` into `ConfigEntryAuthFailed`
-- `401 Unauthorized` must not enter long retry windows or indefinite coordinator retry loops
-- network timeouts and `5xx` responses are operational failures, not auth failures
+- repeated per-platform parsing of the raw init payload is forbidden once a shared registry exists
+- shared indexed lookups such as `rule_index` and resolved applicability metadata must be built centrally
+- `runtime_inventory.py`, entities, services, and future platforms must consume shared normalized outputs instead of each performing their own ad hoc scans
+- caching or lazy lookup is allowed only when it preserves correctness and remains subordinate to the current refresh cycle
+- persisted rule-template matching must tolerate optional upstream field evolution without silently changing the intended user-selected rule identity
 
-## Supported capabilities
+## Mutation ownership and optimistic updates
 
-This architecture is designed to support:
+All rule mutations flow through the manager layer.
 
-- initial key pairing and local credential establishment
-- signed REST client behavior
-- rule discovery and polling
-- user selection of rule-backed entities
-- coordinator-backed state updates
-- reauthentication when local credentials are no longer accepted
+Rules:
 
-This architecture explicitly does not include:
+- the manager is the only integration layer above `api/` that may orchestrate create, update, delete, enable, disable, or pause operations
+- successful commands may update in-memory runtime state optimistically for immediate UI correctness
+- the coordinator refresh remains the later source of truth
+- optimistic state must remain in memory only
+- if later polling disagrees with the optimistic state, the refreshed state wins and the discrepancy is treated as a runtime reconciliation concern
 
-- exact mutation semantics for every rule class
-- non-rule capabilities beyond the MVP
-- storage beyond config-entry needs unless implementation proves it necessary
-- cloud-mediated access paths or MSP fallback behavior
+## Config-entry scope contract
 
-## Localization contract
+All runtime behavior is scoped to one config entry.
 
-User-facing text belongs in translation files, with English as the source of truth.
+Rules:
 
-Architecture implications:
+- service calls must resolve one explicit target entry
+- lifecycle reconciliation must mutate only the owning entry scope
+- no service, manager, or helper may rely on first-loaded-entry behavior
+- diagnostics, reload, unload, reauth, and repair paths must remain entry-scoped
 
-- flow labels and errors must be translation-ready
-- repair and reauth messaging must be translation-ready
-- diagnostics and log text must avoid secret leakage while remaining clear
+Instance isolation rules:
+
+- manager signaling, helper lookups, and cleanup paths must remain scoped to one config entry
+- entity unique IDs must encode entry scope so future multi-instance cleanup remains deterministic
+- config-entry lifecycle operations must never mutate another entry's device, entities, or runtime data
+
+## Entity architecture
+
+Entities are derived views over manager-owned state.
+
+Rules:
+
+- all entities must attach to the license-anchored device
+- entities must remain stable under live rule-ID churn when the same selected logical rule can be matched through the stored template contract
+- groups, users, networks, tags, and targets may inform entity behavior but are not automatically entity types themselves
+- rule-backed pause actions are service-driven unless a later architecture decision explicitly introduces a native entity control for them
+
+Shared entity rules:
+
+- `custom_components/firewalla_local/entity.py` is a required core file for the first multi-platform runtime buildout
+- the shared base entity should provide typed coordinator and manager access, common `DeviceInfo`, and common availability behavior
+- shared entity behavior should be centralized rather than repeated across platform files when the same availability or identity logic appears more than once
+
+Unique ID structure rules:
+
+- entity unique IDs must include the integration instance identifier, the immutable object identifier, and a suffix describing the entity surface
+- the device identity remains license-anchored even when entity unique IDs include `config_entry.entry_id` for multi-instance isolation
+- the suffix must remain stable so registry cleanup and targeted removal logic can classify owned entities reliably
+
+Entity metadata rules:
+
+- entity attributes should expose a concise `purpose` or equivalent metadata field when it materially helps users understand what the entity controls or represents
+- purpose metadata must clarify the intended scope of the entity without leaking internal implementation detail or sensitive payload fields
+- metadata should be manager-derived and consistent across platforms rather than improvised independently by each entity class
+
+Parallel update rules:
+
+- coordinator-based platforms should explicitly declare `PARALLEL_UPDATES = 0` when entities do not poll independently
+- platform concurrency policy must be explicit rather than left to defaults
+- if a future platform performs direct device operations outside the coordinator model, its parallel update limit must be justified by the protocol or device behavior
+
+## Naming contract
+
+The repository uses UID-first naming.
+
+Rules:
+
+- the integration supplies stable unique IDs and stable default object ID inputs anchored to immutable identifiers
+- Home Assistant owns the final `entity_id`
+- the integration must not generate descriptive default names from mutable rule text solely for UI polish
+- any future move away from UID-first naming requires an explicit architecture decision
+
+## Translation and error contract
+
+User-facing runtime behavior must be translation-ready.
+
+Rules:
+
+- config-flow, reauth, repair, and service failures must map to specific translation keys by failure class
+- diagnostics and logs must remain useful without exposing secrets
+- exception taxonomy must remain structured from the API layer through the Home Assistant layer
+
+## Security and diagnostics contract
+
+Rules:
+
+- QR payloads and durable connection material are sensitive inputs
+- diagnostics must redact secrets, tokens, identifiers, and host-sensitive values
+- logs must never expose decrypted payloads, PEM material, signatures, or symmetric-key material
+- troubleshooting output should focus on failure class, endpoint behavior, and status shape rather than sensitive values
 
 ## Structural evolution rules
 
-- Start with the root integration files plus the pure `api/` submodule
-- Add shared entity base files only when at least two platforms need the abstraction
-- Add `helpers/` or `utils/` only when a clear responsibility cannot live cleanly in `models.py`, `const.py`, or `api/`
-- Keep pure protocol code under `api/` and Home Assistant orchestration outside it
-- Do not reintroduce a monolithic `api.py` once the `api/` boundary exists
+- add a shared base entity only when at least two platforms need the same abstraction
+- introduce `managers/` as the durable home for orchestration logic rather than keeping that logic in entities, services, or the coordinator
+- introduce `helpers/` for shared Home Assistant-aware support code, not for business orchestration
+- introduce `utils/` for pure reusable functions, not Home Assistant glue
+- keep root-level modules limited to true integration entry points and shared core modules; move specialized reporting or orchestration support under the owning manager or helper directory
+- do not collapse the `api/` package back into a monolith
+- do not introduce compatibility wrappers or duplicate runtime paths for convenience
+- keep the repository minimal by default, but never at the expense of clear ownership boundaries

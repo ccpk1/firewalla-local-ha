@@ -6,9 +6,18 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
+    ATTR_RULE_ID,
+    ATTR_RULE_IS_PAUSED,
+    ATTR_RULE_NOTES,
+    ATTR_RULE_PAUSE_UNTIL,
+    ATTR_RULE_PURPOSE,
+    ATTR_RULE_TAG_REFS,
+    ATTR_RULE_TARGET_TYPE,
+    ATTR_RULE_TEMPLATE_TARGET,
     CONF_AID,
     CONF_EID,
     CONF_GID,
@@ -18,6 +27,7 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DOMAIN,
+    TRANS_KEY_PURPOSE_RULE_SWITCH,
 )
 from custom_components.firewalla_local.models import (
     FirewallaPolicyRule,
@@ -133,29 +143,28 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
         await hass.async_block_till_done()
 
         entity_id = next(iter(hass.states.async_entity_ids("switch")))
-        assert entity_id.endswith("_744")
-        assert hass.states.get(entity_id).state == "on"
-        attributes = hass.states.get(entity_id).attributes
-        assert attributes["rule_id"] == "744"
-        assert attributes["matching_rule_count"] == 1
-        assert attributes["backing_rule_present"] is True
-        assert attributes["target"] == "social"
-        assert attributes["target_type"] == "category"
-        assert attributes["tag_refs"] == ["tag:17"]
-        assert attributes["notes"] == []
-        assert attributes["is_paused"] is False
-        assert attributes["paused_rule_ids"] == []
-        assert attributes["matched_rules"] == [
-            {
-                "rule_id": "744",
-                "enabled": True,
-                "notes": None,
-                "is_paused": False,
-                "pause_until": None,
-                "pause_remaining_seconds": None,
-            }
-        ]
-        assert attributes["icon"] == "mdi:shield-lock"
+        state = hass.states.get(entity_id)
+        registry = er.async_get(hass)
+        entity_entry = registry.async_get(entity_id)
+
+        assert entity_id.endswith("block_category_social_for_av_smart_tv")
+        assert state is not None
+        assert state.name == "Firewalla block category social for AV_SMART_TV"
+        assert entity_entry is not None
+        assert entity_entry.unique_id.endswith("_744_switch")
+        assert state.state == "on"
+        attributes = state.attributes
+        assert attributes[ATTR_RULE_PURPOSE] == TRANS_KEY_PURPOSE_RULE_SWITCH
+        assert attributes[ATTR_RULE_ID] == "744"
+        assert next(iter(attributes)) == ATTR_RULE_PURPOSE
+        assert "source_rule_id" not in attributes
+        assert "backing_rule_present" not in attributes
+        assert attributes[ATTR_RULE_TEMPLATE_TARGET] == "social"
+        assert attributes[ATTR_RULE_TARGET_TYPE] == "category"
+        assert attributes[ATTR_RULE_TAG_REFS] == ["tag:17"]
+        assert attributes[ATTR_RULE_NOTES] == []
+        assert attributes[ATTR_RULE_IS_PAUSED] is False
+        assert attributes[ATTR_RULE_PAUSE_UNTIL] is None
 
         await hass.services.async_call(
             "switch",
@@ -229,6 +238,49 @@ async def test_selected_rule_switch_is_unavailable_when_rule_is_missing(
     assert hass.states.get(entity_id).state == "unavailable"
 
 
+async def test_selected_rule_switch_does_not_guess_replacement_rule(
+    hass: HomeAssistant,
+) -> None:
+    """Test the switch stays unavailable when only a new equivalent rule exists."""
+    template = FirewallaRuleTemplate(
+        source_rule_id="744",
+        name="block category social for AV_SMART_TV",
+        action="block",
+        target="social",
+        target_type="category",
+        tag_refs=("tag:17",),
+        dnsmasq_only=True,
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["744"],
+            CONF_SELECTED_RULE_TEMPLATES: [template.to_dict()],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
+        new=AsyncMock(return_value=_snapshot_with_rule("999")),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    entity_id = next(iter(hass.states.async_entity_ids("switch")))
+    assert hass.states.get(entity_id).state == "unavailable"
+
+
 async def test_selected_rule_switch_exposes_pause_and_notes_attributes(
     hass: HomeAssistant,
 ) -> None:
@@ -284,18 +336,67 @@ async def test_selected_rule_switch_exposes_pause_and_notes_attributes(
 
     entity_id = next(iter(hass.states.async_entity_ids("switch")))
     attributes = hass.states.get(entity_id).attributes
-    assert attributes["rule_id"] == "744"
-    assert attributes["matching_rule_count"] == 1
-    assert attributes["notes"] == ["Pause for maintenance"]
-    assert attributes["is_paused"] is True
-    assert attributes["paused_rule_ids"] == ["744"]
-    assert attributes["matched_rules"] == [
-        {
-            "rule_id": "744",
-            "enabled": False,
-            "notes": "Pause for maintenance",
-            "is_paused": True,
-            "pause_until": pause_until,
-            "pause_remaining_seconds": 600,
-        }
-    ]
+    assert attributes[ATTR_RULE_PURPOSE] == TRANS_KEY_PURPOSE_RULE_SWITCH
+    assert attributes[ATTR_RULE_ID] == "744"
+    assert attributes[ATTR_RULE_NOTES] == ["Pause for maintenance"]
+    assert attributes[ATTR_RULE_IS_PAUSED] is True
+    assert attributes[ATTR_RULE_PAUSE_UNTIL] == "2026-03-25T12:00:00+00:00"
+
+
+async def test_deselecting_all_rules_removes_switch_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Test deselected rule switches are removed from state and registry."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["744"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "744",
+                    "name": "block category social for AV_SMART_TV",
+                    "action": "block",
+                    "target": "social",
+                    "target_type": "category",
+                    "scope": [],
+                    "tag_refs": ["tag:17"],
+                    "dnsmasq_only": True,
+                    "use_bf": True,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
+        new=AsyncMock(return_value=_snapshot_with_rule("744")),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        entity_id = next(iter(hass.states.async_entity_ids("switch")))
+        entity_registry = er.async_get(hass)
+        assert entity_registry.async_get(entity_id) is not None
+
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                CONF_SELECTED_RULE_IDS: [],
+                CONF_SELECTED_RULE_TEMPLATES: [],
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert not list(hass.states.async_entity_ids("switch"))
+    assert entity_registry.async_get(entity_id) is None

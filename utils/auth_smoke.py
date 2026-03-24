@@ -20,7 +20,7 @@ from custom_components.firewalla_local.const import (
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_PAIRING_DEVICE_NAME,
 )
-from custom_components.firewalla_local.runtime_inventory import (
+from custom_components.firewalla_local.helpers.runtime_inventory import (
     build_runtime_inventory_report,
 )
 

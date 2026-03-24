@@ -4,21 +4,38 @@
 
 This document defines the prescriptive coding standards for the Firewalla Local integration.
 
-The goal is to keep the implementation strict, maintainable, Home Assistant-friendly, and aligned with the architecture contract.
+It explains how code should be written, reviewed, and extended so the repository stays aligned with the architecture contract.
 
 ## Naming baseline
 
 - Product name: `Firewalla Local`
 - Integration domain: `firewalla_local`
+- Package path: `custom_components/firewalla_local/`
 - Pure protocol boundary: `custom_components/firewalla_local/api/`
 
 ## General rules
 
-- Prefer the smallest coherent change that solves the real problem
-- Keep typing explicit and complete
-- Keep user-facing behavior translation-ready from day one
-- Do not mix protocol work with Home Assistant orchestration
-- Do not add fallback identity schemes or fallback crypto libraries
+- prefer the smallest coherent change that solves the real problem
+- keep typing explicit and complete
+- keep user-facing behavior translation-ready from day one
+- preserve layer boundaries even when a shortcut looks faster
+- avoid convenience fallbacks for identity, transport, or mutation behavior
+
+## Lexicon standards
+
+Use repository terminology consistently.
+
+- use `domain` only for the Home Assistant integration domain `firewalla_local`
+- use `rule`, `rule template`, `runtime snapshot`, and `registry` for Firewalla data concepts
+- use `item type` or `record type` for Firewalla-specific categories such as `rule`
+- use `entity` only for Home Assistant platform objects
+- use `unique ID` for the stable registry identifier and `entity_id` for the Home Assistant registry string
+- use `scope metadata` for applicability data such as networks, devices, tags, and targets
+
+Critical rule:
+
+- never call a Firewalla rule or normalized runtime record an entity
+- never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
 
 ## Constants taxonomy
 
@@ -33,30 +50,51 @@ Approved constant families:
 - `SERVICE_*`
 - `SERVICE_FIELD_*`
 - `TRANS_KEY_*`
-- flow step constants once flow complexity justifies them
+- `TRANS_PLACEHOLDER_*`
+- `RULE_*`
+- flow-step constants once flow complexity justifies them
+
+The constant system should stay disciplined but compact. Do not introduce a large taxonomy unless the repository complexity actually requires it.
+
+Constant naming rule:
+
+- prefix by contract surface first, then by item type or purpose only when needed
+
+Usage matrix:
+
+- `CONF_*`: config-entry data or options keys only
+- `DEFAULT_*`: default values only
+- `RULE_*`: normalized Firewalla rule record values and fixed rule-item literals
+- `ATTR_*`: Home Assistant entity state attributes only
+- `SERVICE_*`: service names only
+- `SERVICE_FIELD_*`: service schema keys and `call.data` access only
+- `TRANS_KEY_*`: translation identifiers only
+- `TRANS_PLACEHOLDER_*`: translation placeholder names only
+
+Rules:
+
+- do not use `ATTR_*` constants in service schemas or `call.data`
+- do not use `CONF_*` constants for service selector fields
+- do not use `domain` in constant names to describe Firewalla item types such as rules
+- prefer compact, honest families over large framework-style taxonomies that the repository does not need
 
 ## Type system
 
-- All public and internal functions must be type hinted
-- Use modern Python typing syntax
-- Prefer narrow exception types
-- Use dataclasses, enums, and `TypedDict` when they clarify structure
-- Avoid untyped dictionaries for stable protocol or config shapes when a stronger type is available
+- all public and internal functions must be type hinted
+- use modern Python typing syntax
+- use dataclasses, enums, or `TypedDict` for stable structures with fixed keys
+- use dynamic mappings only where keys are genuinely variable at runtime
+- avoid `dict[str, object]` for stable protocol, config, manager, or service payload shapes when a stronger type is available
+- avoid type suppressions unless no honest type expression can represent the pattern cleanly
 
-## Module boundaries
+Type selection rule:
 
-### Integration root
+- stable protocol payloads, normalized models, manager command payloads, and service inputs should be strongly typed
+- ad hoc dynamic lookup maps may remain dynamic when that is the honest representation
 
-Files in `custom_components/firewalla_local/` own:
+## Module and layer boundaries
 
-- Home Assistant config entry behavior
-- flows and reauth
-- coordinator logic
-- entity definitions
-- diagnostics integration
-- translation-aware user-facing exceptions
-
-### Pure API submodule
+### `api/`
 
 Files in `custom_components/firewalla_local/api/` own:
 
@@ -70,79 +108,236 @@ Rules:
 
 - nothing inside `api/` may import `homeassistant.*`
 - `api/` must not become a single-file monolith
-- separate crypto, auth, client, and transport concerns when implementation begins
+- transport, auth, crypto, and response handling should remain separated when they justify separate files
+
+### Coordinator
+
+The coordinator owns:
+
+- routing refresh outputs into the runtime layer
+- polling cadence
+- refresh orchestration
+- availability transitions
+- config-entry writes and reload-triggering config updates
+- normalized snapshot refresh inputs
+
+Rules:
+
+- the coordinator is primarily a router and refresh orchestrator, not a business-logic owner
+- the coordinator must not own rule-template matching, service dispatch, or entity reconciliation policy
+- config-entry writes belong to the coordinator, not to managers, helpers, services, or platform files
+
+### Manager layer
+
+Manager modules under `custom_components/firewalla_local/managers/` own:
+
+- rule-template matching
+- rule resolution
+- lifecycle reconciliation
+- mutation orchestration
+- optimistic updates
+- shared indexed runtime lookups
+
+Rules:
+
+- all rule mutations above the API layer must flow through manager methods
+- entities, flows, and services must not duplicate command logic or payload construction once manager methods exist
+- the minimum manager set should include `system_manager.py` and `rule_manager.py`
+- `SystemManager` owns shared lifecycle concerns such as device lifecycle and entity lifecycle
+- `RuleManager` owns rule-specific orchestration, indexed lookup state, runtime inventory inputs, and rule-command behavior
+- direct cross-manager writes are forbidden
+- managers may use explicit entry-scoped signals or other centralized orchestration contracts for cross-manager reactions
+- direct read-only manager calls are acceptable only when they do not create hidden mutation coupling
+
+### Helpers
+
+Helper modules under `custom_components/firewalla_local/helpers/` own shared Home Assistant-aware support code.
+
+Rules:
+
+- helpers may import Home Assistant APIs
+- helpers must not own business orchestration or write paths
+- helpers should contain reusable integration glue such as entity lookup or shared registry helper functions
+- report helpers such as runtime inventory belong in `helpers/` only if they are read-only views over manager-owned data; otherwise they belong in the owning manager module
+
+### Utils
+
+Utility modules under `custom_components/firewalla_local/utils/` own pure reusable functions.
+
+Rules:
+
+- utils must not import `homeassistant.*`
+- utils are the correct home for pure parsing, formatting, and value-normalization helpers
+- utils must not accumulate orchestration logic that belongs in managers
+
+### Entities and services
+
+Rules:
+
+- entities and services are presentation and interaction surfaces only
+- they must delegate business logic to manager methods
+- they must not perform protocol calls directly
+- they must map failures into specific Home Assistant exception types and translation keys
 
 ## Async and event loop rules
 
-- All network requests in `custom_components/firewalla_local/api/` must use `aiohttp`
-- The `requests` library is strictly forbidden
-- Do not perform blocking I/O in the Home Assistant event loop
-- Cryptographic operations that are CPU-bound, including RSA key generation and PKCS#8 or SPKI serialization through `cryptography`, must be offloaded with `hass.async_add_executor_job()` when triggered from async Home Assistant code such as config flows
-- Keep executor usage tightly scoped to the CPU-bound cryptographic work; normal integration orchestration remains async-native
+- all network requests in `custom_components/firewalla_local/api/` must use `aiohttp`
+- the `requests` library is forbidden
+- do not perform blocking I/O in the Home Assistant event loop
+- CPU-bound cryptographic work must be offloaded with `hass.async_add_executor_job()` when called from async Home Assistant code
+- keep executor usage tightly scoped to the actual blocking work
 
 ## Identity and device registry rules
 
-- The Home Assistant device registry identity must use the immutable `license` value from the QR payload
+- the Home Assistant device registry identity must use the immutable `license` value from the QR payload
 - `gid` must never be used as the device registry identifier
 - IP addresses and hostnames must never be used as unique IDs
-- Entity unique IDs must remain stable under re-pairing and network changes
-- No floating entities: all entities must attach to the correct Firewalla device registry entry derived from `license`
+- entity unique IDs must remain stable under re-pairing and network changes
+- all entities must attach to the correct license-anchored device
 
-## Entity naming standards
+## Entity standards
 
-- All entities must set `_attr_has_entity_name = True`
-- Entity names must never embed the device name
-- Home Assistant handles device-name concatenation in the frontend, so entity names should contain only the entity-specific label
-- Example: use `Block YouTube`, not `Firewalla Block YouTube`
+### Entity naming
+
+- all entities must set `_attr_has_entity_name = True`
+- entity names must not embed the device name
+- the repository follows a UID-first naming contract
+- the integration must not generate descriptive default names from mutable rule text solely for presentation polish
+
+### Entity identity
+
+- unique IDs must be based on immutable identifiers
+- unique IDs must include the config-entry instance identifier, the immutable object identifier, and a stable suffix
+- Home Assistant owns the final `entity_id`
+- entity identity must survive live rule-ID churn when the stored rule template still resolves to the intended logical rule
+- device identity remains license-anchored even when entity unique IDs include entry scope for multi-instance isolation
+
+### Entity lifecycle
+
+- dynamic entity add, update, remove, and orphan handling must follow one shared lifecycle policy
+- options changes must trigger explicit reconciliation behavior
+- missing backing rules must have a defined handling policy and must not drift into indefinite orphaning by accident
+- shared entity base classes are allowed only when at least two platforms need the same abstraction
+
+### Shared entity base
+
+- `custom_components/firewalla_local/entity.py` is part of the expected core runtime layout for the first multi-platform buildout
+- use `entity.py` as the shared base for common availability, typed coordinator access, typed manager access, `DeviceInfo`, identity behavior, and shared metadata patterns
+- the shared base entity should centralize coordinator-availability handling and any common typed accessors instead of repeating those patterns across platform files
+- entity base helpers must stay focused on shared entity behavior and must not become a business-logic layer
+
+### Entity scope
+
+- groups, users, networks, devices, and tags may be scope metadata without becoming entity types
+- rule-backed pause behavior belongs in services unless a later architecture decision explicitly changes that contract
+
+### Entity metadata
+
+- add concise purpose-oriented metadata when it materially helps users understand what an entity is for
+- keep purpose metadata stable, readable, and manager-derived
+- do not expose internal debugging structures or sensitive payloads just to make an entity feel richer
+
+### Platform concurrency
+
+- coordinator-based platforms should set `PARALLEL_UPDATES = 0` explicitly when entities do not poll independently
+- any non-zero or non-default parallel update limit must be justified by platform behavior and protocol constraints
+- platform concurrency policy should be declared in the platform module rather than left implicit
+
+## Service standards
+
+- service handlers must resolve one explicit config-entry scope
+- service handlers must validate Home Assistant-facing input and then delegate to manager methods
+- services must not construct Firewalla mutation payloads independently from the manager layer
+- services must remain useful even when no entity exists for the targeted rule, if the service contract is rule-based rather than entity-based
+
+## Mutation and write-path standards
+
+- manager methods are the single write path above the API layer
+- successful commands may update in-memory runtime state optimistically
+- optimistic changes must remain in memory only
+- the next coordinator refresh remains the source of truth
+- if refreshed state disagrees with optimistic state, the refreshed state wins and the discrepancy must be handled as reconciliation, not hidden silently
+
+## Runtime registry standards
+
+- normalize the Firewalla init payload once per refresh path when practical
+- shared indexed lookups such as `rule_index` must be built centrally
+- future platforms, inventory tools, and services must consume shared normalized outputs instead of repeating full payload scans
+- lazy lookup or caching is acceptable only when it preserves correctness and does not create a second source of truth
+
+## Config-entry scope rules
+
+- all runtime behavior must operate within one explicit config-entry scope
+- do not rely on first-loaded-entry behavior
+- services, repairs, reloads, unloads, diagnostics, and reauth flows must target the owning entry only
+- signal names, cleanup logic, and unique-ID construction must preserve per-entry isolation for future multi-instance support
 
 ## Exception handling rules
 
-- The API layer must translate transport, auth, and protocol failures into custom integration exceptions
-- Raw `aiohttp` tracebacks must not leak past the API boundary as user-visible failure modes
-- Use a dedicated auth exception such as `FirewallaAuthError` for invalid or revoked credentials
-- The Home Assistant layer must map persistent auth failure into `ConfigEntryAuthFailed`
-- Timeouts and upstream availability failures must be represented separately from auth failures
+- the API layer must translate transport, auth, timeout, and protocol failures into custom integration exceptions
+- raw `aiohttp` tracebacks must not escape the API boundary as user-facing failures
+- use specific exception classes for auth, validation, timeout, and protocol failures
+- always chain exceptions with `from err` when re-raising
+- broad hardcoded user-facing errors are forbidden in runtime code
+
+Home Assistant mapping rules:
+
+- `ConfigEntryAuthFailed` for persistent credential rejection
+- `ConfigEntryNotReady` for temporary setup and connectivity failures where appropriate
+- `ServiceValidationError` for invalid user input
+- `HomeAssistantError` for runtime failures that are not user-input mistakes
 
 ## Authentication and retry rules
 
-- A persistent auth failure is defined as two consecutive `401 Unauthorized` responses
-- The client may perform one immediate retry after the first `401`
-- If the second response is also `401`, raise `FirewallaAuthError`
-- Do not implement long retry windows for `401` responses
-- Use normal backoff and retry handling for timeouts and `5xx` conditions only where appropriate
+- a persistent auth failure is two consecutive `401 Unauthorized` responses
+- the client may perform one immediate retry after the first `401`
+- if the second response is also `401`, raise `FirewallaAuthError`
+- do not place `401` failures into long retry loops
+- treat timeouts and `5xx` responses as operational failures, not auth failures
 
 ## Logging rules
 
-- Use structured, lazy logging
-- Never log QR payloads, PEM material, tokens, signatures, or decrypted sensitive payload data
-- Keep logs useful for debugging without exposing secrets or personal data
-- Avoid repetitive coordinator error spam for persistent auth failure; reauth should take over
+- use lazy structured logging
+- do not use f-strings in log calls
+- never log QR payloads, PEM material, tokens, signatures, decrypted payloads, or symmetric-key material
+- keep logs useful for debugging without exposing secrets or personal data
+- avoid repetitive coordinator error spam when auth failure should hand off to reauth handling
 
-## Localization rules
+## Localization and translation rules
 
-- Do not hardcode user-facing production strings in Python modules when translation keys are appropriate
+- do not hardcode user-facing production strings in Python when translation keys are appropriate
 - English translation files are the only manually edited source for translated integration text
-- Reauth, repair, and config-flow errors must be translation-ready
+- config-flow, reauth, service, and repair messages must be translation-ready
+- exception mapping should be specific by failure class rather than collapsing multiple failures into a generic error bucket
+- icon behavior should use Home Assistant translation or icon infrastructure where supported instead of Python-side presentation rules when that yields a cleaner durable contract
 
-## Diagnostics rules
+## Diagnostics and security rules
 
 - `diagnostics.py` must use Home Assistant redaction helpers such as `async_redact_data`
-- Diagnostics output must scrub PII, secrets, tokens, PEM material, host-specific sensitive values, and any sensitive Firewalla JSON payload fields
-- Diagnostics should expose enough structure to debug integration problems without exposing account or network secrets
+- diagnostics must scrub secrets, tokens, identifiers, sensitive host details, and sensitive payload fields
+- entity attributes must not expose secrets or durable credential material
+- QR payloads and local credentials must be handled as sensitive input throughout the codebase
 
-## Security rules
+## Review rules
 
-- Handle QR payloads as sensitive input
-- Prefer in-memory key generation during normal Home Assistant operation
-- Store only the minimum durable secret material required for reconnect and reauth
-- Never expose secret material in logs, exceptions, diagnostics, or entity attributes
+Review changes against these questions:
 
-## Dependency management
+- does this change preserve the `api/` boundary?
+- does business logic remain in manager methods instead of entities, flows, or services?
+- do config-entry writes stay in coordinator-owned paths?
+- do specialized shared modules live under `managers/`, `helpers/`, or `utils/` instead of becoming unowned root files?
+- does the change preserve entry-scoped behavior?
+- are user-facing failures translation-ready and specifically typed?
+- does the change keep entity identity stable?
+- does the change reuse the shared registry pipeline instead of introducing another ad hoc lookup path?
+- does the change introduce orphan-prone lifecycle behavior without an explicit reconciliation policy?
 
-- The integration must depend on `cryptography`
-- Declare the dependency in `manifest.json`
-- Do not introduce alternative crypto implementations
-- Keep tests and types aligned with the chosen dependency
+## Boundary enforcement
+
+- maintain architecture lint checks that enforce purity boundaries, write ownership, and layer placement rules
+- boundary checks should reject Home Assistant imports in `utils/`
+- boundary checks should reject duplicated business logic or write paths in services, flows, and platform files
+- boundary checks should reject unowned specialized root modules when the code clearly belongs under `managers/`, `helpers/`, or `utils/`
 
 ## Validation workflow
 

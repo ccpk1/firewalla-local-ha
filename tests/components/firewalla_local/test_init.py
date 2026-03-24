@@ -17,15 +17,15 @@ from custom_components.firewalla_local.api.exceptions import (
 )
 from custom_components.firewalla_local.const import (
     CONF_AID,
-    CONF_CONFIG_ENTRY_ID,
-    CONF_CONFIG_ENTRY_NAME,
     CONF_EID,
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LOCAL_IP,
     CONF_SYMMETRIC_KEY,
     DOMAIN,
-    LEGACY_CONF_LOCAL_IP,
+    SERVICE_FIELD_CONFIG_ENTRY_ID,
+    SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_GET_RUNTIME_INVENTORY,
 )
 from custom_components.firewalla_local.models import (
@@ -94,14 +94,14 @@ async def test_setup_entry(hass: HomeAssistant) -> None:
     assert runtime_data.coordinator.data.exception_rule_count == 12
 
 
-async def test_setup_entry_migrates_legacy_local_ip(hass: HomeAssistant) -> None:
-    """Test setup migrates legacy local_ip connection data to host."""
+async def test_setup_entry_normalizes_local_ip_to_host(hass: HomeAssistant) -> None:
+    """Test setup normalizes local_ip connection data to host."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Firewalla (192.168.200.1)",
         data={
             CONF_LICENSE: "license-123",
-            LEGACY_CONF_LOCAL_IP: "192.168.200.1",
+            CONF_LOCAL_IP: "192.168.200.1",
             CONF_GID: "gid-123",
             CONF_EID: "eid-123",
             CONF_AID: "aid-123",
@@ -118,7 +118,7 @@ async def test_setup_entry_migrates_legacy_local_ip(hass: HomeAssistant) -> None
         await hass.async_block_till_done()
 
     assert entry.data[CONF_HOST] == "192.168.200.1"
-    assert LEGACY_CONF_LOCAL_IP not in entry.data
+    assert CONF_LOCAL_IP not in entry.data
 
 
 async def test_setup_entry_raises_auth_failed(hass: HomeAssistant) -> None:
@@ -234,9 +234,7 @@ async def test_get_runtime_inventory_service_returns_markdown(
         "networkProfiles": {},
         "tags": {"10": {"name": "KADEN's Devices", "policy": {}}},
         "userTags": {"21": {"name": "KADEN", "affiliatedTag": "10"}},
-        "policyRules": [
-            {"pid": "739", "target": "00:08:9B:FB:01:D9", "type": "mac"}
-        ],
+        "policyRules": [{"pid": "739", "target": "00:08:9B:FB:01:D9", "type": "mac"}],
     }
 
     with patch.object(
@@ -247,7 +245,7 @@ async def test_get_runtime_inventory_service_returns_markdown(
         response = await hass.services.async_call(
             DOMAIN,
             SERVICE_GET_RUNTIME_INVENTORY,
-            {CONF_CONFIG_ENTRY_ID: entry.entry_id},
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
             blocking=True,
             return_response=True,
         )
@@ -349,7 +347,7 @@ async def test_get_runtime_inventory_service_accepts_entry_name(
         response = await hass.services.async_call(
             DOMAIN,
             SERVICE_GET_RUNTIME_INVENTORY,
-            {CONF_CONFIG_ENTRY_NAME: "Office Firewalla"},
+            {SERVICE_FIELD_CONFIG_ENTRY_NAME: "Office Firewalla"},
             blocking=True,
             return_response=True,
         )
@@ -387,7 +385,7 @@ async def test_get_runtime_inventory_service_rejects_unknown_entry(
         await hass.services.async_call(
             DOMAIN,
             SERVICE_GET_RUNTIME_INVENTORY,
-            {CONF_CONFIG_ENTRY_ID: "missing-entry"},
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: "missing-entry"},
             blocking=True,
             return_response=True,
         )

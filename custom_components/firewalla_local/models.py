@@ -4,11 +4,86 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Final, TypedDict
+
+from .const import (
+    RULE_ACTION_ALLOW,
+    RULE_ACTION_BLOCK,
+    RULE_PURPOSE_FAMILY,
+    RULE_TARGET_TAG,
+    RULE_TARGET_TYPE_CATEGORY,
+    RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_MAC,
+    RULE_TARGET_TYPE_NETWORK,
+)
+
+_RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
+_RAW_UPDATE_NOTES_KEY: Final = "notes"
+_STATUS_DISABLED: Final = "disabled"
+_STATUS_ENABLED: Final = "enabled"
+_TEMPLATE_DATA_ACTION_KEY: Final = "action"
+_TEMPLATE_DATA_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
+_TEMPLATE_DATA_NAME_KEY: Final = "name"
+_TEMPLATE_DATA_SCOPE_KEY: Final = "scope"
+_TEMPLATE_DATA_SOURCE_RULE_ID_KEY: Final = "source_rule_id"
+_TEMPLATE_DATA_TAG_REFS_KEY: Final = "tag_refs"
+_TEMPLATE_DATA_TARGET_KEY: Final = "target"
+_TEMPLATE_DATA_TARGET_TYPE_KEY: Final = "target_type"
+_TEMPLATE_DATA_USE_BF_KEY: Final = "use_bf"
+_CREATE_PAYLOAD_ACTION_KEY: Final = "action"
+_CREATE_PAYLOAD_APP_TIME_USAGE_KEY: Final = "appTimeUsage"
+_CREATE_PAYLOAD_DISTURB_LEVEL_KEY: Final = "disturbLevel"
+_CREATE_PAYLOAD_DISTURB_METHOD_KEY: Final = "disturbMethod"
+_CREATE_PAYLOAD_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
+_CREATE_PAYLOAD_DURATION_KEY: Final = "duration"
+_CREATE_PAYLOAD_SCOPE_KEY: Final = "scope"
+_CREATE_PAYLOAD_TAG_KEY: Final = "tag"
+_CREATE_PAYLOAD_TARGET_KEY: Final = "target"
+_CREATE_PAYLOAD_TRUST_KEY: Final = "trust"
+_CREATE_PAYLOAD_TYPE_KEY: Final = "type"
+_CREATE_PAYLOAD_UPDATED_TIME_KEY: Final = "updatedTime"
+_CREATE_PAYLOAD_USE_BF_KEY: Final = "useBf"
+_INTERNAL_IDENTIFIER_SEPARATOR: Final = "-"
+_PRETTIFIED_TARGET_SEPARATOR: Final = "_"
+_PRETTIFIED_TARGET_REPLACEMENT: Final = " "
+_TARGET_LIST_PREFIX: Final = "TL-"
+
+
+class FirewallaRuleTemplateDict(TypedDict):
+    """Serialized config-entry storage shape for a rule template."""
+
+    source_rule_id: str
+    name: str
+    action: str
+    target: str
+    target_type: str
+    scope: list[str]
+    tag_refs: list[str]
+    dnsmasq_only: bool | None
+    use_bf: bool
+
+
+class FirewallaRuleCreatePayload(TypedDict, total=False):
+    """Confirmed create payload shape for a Firewalla rule template."""
+
+    action: str
+    appTimeUsage: dict[str, object]
+    disturbLevel: str
+    disturbMethod: dict[str, object]
+    duration: str
+    scope: list[str]
+    target: str
+    trust: str
+    type: str
+    updatedTime: float
+    useBf: bool
+    tag: list[str]
+    dnsmasq_only: bool
 
 
 def _looks_like_internal_identifier(value: str) -> bool:
     """Return whether a target value looks like an internal Firewalla identifier."""
-    segments = value.split("-")
+    segments = value.split(_INTERNAL_IDENTIFIER_SEPARATOR)
     if len(segments) == 5 and all(segments):
         expected_lengths = (8, 4, 4, 4, 12)
         segment_lengths_match = all(
@@ -72,7 +147,7 @@ class FirewallaPolicyRule:
     @property
     def notes(self) -> str | None:
         """Return user-visible notes carried on the live rule payload."""
-        raw_notes = self.raw_update_payload.get("notes")
+        raw_notes = self.raw_update_payload.get(_RAW_UPDATE_NOTES_KEY)
         if not isinstance(raw_notes, str):
             return None
         stripped_notes = raw_notes.strip()
@@ -81,7 +156,7 @@ class FirewallaPolicyRule:
     @property
     def pause_until(self) -> float | None:
         """Return the pause boundary timestamp carried by Firewalla, if any."""
-        raw_idle_ts = self.raw_update_payload.get("idleTs")
+        raw_idle_ts = self.raw_update_payload.get(_RAW_UPDATE_IDLE_TS_KEY)
         if isinstance(raw_idle_ts, (int, float)):
             return float(raw_idle_ts)
         if isinstance(raw_idle_ts, str) and raw_idle_ts:
@@ -125,17 +200,20 @@ def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:
     """Build a readable state-free name for one normalized policy rule."""
     applicability = f" for {', '.join(rule.applies_to)}" if rule.applies_to else ""
 
-    if rule.target_type == "mac" and rule.target == "TAG":
+    if rule.target_type == RULE_TARGET_TYPE_MAC and rule.target == RULE_TARGET_TAG:
         if rule.target_name:
             return f"{rule.action} internet for {rule.target_name}"
         return f"{rule.action} internet{applicability}"
 
     display_target = rule.target
     if rule.target_name:
-        prettified_target = rule.target.replace("_", " ")
+        prettified_target = rule.target.replace(
+            _PRETTIFIED_TARGET_SEPARATOR,
+            _PRETTIFIED_TARGET_REPLACEMENT,
+        )
         target_is_internal_id = rule.target_type in {
-            "network",
-            "category",
+            RULE_TARGET_TYPE_NETWORK,
+            RULE_TARGET_TYPE_CATEGORY,
         } and _looks_like_internal_identifier(rule.target)
         if (
             rule.target_name.casefold() == prettified_target.casefold()
@@ -159,7 +237,7 @@ def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:
 
 def format_policy_rule_label(rule: FirewallaPolicyRule) -> str:
     """Build a readable label for one normalized Firewalla policy rule."""
-    status = "enabled" if rule.enabled else "disabled"
+    status = _STATUS_ENABLED if rule.enabled else _STATUS_DISABLED
     return f"{format_policy_rule_name(rule)} ({status})"
 
 
@@ -168,30 +246,40 @@ def supports_rule_switch(rule: FirewallaPolicyRule) -> bool:
     if rule.auto_delete_when_expires is True or rule.is_temporary:
         return False
 
-    if rule.purpose == "family":
+    if rule.purpose == RULE_PURPOSE_FAMILY:
         return False
 
-    if rule.action == "block" and rule.target_type == "mac" and rule.target == "TAG":
+    if (
+        rule.action == RULE_ACTION_BLOCK
+        and rule.target_type == RULE_TARGET_TYPE_MAC
+        and rule.target == RULE_TARGET_TAG
+    ):
         return True
 
-    if rule.target_type == "dns":
-        return rule.action in {"allow", "block"} and rule.purpose is None
-
-    if rule.target_type == "network":
+    if rule.target_type == RULE_TARGET_TYPE_DNS:
         return (
-            rule.action in {"allow", "block"}
+            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
+            and rule.purpose is None
+        )
+
+    if rule.target_type == RULE_TARGET_TYPE_NETWORK:
+        return (
+            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
             and rule.purpose is None
             and rule.target_name is not None
         )
 
-    if rule.target_type == "category":
-        if rule.action not in {"allow", "block"} or rule.purpose is not None:
+    if rule.target_type == RULE_TARGET_TYPE_CATEGORY:
+        if (
+            rule.action not in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
+            or rule.purpose is not None
+        ):
             return False
 
         if rule.target_name:
             return True
 
-        return not rule.target.startswith("TL-")
+        return not rule.target.startswith(_TARGET_LIST_PREFIX)
 
     return False
 
@@ -227,11 +315,11 @@ class FirewallaRuleTemplate:
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> FirewallaRuleTemplate | None:
         """Deserialize a stored rule template from config entry options."""
-        source_rule_id = data.get("source_rule_id")
-        name = data.get("name")
-        action = data.get("action")
-        target = data.get("target")
-        target_type = data.get("target_type")
+        source_rule_id = data.get(_TEMPLATE_DATA_SOURCE_RULE_ID_KEY)
+        name = data.get(_TEMPLATE_DATA_NAME_KEY)
+        action = data.get(_TEMPLATE_DATA_ACTION_KEY)
+        target = data.get(_TEMPLATE_DATA_TARGET_KEY)
+        target_type = data.get(_TEMPLATE_DATA_TARGET_TYPE_KEY)
         if not all(
             isinstance(value, str) and value
             for value in (source_rule_id, name, action, target, target_type)
@@ -243,22 +331,22 @@ class FirewallaRuleTemplate:
         assert isinstance(target, str)
         assert isinstance(target_type, str)
 
-        raw_scope = data.get("scope")
+        raw_scope = data.get(_TEMPLATE_DATA_SCOPE_KEY)
         scope = (
             tuple(item for item in raw_scope if isinstance(item, str) and item)
             if isinstance(raw_scope, list)
             else ()
         )
-        raw_tag_refs = data.get("tag_refs")
+        raw_tag_refs = data.get(_TEMPLATE_DATA_TAG_REFS_KEY)
         tag_refs = (
             tuple(item for item in raw_tag_refs if isinstance(item, str) and item)
             if isinstance(raw_tag_refs, list)
             else ()
         )
-        dnsmasq_only = data.get("dnsmasq_only")
+        dnsmasq_only = data.get(_TEMPLATE_DATA_DNSMASQ_ONLY_KEY)
         if dnsmasq_only is not None and not isinstance(dnsmasq_only, bool):
             dnsmasq_only = None
-        use_bf = data.get("use_bf")
+        use_bf = data.get(_TEMPLATE_DATA_USE_BF_KEY)
 
         return cls(
             source_rule_id=source_rule_id,
@@ -272,48 +360,37 @@ class FirewallaRuleTemplate:
             use_bf=use_bf if isinstance(use_bf, bool) else True,
         )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> FirewallaRuleTemplateDict:
         """Serialize the template for config entry option storage."""
         return {
-            "source_rule_id": self.source_rule_id,
-            "name": self.name,
-            "action": self.action,
-            "target": self.target,
-            "target_type": self.target_type,
-            "scope": list(self.scope),
-            "tag_refs": list(self.tag_refs),
-            "dnsmasq_only": self.dnsmasq_only,
-            "use_bf": self.use_bf,
+            _TEMPLATE_DATA_SOURCE_RULE_ID_KEY: self.source_rule_id,
+            _TEMPLATE_DATA_NAME_KEY: self.name,
+            _TEMPLATE_DATA_ACTION_KEY: self.action,
+            _TEMPLATE_DATA_TARGET_KEY: self.target,
+            _TEMPLATE_DATA_TARGET_TYPE_KEY: self.target_type,
+            _TEMPLATE_DATA_SCOPE_KEY: list(self.scope),
+            _TEMPLATE_DATA_TAG_REFS_KEY: list(self.tag_refs),
+            _TEMPLATE_DATA_DNSMASQ_ONLY_KEY: self.dnsmasq_only,
+            _TEMPLATE_DATA_USE_BF_KEY: self.use_bf,
         }
 
-    def matches_rule(self, rule: FirewallaPolicyRule) -> bool:
-        """Return whether a live rule matches this switch template identity."""
-        return (
-            rule.action == self.action
-            and rule.target == self.target
-            and rule.target_type == self.target_type
-            and _normalize_ref_values(rule.scope) == self.scope
-            and _normalize_ref_values(rule.tag_refs) == self.tag_refs
-            and (self.dnsmasq_only is None or rule.dnsmasq_only == self.dnsmasq_only)
-        )
-
-    def build_create_value(self, *, updated_time: float) -> dict[str, object]:
+    def build_create_value(self, *, updated_time: float) -> FirewallaRuleCreatePayload:
         """Build the confirmed persistent create payload for this template."""
-        payload: dict[str, object] = {
-            "action": self.action,
-            "appTimeUsage": {},
-            "disturbLevel": "",
-            "disturbMethod": {},
-            "duration": "",
-            "scope": list(self.scope),
-            "target": self.target,
-            "trust": "",
-            "type": self.target_type,
-            "updatedTime": updated_time,
-            "useBf": self.use_bf,
+        payload: FirewallaRuleCreatePayload = {
+            _CREATE_PAYLOAD_ACTION_KEY: self.action,
+            _CREATE_PAYLOAD_APP_TIME_USAGE_KEY: {},
+            _CREATE_PAYLOAD_DISTURB_LEVEL_KEY: "",
+            _CREATE_PAYLOAD_DISTURB_METHOD_KEY: {},
+            _CREATE_PAYLOAD_DURATION_KEY: "",
+            _CREATE_PAYLOAD_SCOPE_KEY: list(self.scope),
+            _CREATE_PAYLOAD_TARGET_KEY: self.target,
+            _CREATE_PAYLOAD_TRUST_KEY: "",
+            _CREATE_PAYLOAD_TYPE_KEY: self.target_type,
+            _CREATE_PAYLOAD_UPDATED_TIME_KEY: updated_time,
+            _CREATE_PAYLOAD_USE_BF_KEY: self.use_bf,
         }
         if self.tag_refs:
-            payload["tag"] = list(self.tag_refs)
+            payload[_CREATE_PAYLOAD_TAG_KEY] = list(self.tag_refs)
         if self.dnsmasq_only is not None:
-            payload["dnsmasq_only"] = self.dnsmasq_only
+            payload[_CREATE_PAYLOAD_DNSMASQ_ONLY_KEY] = self.dnsmasq_only
         return payload

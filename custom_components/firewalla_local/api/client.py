@@ -7,6 +7,7 @@ import sys
 import time
 import uuid
 from datetime import datetime
+from typing import Final
 
 from aiohttp import ClientSession
 from aiohttp.client_exceptions import ClientError
@@ -28,6 +29,91 @@ from .exceptions import (
     FirewallaConnectionError,
     FirewallaProtocolError,
 )
+
+_FWMESSAGE_TYPE_MSG: Final = "msg"
+_FWMESSAGE_TYPE_JSONDATA: Final = "jsondata"
+_FWMESSAGE_OBJECT_TYPE_JSONMSG: Final = "jsonmsg"
+_FWMESSAGE_LANGUAGE_ENGLISH: Final = "en"
+_FWMESSAGE_TIMEZONE_UTC: Final = "UTC"
+
+_RAW_MESSAGE_KEY: Final = "message"
+_RAW_MESSAGE_ERROR_KEY: Final = "error"
+_RAW_MESSAGE_DATA_KEY: Final = "data"
+_RAW_MESSAGE_CODE_KEY: Final = "code"
+_RAW_MESSAGE_TIMESTAMP_KEY: Final = "timestamp"
+
+_COMMAND_MESSAGE_TYPE: Final = "cmd"
+_INIT_MESSAGE_TYPE: Final = "init"
+_COMMAND_ITEM_KEY: Final = "item"
+_COMMAND_VALUE_KEY: Final = "value"
+_COMMAND_GET_KEY: Final = "get"
+_COMMAND_POLICY_CREATE: Final = "policy:create"
+_COMMAND_POLICY_DELETE: Final = "policy:delete"
+_COMMAND_POLICY_UPDATE: Final = "policy:update"
+_COMMAND_POLICY_ID_KEY: Final = "policyID"
+
+_RAW_RULE_ID_KEY: Final = "pid"
+_RAW_RULE_ACTION_KEY: Final = "action"
+_RAW_RULE_TARGET_KEY: Final = "target"
+_RAW_RULE_TYPE_KEY: Final = "type"
+_RAW_RULE_DIRECTION_KEY: Final = "direction"
+_RAW_RULE_PURPOSE_KEY: Final = "purpose"
+_RAW_RULE_SCOPE_KEY: Final = "scope"
+_RAW_RULE_TAGS_KEY: Final = "tag"
+_RAW_RULE_DISABLED_KEY: Final = "disabled"
+_RAW_RULE_UPDATED_TIME_KEY: Final = "updatedTime"
+_RAW_RULE_IDLE_TS_KEY: Final = "idleTs"
+_RAW_RULE_TARGET_NAME_KEY: Final = "target_name"
+_RAW_RULE_ACTIVATED_TIME_KEY: Final = "activatedTime"
+_RAW_RULE_LAST_ACTIVATED_TIME_KEY: Final = "lastActivatedTime"
+_RAW_RULE_EXPIRE_KEY: Final = "expire"
+_RAW_RULE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
+_RAW_RULE_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
+
+_RAW_SYSTEM_MODEL_KEY: Final = "model"
+_RAW_SYSTEM_CPU_ID_KEY: Final = "cpuid"
+_RAW_SYSTEM_LONG_VERSION_KEY: Final = "longVersion"
+_RAW_SYSTEM_GROUP_NAME_KEY: Final = "groupName"
+_RAW_SYSTEM_DEVICE_NAME_KEY: Final = "device"
+_RAW_CUSTOMIZED_CATEGORIES_KEY: Final = "customizedCategories"
+_RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
+_RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
+_RAW_INTERFACE_KEY: Final = "interface"
+_RAW_META_KEY: Final = "meta"
+_RAW_UUID_KEY: Final = "uuid"
+_RAW_NAME_KEY: Final = "name"
+_RAW_DESC_KEY: Final = "desc"
+_RAW_INTF_KEY: Final = "intf"
+_RAW_DEVICE_TAGS_KEY: Final = "deviceTags"
+_RAW_USER_TAGS_KEY: Final = "userTags"
+_RAW_HOSTS_KEY: Final = "hosts"
+_RAW_HOST_MAC_KEY: Final = "mac"
+_RAW_HOST_BACKUP_NAME_KEY: Final = "bname"
+_RAW_EXCEPTION_RULES_KEY: Final = "exceptionRules"
+_RAW_POLICY_RULES_KEY: Final = "policyRules"
+
+_RAW_TAG_PREFIX_GROUP: Final = "tag"
+_RAW_TAG_PREFIX_DEVICE: Final = "dtag"
+_RAW_TAG_PREFIX_USER: Final = "utag"
+_RAW_TAG_PREFIX_USER_ALT: Final = "userTag"
+_RAW_TAG_PREFIX_NETWORK: Final = "intf"
+_RAW_TAG_SEPARATOR: Final = ":"
+
+_RULE_TARGET_TAG: Final = "TAG"
+_RULE_TARGET_LIST_PREFIX: Final = "TL-"
+_RULE_TARGET_TYPE_CATEGORY: Final = "category"
+_RULE_TARGET_TYPE_MAC: Final = "mac"
+_RULE_TARGET_TYPE_NETWORK: Final = "network"
+
+_QOS_PREFIX: Final = "qos_"
+_QOS_LABEL_PREFIX: Final = "QoS "
+_DEFAULT_BOX_NAME: Final = "Firewalla"
+_BOOLISH_TRUE_VALUES: Final = {"1", "true", "yes"}
+_BOOLISH_FALSE_VALUES: Final = {"0", "false", "no", ""}
+_DISABLED_TRUE_VALUES: Final = {"1", "true", "True", 1}
+_RAW_RULE_DISABLED_FALSE_VALUE: Final = 0
+_RAW_RULE_DISABLED_TRUE_VALUE: Final = 1
+_RAW_RULE_IDLE_TS_EMPTY_VALUE: Final = ""
 
 
 class FirewallaApiClient:
@@ -60,16 +146,16 @@ class FirewallaApiClient:
         target: str = DEFAULT_INIT_TARGET,
     ) -> dict[str, object]:
         """Build the Firewalla-style local message envelope."""
-        timezone_name = datetime.now().astimezone().tzname() or "UTC"
+        timezone_name = datetime.now().astimezone().tzname() or _FWMESSAGE_TIMEZONE_UTC
         return {
-            "mtype": "msg",
-            "message": {
-                "mtype": "msg",
-                "type": "jsondata",
+            "mtype": _FWMESSAGE_TYPE_MSG,
+            _RAW_MESSAGE_KEY: {
+                "mtype": _FWMESSAGE_TYPE_MSG,
+                "type": _FWMESSAGE_TYPE_JSONDATA,
                 "msg": "",
                 "from": self.device_name,
                 "obj": {
-                    "type": "jsonmsg",
+                    "type": _FWMESSAGE_OBJECT_TYPE_JSONMSG,
                     "id": str(uuid.uuid4()),
                     "mtype": message_type,
                     "target": target,
@@ -80,7 +166,7 @@ class FirewallaApiClient:
                     "appID": FIREWALLA_APP_ID,
                     "platform": sys.platform,
                     "timezone": timezone_name,
-                    "language": "en",
+                    "language": _FWMESSAGE_LANGUAGE_ENGLISH,
                     "version": FIREWALLA_APP_VERSION,
                     "eid": self.eid,
                 },
@@ -118,7 +204,10 @@ class FirewallaApiClient:
             json.dumps(message, separators=(",", ":")),
             self.symmetric_key,
         )
-        payload = {"message": encrypted_message, "timestamp": int(time.time())}
+        payload = {
+            _RAW_MESSAGE_KEY: encrypted_message,
+            _RAW_MESSAGE_TIMESTAMP_KEY: int(time.time()),
+        }
 
         response_status, response_text = await self._async_post_local_payload(payload)
         if response_status == 401:
@@ -148,12 +237,12 @@ class FirewallaApiClient:
                 "Firewalla local runtime response was not a JSON object"
             )
 
-        if response_error := response_payload.get("error"):
+        if response_error := response_payload.get(_RAW_MESSAGE_ERROR_KEY):
             raise FirewallaProtocolError(
                 f"Firewalla local runtime returned an error: {response_error}"
             )
 
-        response_message = response_payload.get("message")
+        response_message = response_payload.get(_RAW_MESSAGE_KEY)
         if not isinstance(response_message, str) or not response_message:
             raise FirewallaProtocolError(
                 "Firewalla local runtime response did not include an encrypted message"
@@ -172,12 +261,13 @@ class FirewallaApiClient:
                 "Firewalla local runtime decrypted payload was not a JSON object"
             )
 
-        if decrypted_payload.get("code") != 200:
+        if decrypted_payload.get(_RAW_MESSAGE_CODE_KEY) != 200:
             raise FirewallaProtocolError(
-                f"Firewalla local runtime returned code {decrypted_payload.get('code')}"
+                "Firewalla local runtime returned code "
+                f"{decrypted_payload.get(_RAW_MESSAGE_CODE_KEY)}"
             )
 
-        data_payload = decrypted_payload.get("data")
+        data_payload = decrypted_payload.get(_RAW_MESSAGE_DATA_KEY)
         if not isinstance(data_payload, dict):
             raise FirewallaProtocolError(
                 "Firewalla local runtime payload did not include a data object"
@@ -188,18 +278,20 @@ class FirewallaApiClient:
     async def async_get_runtime_init_payload(self) -> dict[str, object]:
         """Fetch the raw Firewalla init payload from the local runtime."""
         return await self._async_send_local_message(
-            message_type="init",
-            data={"get": DEFAULT_INIT_TARGET},
+            message_type=_INIT_MESSAGE_TYPE,
+            data={_COMMAND_GET_KEY: DEFAULT_INIT_TARGET},
             target=DEFAULT_INIT_TARGET,
         )
 
     async def async_create_rule(self, template: FirewallaRuleTemplate) -> None:
         """Create one persistent rule from a stored template."""
         await self._async_send_local_message(
-            message_type="cmd",
+            message_type=_COMMAND_MESSAGE_TYPE,
             data={
-                "item": "policy:create",
-                "value": template.build_create_value(updated_time=time.time()),
+                _COMMAND_ITEM_KEY: _COMMAND_POLICY_CREATE,
+                _COMMAND_VALUE_KEY: template.build_create_value(
+                    updated_time=time.time()
+                ),
             },
             target=DEFAULT_INIT_TARGET,
         )
@@ -207,8 +299,11 @@ class FirewallaApiClient:
     async def async_delete_rule(self, rule_id: str) -> None:
         """Delete one existing policy rule by ID."""
         await self._async_send_local_message(
-            message_type="cmd",
-            data={"item": "policy:delete", "value": {"policyID": rule_id}},
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_POLICY_DELETE,
+                _COMMAND_VALUE_KEY: {_COMMAND_POLICY_ID_KEY: rule_id},
+            },
             target=DEFAULT_INIT_TARGET,
         )
 
@@ -221,32 +316,41 @@ class FirewallaApiClient:
     ) -> None:
         """Update one existing policy rule in place."""
         value = dict(rule.raw_update_payload)
-        value["pid"] = rule.rule_id
-        value["disabled"] = 0 if enabled else 1
-        value["updatedTime"] = time.time()
+        value[_RAW_RULE_ID_KEY] = rule.rule_id
+        value[_RAW_RULE_DISABLED_KEY] = (
+            _RAW_RULE_DISABLED_FALSE_VALUE if enabled else _RAW_RULE_DISABLED_TRUE_VALUE
+        )
+        value[_RAW_RULE_UPDATED_TIME_KEY] = time.time()
 
         if enabled:
-            value["idleTs"] = ""
+            value[_RAW_RULE_IDLE_TS_KEY] = _RAW_RULE_IDLE_TS_EMPTY_VALUE
         elif idle_ts is not None:
-            value["idleTs"] = idle_ts
-        elif "idleTs" in value:
-            value["idleTs"] = ""
+            value[_RAW_RULE_IDLE_TS_KEY] = idle_ts
+        elif _RAW_RULE_IDLE_TS_KEY in value:
+            value[_RAW_RULE_IDLE_TS_KEY] = _RAW_RULE_IDLE_TS_EMPTY_VALUE
 
         await self._async_send_local_message(
-            message_type="cmd",
-            data={"item": "policy:update", "value": value},
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_POLICY_UPDATE,
+                _COMMAND_VALUE_KEY: value,
+            },
             target=DEFAULT_INIT_TARGET,
         )
 
     def _build_system_info(self, data: dict[str, object]) -> FirewallaSystemInfo:
         """Build normalized system information from the init payload."""
-        model = data.get("model")
-        serial_number = data.get("cpuid")
-        software_version = data.get("longVersion")
+        model = data.get(_RAW_SYSTEM_MODEL_KEY)
+        serial_number = data.get(_RAW_SYSTEM_CPU_ID_KEY)
+        software_version = data.get(_RAW_SYSTEM_LONG_VERSION_KEY)
 
         return FirewallaSystemInfo(
             host=self.host,
-            name=str(data.get("groupName") or data.get("device") or "Firewalla"),
+            name=str(
+                data.get(_RAW_SYSTEM_GROUP_NAME_KEY)
+                or data.get(_RAW_SYSTEM_DEVICE_NAME_KEY)
+                or _DEFAULT_BOX_NAME
+            ),
             model=model if isinstance(model, str) else None,
             serial_number=serial_number if isinstance(serial_number, str) else None,
             software_version=(
@@ -256,7 +360,7 @@ class FirewallaApiClient:
 
     def _build_category_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of category identifiers to human-readable names."""
-        raw_categories = data.get("customizedCategories")
+        raw_categories = data.get(_RAW_CUSTOMIZED_CATEGORIES_KEY)
         if not isinstance(raw_categories, dict):
             return {}
 
@@ -268,13 +372,14 @@ class FirewallaApiClient:
                 continue
 
             app_name = raw_category.get("app")
-            if isinstance(app_name, str) and app_name.startswith("qos_"):
+            if isinstance(app_name, str) and app_name.startswith(_QOS_PREFIX):
                 category_lookup[category_id] = (
-                    f"QoS {app_name.removeprefix('qos_').replace('_', ' ').title()}"
+                    f"{_QOS_LABEL_PREFIX}"
+                    f"{app_name.removeprefix(_QOS_PREFIX).replace('_', ' ').title()}"
                 )
                 continue
 
-            category_name = raw_category.get("name")
+            category_name = raw_category.get(_RAW_NAME_KEY)
             if isinstance(category_name, str) and category_name:
                 category_lookup[category_id] = category_name
 
@@ -282,7 +387,7 @@ class FirewallaApiClient:
 
     def _build_network_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of network UUIDs to readable network names."""
-        raw_network_profiles = data.get("networkProfiles")
+        raw_network_profiles = data.get(_RAW_NETWORK_PROFILES_KEY)
         network_lookup: dict[str, str] = {}
 
         if isinstance(raw_network_profiles, dict):
@@ -296,9 +401,9 @@ class FirewallaApiClient:
                 if display_name is not None:
                     network_lookup[network_id] = display_name
 
-        raw_network_config = data.get("networkConfig")
+        raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
         if isinstance(raw_network_config, dict):
-            raw_interfaces = raw_network_config.get("interface")
+            raw_interfaces = raw_network_config.get(_RAW_INTERFACE_KEY)
             self._merge_network_config_lookup(raw_interfaces, network_lookup)
 
         return network_lookup
@@ -307,7 +412,7 @@ class FirewallaApiClient:
         self, raw_profile: dict[str, object]
     ) -> str | None:
         """Resolve the best available display name from one network profile."""
-        for key in ("desc", "name", "intf"):
+        for key in (_RAW_DESC_KEY, _RAW_NAME_KEY, _RAW_INTF_KEY):
             value = raw_profile.get(key)
             if isinstance(value, str) and value:
                 return value
@@ -318,14 +423,14 @@ class FirewallaApiClient:
     ) -> None:
         """Merge readable network names from networkConfig.interface metadata."""
         if isinstance(raw_interfaces, dict):
-            meta = raw_interfaces.get("meta")
+            meta = raw_interfaces.get(_RAW_META_KEY)
             if isinstance(meta, dict):
-                network_id = meta.get("uuid")
+                network_id = meta.get(_RAW_UUID_KEY)
                 if isinstance(network_id, str) and network_id:
                     for candidate in (
-                        meta.get("name"),
-                        raw_interfaces.get("desc"),
-                        raw_interfaces.get("name"),
+                        meta.get(_RAW_NAME_KEY),
+                        raw_interfaces.get(_RAW_DESC_KEY),
+                        raw_interfaces.get(_RAW_NAME_KEY),
                     ):
                         if isinstance(candidate, str) and candidate:
                             network_lookup[network_id] = candidate
@@ -352,7 +457,7 @@ class FirewallaApiClient:
             if not isinstance(raw_item, dict):
                 continue
 
-            item_name = raw_item.get("name")
+            item_name = raw_item.get(_RAW_NAME_KEY)
             if isinstance(item_name, str) and item_name:
                 named_lookup[item_id] = item_name
 
@@ -362,7 +467,7 @@ class FirewallaApiClient:
         self, data: dict[str, object]
     ) -> dict[str, tuple[str, ...]]:
         """Build a lookup of group tags to affiliated user names."""
-        raw_user_tags = data.get("userTags")
+        raw_user_tags = data.get(_RAW_USER_TAGS_KEY)
         if not isinstance(raw_user_tags, dict):
             return {}
 
@@ -372,7 +477,7 @@ class FirewallaApiClient:
                 continue
 
             affiliated_tag = raw_user_tag.get("affiliatedTag")
-            user_name = raw_user_tag.get("name")
+            user_name = raw_user_tag.get(_RAW_NAME_KEY)
             if (
                 not isinstance(affiliated_tag, str)
                 or not affiliated_tag
@@ -390,7 +495,7 @@ class FirewallaApiClient:
 
     def _build_host_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of host MAC addresses to host names."""
-        raw_hosts = data.get("hosts")
+        raw_hosts = data.get(_RAW_HOSTS_KEY)
         if not isinstance(raw_hosts, list):
             return {}
 
@@ -399,8 +504,10 @@ class FirewallaApiClient:
             if not isinstance(raw_host, dict):
                 continue
 
-            host_mac = raw_host.get("mac")
-            host_name = raw_host.get("name") or raw_host.get("bname")
+            host_mac = raw_host.get(_RAW_HOST_MAC_KEY)
+            host_name = raw_host.get(_RAW_NAME_KEY) or raw_host.get(
+                _RAW_HOST_BACKUP_NAME_KEY
+            )
             if (
                 isinstance(host_mac, str)
                 and host_mac
@@ -422,21 +529,21 @@ class FirewallaApiClient:
         affiliated_users: dict[str, tuple[str, ...]],
     ) -> str | None:
         """Resolve a Firewalla tag reference string into a readable name."""
-        tag_prefix, _, tag_value = tag_reference.partition(":")
+        tag_prefix, _, tag_value = tag_reference.partition(_RAW_TAG_SEPARATOR)
         if not tag_value:
             return None
 
-        if tag_prefix == "tag":
+        if tag_prefix == _RAW_TAG_PREFIX_GROUP:
             if tag_name := tags.get(tag_value):
                 if user_names := affiliated_users.get(tag_value):
                     return f"{tag_name} ({', '.join(user_names)})"
                 return tag_name
             return None
-        if tag_prefix == "dtag":
+        if tag_prefix == _RAW_TAG_PREFIX_DEVICE:
             return device_tags.get(tag_value)
-        if tag_prefix in {"utag", "userTag"}:
+        if tag_prefix in {_RAW_TAG_PREFIX_USER, _RAW_TAG_PREFIX_USER_ALT}:
             return user_tags.get(tag_value)
-        if tag_prefix == "intf":
+        if tag_prefix == _RAW_TAG_PREFIX_NETWORK:
             return networks.get(tag_value)
         return None
 
@@ -451,7 +558,7 @@ class FirewallaApiClient:
         affiliated_users: dict[str, tuple[str, ...]],
     ) -> tuple[str, ...]:
         """Resolve tag-based rule applicability into readable labels."""
-        raw_tags = raw_rule.get("tag")
+        raw_tags = raw_rule.get(_RAW_RULE_TAGS_KEY)
         if not isinstance(raw_tags, list):
             return ()
 
@@ -487,13 +594,13 @@ class FirewallaApiClient:
         affiliated_users: dict[str, tuple[str, ...]],
     ) -> str | None:
         """Resolve a human-readable target name for one policy rule."""
-        explicit_target_name = raw_rule.get("target_name")
+        explicit_target_name = raw_rule.get(_RAW_RULE_TARGET_NAME_KEY)
         if isinstance(explicit_target_name, str) and explicit_target_name:
             return explicit_target_name
 
-        if target_type == "mac":
-            if target == "TAG":
-                raw_tags = raw_rule.get("tag")
+        if target_type == _RULE_TARGET_TYPE_MAC:
+            if target == _RULE_TARGET_TAG:
+                raw_tags = raw_rule.get(_RAW_RULE_TAGS_KEY)
                 if isinstance(raw_tags, list):
                     resolved_tags = [
                         resolved_name
@@ -515,19 +622,21 @@ class FirewallaApiClient:
 
             return hosts.get(target)
 
-        if target_type == "network":
+        if target_type == _RULE_TARGET_TYPE_NETWORK:
             return networks.get(target)
 
-        if target_type == "category":
+        if target_type == _RULE_TARGET_TYPE_CATEGORY:
             if target in categories:
                 return categories[target]
-            if target.startswith("TL-"):
-                trimmed_target = target.removeprefix("TL-")
+            if target.startswith(_RULE_TARGET_LIST_PREFIX):
+                trimmed_target = target.removeprefix(_RULE_TARGET_LIST_PREFIX)
                 if trimmed_target in categories:
                     return categories[trimmed_target]
-            if target.replace("_", "").isalnum() and not target.startswith("TL-"):
+            if target.replace("_", "").isalnum() and not target.startswith(
+                _RULE_TARGET_LIST_PREFIX
+            ):
                 return target.replace("_", " ")
-            if "_" in target and not target.startswith("TL-"):
+            if "_" in target and not target.startswith(_RULE_TARGET_LIST_PREFIX):
                 return target.replace("_", " ")
 
         return None
@@ -566,9 +675,9 @@ class FirewallaApiClient:
             return bool(value)
         if isinstance(value, str):
             lowered = value.strip().lower()
-            if lowered in {"1", "true", "yes"}:
+            if lowered in _BOOLISH_TRUE_VALUES:
                 return True
-            if lowered in {"0", "false", "no", ""}:
+            if lowered in _BOOLISH_FALSE_VALUES:
                 return False
         return None
 
@@ -576,15 +685,15 @@ class FirewallaApiClient:
         self, data: dict[str, object]
     ) -> tuple[FirewallaPolicyRule, ...]:
         """Normalize Firewalla policy rules into a stable typed MVP shape."""
-        raw_rules = data.get("policyRules")
+        raw_rules = data.get(_RAW_POLICY_RULES_KEY)
         if not isinstance(raw_rules, list):
             return ()
 
         category_lookup = self._build_category_lookup(data)
         network_lookup = self._build_network_lookup(data)
         tag_lookup = self._build_named_lookup(data, "tags")
-        device_tag_lookup = self._build_named_lookup(data, "deviceTags")
-        user_tag_lookup = self._build_named_lookup(data, "userTags")
+        device_tag_lookup = self._build_named_lookup(data, _RAW_DEVICE_TAGS_KEY)
+        user_tag_lookup = self._build_named_lookup(data, _RAW_USER_TAGS_KEY)
         affiliated_user_lookup = self._build_affiliated_user_lookup(data)
         host_lookup = self._build_host_lookup(data)
 
@@ -593,10 +702,10 @@ class FirewallaApiClient:
             if not isinstance(raw_rule, dict):
                 continue
 
-            raw_rule_id = raw_rule.get("pid")
-            raw_action = raw_rule.get("action")
-            raw_target = raw_rule.get("target")
-            raw_target_type = raw_rule.get("type")
+            raw_rule_id = raw_rule.get(_RAW_RULE_ID_KEY)
+            raw_action = raw_rule.get(_RAW_RULE_ACTION_KEY)
+            raw_target = raw_rule.get(_RAW_RULE_TARGET_KEY)
+            raw_target_type = raw_rule.get(_RAW_RULE_TYPE_KEY)
             if not isinstance(raw_rule_id, str) or not raw_rule_id:
                 continue
             if not isinstance(raw_action, str) or not raw_action:
@@ -606,34 +715,40 @@ class FirewallaApiClient:
             if not isinstance(raw_target_type, str) or not raw_target_type:
                 continue
 
-            direction = raw_rule.get("direction")
-            purpose = raw_rule.get("purpose")
-            scope_value = raw_rule.get("scope")
+            direction = raw_rule.get(_RAW_RULE_DIRECTION_KEY)
+            purpose = raw_rule.get(_RAW_RULE_PURPOSE_KEY)
+            scope_value = raw_rule.get(_RAW_RULE_SCOPE_KEY)
             scope = (
                 tuple(item for item in scope_value if isinstance(item, str) and item)
                 if isinstance(scope_value, list)
                 else ()
             )
-            raw_tag_refs = raw_rule.get("tag")
+            raw_tag_refs = raw_rule.get(_RAW_RULE_TAGS_KEY)
             tag_refs = (
                 tuple(item for item in raw_tag_refs if isinstance(item, str) and item)
                 if isinstance(raw_tag_refs, list)
                 else ()
             )
 
-            disabled = raw_rule.get("disabled")
-            enabled = disabled not in {"1", "true", "True", 1}
+            disabled = raw_rule.get(_RAW_RULE_DISABLED_KEY)
+            enabled = disabled not in _DISABLED_TRUE_VALUES
             if isinstance(disabled, bool):
                 enabled = not disabled
 
-            activated_time = self._coerce_float(raw_rule.get("activatedTime"))
-            updated_time = self._coerce_float(raw_rule.get("updatedTime"))
-            last_activated_time = self._coerce_float(raw_rule.get("lastActivatedTime"))
-            expire_seconds = self._coerce_int(raw_rule.get("expire"))
-            auto_delete_when_expires = self._coerce_boolish(
-                raw_rule.get("autoDeleteWhenExpires")
+            activated_time = self._coerce_float(
+                raw_rule.get(_RAW_RULE_ACTIVATED_TIME_KEY)
             )
-            dnsmasq_only = self._coerce_boolish(raw_rule.get("dnsmasq_only"))
+            updated_time = self._coerce_float(raw_rule.get(_RAW_RULE_UPDATED_TIME_KEY))
+            last_activated_time = self._coerce_float(
+                raw_rule.get(_RAW_RULE_LAST_ACTIVATED_TIME_KEY)
+            )
+            expire_seconds = self._coerce_int(raw_rule.get(_RAW_RULE_EXPIRE_KEY))
+            auto_delete_when_expires = self._coerce_boolish(
+                raw_rule.get(_RAW_RULE_AUTO_DELETE_WHEN_EXPIRES_KEY)
+            )
+            dnsmasq_only = self._coerce_boolish(
+                raw_rule.get(_RAW_RULE_DNSMASQ_ONLY_KEY)
+            )
             expires_at = (
                 activated_time + expire_seconds
                 if activated_time is not None and expire_seconds is not None
@@ -689,7 +804,7 @@ class FirewallaApiClient:
 
     def _count_exception_rules(self, data: dict[str, object]) -> int:
         """Return the number of exception rules exposed by the init payload."""
-        raw_exception_rules = data.get("exceptionRules")
+        raw_exception_rules = data.get(_RAW_EXCEPTION_RULES_KEY)
         if not isinstance(raw_exception_rules, list):
             return 0
         return len(raw_exception_rules)

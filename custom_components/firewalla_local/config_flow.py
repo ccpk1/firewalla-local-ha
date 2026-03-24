@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Self
+from collections.abc import Mapping
+from typing import Final, Self, TypedDict, cast
 
 import voluptuous as vol
 from homeassistant.config_entries import (
@@ -32,16 +33,42 @@ from .const import (
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
+    CONFIG_ERROR_CANNOT_CONNECT,
+    CONFIG_ERROR_INVALID_HOST,
+    CONFIG_ERROR_INVALID_QR,
+    CONFIG_ERROR_WRONG_ACCOUNT,
+    DEFAULT_BOX_NAME,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_PAIRING_DEVICE_NAME,
     DOMAIN,
 )
+from .managers import FirewallaRuleManager
 from .models import (
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     format_policy_rule_label,
     supports_rule_switch,
 )
+
+_STEP_ID_INIT: Final = "init"
+_STEP_ID_REAUTH_CONFIRM: Final = "reauth_confirm"
+_STEP_ID_RECONFIGURE: Final = "reconfigure"
+_STEP_ID_USER: Final = "user"
+_UNAVAILABLE_RULE_LABEL: Final = "Unavailable rule"
+_UNAVAILABLE_RULE_SUFFIX: Final = "(unavailable)"
+
+
+class PairingUserInput(TypedDict):
+    """Validated user input for pairing and reauth flows."""
+
+    host: str
+    qr_json: str
+
+
+class RuleSelectionOptionsInput(TypedDict, total=False):
+    """Validated user input for the options flow."""
+
+    selected_rule_ids: list[str]
 
 
 def _normalize_host(host: str) -> str:
@@ -92,7 +119,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         return vol.Schema(schema)
 
     async def _async_pair_firewalla(
-        self, user_input: dict[str, Any]
+        self, user_input: PairingUserInput
     ) -> tuple[dict[str, str], str] | None:
         """Validate pairing input and return durable credential data plus title."""
         host = _normalize_host(user_input[CONF_HOST])
@@ -119,7 +146,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         await client.async_get_system_info()
 
-        title_name = credentials.box_name or "Firewalla"
+        title_name = credentials.box_name or DEFAULT_BOX_NAME
         return (
             {
                 CONF_LICENSE: credentials.license,
@@ -137,17 +164,23 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         return other_flow.license == self.license
 
     async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
+        self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             try:
-                host = _normalize_host(user_input[CONF_HOST])
-                qr_data = load_qr_json(user_input[CONF_QR_JSON])
-            except ValueError, FirewallaValidationError:
-                errors["base"] = "invalid_qr"
+                typed_user_input = PairingUserInput(
+                    host=cast(str, user_input[CONF_HOST]),
+                    qr_json=cast(str, user_input[CONF_QR_JSON]),
+                )
+                host = _normalize_host(typed_user_input[CONF_HOST])
+                qr_data = load_qr_json(typed_user_input[CONF_QR_JSON])
+            except ValueError:
+                errors["base"] = CONFIG_ERROR_INVALID_HOST
+            except FirewallaValidationError:
+                errors["base"] = CONFIG_ERROR_INVALID_QR
             else:
                 self.license = qr_data.license
                 self.host = host
@@ -155,61 +188,69 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
 
                 try:
-                    pairing_result = await self._async_pair_firewalla(user_input)
+                    pairing_result = await self._async_pair_firewalla(typed_user_input)
                 except FirewallaApiError:
-                    errors["base"] = "cannot_connect"
+                    errors["base"] = CONFIG_ERROR_CANNOT_CONNECT
                 else:
                     assert pairing_result is not None
                     entry_data, title = pairing_result
                     return self.async_create_entry(title=title, data=entry_data)
 
         return self.async_show_form(
-            step_id="user",
+            step_id=_STEP_ID_USER,
             data_schema=self._build_pairing_schema(),
             errors=errors,
         )
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, object]
+    ) -> ConfigFlowResult:
         """Start reauthentication for an existing entry."""
-        self.license = entry_data[CONF_LICENSE]
-        self.host = entry_data[CONF_HOST]
+        self.license = cast(str, entry_data[CONF_LICENSE])
+        self.host = cast(str, entry_data[CONF_HOST])
         await self.async_set_unique_id(self.license)
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
-        self, user_input: dict[str, Any] | None = None
+        self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
         """Refresh credentials for an existing Firewalla entry."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             try:
-                pairing_result = await self._async_pair_firewalla(user_input)
-            except ValueError, FirewallaValidationError:
-                errors["base"] = "invalid_qr"
+                typed_user_input = PairingUserInput(
+                    host=cast(str, user_input[CONF_HOST]),
+                    qr_json=cast(str, user_input[CONF_QR_JSON]),
+                )
+                pairing_result = await self._async_pair_firewalla(typed_user_input)
+            except ValueError:
+                errors["base"] = CONFIG_ERROR_INVALID_HOST
+            except FirewallaValidationError:
+                errors["base"] = CONFIG_ERROR_INVALID_QR
             except FirewallaApiError:
-                errors["base"] = "cannot_connect"
+                errors["base"] = CONFIG_ERROR_CANNOT_CONNECT
             else:
                 assert pairing_result is not None
                 entry_data, _title = pairing_result
-                self._abort_if_unique_id_mismatch(reason="wrong_account")
+                self._abort_if_unique_id_mismatch(reason=CONFIG_ERROR_WRONG_ACCOUNT)
                 return self.async_update_reload_and_abort(
                     self._get_reauth_entry(),
                     data_updates=entry_data,
                 )
 
         return self.async_show_form(
-            step_id="reauth_confirm",
+            step_id=_STEP_ID_REAUTH_CONFIRM,
             data_schema=self._build_pairing_schema(host=self.host),
             errors=errors,
         )
 
     async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
+        self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
         """Handle reconfiguration of an existing entry."""
         if user_input is not None:
-            host = _normalize_host(user_input[CONF_HOST])
+            host = _normalize_host(cast(str, user_input[CONF_HOST]))
             self.host = host
             entry = self._get_reconfigure_entry()
             return self.async_update_reload_and_abort(
@@ -219,7 +260,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         entry = self._get_reconfigure_entry()
         return self.async_show_form(
-            step_id="reconfigure",
+            step_id=_STEP_ID_RECONFIGURE,
             data_schema=vol.Schema(
                 {
                     vol.Required(
@@ -238,8 +279,21 @@ class FirewallaOptionsFlow(OptionsFlow):
         """Initialize the options flow."""
         self._config_entry = config_entry
 
+    def _get_rule_manager(self) -> FirewallaRuleManager | None:
+        """Return the loaded rule manager when runtime data is available."""
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return None
+        rule_manager = getattr(runtime_data, "rule_manager", None)
+        if isinstance(rule_manager, FirewallaRuleManager):
+            return rule_manager
+        return None
+
     def _get_rule_choices(self) -> dict[str, str]:
         """Return selectable rule IDs from the live coordinator snapshot."""
+        if rule_manager := self._get_rule_manager():
+            return rule_manager.get_switch_candidate_choices()
+
         runtime_data = getattr(self._config_entry, "runtime_data", None)
         if runtime_data is None:
             return {}
@@ -256,17 +310,11 @@ class FirewallaOptionsFlow(OptionsFlow):
 
     def _get_stored_rule_templates(self) -> dict[str, FirewallaRuleTemplate]:
         """Return persisted rule templates keyed by source rule ID."""
-        raw_templates = self._config_entry.options.get(CONF_SELECTED_RULE_TEMPLATES, [])
-        if not isinstance(raw_templates, list):
-            return {}
-
-        templates: dict[str, FirewallaRuleTemplate] = {}
-        for raw_template in raw_templates:
-            if not isinstance(raw_template, dict):
-                continue
-            if template := FirewallaRuleTemplate.from_dict(raw_template):
-                templates[template.source_rule_id] = template
-        return templates
+        templates = FirewallaRuleManager.load_selected_templates(
+            self._config_entry.options,
+            None,
+        )
+        return {template.source_rule_id: template for template in templates}
 
     def _get_missing_rule_choices(
         self, live_rule_choices: dict[str, str]
@@ -286,15 +334,18 @@ class FirewallaOptionsFlow(OptionsFlow):
 
             if template := stored_templates.get(rule_id):
                 missing_rule_choices[rule_id] = (
-                    f"[{rule_id}] {template.name} (unavailable)"
+                    f"[{rule_id}] {template.name} {_UNAVAILABLE_RULE_SUFFIX}"
                 )
             else:
-                missing_rule_choices[rule_id] = f"[{rule_id}] Unavailable rule"
+                missing_rule_choices[rule_id] = f"[{rule_id}] {_UNAVAILABLE_RULE_LABEL}"
 
         return missing_rule_choices
 
     def _get_rule_templates(self) -> dict[str, FirewallaRuleTemplate]:
         """Return supported switch templates keyed by the source rule ID."""
+        if rule_manager := self._get_rule_manager():
+            return rule_manager.get_switch_candidate_templates()
+
         runtime_data = getattr(self._config_entry, "runtime_data", None)
         if runtime_data is None:
             return {}
@@ -310,7 +361,7 @@ class FirewallaOptionsFlow(OptionsFlow):
         }
 
     async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
+        self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
         """Manage rule-selection options."""
         live_rule_choices = self._get_rule_choices()
@@ -319,9 +370,14 @@ class FirewallaOptionsFlow(OptionsFlow):
         rule_templates = self._get_rule_templates()
 
         if user_input is not None:
+            typed_user_input = RuleSelectionOptionsInput(
+                selected_rule_ids=cast(
+                    list[str], user_input.get(CONF_SELECTED_RULE_IDS, [])
+                )
+            )
             selected_rule_ids = sorted(
                 rule_id
-                for rule_id in user_input.get(CONF_SELECTED_RULE_IDS, [])
+                for rule_id in typed_user_input.get(CONF_SELECTED_RULE_IDS, [])
                 if rule_id in rule_templates
             )
             return self.async_create_entry(
@@ -344,7 +400,7 @@ class FirewallaOptionsFlow(OptionsFlow):
             if isinstance(rule_id, str) and rule_id in rule_choices
         ]
         return self.async_show_form(
-            step_id="init",
+            step_id=_STEP_ID_INIT,
             data_schema=vol.Schema(
                 {
                     vol.Optional(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Final, cast
 
 from aiohttp import ClientError, ClientSession
 
@@ -29,13 +29,39 @@ from .exceptions import (
     FirewallaValidationError,
 )
 from .models import (
+    CloudGroupRecord,
     ETPIdentity,
     FirewallaProvisionedCredentials,
     GeneratedKeys,
     GroupFetchResult,
+    LoginIdentityPayload,
     PairingCode,
     PairingQrData,
 )
+
+_JSON_HEADER_CONTENT_TYPE: Final = "Content-Type"
+_JSON_MIME_TYPE: Final = "application/json"
+_AUTH_HEADER: Final = "Authorization"
+_AUTH_BEARER_PREFIX: Final = "Bearer "
+
+_PAIRING_FIELD_LICENSE: Final = "license"
+_PAIRING_FIELD_EVALUE: Final = "evalue"
+_PAIRING_FIELD_RENDEZVOUS_ID: Final = "r"
+_PAIRING_FIELD_RENDEZVOUS_ID_ALT: Final = "rid"
+
+_LOGIN_FIELD_ACCESS_TOKEN: Final = "access_token"
+_LOGIN_FIELD_AID: Final = "aid"
+_LOGIN_FIELD_EID: Final = "eid"
+_LOGIN_FIELD_GROUPS: Final = "groups"
+
+_GROUP_FIELD_ID: Final = "_id"
+_GROUP_FIELD_AID: Final = "aid"
+_GROUP_FIELD_EID: Final = "eid"
+_GROUP_FIELD_SYMMETRIC_KEYS: Final = "symmetricKeys"
+_SYMMETRIC_KEY_FIELD_KEY: Final = "key"
+
+_ENDPOINT_LOGIN_EPTOKEN: Final = "/login/eptoken"
+_ENDPOINT_CLOUD_RENDEZVOUS: Final = "/ept/rendezvous/me"
 
 
 def load_qr_json(raw_json: str) -> PairingQrData:
@@ -51,7 +77,7 @@ def load_qr_json(raw_json: str) -> PairingQrData:
     return PairingQrData.from_mapping(payload)
 
 
-def _json_dumps_compact(value: Any) -> str:
+def _json_dumps_compact(value: object) -> str:
     """Serialize JSON using the compact separators seen in upstream tooling."""
     return json.dumps(value, separators=(",", ":"))
 
@@ -68,21 +94,23 @@ def decrypt_pairing_code(qr_data: PairingQrData) -> PairingCode:
     except json.JSONDecodeError:
         return PairingCode(
             rendezvous_id=plaintext,
-            evalue={"license": qr_data.license},
+            evalue={_PAIRING_FIELD_LICENSE: qr_data.license},
         )
 
     if not isinstance(parsed, dict):
         raise FirewallaProtocolError("QR pairing payload did not decode to an object")
 
-    rendezvous_id = parsed.get("r") or parsed.get("rid")
-    evalue = parsed.get("evalue")
+    rendezvous_id = parsed.get(_PAIRING_FIELD_RENDEZVOUS_ID) or parsed.get(
+        _PAIRING_FIELD_RENDEZVOUS_ID_ALT
+    )
+    evalue = parsed.get(_PAIRING_FIELD_EVALUE)
     if isinstance(rendezvous_id, str) and isinstance(evalue, dict):
         return PairingCode(rendezvous_id=rendezvous_id, evalue=evalue)
 
     raise FirewallaProtocolError("QR pairing payload did not include rendezvous data")
 
 
-def build_login_payload(assertion_name: str, public_pem: str) -> dict[str, Any]:
+def build_login_payload(assertion_name: str, public_pem: str) -> dict[str, object]:
     """Build the `login/eptoken` request payload."""
     return {
         "assertion": {
@@ -96,7 +124,7 @@ def build_login_payload(assertion_name: str, public_pem: str) -> dict[str, Any]:
     }
 
 
-def build_cloud_link_payload(pairing_code: PairingCode) -> dict[str, Any]:
+def build_cloud_link_payload(pairing_code: PairingCode) -> dict[str, object]:
     """Build the authenticated rendezvous payload for the cloud link step."""
     return {
         "rid": pairing_code.rendezvous_id,
@@ -107,14 +135,14 @@ def build_cloud_link_payload(pairing_code: PairingCode) -> dict[str, Any]:
 async def post_json(
     session: ClientSession,
     url: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     access_token: str | None = None,
 ) -> tuple[int, str]:
     """Post JSON and return the raw HTTP status and text body."""
-    headers = {"Content-Type": "application/json"}
+    headers = {_JSON_HEADER_CONTENT_TYPE: _JSON_MIME_TYPE}
     if access_token:
-        headers["Authorization"] = f"Bearer {access_token}"
+        headers[_AUTH_HEADER] = f"{_AUTH_BEARER_PREFIX}{access_token}"
 
     try:
         async with session.post(url, json=payload, headers=headers) as response:
@@ -132,7 +160,7 @@ async def get_json(
     access_token: str,
 ) -> tuple[int, str]:
     """Issue an authenticated GET and return the raw HTTP status and text body."""
-    headers = {"Authorization": f"Bearer {access_token}"}
+    headers = {_AUTH_HEADER: f"{_AUTH_BEARER_PREFIX}{access_token}"}
     try:
         async with session.get(url, headers=headers) as response:
             return response.status, await response.text()
@@ -144,14 +172,21 @@ async def get_json(
 
 def parse_login_identity(response_text: str) -> ETPIdentity:
     """Parse the cloud login response into a strongly typed identity."""
-    payload = json.loads(response_text)
+    try:
+        payload = json.loads(response_text)
+    except json.JSONDecodeError as err:
+        raise FirewallaProtocolError(
+            "login/eptoken response was not valid JSON"
+        ) from err
+
     if not isinstance(payload, dict):
         raise FirewallaProtocolError("login/eptoken response was not a JSON object")
 
-    access_token = payload.get("access_token")
-    eid = payload.get("eid")
-    aid = payload.get("aid")
-    groups = payload.get("groups", [])
+    typed_payload = cast(LoginIdentityPayload, payload)
+    access_token = typed_payload.get(_LOGIN_FIELD_ACCESS_TOKEN)
+    eid = typed_payload.get(_LOGIN_FIELD_EID)
+    aid = typed_payload.get(_LOGIN_FIELD_AID)
+    groups = typed_payload.get(_LOGIN_FIELD_GROUPS, [])
 
     if not isinstance(access_token, str) or not access_token:
         raise FirewallaProtocolError(
@@ -178,7 +213,7 @@ async def login_eptoken(
     """Create or refresh the ETP identity used for the cloud link step."""
     status, response_text = await post_json(
         session,
-        f"{APP_API_BASE}/login/eptoken",
+        f"{APP_API_BASE}{_ENDPOINT_LOGIN_EPTOKEN}",
         build_login_payload(assertion_name, public_pem),
     )
     if status == 401:
@@ -199,7 +234,7 @@ async def link_group_cloud(
     """Execute the authenticated cloud rendezvous step for additional pairing."""
     status, response_text = await post_json(
         session,
-        f"{APP_API_BASE}/ept/rendezvous/me",
+        f"{APP_API_BASE}{_ENDPOINT_CLOUD_RENDEZVOUS}",
         build_cloud_link_payload(pairing_code),
         access_token=access_token,
     )
@@ -211,14 +246,20 @@ async def link_group_cloud(
         )
 
 
-def extract_groups(payload: Any) -> list[dict[str, Any]] | None:
+def extract_groups(payload: object) -> list[CloudGroupRecord] | None:
     """Normalize cloud group-list responses that may wrap the groups array."""
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        return [
+            cast(CloudGroupRecord, item) for item in payload if isinstance(item, dict)
+        ]
     if isinstance(payload, dict):
-        groups = payload.get("groups")
+        groups = payload.get(_LOGIN_FIELD_GROUPS)
         if isinstance(groups, list):
-            return [item for item in groups if isinstance(item, dict)]
+            return [
+                cast(CloudGroupRecord, item)
+                for item in groups
+                if isinstance(item, dict)
+            ]
     return None
 
 
@@ -255,7 +296,7 @@ async def fetch_groups(
     )
     return (
         GroupFetchResult(
-            source="/login/eptoken",
+            source=_ENDPOINT_LOGIN_EPTOKEN,
             status=200,
             groups=refreshed_identity.groups,
         ),
@@ -265,22 +306,22 @@ async def fetch_groups(
 
 def extract_group_credentials(
     *,
-    groups: list[dict[str, Any]],
+    groups: list[CloudGroupRecord],
     qr_data: PairingQrData,
     host: str,
     private_pem: str,
 ) -> FirewallaProvisionedCredentials | None:
     """Extract the durable local runtime credentials from a linked group list."""
     matching_group = next(
-        (group for group in groups if group.get("_id") == qr_data.gid),
+        (group for group in groups if group.get(_GROUP_FIELD_ID) == qr_data.gid),
         None,
     )
     if matching_group is None:
         return None
 
-    eid = matching_group.get("eid")
-    aid = matching_group.get("aid")
-    symmetric_keys = matching_group.get("symmetricKeys")
+    eid = matching_group.get(_GROUP_FIELD_EID)
+    aid = matching_group.get(_GROUP_FIELD_AID)
+    symmetric_keys = matching_group.get(_GROUP_FIELD_SYMMETRIC_KEYS)
     if not isinstance(eid, str) or not eid:
         return None
     if not isinstance(aid, str) or not aid:
@@ -292,7 +333,7 @@ def extract_group_credentials(
     if not isinstance(first_symmetric_key, dict):
         return None
 
-    symmetric_key_cipher = first_symmetric_key.get("key")
+    symmetric_key_cipher = first_symmetric_key.get(_SYMMETRIC_KEY_FIELD_KEY)
     if not isinstance(symmetric_key_cipher, str) or not symmetric_key_cipher:
         return None
 

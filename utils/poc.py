@@ -1037,7 +1037,9 @@ async def async_main() -> int:
                 public_pem=keys.public_pem,
             )
 
-        print("Cloud auth request: POST https://firewalla.encipher.io/app/api/v2/login/eptoken")
+        print(
+            "Cloud auth request: POST https://firewalla.encipher.io/app/api/v2/login/eptoken"
+        )
         print("Cloud auth HTTP 200")
         print(
             json.dumps(

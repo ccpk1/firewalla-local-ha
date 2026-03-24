@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from custom_components.firewalla_local.models import FirewallaPolicyRule
-from custom_components.firewalla_local.runtime_inventory import (
+from custom_components.firewalla_local.helpers.runtime_inventory import (
     build_runtime_inventory_report,
 )
+from custom_components.firewalla_local.models import FirewallaPolicyRule
 
 
 def test_build_runtime_inventory_report() -> None:

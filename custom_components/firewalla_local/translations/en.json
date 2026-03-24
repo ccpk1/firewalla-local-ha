@@ -5,6 +5,7 @@
     },
     "error": {
       "cannot_connect": "The Firewalla pairing or local connection test failed.",
+      "invalid_host": "The Firewalla local hostname or IP address is invalid.",
       "invalid_qr": "The Firewalla QR JSON or local IP address is invalid.",
       "wrong_account": "The new QR code belongs to a different Firewalla box."
     },
@@ -42,6 +43,166 @@
         },
         "description": "Select which discovered Firewalla category rules should be exposed as rule-backed switches.",
         "title": "Rule selection"
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "allow_rule": {
+        "name": "{rule_name}",
+        "state_attributes": {
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_rule_control": "Pauses or resumes the firewall rule"
+            }
+          },
+          "rule_id": {
+            "name": "Rule ID"
+          },
+          "target": {
+            "name": "Target"
+          },
+          "target_type": {
+            "name": "Target type"
+          },
+          "tag_refs": {
+            "name": "Tag refs"
+          },
+          "notes": {
+            "name": "Notes"
+          },
+          "is_paused": {
+            "name": "Is paused"
+          },
+          "pause_until": {
+            "name": "Pause until"
+          }
+        }
+      },
+      "block_rule": {
+        "name": "{rule_name}",
+        "state_attributes": {
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_rule_control": "Pauses or resumes the firewall rule"
+            }
+          },
+          "rule_id": {
+            "name": "Rule ID"
+          },
+          "target": {
+            "name": "Target"
+          },
+          "target_type": {
+            "name": "Target type"
+          },
+          "tag_refs": {
+            "name": "Tag refs"
+          },
+          "notes": {
+            "name": "Notes"
+          },
+          "is_paused": {
+            "name": "Is paused"
+          },
+          "pause_until": {
+            "name": "Pause until"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "config_entry_name_ambiguous": {
+      "message": "More than one loaded Firewalla entry uses that name. Use the config entry ID instead."
+    },
+    "config_entry_name_not_found": {
+      "message": "No loaded Firewalla entry matches that name."
+    },
+    "config_entry_not_found": {
+      "message": "The requested Firewalla config entry was not found."
+    },
+    "config_entry_not_loaded": {
+      "message": "The requested Firewalla config entry is not loaded."
+    },
+    "invalid_duration": {
+      "message": "The duration \"{duration}\" is invalid. Use values such as 30m, 4h, or 2d 4h 30m."
+    },
+    "multiple_entries_loaded": {
+      "message": "Multiple Firewalla entries are loaded. Use config_entry_id or config_entry_name."
+    },
+    "pause_rule_timing_conflict": {
+      "message": "Provide either a duration or a resume time, not both."
+    },
+    "resume_at_in_past": {
+      "message": "The resume time must be in the future."
+    },
+    "rule_target_not_found": {
+      "message": "The rule target \"{rule_target}\" does not match a managed live rule."
+    },
+    "wrong_integration_entry": {
+      "message": "The requested config entry does not belong to Firewalla Local."
+    }
+  },
+  "services": {
+    "get_runtime_inventory": {
+      "name": "Get runtime inventory",
+      "description": "Return the current Firewalla runtime objects as markdown and structured data.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "pause_rule": {
+      "name": "Pause rule",
+      "description": "Pause one managed Firewalla rule. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.",
+      "fields": {
+        "rule_target": {
+          "name": "Rule target",
+          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Optional. How long to pause the rule, for example 30m, 4h, or 2d 4h 30m."
+        },
+        "resume_at": {
+          "name": "Resume at",
+          "description": "Optional. A local date and time when the rule should resume."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "resume_rule": {
+      "name": "Resume rule",
+      "description": "Resume one managed Firewalla rule immediately.",
+      "fields": {
+        "rule_target": {
+          "name": "Rule target",
+          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
       }
     }
   }
