@@ -38,7 +38,7 @@ from .runtime_inventory import (
     render_runtime_inventory_markdown,
 )
 
-PLATFORMS: list[Platform] = []
+PLATFORMS: list[Platform] = [Platform.SWITCH]
 GET_RUNTIME_INVENTORY_SCHEMA = vol.Schema(
     {
         vol.Optional(CONF_CONFIG_ENTRY_ID): cv.string,
@@ -115,6 +115,7 @@ async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectTy
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up Firewalla Local services."""
+    del config
     if not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_INVENTORY):
         hass.services.async_register(
             DOMAIN,
@@ -125,6 +126,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         )
 
     return True
+
+
+async def _async_reload_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) -> None:
+    """Reload a config entry after mutable updates such as options changes."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def _async_migrate_entry_host(
@@ -157,6 +163,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = FirewallaRuntimeData(client=client, coordinator=coordinator)
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 
     if PLATFORMS:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

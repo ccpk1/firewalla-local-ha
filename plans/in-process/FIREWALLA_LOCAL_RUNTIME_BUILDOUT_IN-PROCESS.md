@@ -22,15 +22,21 @@ Implemented and verified in the repository:
 - log-once unavailability and recovery behavior in the coordinator
 - runtime inventory reporting and a response-returning Home Assistant service for live inspection
 - typed timing fields on normalized policy rules, including temporary-rule derivation based on current evidence
+- first rule-backed switch platform wired into config entry setup
+- persisted rule-template matching so selected switches survive live rule-ID churn and missing-rule cleanup
+- update-in-place rule toggling for the first supported switchable rule families
+- switch attributes for rule ID, match count, pause state, pause duration, and notes
+- license-anchored switch and device identity with UID-based default naming rather than generated entity names
 - focused tests covering client normalization, config flow behavior, runtime service behavior, and inventory reporting
+- focused tests covering switch setup, availability, toggle behavior, and pause metadata
 
 Still open and driving the next implementation slice:
 
-- write-path confirmation for the local v1 mutation contract
+- complete write-path confirmation for the remaining local v1 mutation families
 - duration parsing and `resumeTs` payload generation for time-bounded actions
-- first rule-backed switch entities
 - real mutation services, including `pause_rule`
-- final test-matrix expansion around mutation behavior and entity registry stability
+- platinum-alignment cleanup for translation posture, exception translations, and quality-scale truthfulness
+- final test-matrix expansion around mutation behavior, entity registry stability, and service surfaces
 
 ## Critical execution note
 
@@ -138,16 +144,24 @@ Gate note: Phase 3 must preserve the accepted Home Assistant contracts for devic
 - [x] Define the `runtime_data` shape created during `async_setup_entry`, including the API client and coordinator objects.
 - [x] Define the coordinator data contract for normalized rule data, polling cadence, availability transitions, log-once unavailable behavior, recovery behavior, and no-cache restart behavior.
 - [ ] Define the entity and service contract for rule control:
+ - [x] Define the entity and service contract for the first rule-backed switch slice:
   - entities are strictly binary switch entities for on or off behavior
-  - switch entities are rule-backed, not group-backed; the entity identity is the concrete rule effect plus scope, for example `block internet for KADEN`
+  - the first implemented switches toggle existing live rules in place rather than recreating them
+  - switch identity is anchored to the license-backed config entry plus immutable source rule ID
+  - Home Assistant owns the final entity ID; the integration supplies UID-based default naming rather than generated human names
+  - switch attributes expose the primary backing `rule_id` and matching-rule metadata for future service targeting
+- [ ] Define the remaining service contract for rule control:
+  - entities are strictly binary switch entities for on or off behavior
+  - switch entities are rule-backed, not group-backed
   - groups, users, and networks act as rule scope or applicability metadata, not as switch entities on their own
   - time-bounded pause actions are not native entity controls
   - time-bounded pause actions are exposed exclusively through a custom Home Assistant service such as `firewalla_local.pause_rule`
   - the custom service accepts the rule target and a duration string, then resolves that duration into the `resumeTs` payload field
-- [ ] Define the first entity plan, including which rule-backed switch entities are created, how unique IDs are derived, how all entities attach to the license-anchored device entry, and how the switch surface coordinates with the time-bounded pause service.
+- [x] Define and implement the first entity plan, including which rule-backed switch entities are created, how unique IDs are derived, and how all entities attach to the license-anchored device entry.
+- [ ] Define the follow-on entity plan for broader rule-family coverage and how the switch surface coordinates with the time-bounded pause service.
 - [x] Define the diagnostics plan, including which config entry fields and runtime payloads are exposed and how Home Assistant redaction helpers are applied.
 
-Phase 3 execution note: The current implementation now provisions real local credentials during config flow, validates the local runtime before creating the entry, supports reauth with a fresh QR payload, supports host reconfigure, and ships an options flow that persists selected rule IDs from the live coordinator snapshot. The coordinator populates typed `FirewallaRuntimeSnapshot` data containing normalized `system_info`, `policy_rules`, and `exception_rule_count`, and it now logs local-runtime outages once and recovery once when polling succeeds again. Runtime inventory reporting is available both as structured data and markdown through the `get_runtime_inventory` response service. Rule entities and service-layer mutation remain to be defined and implemented.
+Phase 3 execution note: The current implementation now provisions real local credentials during config flow, validates the local runtime before creating the entry, supports reauth with a fresh QR payload, supports host reconfigure, and ships an options flow that persists selected rule IDs and rule templates from the live coordinator snapshot. The coordinator populates typed `FirewallaRuntimeSnapshot` data containing normalized `system_info`, `policy_rules`, and `exception_rule_count`, and it now logs local-runtime outages once and recovery once when polling succeeds again. Runtime inventory reporting is available both as structured data and markdown through the `get_runtime_inventory` response service. The first rule-backed switch platform is implemented and validated, including license-anchored identity, UID-based default naming, availability handling when backing rules disappear, update-in-place toggles, and pause or notes metadata. The remaining Phase 3 work is service-layer mutation beyond plain enable or disable, broader rule-family coverage, and translation or quality-scale alignment for the implemented entity model.
 
 ### Phase 4: Validation and implementation handoff
 
@@ -175,6 +189,7 @@ Gate note: Phase 4 must optimize for fast iteration. Pure `api/` unit tests shou
 - [ ] Split the validation plan into a fast lane for pure `api/` unit tests and a slower lane for Home Assistant integration tests.
 
 Phase 4 execution note: Focused validation is now in place for the implemented runtime slices. Recent work has passed Ruff, MyPy, and targeted pytest coverage for client normalization, config flow, setup and service behavior, and runtime inventory reporting. The remaining handoff work is centered on the first write-path slice: mutation payload confirmation, duration parsing, service schema finalization, and entity platform scope.
+Phase 4 execution note: Focused validation is now in place for the implemented runtime slices. Recent work has passed Ruff, MyPy, and targeted pytest coverage for client normalization, config flow, setup and service behavior, runtime inventory reporting, and the first switch platform. The remaining handoff work is centered on the next write-path slice: mutation payload confirmation for additional rule families, duration parsing, service schema finalization, broader entity coverage, and reconciling the quality-scale file with the repo's actual platinum target and current implementation state.
 
 ## Validation strategy
 

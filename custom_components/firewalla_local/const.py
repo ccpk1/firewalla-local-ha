@@ -16,6 +16,7 @@ CONF_HOST = "host"
 CONF_LICENSE = "license"
 CONF_QR_JSON = "qr_json"
 CONF_SELECTED_RULE_IDS = "selected_rule_ids"
+CONF_SELECTED_RULE_TEMPLATES = "selected_rule_templates"
 CONF_SYMMETRIC_KEY = "symmetric_key"
 LEGACY_CONF_LOCAL_IP = "local_ip"
 

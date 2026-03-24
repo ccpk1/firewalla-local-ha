@@ -9,6 +9,34 @@
   ],
   "settings": {
     "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
+    "python.analysis.exclude": [
+      "**/node_modules",
+      "**/__pycache__",
+      "**/.*",
+      "**/.mypy_cache/**",
+      "**/.pytest_cache/**",
+      "**/.ruff_cache/**",
+      "**/.tmp/**",
+      "**/site-packages/**",
+    ],
+    "search.exclude": {
+      "**/.mypy_cache": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true,
+      "**/.tmp": true,
+    },
+    "files.exclude": {
+      "**/.mypy_cache": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true,
+    },
+    "pylint.ignorePatterns": [
+      "**/.tmp/**/*.py",
+      "**/site-packages/**/*.py",
+      "/workspaces/core/**/*.py",
+      "/workspaces/firewalla-local-ha/poc.py",
+      "/workspaces/firewalla-local-ha/utils/poc.py",
+    ],
   },
   "tasks": {
     "version": "2.0.0",

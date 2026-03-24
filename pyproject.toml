@@ -24,6 +24,9 @@ addopts = "-ra"
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:Setting custom ClientSession.close attribute is discouraged:DeprecationWarning:homeassistant.helpers.aiohttp_client",
+]
 
 [tool.ruff]
 line-length = 88
@@ -38,3 +41,17 @@ strict = true
 warn_unused_ignores = true
 show_error_codes = true
 files = ["custom_components/firewalla_local"]
+
+[tool.pylint.main]
+ignore-paths = [
+    "^\\.mypy_cache/.*$",
+    "^\\.pytest_cache/.*$",
+    "^\\.ruff_cache/.*$",
+    "^\\.tmp/.*$",
+    "^poc\\.py$",
+]
+
+[tool.pylint."messages control"]
+disable = [
+    "line-too-long",
+]

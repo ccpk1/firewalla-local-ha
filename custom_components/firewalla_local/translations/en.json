@@ -38,9 +38,9 @@
     "step": {
       "init": {
         "data": {
-          "selected_rule_ids": "Rules to expose"
+          "selected_rule_ids": "Rules to expose as switches"
         },
-        "description": "Select which discovered Firewalla rules should be exposed for future entity surfaces.",
+        "description": "Select which discovered Firewalla category rules should be exposed as rule-backed switches.",
         "title": "Rule selection"
       }
     }

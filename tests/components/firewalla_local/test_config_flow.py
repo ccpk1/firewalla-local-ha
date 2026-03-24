@@ -22,6 +22,7 @@ from custom_components.firewalla_local.const import (
     CONF_LICENSE,
     CONF_QR_JSON,
     CONF_SELECTED_RULE_IDS,
+    CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DEFAULT_FIREWALLA_HOST,
     DOMAIN,
@@ -216,7 +217,7 @@ async def test_reauth_updates_existing_entry(hass) -> None:
 
 
 async def test_options_flow_updates_selected_rule_ids(hass) -> None:
-    """Test the options flow stores selected rule IDs only."""
+    """Test the options flow stores supported switch rule templates."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -229,7 +230,7 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
             CONF_AID: "aid-123",
             CONF_SYMMETRIC_KEY: "symmetric-key",
         },
-        options={CONF_SELECTED_RULE_IDS: ["738"]},
+        options={CONF_SELECTED_RULE_IDS: []},
     )
     entry.runtime_data = SimpleNamespace(
         coordinator=SimpleNamespace(
@@ -251,7 +252,36 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
                         enabled=True,
                         purpose=None,
                         scope=(),
+                        tag_refs=("tag:10",),
                         target_name="KADEN's Devices (KADEN)",
+                    ),
+                    FirewallaPolicyRule(
+                        rule_id="735",
+                        action="block",
+                        target="games",
+                        target_type="category",
+                        direction="bidirection",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=("tag:10",),
+                        target_name="games",
+                        applies_to=("KADEN's Devices (KADEN)",),
+                        dnsmasq_only=True,
+                    ),
+                    FirewallaPolicyRule(
+                        rule_id="734",
+                        action="block",
+                        target="doh",
+                        target_type="category",
+                        direction="bidirection",
+                        enabled=True,
+                        purpose="family",
+                        scope=(),
+                        tag_refs=("tag:10",),
+                        target_name="doh",
+                        applies_to=("KADEN's Devices (KADEN)",),
+                        dnsmasq_only=True,
                     ),
                     FirewallaPolicyRule(
                         rule_id="739",
@@ -262,6 +292,7 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
                         enabled=False,
                         purpose="dap",
                         scope=(),
+                        tag_refs=(),
                         target_name="Living room speaker",
                     ),
                     FirewallaPolicyRule(
@@ -273,6 +304,7 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
                         enabled=True,
                         purpose="dap",
                         scope=("00:08:9B:FB:01:D9",),
+                        tag_refs=(),
                         target_name="Kitchen speaker",
                     ),
                     FirewallaPolicyRule(
@@ -284,6 +316,62 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
                         enabled=True,
                         purpose=None,
                         scope=(),
+                        tag_refs=("tag:10",),
+                        target_name=None,
+                        applies_to=("KADEN's Devices (KADEN)",),
+                    ),
+                    FirewallaPolicyRule(
+                        rule_id="741",
+                        action="block",
+                        target="social",
+                        target_type="category",
+                        direction="bidirection",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=("tag:10",),
+                        target_name="social",
+                        applies_to=("KADEN's Devices (KADEN)",),
+                        dnsmasq_only=True,
+                        auto_delete_when_expires=True,
+                    ),
+                    FirewallaPolicyRule(
+                        rule_id="740",
+                        action="block",
+                        target="social",
+                        target_type="category",
+                        direction="bidirection",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=("tag:10",),
+                        target_name="social",
+                        applies_to=("KADEN's Devices (KADEN)",),
+                        dnsmasq_only=True,
+                    ),
+                    FirewallaPolicyRule(
+                        rule_id="743",
+                        action="block",
+                        target="5799d896-5e0f-40a5-a776-38a5d7746204",
+                        target_type="network",
+                        direction="bidirection",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=("tag:10",),
+                        target_name="VLAN10 CORE",
+                        applies_to=("KADEN's Devices (KADEN)",),
+                    ),
+                    FirewallaPolicyRule(
+                        rule_id="742",
+                        action="allow",
+                        target="TL-56d856bb-efdc-4894-8e5f-c483555e09f6",
+                        target_type="category",
+                        direction="outbound",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=("tag:10",),
                         target_name=None,
                         applies_to=("KADEN's Devices (KADEN)",),
                     ),
@@ -294,21 +382,146 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
     )
     entry.add_to_hass(hass)
 
+    options_flow = FirewallaOptionsFlow(entry)
+    preview_result = await options_flow.async_step_init()
+    field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
+    assert field.options == {
+        "735": "[735] block category games for KADEN's Devices (KADEN) (enabled)",
+        "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)",
+        "737": "[737] allow dns spotify.com for KADEN's Devices (KADEN) (enabled)",
+        "740": "[740] block category social for KADEN's Devices (KADEN) (enabled)",
+        "743": "[743] block network VLAN10 CORE for KADEN's Devices (KADEN) (enabled)",
+    }
+
     result = await hass.config_entries.options.async_init(entry.entry_id)
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
-    assert FirewallaOptionsFlow(entry)._get_rule_choices() == {
-        "736": "block internet for KADEN's Devices (KADEN) (enabled)",
-        "737": "allow dns spotify.com for KADEN's Devices (KADEN) (enabled)",
-        "738": "allow category Kitchen speaker [dap_00089bfb01d9] (enabled)",
-        "739": "block mac Living room speaker [00:08:9B:FB:01:D9] (disabled)",
-    }
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={CONF_SELECTED_RULE_IDS: ["739"]},
+        user_input={CONF_SELECTED_RULE_IDS: ["736"]},
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_SELECTED_RULE_IDS: ["739"]}
+    assert result["data"] == {
+        CONF_SELECTED_RULE_IDS: ["736"],
+        CONF_SELECTED_RULE_TEMPLATES: [
+            {
+                "source_rule_id": "736",
+                "name": "block internet for KADEN's Devices (KADEN)",
+                "action": "block",
+                "target": "TAG",
+                "target_type": "mac",
+                "scope": [],
+                "tag_refs": ["tag:10"],
+                "dnsmasq_only": None,
+                "use_bf": True,
+            }
+        ],
+    }
+
+
+async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
+    """Test the options flow can remove a stored rule after it disappears."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["999", "736"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "999",
+                    "name": "allow dns old.example for KADEN's Devices (KADEN)",
+                    "action": "allow",
+                    "target": "old.example",
+                    "target_type": "dns",
+                    "scope": [],
+                    "tag_refs": ["tag:10"],
+                    "dnsmasq_only": False,
+                    "use_bf": True,
+                },
+                {
+                    "source_rule_id": "736",
+                    "name": "block internet for KADEN's Devices (KADEN)",
+                    "action": "block",
+                    "target": "TAG",
+                    "target_type": "mac",
+                    "scope": [],
+                    "tag_refs": ["tag:10"],
+                    "dnsmasq_only": None,
+                    "use_bf": True,
+                },
+            ],
+        },
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            data=FirewallaRuntimeSnapshot(
+                system_info=FirewallaSystemInfo(
+                    host="fire.walla",
+                    name="Firewalla",
+                    model="gold",
+                    serial_number="serial-123",
+                    software_version="1.0.0",
+                ),
+                policy_rules=(
+                    FirewallaPolicyRule(
+                        rule_id="736",
+                        action="block",
+                        target="TAG",
+                        target_type="mac",
+                        direction="bidirection",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=("tag:10",),
+                        target_name="KADEN's Devices (KADEN)",
+                    ),
+                ),
+                exception_rule_count=0,
+            )
+        )
+    )
+    entry.add_to_hass(hass)
+
+    options_flow = FirewallaOptionsFlow(entry)
+    preview_result = await options_flow.async_step_init()
+    field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
+    assert field.options == {
+        "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)",
+        "999": "[999] allow dns old.example for KADEN's Devices (KADEN) (unavailable)",
+    }
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_SELECTED_RULE_IDS: ["736"]},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        CONF_SELECTED_RULE_IDS: ["736"],
+        CONF_SELECTED_RULE_TEMPLATES: [
+            {
+                "source_rule_id": "736",
+                "name": "block internet for KADEN's Devices (KADEN)",
+                "action": "block",
+                "target": "TAG",
+                "target_type": "mac",
+                "scope": [],
+                "tag_refs": ["tag:10"],
+                "dnsmasq_only": None,
+                "use_bf": True,
+            }
+        ],
+    }

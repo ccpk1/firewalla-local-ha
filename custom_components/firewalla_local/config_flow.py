@@ -30,12 +30,18 @@ from .const import (
     CONF_LICENSE,
     CONF_QR_JSON,
     CONF_SELECTED_RULE_IDS,
+    CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_PAIRING_DEVICE_NAME,
     DOMAIN,
 )
-from .models import FirewallaPolicyRule, format_policy_rule_label
+from .models import (
+    FirewallaPolicyRule,
+    FirewallaRuleTemplate,
+    format_policy_rule_label,
+    supports_rule_switch,
+)
 
 
 def _normalize_host(host: str) -> str:
@@ -48,7 +54,7 @@ def _normalize_host(host: str) -> str:
 
 def _format_rule_option(rule: FirewallaPolicyRule) -> str:
     """Build a compact label for one selectable Firewalla rule."""
-    return format_policy_rule_label(rule)
+    return f"[{rule.rule_id}] {format_policy_rule_label(rule)}"
 
 
 class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -140,7 +146,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 host = _normalize_host(user_input[CONF_HOST])
                 qr_data = load_qr_json(user_input[CONF_QR_JSON])
-            except (ValueError, FirewallaValidationError):
+            except ValueError, FirewallaValidationError:
                 errors["base"] = "invalid_qr"
             else:
                 self.license = qr_data.license
@@ -179,7 +185,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 pairing_result = await self._async_pair_firewalla(user_input)
-            except (ValueError, FirewallaValidationError):
+            except ValueError, FirewallaValidationError:
                 errors["base"] = "invalid_qr"
             except FirewallaApiError:
                 errors["base"] = "cannot_connect"
@@ -245,24 +251,98 @@ class FirewallaOptionsFlow(OptionsFlow):
         return {
             rule.rule_id: _format_rule_option(rule)
             for rule in sorted(snapshot.policy_rules, key=lambda rule: rule.rule_id)
+            if supports_rule_switch(rule)
+        }
+
+    def _get_stored_rule_templates(self) -> dict[str, FirewallaRuleTemplate]:
+        """Return persisted rule templates keyed by source rule ID."""
+        raw_templates = self._config_entry.options.get(CONF_SELECTED_RULE_TEMPLATES, [])
+        if not isinstance(raw_templates, list):
+            return {}
+
+        templates: dict[str, FirewallaRuleTemplate] = {}
+        for raw_template in raw_templates:
+            if not isinstance(raw_template, dict):
+                continue
+            if template := FirewallaRuleTemplate.from_dict(raw_template):
+                templates[template.source_rule_id] = template
+        return templates
+
+    def _get_missing_rule_choices(
+        self, live_rule_choices: dict[str, str]
+    ) -> dict[str, str]:
+        """Return persisted selections whose backing live rules are missing."""
+        stored_selected_rule_ids = self._config_entry.options.get(
+            CONF_SELECTED_RULE_IDS, []
+        )
+        if not isinstance(stored_selected_rule_ids, list):
+            return {}
+
+        stored_templates = self._get_stored_rule_templates()
+        missing_rule_choices: dict[str, str] = {}
+        for rule_id in stored_selected_rule_ids:
+            if not isinstance(rule_id, str) or rule_id in live_rule_choices:
+                continue
+
+            if template := stored_templates.get(rule_id):
+                missing_rule_choices[rule_id] = (
+                    f"[{rule_id}] {template.name} (unavailable)"
+                )
+            else:
+                missing_rule_choices[rule_id] = f"[{rule_id}] Unavailable rule"
+
+        return missing_rule_choices
+
+    def _get_rule_templates(self) -> dict[str, FirewallaRuleTemplate]:
+        """Return supported switch templates keyed by the source rule ID."""
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return {}
+
+        snapshot = runtime_data.coordinator.data
+        if snapshot is None:
+            return {}
+
+        return {
+            rule.rule_id: FirewallaRuleTemplate.from_rule(rule)
+            for rule in snapshot.policy_rules
+            if supports_rule_switch(rule)
         }
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage rule-selection options."""
-        rule_choices = self._get_rule_choices()
+        live_rule_choices = self._get_rule_choices()
+        missing_rule_choices = self._get_missing_rule_choices(live_rule_choices)
+        rule_choices = {**live_rule_choices, **missing_rule_choices}
+        rule_templates = self._get_rule_templates()
 
         if user_input is not None:
-            selected_rule_ids = sorted(user_input.get(CONF_SELECTED_RULE_IDS, []))
+            selected_rule_ids = sorted(
+                rule_id
+                for rule_id in user_input.get(CONF_SELECTED_RULE_IDS, [])
+                if rule_id in rule_templates
+            )
             return self.async_create_entry(
                 title="",
-                data={CONF_SELECTED_RULE_IDS: selected_rule_ids},
+                data={
+                    CONF_SELECTED_RULE_IDS: selected_rule_ids,
+                    CONF_SELECTED_RULE_TEMPLATES: [
+                        rule_templates[rule_id].to_dict()
+                        for rule_id in selected_rule_ids
+                    ],
+                },
             )
 
-        selected_rule_ids = list(
-            self._config_entry.options.get(CONF_SELECTED_RULE_IDS, [])
+        stored_selected_rule_ids = self._config_entry.options.get(
+            CONF_SELECTED_RULE_IDS, []
         )
+        selected_rule_ids = [
+            rule_id
+            for rule_id in stored_selected_rule_ids
+            if isinstance(rule_id, str) and rule_id in rule_choices
+        ]
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(

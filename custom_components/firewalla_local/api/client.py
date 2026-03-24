@@ -18,6 +18,7 @@ from ..const import (
 )
 from ..models import (
     FirewallaPolicyRule,
+    FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     FirewallaSystemInfo,
 )
@@ -87,6 +88,19 @@ class FirewallaApiClient:
             },
         }
 
+    async def _async_post_local_payload(
+        self, payload: dict[str, object]
+    ) -> tuple[int, str]:
+        """Post an encrypted payload to the local runtime endpoint."""
+        url = f"http://{self.host}:8833/v1/encipher/message/{self.gid}"
+        try:
+            async with self._session.post(url, json=payload) as response:
+                return response.status, await response.text()
+        except ClientError as err:
+            raise FirewallaConnectionError(
+                f"Could not reach Firewalla box at {self.host}: {err}"
+            ) from err
+
     async def _async_send_local_message(
         self,
         *,
@@ -122,11 +136,18 @@ class FirewallaApiClient:
                 f"{response_status}: {response_text}"
             )
 
-        response_payload = json.loads(response_text)
+        try:
+            response_payload = json.loads(response_text)
+        except json.JSONDecodeError as err:
+            raise FirewallaProtocolError(
+                "Firewalla local runtime response was not valid JSON"
+            ) from err
+
         if not isinstance(response_payload, dict):
             raise FirewallaProtocolError(
                 "Firewalla local runtime response was not a JSON object"
             )
+
         if response_error := response_payload.get("error"):
             raise FirewallaProtocolError(
                 f"Firewalla local runtime returned an error: {response_error}"
@@ -139,11 +160,18 @@ class FirewallaApiClient:
             )
 
         decrypted = aes256_cbc_decrypt_from_base64(response_message, self.symmetric_key)
-        decrypted_payload = json.loads(decrypted)
+        try:
+            decrypted_payload = json.loads(decrypted)
+        except json.JSONDecodeError as err:
+            raise FirewallaProtocolError(
+                "Firewalla local runtime decrypted payload was not valid JSON"
+            ) from err
+
         if not isinstance(decrypted_payload, dict):
             raise FirewallaProtocolError(
                 "Firewalla local runtime decrypted payload was not a JSON object"
             )
+
         if decrypted_payload.get("code") != 200:
             raise FirewallaProtocolError(
                 f"Firewalla local runtime returned code {decrypted_payload.get('code')}"
@@ -165,18 +193,50 @@ class FirewallaApiClient:
             target=DEFAULT_INIT_TARGET,
         )
 
-    async def _async_post_local_payload(
-        self, payload: dict[str, object]
-    ) -> tuple[int, str]:
-        """Post an encrypted payload to the local runtime endpoint."""
-        url = f"http://{self.host}:8833/v1/encipher/message/{self.gid}"
-        try:
-            async with self._session.post(url, json=payload) as response:
-                return response.status, await response.text()
-        except ClientError as err:
-            raise FirewallaConnectionError(
-                f"Could not reach Firewalla box at {self.host}: {err}"
-            ) from err
+    async def async_create_rule(self, template: FirewallaRuleTemplate) -> None:
+        """Create one persistent rule from a stored template."""
+        await self._async_send_local_message(
+            message_type="cmd",
+            data={
+                "item": "policy:create",
+                "value": template.build_create_value(updated_time=time.time()),
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+
+    async def async_delete_rule(self, rule_id: str) -> None:
+        """Delete one existing policy rule by ID."""
+        await self._async_send_local_message(
+            message_type="cmd",
+            data={"item": "policy:delete", "value": {"policyID": rule_id}},
+            target=DEFAULT_INIT_TARGET,
+        )
+
+    async def async_update_rule(
+        self,
+        rule: FirewallaPolicyRule,
+        *,
+        enabled: bool,
+        idle_ts: int | None = None,
+    ) -> None:
+        """Update one existing policy rule in place."""
+        value = dict(rule.raw_update_payload)
+        value["pid"] = rule.rule_id
+        value["disabled"] = 0 if enabled else 1
+        value["updatedTime"] = time.time()
+
+        if enabled:
+            value["idleTs"] = ""
+        elif idle_ts is not None:
+            value["idleTs"] = idle_ts
+        elif "idleTs" in value:
+            value["idleTs"] = ""
+
+        await self._async_send_local_message(
+            message_type="cmd",
+            data={"item": "policy:update", "value": value},
+            target=DEFAULT_INIT_TARGET,
+        )
 
     def _build_system_info(self, data: dict[str, object]) -> FirewallaSystemInfo:
         """Build normalized system information from the init payload."""
@@ -221,27 +281,65 @@ class FirewallaApiClient:
         return category_lookup
 
     def _build_network_lookup(self, data: dict[str, object]) -> dict[str, str]:
-        """Build a lookup of network UUIDs to interface names."""
+        """Build a lookup of network UUIDs to readable network names."""
         raw_network_profiles = data.get("networkProfiles")
-        if not isinstance(raw_network_profiles, dict):
-            return {}
-
         network_lookup: dict[str, str] = {}
-        for network_id, raw_profile in raw_network_profiles.items():
-            if not isinstance(network_id, str) or not network_id:
-                continue
-            if not isinstance(raw_profile, dict):
-                continue
 
-            interface_name = raw_profile.get("intf")
-            if isinstance(interface_name, str) and interface_name:
-                network_lookup[network_id] = interface_name
+        if isinstance(raw_network_profiles, dict):
+            for network_id, raw_profile in raw_network_profiles.items():
+                if not isinstance(network_id, str) or not network_id:
+                    continue
+                if not isinstance(raw_profile, dict):
+                    continue
+
+                display_name = self._resolve_network_display_name(raw_profile)
+                if display_name is not None:
+                    network_lookup[network_id] = display_name
+
+        raw_network_config = data.get("networkConfig")
+        if isinstance(raw_network_config, dict):
+            raw_interfaces = raw_network_config.get("interface")
+            self._merge_network_config_lookup(raw_interfaces, network_lookup)
 
         return network_lookup
 
-    def _build_named_lookup(
-        self, data: dict[str, object], key: str
-    ) -> dict[str, str]:
+    def _resolve_network_display_name(
+        self, raw_profile: dict[str, object]
+    ) -> str | None:
+        """Resolve the best available display name from one network profile."""
+        for key in ("desc", "name", "intf"):
+            value = raw_profile.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _merge_network_config_lookup(
+        self, raw_interfaces: object, network_lookup: dict[str, str]
+    ) -> None:
+        """Merge readable network names from networkConfig.interface metadata."""
+        if isinstance(raw_interfaces, dict):
+            meta = raw_interfaces.get("meta")
+            if isinstance(meta, dict):
+                network_id = meta.get("uuid")
+                if isinstance(network_id, str) and network_id:
+                    for candidate in (
+                        meta.get("name"),
+                        raw_interfaces.get("desc"),
+                        raw_interfaces.get("name"),
+                    ):
+                        if isinstance(candidate, str) and candidate:
+                            network_lookup[network_id] = candidate
+                            break
+
+            for value in raw_interfaces.values():
+                self._merge_network_config_lookup(value, network_lookup)
+            return
+
+        if isinstance(raw_interfaces, list):
+            for value in raw_interfaces:
+                self._merge_network_config_lookup(value, network_lookup)
+
+    def _build_named_lookup(self, data: dict[str, object], key: str) -> dict[str, str]:
         """Build a uid-to-name lookup for Firewalla tag collections."""
         raw_collection = data.get(key)
         if not isinstance(raw_collection, dict):
@@ -434,121 +532,6 @@ class FirewallaApiClient:
 
         return None
 
-    def _normalize_policy_rules(
-        self, data: dict[str, object]
-    ) -> tuple[FirewallaPolicyRule, ...]:
-        """Normalize Firewalla policy rules into a stable typed MVP shape."""
-        raw_rules = data.get("policyRules")
-        if not isinstance(raw_rules, list):
-            return ()
-
-        category_lookup = self._build_category_lookup(data)
-        network_lookup = self._build_network_lookup(data)
-        tag_lookup = self._build_named_lookup(data, "tags")
-        device_tag_lookup = self._build_named_lookup(data, "deviceTags")
-        user_tag_lookup = self._build_named_lookup(data, "userTags")
-        affiliated_user_lookup = self._build_affiliated_user_lookup(data)
-        host_lookup = self._build_host_lookup(data)
-
-        normalized_rules: list[FirewallaPolicyRule] = []
-        for raw_rule in raw_rules:
-            if not isinstance(raw_rule, dict):
-                continue
-
-            raw_rule_id = raw_rule.get("pid")
-            raw_action = raw_rule.get("action")
-            raw_target = raw_rule.get("target")
-            raw_target_type = raw_rule.get("type")
-            if not isinstance(raw_rule_id, str) or not raw_rule_id:
-                continue
-            if not isinstance(raw_action, str) or not raw_action:
-                continue
-            if not isinstance(raw_target, str) or not raw_target:
-                continue
-            if not isinstance(raw_target_type, str) or not raw_target_type:
-                continue
-
-            rule_id = raw_rule_id
-            action = raw_action
-            target = raw_target
-            target_type = raw_target_type
-            direction = raw_rule.get("direction")
-            purpose = raw_rule.get("purpose")
-            scope_value = raw_rule.get("scope")
-            scope: tuple[str, ...]
-            if isinstance(scope_value, list):
-                scope = tuple(
-                    item for item in scope_value if isinstance(item, str) and item
-                )
-            else:
-                scope = ()
-
-            disabled = raw_rule.get("disabled")
-            enabled = disabled not in {"1", "true", "True", 1}
-            if isinstance(disabled, bool):
-                enabled = not disabled
-
-            activated_time = self._coerce_float(raw_rule.get("activatedTime"))
-            updated_time = self._coerce_float(raw_rule.get("updatedTime"))
-            last_activated_time = self._coerce_float(
-                raw_rule.get("lastActivatedTime")
-            )
-            expire_seconds = self._coerce_int(raw_rule.get("expire"))
-            auto_delete_when_expires = self._coerce_boolish(
-                raw_rule.get("autoDeleteWhenExpires")
-            )
-            dnsmasq_only = self._coerce_boolish(raw_rule.get("dnsmasq_only"))
-            expires_at = (
-                activated_time + expire_seconds
-                if activated_time is not None and expire_seconds is not None
-                else None
-            )
-
-            target_name = self._resolve_target_name(
-                raw_rule,
-                target=target,
-                target_type=target_type,
-                categories=category_lookup,
-                networks=network_lookup,
-                tags=tag_lookup,
-                device_tags=device_tag_lookup,
-                user_tags=user_tag_lookup,
-                hosts=host_lookup,
-                affiliated_users=affiliated_user_lookup,
-            )
-            applies_to = self._resolve_rule_applicability(
-                raw_rule,
-                tags=tag_lookup,
-                device_tags=device_tag_lookup,
-                user_tags=user_tag_lookup,
-                networks=network_lookup,
-                affiliated_users=affiliated_user_lookup,
-            )
-
-            normalized_rules.append(
-                FirewallaPolicyRule(
-                    rule_id=rule_id,
-                    action=action,
-                    target=target,
-                    target_type=target_type,
-                    direction=direction if isinstance(direction, str) else None,
-                    enabled=enabled,
-                    purpose=purpose if isinstance(purpose, str) else None,
-                    scope=scope,
-                    target_name=target_name,
-                    applies_to=applies_to,
-                    activated_time=activated_time,
-                    updated_time=updated_time,
-                    last_activated_time=last_activated_time,
-                    expire_seconds=expire_seconds,
-                    expires_at=expires_at,
-                    auto_delete_when_expires=auto_delete_when_expires,
-                    dnsmasq_only=dnsmasq_only,
-                )
-            )
-
-        return tuple(normalized_rules)
-
     def _coerce_float(self, value: object) -> float | None:
         """Coerce Firewalla numeric-like values to float when possible."""
         if isinstance(value, (int, float)):
@@ -588,6 +571,121 @@ class FirewallaApiClient:
             if lowered in {"0", "false", "no", ""}:
                 return False
         return None
+
+    def _normalize_policy_rules(
+        self, data: dict[str, object]
+    ) -> tuple[FirewallaPolicyRule, ...]:
+        """Normalize Firewalla policy rules into a stable typed MVP shape."""
+        raw_rules = data.get("policyRules")
+        if not isinstance(raw_rules, list):
+            return ()
+
+        category_lookup = self._build_category_lookup(data)
+        network_lookup = self._build_network_lookup(data)
+        tag_lookup = self._build_named_lookup(data, "tags")
+        device_tag_lookup = self._build_named_lookup(data, "deviceTags")
+        user_tag_lookup = self._build_named_lookup(data, "userTags")
+        affiliated_user_lookup = self._build_affiliated_user_lookup(data)
+        host_lookup = self._build_host_lookup(data)
+
+        normalized_rules: list[FirewallaPolicyRule] = []
+        for raw_rule in raw_rules:
+            if not isinstance(raw_rule, dict):
+                continue
+
+            raw_rule_id = raw_rule.get("pid")
+            raw_action = raw_rule.get("action")
+            raw_target = raw_rule.get("target")
+            raw_target_type = raw_rule.get("type")
+            if not isinstance(raw_rule_id, str) or not raw_rule_id:
+                continue
+            if not isinstance(raw_action, str) or not raw_action:
+                continue
+            if not isinstance(raw_target, str) or not raw_target:
+                continue
+            if not isinstance(raw_target_type, str) or not raw_target_type:
+                continue
+
+            direction = raw_rule.get("direction")
+            purpose = raw_rule.get("purpose")
+            scope_value = raw_rule.get("scope")
+            scope = (
+                tuple(item for item in scope_value if isinstance(item, str) and item)
+                if isinstance(scope_value, list)
+                else ()
+            )
+            raw_tag_refs = raw_rule.get("tag")
+            tag_refs = (
+                tuple(item for item in raw_tag_refs if isinstance(item, str) and item)
+                if isinstance(raw_tag_refs, list)
+                else ()
+            )
+
+            disabled = raw_rule.get("disabled")
+            enabled = disabled not in {"1", "true", "True", 1}
+            if isinstance(disabled, bool):
+                enabled = not disabled
+
+            activated_time = self._coerce_float(raw_rule.get("activatedTime"))
+            updated_time = self._coerce_float(raw_rule.get("updatedTime"))
+            last_activated_time = self._coerce_float(raw_rule.get("lastActivatedTime"))
+            expire_seconds = self._coerce_int(raw_rule.get("expire"))
+            auto_delete_when_expires = self._coerce_boolish(
+                raw_rule.get("autoDeleteWhenExpires")
+            )
+            dnsmasq_only = self._coerce_boolish(raw_rule.get("dnsmasq_only"))
+            expires_at = (
+                activated_time + expire_seconds
+                if activated_time is not None and expire_seconds is not None
+                else None
+            )
+
+            target_name = self._resolve_target_name(
+                raw_rule,
+                target=raw_target,
+                target_type=raw_target_type,
+                categories=category_lookup,
+                networks=network_lookup,
+                tags=tag_lookup,
+                device_tags=device_tag_lookup,
+                user_tags=user_tag_lookup,
+                hosts=host_lookup,
+                affiliated_users=affiliated_user_lookup,
+            )
+            applies_to = self._resolve_rule_applicability(
+                raw_rule,
+                tags=tag_lookup,
+                device_tags=device_tag_lookup,
+                user_tags=user_tag_lookup,
+                networks=network_lookup,
+                affiliated_users=affiliated_user_lookup,
+            )
+
+            normalized_rules.append(
+                FirewallaPolicyRule(
+                    rule_id=raw_rule_id,
+                    action=raw_action,
+                    target=raw_target,
+                    target_type=raw_target_type,
+                    direction=direction if isinstance(direction, str) else None,
+                    enabled=enabled,
+                    purpose=purpose if isinstance(purpose, str) else None,
+                    scope=scope,
+                    tag_refs=tag_refs,
+                    target_name=target_name,
+                    applies_to=applies_to,
+                    activated_time=activated_time,
+                    updated_time=updated_time,
+                    last_activated_time=last_activated_time,
+                    expire_seconds=expire_seconds,
+                    expires_at=expires_at,
+                    auto_delete_when_expires=auto_delete_when_expires,
+                    dnsmasq_only=dnsmasq_only,
+                    raw_update_payload=dict(raw_rule),
+                )
+            )
+
+        return tuple(normalized_rules)
 
     def _count_exception_rules(self, data: dict[str, object]) -> int:
         """Return the number of exception rules exposed by the init payload."""
