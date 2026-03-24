@@ -1,0 +1,252 @@
+"""Tests for Firewalla Local rule manager behavior."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock, Mock, patch
+
+from custom_components.firewalla_local.api.client import FirewallaApiClient
+from custom_components.firewalla_local.coordinator import (
+    FirewallaConfigEntry,
+    FirewallaDataUpdateCoordinator,
+)
+from custom_components.firewalla_local.managers.rule_manager import FirewallaRuleManager
+from custom_components.firewalla_local.models import (
+    FirewallaPolicyRule,
+    FirewallaRuleTemplate,
+    FirewallaRuntimeSnapshot,
+    FirewallaSystemInfo,
+)
+
+
+class _StubCoordinator:
+    """Minimal coordinator stub for manager tests."""
+
+    def __init__(self, snapshot: FirewallaRuntimeSnapshot) -> None:
+        """Initialize the stub coordinator."""
+        self.data = snapshot
+        self.updated_snapshots: list[FirewallaRuntimeSnapshot] = []
+
+    def async_set_updated_data(self, snapshot: FirewallaRuntimeSnapshot) -> None:
+        """Mirror DataUpdateCoordinator state updates for assertions."""
+        self.data = snapshot
+        self.updated_snapshots.append(snapshot)
+
+
+def _build_rule(
+    rule_id: str,
+    *,
+    action: str = "block",
+    target: str = "social",
+    target_type: str = "category",
+    enabled: bool = True,
+    target_name: str | None = "social",
+    applies_to: tuple[str, ...] = ("AV_SMART_TV",),
+    raw_update_payload: dict[str, object] | None = None,
+) -> FirewallaPolicyRule:
+    """Build one normalized rule for manager tests."""
+    return FirewallaPolicyRule(
+        rule_id=rule_id,
+        action=action,
+        target=target,
+        target_type=target_type,
+        direction="bidirection",
+        enabled=enabled,
+        purpose=None,
+        scope=(),
+        tag_refs=("tag:17",),
+        target_name=target_name,
+        applies_to=applies_to,
+        dnsmasq_only=True,
+        raw_update_payload=raw_update_payload
+        or {
+            "pid": rule_id,
+            "action": action,
+            "target": target,
+            "type": target_type,
+            "tag": ["tag:17"],
+            "dnsmasq_only": True,
+            "disabled": 0 if enabled else 1,
+        },
+    )
+
+
+def _build_snapshot(*rules: FirewallaPolicyRule) -> FirewallaRuntimeSnapshot:
+    """Build one runtime snapshot for manager tests."""
+    return FirewallaRuntimeSnapshot(
+        system_info=FirewallaSystemInfo(
+            host="192.168.200.1",
+            name="Firewalla",
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        policy_rules=rules,
+        exception_rule_count=0,
+    )
+
+
+def _build_manager(
+    snapshot: FirewallaRuntimeSnapshot,
+    *,
+    options: dict[str, object] | None = None,
+) -> tuple[FirewallaRuleManager, _StubCoordinator, AsyncMock]:
+    """Build a rule manager with typed stubs for isolated tests."""
+    coordinator = _StubCoordinator(snapshot)
+    update_rule = AsyncMock()
+    client = cast(FirewallaApiClient, SimpleNamespace(async_update_rule=update_rule))
+    entry = cast(
+        FirewallaConfigEntry,
+        SimpleNamespace(
+            options=options or {},
+            data={},
+            entry_id="entry-123",
+        ),
+    )
+    manager = FirewallaRuleManager(
+        cast(FirewallaDataUpdateCoordinator, coordinator),
+        entry,
+        client,
+    )
+    return manager, coordinator, update_rule
+
+
+def test_get_switch_candidate_rule_ids_filters_non_user_or_unreadable_rules() -> None:
+    """Test candidate filtering keeps only readable user-managed switch rules."""
+    candidate_rule = _build_rule("744")
+    system_managed_rule = _build_rule("745", target="games", target_name="games")
+    unnamed_network_rule = _build_rule(
+        "746",
+        target="5799d896-5e0f-40a5-a776-38a5d7746204",
+        target_type="network",
+        target_name=None,
+    )
+    target_list_rule = _build_rule(
+        "747",
+        action="allow",
+        target="TL-56d856bb-efdc-4894-8e5f-c483555e09f6",
+        target_name=None,
+        applies_to=(),
+    )
+    snapshot = _build_snapshot(
+        candidate_rule,
+        system_managed_rule,
+        unnamed_network_rule,
+        target_list_rule,
+    )
+    manager, _, _ = _build_manager(snapshot)
+
+    manager.handle_refresh(
+        {
+            "policyRules": [
+                candidate_rule.raw_update_payload,
+                {**system_managed_rule.raw_update_payload, "method": "auto"},
+                unnamed_network_rule.raw_update_payload,
+                target_list_rule.raw_update_payload,
+            ]
+        },
+        snapshot,
+    )
+
+    assert manager.get_switch_candidate_rule_ids() == {"744"}
+    assert manager.get_switch_candidate_choices() == {
+        "744": "[744] block category social for AV_SMART_TV (enabled)"
+    }
+
+
+async def test_async_set_template_enabled_updates_snapshot_optimistically() -> None:
+    """Test enabling a selected template updates the in-memory snapshot immediately."""
+    snapshot = _build_snapshot(
+        _build_rule(
+            "744",
+            enabled=False,
+            raw_update_payload={
+                "pid": "744",
+                "action": "block",
+                "target": "social",
+                "type": "category",
+                "tag": ["tag:17"],
+                "dnsmasq_only": True,
+                "disabled": 1,
+                "idleTs": "1774324800",
+            },
+        )
+    )
+    manager, coordinator, update_rule = _build_manager(
+        snapshot,
+        options={
+            "selected_rule_templates": [
+                FirewallaRuleTemplate.from_rule(snapshot.policy_rules[0]).to_dict()
+            ]
+        },
+    )
+    manager.handle_refresh(
+        {"policyRules": [snapshot.policy_rules[0].raw_update_payload]},
+        snapshot,
+    )
+    template = manager.selected_templates[0]
+
+    with patch(
+        "custom_components.firewalla_local.managers.rule_manager.time.time",
+        return_value=1_700_000_000.0,
+    ):
+        await manager.async_set_template_enabled(template, enabled=True)
+
+    assert update_rule.await_args is not None
+    assert update_rule.await_count == 1
+    assert update_rule.await_args.args[0].rule_id == "744"
+    assert update_rule.await_args.kwargs == {"enabled": True}
+    assert coordinator.data.policy_rules[0].enabled is True
+    assert coordinator.data.policy_rules[0].raw_update_payload["disabled"] == 0
+    assert coordinator.data.policy_rules[0].raw_update_payload["idleTs"] == ""
+
+
+async def test_async_pause_and_resume_rule_update_snapshot_optimistically() -> None:
+    """Test pause and resume apply manager-owned state updates without a refresh."""
+    snapshot = _build_snapshot(_build_rule("744"))
+    manager, coordinator, update_rule = _build_manager(snapshot)
+    manager.handle_refresh(
+        {"policyRules": [snapshot.policy_rules[0].raw_update_payload]},
+        snapshot,
+    )
+
+    with patch(
+        "custom_components.firewalla_local.managers.rule_manager.time.time",
+        side_effect=[1_700_000_000.0, 1_700_000_100.0],
+    ):
+        await manager.async_pause_rule("744", 1_700_001_800)
+        await manager.async_resume_rule("744")
+
+    assert update_rule.await_count == 2
+    assert update_rule.await_args_list[0].args[0].rule_id == "744"
+    assert update_rule.await_args_list[0].kwargs == {
+        "enabled": False,
+        "idle_ts": 1_700_001_800,
+    }
+    assert update_rule.await_args_list[1].args[0].rule_id == "744"
+    assert update_rule.await_args_list[1].kwargs == {"enabled": True}
+    assert coordinator.updated_snapshots[0].policy_rules[0].enabled is False
+    assert (
+        coordinator.updated_snapshots[0].policy_rules[0].raw_update_payload["idleTs"]
+        == 1_700_001_800
+    )
+    assert coordinator.data.policy_rules[0].enabled is True
+    assert coordinator.data.policy_rules[0].raw_update_payload["idleTs"] == ""
+
+
+async def test_async_pause_rule_ignores_missing_targets() -> None:
+    """Test missing rule targets do not trigger client mutations."""
+    snapshot = _build_snapshot(_build_rule("744"))
+    manager, coordinator, update_rule = _build_manager(snapshot)
+    manager.handle_refresh(
+        {"policyRules": [snapshot.policy_rules[0].raw_update_payload]},
+        snapshot,
+    )
+
+    with patch.object(manager, "_apply_optimistic_rule_update", Mock()) as optimistic:
+        await manager.async_pause_rule("999", 1_700_001_800)
+
+    assert update_rule.await_count == 0
+    optimistic.assert_not_called()
+    assert coordinator.data.policy_rules[0].rule_id == "744"

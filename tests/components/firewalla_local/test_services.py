@@ -21,6 +21,7 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     DOMAIN,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
+    SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
@@ -32,6 +33,7 @@ from custom_components.firewalla_local.models import (
     FirewallaRuntimeSnapshot,
     FirewallaSystemInfo,
 )
+from custom_components.firewalla_local.services import _get_loaded_entry
 
 
 def _snapshot(enabled: bool = True) -> FirewallaRuntimeSnapshot:
@@ -134,7 +136,9 @@ async def test_pause_rule_service_updates_matching_rule_optimistically(
         await hass.async_block_till_done()
 
         entity_id = next(iter(hass.states.async_entity_ids("switch")))
-        assert hass.states.get(entity_id).state == "on"
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "on"
 
         await hass.services.async_call(
             DOMAIN,
@@ -148,12 +152,15 @@ async def test_pause_rule_service_updates_matching_rule_optimistically(
         )
         await hass.async_block_till_done()
 
+    assert mock_update_rule.await_args is not None
     assert mock_update_rule.await_count == 1
     assert mock_update_rule.await_args.kwargs == {
         "enabled": False,
         "idle_ts": 1_700_001_800,
     }
-    assert hass.states.get(entity_id).state == "off"
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "off"
 
 
 async def test_pause_rule_service_rejects_invalid_duration(
@@ -288,6 +295,7 @@ async def test_pause_rule_service_supports_indefinite_pause(
         )
         await hass.async_block_till_done()
 
+    assert mock_update_rule.await_args is not None
     assert mock_update_rule.await_count == 1
     assert mock_update_rule.await_args.kwargs == {"enabled": False, "idle_ts": None}
 
@@ -361,6 +369,7 @@ async def test_pause_rule_service_supports_resume_at(
         )
         await hass.async_block_till_done()
 
+    assert mock_update_rule.await_args is not None
     assert mock_update_rule.await_count == 1
     assert mock_update_rule.await_args.kwargs == {
         "enabled": False,
@@ -434,6 +443,175 @@ async def test_pause_rule_service_rejects_duration_and_resume_at(
         )
 
 
+def test_get_loaded_entry_rejects_ambiguous_config_entry_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test ambiguous entry names require callers to use config_entry_id."""
+    first_entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla",
+        data={CONF_LICENSE: "license-123"},
+    )
+    second_entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-456",
+        title="Firewalla",
+        data={CONF_LICENSE: "license-456"},
+    )
+    first_entry.runtime_data = object()
+    second_entry.runtime_data = object()
+    first_entry.add_to_hass(hass)
+    second_entry.add_to_hass(hass)
+
+    with pytest.raises(ServiceValidationError, match="ambiguous"):
+        _get_loaded_entry(hass, entry_id=None, entry_name="Firewalla")
+
+
+async def test_pause_rule_service_accepts_config_entry_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test pause_rule can target a loaded entry by config_entry_name."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["744"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "744",
+                    "name": "block category social for AV_SMART_TV",
+                    "action": "block",
+                    "target": "social",
+                    "target_type": "category",
+                    "scope": [],
+                    "tag_refs": ["tag:17"],
+                    "dnsmasq_only": True,
+                    "use_bf": True,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
+            new=AsyncMock(return_value=_snapshot()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule",
+            new=AsyncMock(),
+        ) as mock_update_rule,
+        patch(
+            "custom_components.firewalla_local.services.dt_util.utcnow",
+            return_value=datetime.fromtimestamp(1_700_000_000, UTC),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_PAUSE_RULE,
+            {
+                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_DURATION: "30m",
+                SERVICE_FIELD_CONFIG_ENTRY_NAME: entry.title,
+            },
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    assert mock_update_rule.await_args is not None
+    assert mock_update_rule.await_count == 1
+    assert mock_update_rule.await_args.kwargs == {
+        "enabled": False,
+        "idle_ts": 1_700_001_800,
+    }
+
+
+async def test_pause_rule_service_rejects_unknown_rule_target(
+    hass: HomeAssistant,
+) -> None:
+    """Test pause_rule rejects targets that are not present in manager state."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["744"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "744",
+                    "name": "block category social for AV_SMART_TV",
+                    "action": "block",
+                    "target": "social",
+                    "target_type": "category",
+                    "scope": [],
+                    "tag_refs": ["tag:17"],
+                    "dnsmasq_only": True,
+                    "use_bf": True,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
+            new=AsyncMock(return_value=_snapshot()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with pytest.raises(ServiceValidationError, match="Rule target not found"):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_PAUSE_RULE,
+            {
+                SERVICE_FIELD_RULE_TARGET: "999",
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+        )
+
+
 async def test_resume_rule_service_reenables_matching_rule(
     hass: HomeAssistant,
 ) -> None:
@@ -501,5 +679,6 @@ async def test_resume_rule_service_reenables_matching_rule(
         )
         await hass.async_block_till_done()
 
+    assert mock_update_rule.await_args is not None
     assert mock_update_rule.await_count == 1
     assert mock_update_rule.await_args.kwargs == {"enabled": True}

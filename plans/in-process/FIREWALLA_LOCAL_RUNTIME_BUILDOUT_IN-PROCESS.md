@@ -161,7 +161,8 @@ Gate note: Phase 3 must preserve the accepted Home Assistant contracts for devic
   - time-bounded pause actions are exposed exclusively through a custom Home Assistant service such as `firewalla_local.pause_rule`
   - the custom service accepts the rule target and a duration string, then resolves that duration into the `resumeTs` payload field
 - [x] Define and implement the first entity plan, including which rule-backed switch entities are created, how unique IDs are derived, and how all entities attach to the license-anchored device entry.
-- [ ] Define the follow-on entity plan for broader rule-family coverage and how the switch surface coordinates with the time-bounded pause service.
+- [x] Define the follow-on entity plan for broader rule-family coverage and how the switch surface coordinates with the time-bounded pause service.
+  - re-homed into Phase 4 builder handoff planning so the next coverage slice is executed as a file-scoped implementation backlog rather than as a lingering architecture question
 - [x] Define the diagnostics plan, including which config entry fields and runtime payloads are exposed and how Home Assistant redaction helpers are applied.
 
 Phase 3 execution note: The current implementation now provisions real local credentials during config flow, validates the local runtime before creating the entry, supports reauth with a fresh QR payload, supports host reconfigure, and ships an options flow that persists selected rule IDs and rule templates from the live coordinator snapshot. The coordinator populates typed `FirewallaRuntimeSnapshot` data containing normalized `system_info`, `policy_rules`, and `exception_rule_count`, and it now logs local-runtime outages once and recovery once when polling succeeds again. Runtime inventory reporting is available both as structured data and markdown through the `get_runtime_inventory` response service. The first rule-backed switch platform is implemented and validated, including license-anchored identity, UID-based default naming, availability handling when backing rules disappear, update-in-place toggles, and pause or notes metadata. The remaining Phase 3 work is service-layer mutation beyond plain enable or disable, broader rule-family coverage, and translation or quality-scale alignment for the implemented entity model.
@@ -248,27 +249,32 @@ Goal: Produce the implementation-ready validation plan and builder handoff so ru
 
 Gate note: Phase 4 must optimize for fast iteration. Pure `api/` unit tests should validate protocol rules cheaply before slower Home Assistant integration tests become the main feedback loop.
 
-- [ ] Define the initial test matrix for:
-  - pure `api/` pairing and signing behavior
-  - successful setup and pairing
-  - repeated `401` to reauth behavior
-  - reconfigure behavior for mutable connection data
-  - options flow persistence
-  - entity availability and recovery behavior
-  - diagnostics redaction
-  - device and entity registry stability
+- [x] Phase 4A: Validation lanes and initial test matrix
+  - define the fast-lane validation matrix for pure `api/` and utility behavior, including owning test modules and current coverage state
+  - define the slow-lane validation matrix for Home Assistant integration behavior, including setup, reauth, reconfigure, services, entity availability, diagnostics redaction, and registry stability
+  - record current coverage as `present`, `partial`, or `missing` so the next builder slice adds tests to named files instead of broad areas
+  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`, including executable lane commands for the current repo test layout
+- [x] Phase 4B: Builder handoff by file surface
+  - convert the next runtime slice into ordered work packages for mutation proof, service hardening, and switch-first follow-on coverage
+  - assign touch-first files, verify-only files, test owners, and explicit stop conditions for each package
+  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` as a concrete file-scoped execution map grounded in the current `api/client.py`, `services.py`, `switch.py`, and `managers/rule_manager.py` surfaces
+  - execution started and validated with direct manager mutation tests in `tests/components/firewalla_local/test_rule_manager.py` and additional service-resolution coverage in `tests/components/firewalla_local/test_services.py`
 - [x] Define the minimum code-quality gates for the first implementation pass:
   - `python -m ruff check .`
   - `python -m ruff format .`
   - `python -m mypy custom_components/firewalla_local`
   - `python -m pytest tests/ -v`
-- [ ] Define the builder handoff scope file-by-file so implementation begins from a concrete task breakdown instead of a broad feature brief.
-- [ ] Include the custom service implementation surface in the builder handoff, including `services.yaml`, service schema, duration parsing, and service tests.
-- [ ] Record any remaining protocol unknowns as explicit implementation risks, not as hidden assumptions.
-- [ ] Split the validation plan into a fast lane for pure `api/` unit tests and a slower lane for Home Assistant integration tests.
-- [ ] Add a quality-scale closure matrix that tracks every rule to concrete implementation evidence, explicit exemptions, or remaining blockers.
+- [x] Phase 4C: Remaining protocol unknowns and implementation risks
+  - separate confirmed mutation contracts from unconfirmed rule-family behavior so Builder does not generalize from the currently proven slice
+  - record explicit stop conditions for additional mutation families, pause or resume semantics, create or update payload variance, and rule-template stability under broader coverage
+  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` as a concrete risk register tied to the current `api/client.py`, `services.py`, `models.py`, `switch.py`, and `managers/rule_manager.py` surfaces, including explicit allowed assumptions, prohibited assumptions, proof requirements, and stop/go decision rules
+- [x] Phase 4D: Quality-scale closure matrix and exit criteria
+  - map relevant quality-scale rules to concrete evidence, explicit blockers, or deliberate defer decisions
+  - distinguish runtime-slice blockers from later documentation or release-prep work so Phase 4 can close honestly
+  - define exit criteria for Phase 4 completion in terms that are testable and reviewable
+  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` with a trued-up closure matrix tied to `quality_scale.yaml`, the current implementation surfaces, and explicit defer reasons for release-prep items
 
-Phase 4 execution note: Phase 4 is now the active planning and handoff slice. The current implementation baseline has passed Ruff, MyPy, and the full `pytest tests/ -v` suite, in addition to earlier focused validation for client normalization, config flow, setup and service behavior, runtime inventory reporting, and the first switch platform. The remaining handoff work is centered on the next write-path slice: mutation payload confirmation for additional rule families, the documented fast-lane versus slow-lane validation matrix, broader entity coverage, quality-scale closure, and proving that the new domain-manager architecture actually removed duplication rather than merely moving it.
+Phase 4 execution note: Phase 4 planning and handoff are now complete. The repository has a documented fast-lane versus slow-lane validation matrix, a file-scoped builder handoff, a concrete protocol risk register with stop/go rules, and a quality-scale closure matrix tied to current evidence and explicit defers. Remaining open items in `quality_scale.yaml` are now clearly separated into runtime blockers versus release-prep or future-protocol work rather than being mixed into architecture planning. Detailed execution scaffolding for that work lives in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`.
 
 ## Validation strategy
 
@@ -291,6 +297,7 @@ Document-only updates to plans and support notes do not require repo lint, type-
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT_STANDARDS.md`
+- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_BUILDER_HANDOFF.md`
 - `AGENTS.md`

@@ -8,7 +8,7 @@ rules:
   common-modules: done
   config-flow-test-coverage:
     status: todo
-    comment: Expand coverage beyond the current user, reauth, setup-path, and switch tests. On hold due to 3rd-party authentication concerns
+    comment: Expand coverage for reconfigure validation edges, reauth failure paths, and options-flow drift cases while keeping all auth coverage internal-only and fully mocked.
   config-flow: done
   dependency-transparency: done
   docs-actions: done
@@ -38,7 +38,7 @@ rules:
   config-entry-unloading: done
   docs-data-update:
     status: todo
-    comment: Document the runtime snapshot shape, polling behavior, and the no-local-cache storage contract for users.
+    comment: Document the runtime snapshot shape, polling behavior, and the no-local-cache storage contract in user-facing docs rather than only architecture notes.
   entity-unavailable: done
   log-when-unavailable:
     status: done

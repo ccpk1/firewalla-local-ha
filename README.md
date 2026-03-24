@@ -30,19 +30,25 @@ The durable project rules now live in:
 - Standalone custom component repository layout
 - Separate VS Code workspace that opens this repo with Home Assistant Core
 - Link target for `core/config/custom_components/firewalla_local`
-- UI config flow scaffold
-- Typed runtime data and coordinator scaffold
-- Diagnostics scaffold
+- Real local API client and pairing bootstrap under `custom_components/firewalla_local/api/`
+- UI config flow with local runtime validation before entry creation
+- Reauthentication flow with fresh QR input
+- Reconfigure flow for host updates
+- Options flow for selected rule-backed switches
+- Typed runtime data, coordinator refresh, and manager-owned orchestration
+- Rule-backed switch platform
+- Runtime inventory, pause, and resume services
+- Diagnostics with redaction coverage
 - English translations from day one
 - Quality scale tracking file
-- Minimal test scaffold
+- Focused tests for client behavior, flows, setup, diagnostics, services, runtime inventory, managers, and switch behavior
 
 ## What is not implemented yet
 
-- Real Firewalla API communication
-- Entities and platforms
-- Reauthentication and options flow
-- Integration-specific tests beyond scaffold coverage
+- Broader rule-family mutation support beyond the currently proven switch-backed slice
+- Explicit registry-stability coverage for broader entity expansion
+- Release-facing installation and removal documentation
+- Discovery, branding assets, and any broader platform expansion not yet proven by protocol evidence
 
 ## Repository layout
 
