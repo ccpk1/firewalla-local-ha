@@ -29,6 +29,8 @@ Implemented and verified in the repository:
 - license-anchored switch and device identity with UID-based default naming rather than generated entity names
 - focused tests covering client normalization, config flow behavior, runtime service behavior, and inventory reporting
 - focused tests covering switch setup, availability, toggle behavior, and pause metadata
+- expanded options-flow and runtime-inventory switch-candidate coverage for additional user-managed rule families, including `ip`, `remotePort`, and target-list-backed category rules that should remain selectable even when only partially named at runtime
+- tightened editor-workspace hygiene for local development by moving repo-specific diagnostic exclusions into `firewalla-dev.code-workspace` instead of relying on ad hoc local VS Code settings
 
 Phase 3b status:
 
@@ -40,6 +42,7 @@ Still open and driving the next implementation slice:
 - add branded assets before release
 - evaluate reliable local discovery only if Firewalla exposes a durable discovery contract
 - define the next bounded runtime slice after Phase 5 instead of widening the current sensor surface opportunistically
+- package the current runtime and selection-surface progress into documentation and release-prep updates rather than continuing feature expansion without a user-facing operating guide
 
 ## Critical execution note
 
@@ -166,6 +169,8 @@ Gate note: Phase 3 must preserve the accepted Home Assistant contracts for devic
 - [x] Define the diagnostics plan, including which config entry fields and runtime payloads are exposed and how Home Assistant redaction helpers are applied.
 
 Phase 3 execution note: The current implementation now provisions real local credentials during config flow, validates the local runtime before creating the entry, supports reauth with a fresh QR payload, supports host reconfigure, and ships an options flow that persists selected rule IDs and rule templates from the live coordinator snapshot. The coordinator populates typed `FirewallaRuntimeSnapshot` data containing normalized `system_info`, `policy_rules`, and `exception_rule_count`, and it now logs local-runtime outages once and recovery once when polling succeeds again. Runtime inventory reporting is available both as structured data and markdown through the `get_runtime_inventory` response service. The first rule-backed switch platform is implemented and validated, including license-anchored identity, UID-based default naming, availability handling when backing rules disappear, update-in-place toggles, and pause or notes metadata. The remaining Phase 3 work is service-layer mutation beyond plain enable or disable, broader rule-family coverage, and translation or quality-scale alignment for the implemented entity model.
+
+Phase 3 follow-up note: The selection surface for rule-backed switches has been widened and re-validated so the options flow and runtime inventory now treat additional user-managed rule families as supported candidates. This includes direct `ip` rules, `remotePort` rules, and target-list-backed category rules that remain operationally user-managed even when their readable target names are incomplete. The candidate filter now blocks only true management or policy exclusions instead of readability-only warnings, which keeps the selection list aligned with the intended Firewalla app-visible candidate set.
 
 ### Phase 3b: Platinum hygiene and orchestration hardening
 
@@ -321,6 +326,8 @@ Support note: See `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_
 Phase 5 entry criteria: The work may begin immediately because the repository now has a manager-owned runtime architecture, a stable coordinator snapshot, and decrypted local-payload evidence for both box-level status fields and internet speed-test history. The required constraint is to keep the slice bounded to the proven fields documented in the Phase 5 support note.
 
 Phase 5 execution note: Phase 5 is complete. The repository now exposes a bounded system-status sensor and a latest-speed-test download sensor backed by typed runtime models, API-side normalization, constants-backed attributes, translation-backed sensor metadata, and internal-only validation. Deferred metrics remain explicitly out of scope until the local payload proves a stable contract for them.
+
+Current post-Phase 5 note: The repo is presently in a documentation-and-release-prep posture rather than a new runtime-expansion posture. The latest completed code slice tightened rule-candidate semantics, refreshed the related tests, and moved workspace-level lint and search exclusions into the checked-in workspace file so the shared dev environment better matches the current repository boundaries.
 
 ## Validation strategy
 

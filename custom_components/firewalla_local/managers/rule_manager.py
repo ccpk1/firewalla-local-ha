@@ -226,10 +226,20 @@ def build_rule_switch_candidate_ids(
         review_reasons = build_rule_review_reasons(rule, raw_rule)
         raw_extras = extract_raw_rule_extras(raw_rule)
         management = build_rule_management_info(raw_extras)
+        blocking_review_reasons = {
+            reason
+            for reason in review_reasons
+            if reason
+            not in {
+                _RULE_REVIEW_REASON_MISSING_READABLE_TARGET_NAME,
+                _RULE_REVIEW_REASON_TARGET_LIST_REFERENCE,
+                _RULE_REVIEW_REASON_MISSING_TARGET_LIST_NAME,
+            }
+        }
         if (
             supports_rule_switch(rule)
             and management["classification"] == _RULE_MANAGEMENT_CLASSIFICATION_USER
-            and not review_reasons
+            and not blocking_review_reasons
         ):
             candidate_rule_ids.add(rule.rule_id)
 
@@ -533,6 +543,7 @@ class FirewallaRuleManager(FirewallaBaseManager):
 
     async def async_get_runtime_inventory_response(self) -> dict[str, object]:
         """Return the current runtime inventory data and markdown view."""
+        # pylint: disable=import-outside-toplevel
         from ..helpers.runtime_inventory import (
             build_runtime_inventory_report,
             render_runtime_inventory_markdown,

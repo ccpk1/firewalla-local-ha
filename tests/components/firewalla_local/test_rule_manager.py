@@ -112,8 +112,8 @@ def _build_manager(
     return manager, coordinator, update_rule
 
 
-def test_get_switch_candidate_rule_ids_filters_non_user_or_unreadable_rules() -> None:
-    """Test candidate filtering keeps only readable user-managed switch rules."""
+def test_get_switch_candidate_rule_ids_filters_non_user_rules() -> None:
+    """Test candidate filtering keeps supported user-managed switch rules."""
     candidate_rule = _build_rule("744")
     system_managed_rule = _build_rule("745", target="games", target_name="games")
     unnamed_network_rule = _build_rule(
@@ -127,13 +127,31 @@ def test_get_switch_candidate_rule_ids_filters_non_user_or_unreadable_rules() ->
         action="allow",
         target="TL-56d856bb-efdc-4894-8e5f-c483555e09f6",
         target_name=None,
-        applies_to=(),
+        applies_to=("caddy-int",),
+    )
+    ip_rule = _build_rule(
+        "748",
+        action="allow",
+        target="192.168.200.124",
+        target_type="ip",
+        target_name=None,
+        applies_to=("VLAN60 IOT",),
+    )
+    remote_port_rule = _build_rule(
+        "749",
+        action="allow",
+        target="20002",
+        target_type="remotePort",
+        target_name=None,
+        applies_to=("xtool-d1",),
     )
     snapshot = _build_snapshot(
         candidate_rule,
         system_managed_rule,
         unnamed_network_rule,
         target_list_rule,
+        ip_rule,
+        remote_port_rule,
     )
     manager, _, _ = _build_manager(snapshot)
 
@@ -144,14 +162,22 @@ def test_get_switch_candidate_rule_ids_filters_non_user_or_unreadable_rules() ->
                 {**system_managed_rule.raw_update_payload, "method": "auto"},
                 unnamed_network_rule.raw_update_payload,
                 target_list_rule.raw_update_payload,
+                ip_rule.raw_update_payload,
+                remote_port_rule.raw_update_payload,
             ]
         },
         snapshot,
     )
 
-    assert manager.get_switch_candidate_rule_ids() == {"744"}
+    assert manager.get_switch_candidate_rule_ids() == {"744", "747", "748", "749"}
     assert manager.get_switch_candidate_choices() == {
-        "744": "[744] block category social for AV_SMART_TV (enabled)"
+        "744": "[744] block category social for AV_SMART_TV (enabled)",
+        "747": (
+            "[747] allow category TL-56d856bb-efdc-4894-8e5f-c483555e09f6 "
+            "for caddy-int (enabled)"
+        ),
+        "748": "[748] allow ip 192.168.200.124 for VLAN60 IOT (enabled)",
+        "749": "[749] allow remotePort 20002 for xtool-d1 (enabled)",
     }
 
 

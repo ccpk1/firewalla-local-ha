@@ -25,7 +25,7 @@ ORPHAN_POLICY_RETAIN_UNAVAILABLE_UNTIL_DESELECTED: Final = (
 class FirewallaSystemManager(FirewallaBaseManager):
     """Own shared entry-scoped lifecycle and device behavior."""
 
-    orphan_policy: Final = ORPHAN_POLICY_RETAIN_UNAVAILABLE_UNTIL_DESELECTED
+    ORPHAN_POLICY: Final = ORPHAN_POLICY_RETAIN_UNAVAILABLE_UNTIL_DESELECTED
 
     def build_device_info(self) -> DeviceInfo:
         """Build the license-anchored device entry for this config entry."""

@@ -723,6 +723,10 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
         "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)",
         "737": "[737] allow dns spotify.com for KADEN's Devices (KADEN) (enabled)",
         "740": "[740] block category social for KADEN's Devices (KADEN) (enabled)",
+        "742": (
+            "[742] allow category TL-56d856bb-efdc-4894-8e5f-c483555e09f6 "
+            "for KADEN's Devices (KADEN) (enabled)"
+        ),
         "743": "[743] block network VLAN10 CORE for KADEN's Devices (KADEN) (enabled)",
     }
 
@@ -949,5 +953,10 @@ async def test_options_flow_uses_manager_candidate_logic_for_rule_choices() -> N
     field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
 
     assert field.options == {
-        "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)"
+        "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)",
+        "742": (
+            "[742] allow category Streaming allow list "
+            "[TL-56d856bb-efdc-4894-8e5f-c483555e09f6] "
+            "for KADEN's Devices (KADEN) (enabled)"
+        ),
     }

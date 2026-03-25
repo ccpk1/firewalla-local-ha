@@ -107,7 +107,7 @@ def test_build_runtime_inventory_report() -> None:
     assert report["summary"]["system_managed_rule_count"] == 1
     assert report["summary"]["visible_rule_count"] == 2
     assert report["summary"]["visible_enabled_rule_count"] == 2
-    assert report["summary"]["rule_switch_candidate_count"] == 0
+    assert report["summary"]["rule_switch_candidate_count"] == 1
     assert report["summary"]["rules_needing_review_count"] == 1
     assert report["summary"]["target_list_reference_count"] == 1
     assert report["groups"][0]["name"] == "AV_SMART_TV"
@@ -152,7 +152,45 @@ def test_build_runtime_inventory_report() -> None:
     assert report["rules"][0]["label"] == (
         "block internet for KADEN's Devices (KADEN) (enabled)"
     )
-    assert not report["rule_switch_candidates"]
+    assert report["rule_switch_candidates"] == [
+        {
+            "action": "allow",
+            "applies_to": [],
+            "direction": "outbound",
+            "enabled": True,
+            "expire_seconds": None,
+            "expires_at": None,
+            "activated_time": None,
+            "updated_time": None,
+            "last_activated_time": None,
+            "auto_delete_when_expires": None,
+            "dnsmasq_only": None,
+            "is_temporary": False,
+            "label": "allow category TL-deadbeef (enabled)",
+            "management": {
+                "classification": "user_managed",
+                "reasons": [],
+            },
+            "matching": {
+                "has_readable_target_name": False,
+                "kind": "target_list",
+                "references_target_list": True,
+            },
+            "purpose": None,
+            "raw_extras": {},
+            "review_reasons": [
+                "missing_readable_target_name",
+                "target_list_reference",
+                "missing_target_list_name",
+            ],
+            "rule_id": "737",
+            "scope": [],
+            "tag_refs": [],
+            "target": "TL-deadbeef",
+            "target_name": None,
+            "target_type": "category",
+        }
+    ]
     assert report["user_managed_rules"] == [
         {
             "action": "block",

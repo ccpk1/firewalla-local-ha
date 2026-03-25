@@ -75,7 +75,7 @@ def test_format_policy_rule_name_hides_internal_qos_uuid() -> None:
 
 
 def test_supports_rule_switch_excludes_opaque_translation_list_categories() -> None:
-    """Test unnamed TL category targets are not offered as switches."""
+    """Test TL category targets can back switches even without a resolved name."""
     rule = FirewallaPolicyRule(
         rule_id="3",
         action="allow",
@@ -88,7 +88,40 @@ def test_supports_rule_switch_excludes_opaque_translation_list_categories() -> N
         target_name=None,
     )
 
-    assert supports_rule_switch(rule) is False
+    assert supports_rule_switch(rule) is True
+
+
+def test_supports_rule_switch_accepts_ip_rules() -> None:
+    """Test IP rules can back switches."""
+    rule = FirewallaPolicyRule(
+        rule_id="8",
+        action="allow",
+        target="192.168.200.124",
+        target_type="ip",
+        direction="outbound",
+        enabled=True,
+        purpose=None,
+        scope=(),
+        applies_to=("VLAN60 IOT",),
+    )
+
+    assert supports_rule_switch(rule) is True
+
+
+def test_supports_rule_switch_accepts_remote_port_rules() -> None:
+    """Test remote-port rules can back switches."""
+    rule = FirewallaPolicyRule(
+        rule_id="9",
+        action="allow",
+        target="20002",
+        target_type="remotePort",
+        direction="outbound",
+        enabled=True,
+        purpose=None,
+        scope=(),
+    )
+
+    assert supports_rule_switch(rule) is True
 
 
 def test_supports_rule_switch_accepts_named_network_rules() -> None:

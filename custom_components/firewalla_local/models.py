@@ -13,8 +13,10 @@ from .const import (
     RULE_TARGET_TAG,
     RULE_TARGET_TYPE_CATEGORY,
     RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_IP,
     RULE_TARGET_TYPE_MAC,
     RULE_TARGET_TYPE_NETWORK,
+    RULE_TARGET_TYPE_REMOTE_PORT,
 )
 
 _RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
@@ -304,6 +306,18 @@ def supports_rule_switch(rule: FirewallaPolicyRule) -> bool:
             and rule.purpose is None
         )
 
+    if rule.target_type == RULE_TARGET_TYPE_IP:
+        return (
+            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
+            and rule.purpose is None
+        )
+
+    if rule.target_type == RULE_TARGET_TYPE_REMOTE_PORT:
+        return (
+            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
+            and rule.purpose is None
+        )
+
     if rule.target_type == RULE_TARGET_TYPE_NETWORK:
         return (
             rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
@@ -312,16 +326,10 @@ def supports_rule_switch(rule: FirewallaPolicyRule) -> bool:
         )
 
     if rule.target_type == RULE_TARGET_TYPE_CATEGORY:
-        if (
-            rule.action not in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
-            or rule.purpose is not None
-        ):
-            return False
-
-        if rule.target_name:
-            return True
-
-        return not rule.target.startswith(_TARGET_LIST_PREFIX)
+        return (
+            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
+            and rule.purpose is None
+        )
 
     return False
 
