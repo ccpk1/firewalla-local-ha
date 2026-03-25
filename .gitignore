@@ -11,3 +11,6 @@ build/
 etp.private.pem
 etp.public.pem
 *.pyc
+
+# Generated support exports
+utils/exports/*.txt
