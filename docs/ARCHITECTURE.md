@@ -360,6 +360,14 @@ Rules:
 - groups, users, networks, tags, and targets may inform entity behavior but are not automatically entity types themselves
 - rule-backed pause actions are service-driven unless a later architecture decision explicitly introduces a native entity control for them
 
+Switch-enabled rule policy:
+
+- switch eligibility must be defined through one manager-owned logic path
+- the same switch-candidate policy must drive live manager behavior, options-flow fallback behavior, and runtime inventory reporting
+- only a subset of Firewalla rules should be switch-enabled because the integration is intentionally limited to rule shapes that behave like stable user-managed on or off controls
+- Firewalla-managed, temporary, auto-expiring, or otherwise non-persistent rule shapes must remain outside the switch surface
+- user-facing documentation may describe this as a supported subset, but the exact filtering logic remains an internal manager contract
+
 Shared entity rules:
 
 - `custom_components/firewalla_local/entity.py` is a required core file for the first multi-platform runtime buildout

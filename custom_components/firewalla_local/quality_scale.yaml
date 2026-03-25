@@ -3,8 +3,8 @@ rules:
   action-setup: done
   appropriate-polling: done
   brands:
-    status: todo
-    comment: Add branded assets before release.
+    status: done
+    comment: Custom integration brand assets are shipped in the integration package under brand/ per current Home Assistant guidance.
   common-modules: done
   config-flow-test-coverage:
     status: done
@@ -14,11 +14,11 @@ rules:
   docs-actions: done
   docs-high-level-description: done
   docs-installation-instructions:
-    status: todo
-    comment: Publish user-facing installation steps covering local pairing, key generation, options flow behavior, and the initial sensor and switch surfaces.
+    status: done
+    comment: README and USER_GUIDE now document HACS installation, QR-based setup, and the initial runtime surfaces.
   docs-removal-instructions:
-    status: todo
-    comment: Add removal instructions once the integration is installable by users.
+    status: done
+    comment: USER_GUIDE now documents config-entry removal and HACS repository removal.
   entity-event-setup:
     status: exempt
     comment: The switch platform is coordinator-based and does not subscribe to push events.
@@ -37,8 +37,8 @@ rules:
     comment: Runtime inventory and pause_rule validate entry scope, duration, and rule targets with specific service errors.
   config-entry-unloading: done
   docs-data-update:
-    status: todo
-    comment: Document the runtime snapshot shape, polling behavior, and the no-local-cache storage contract in user-facing docs rather than only architecture notes.
+    status: done
+    comment: USER_GUIDE now documents local polling, refresh cadence, optimistic updates, and the no-custom-cache runtime contract.
   entity-unavailable: done
   log-when-unavailable:
     status: done
@@ -53,8 +53,8 @@ rules:
   devices: done
   diagnostics: done
   discovery:
-    status: todo
-    comment: Add discovery if Firewalla supports a reliable discovery mechanism.
+    status: exempt
+    comment: No reliable local discovery contract has been confirmed for Firewalla Local.
   entity-category:
     status: done
     comment: Diagnostic system-monitoring sensors use the diagnostic category while the rule-backed switch remains a primary control entity.

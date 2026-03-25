@@ -14,8 +14,8 @@ from ..const import (
     DEFAULT_GROUP_POLL_ATTEMPTS,
     DEFAULT_GROUP_POLL_INTERVAL,
     DEFAULT_PAIRING_DEVICE_NAME,
-    FIREWALLA_APP_ID,
-    FIREWALLA_APP_SECRET,
+    FIREWALLA_PROTOCOL_CLIENT_ID,
+    FIREWALLA_PROTOCOL_CLIENT_KEY,
 )
 from .crypto import (
     aes256_cbc_decrypt_from_base64,
@@ -117,8 +117,8 @@ def build_login_payload(assertion_name: str, public_pem: str) -> dict[str, objec
             "name": assertion_name,
             "info": {"name": "circle"},
             "publicKey": public_pem,
-            "appId": FIREWALLA_APP_ID,
-            "appSecret": FIREWALLA_APP_SECRET,
+            "appId": FIREWALLA_PROTOCOL_CLIENT_ID,
+            "appSecret": FIREWALLA_PROTOCOL_CLIENT_KEY,
             "signature": "",
         }
     }

@@ -16,8 +16,8 @@ from aiohttp.client_exceptions import ClientError
 
 from ..const import (
     DEFAULT_INIT_TARGET,
-    FIREWALLA_APP_ID,
-    FIREWALLA_APP_VERSION,
+    FIREWALLA_PROTOCOL_CLIENT_ID,
+    FIREWALLA_PROTOCOL_CLIENT_VERSION,
 )
 from ..models import (
     FirewallaPolicyRule,
@@ -212,11 +212,11 @@ class FirewallaApiClient:
                 },
                 "appInfo": {
                     "deviceName": self.device_name,
-                    "appID": FIREWALLA_APP_ID,
+                    "appID": FIREWALLA_PROTOCOL_CLIENT_ID,
                     "platform": sys.platform,
                     "timezone": timezone_name,
                     "language": _FWMESSAGE_LANGUAGE_ENGLISH,
-                    "version": FIREWALLA_APP_VERSION,
+                    "version": FIREWALLA_PROTOCOL_CLIENT_VERSION,
                     "eid": self.eid,
                 },
                 "compressMode": 1,

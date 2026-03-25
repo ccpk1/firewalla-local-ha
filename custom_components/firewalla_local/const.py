@@ -72,11 +72,11 @@ APP_GROUP_ENDPOINT_CANDIDATES: Final = (
     "/ept/group/me",
     "/ept/groups/me",
 )
-FIREWALLA_APP_ID: Final = "com.rottiesoft.circle"
-FIREWALLA_APP_SECRET: Final = "fbb05afa-9145-41f1-8076-9de8be56f104"
-FIREWALLA_APP_VERSION: Final = "1.51.84"
+FIREWALLA_PROTOCOL_CLIENT_ID: Final = "com.rottiesoft.circle"
+FIREWALLA_PROTOCOL_CLIENT_KEY: Final = "fbb05afa-9145-41f1-8076-9de8be56f104"
+FIREWALLA_PROTOCOL_CLIENT_VERSION: Final = "1.51.84"
 
-DEFAULT_UPDATE_INTERVAL: Final = timedelta(minutes=1)
+DEFAULT_UPDATE_INTERVAL: Final = timedelta(minutes=3)
 DEFAULT_GROUP_POLL_ATTEMPTS: Final = 10
 DEFAULT_GROUP_POLL_INTERVAL: Final = 3.0
 DEFAULT_INIT_TARGET: Final = "0.0.0.0"
