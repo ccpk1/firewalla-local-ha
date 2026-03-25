@@ -47,7 +47,6 @@ from .models import (
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     format_policy_rule_label,
-    supports_rule_switch,
 )
 
 _STEP_ID_INIT: Final = "init"
@@ -309,11 +308,7 @@ class FirewallaOptionsFlow(OptionsFlow):
         if snapshot is None:
             return {}
 
-        return {
-            rule.rule_id: _format_rule_option(rule)
-            for rule in sorted(snapshot.policy_rules, key=lambda rule: rule.rule_id)
-            if supports_rule_switch(rule)
-        }
+        return FirewallaRuleManager.get_switch_candidate_choices_for_snapshot(snapshot)
 
     def _get_stored_rule_templates(self) -> dict[str, FirewallaRuleTemplate]:
         """Return persisted rule templates keyed by source rule ID."""
@@ -361,11 +356,9 @@ class FirewallaOptionsFlow(OptionsFlow):
         if snapshot is None:
             return {}
 
-        return {
-            rule.rule_id: FirewallaRuleTemplate.from_rule(rule)
-            for rule in snapshot.policy_rules
-            if supports_rule_switch(rule)
-        }
+        return FirewallaRuleManager.get_switch_candidate_templates_for_snapshot(
+            snapshot
+        )
 
     async def async_step_init(
         self, user_input: dict[str, object] | None = None

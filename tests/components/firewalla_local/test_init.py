@@ -62,6 +62,11 @@ def _mock_snapshot() -> FirewallaRuntimeSnapshot:
     )
 
 
+def _mock_runtime_payload() -> dict[str, object]:
+    """Return a representative raw init payload for setup and refresh tests."""
+    return {"policyRules": []}
+
+
 async def test_setup_entry(hass: HomeAssistant) -> None:
     """Test setting up a provisioned Firewalla entry."""
     entry = MockConfigEntry(
@@ -78,9 +83,15 @@ async def test_setup_entry(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -110,9 +121,15 @@ async def test_setup_entry_normalizes_local_ip_to_host(hass: HomeAssistant) -> N
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -138,7 +155,7 @@ async def test_setup_entry_raises_auth_failed(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
 
     with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
+        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
         new=AsyncMock(side_effect=FirewallaAuthError("unauthorized")),
     ):
         assert not await hass.config_entries.async_setup(entry.entry_id)
@@ -164,9 +181,15 @@ async def test_coordinator_logs_unavailability_once_and_recovery(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -174,15 +197,22 @@ async def test_coordinator_logs_unavailability_once_and_recovery(
     runtime_data = entry.runtime_data
     caplog.set_level(logging.INFO, logger="custom_components.firewalla_local.const")
 
-    with patch.object(
-        runtime_data.client,
-        "async_get_runtime_snapshot",
-        AsyncMock(
-            side_effect=[
-                FirewallaConnectionError("offline"),
-                FirewallaConnectionError("offline"),
-                _mock_snapshot(),
-            ]
+    with (
+        patch.object(
+            runtime_data.client,
+            "async_get_runtime_init_payload",
+            AsyncMock(
+                side_effect=[
+                    FirewallaConnectionError("offline"),
+                    FirewallaConnectionError("offline"),
+                    _mock_runtime_payload(),
+                ]
+            ),
+        ),
+        patch.object(
+            runtime_data.client,
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
         ),
     ):
         await runtime_data.coordinator.async_refresh()
@@ -222,9 +252,15 @@ async def test_get_runtime_inventory_service_returns_markdown(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -274,9 +310,15 @@ async def test_get_runtime_inventory_service_uses_single_loaded_entry(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -324,9 +366,15 @@ async def test_get_runtime_inventory_service_accepts_entry_name(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -356,6 +404,107 @@ async def test_get_runtime_inventory_service_accepts_entry_name(
     assert response["config_entry_id"] == entry.entry_id
 
 
+async def test_setup_populates_raw_payload_for_live_rule_filtering(
+    hass: HomeAssistant,
+) -> None:
+    """Test setup stores the raw payload used by live rule selection."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    runtime_payload = {
+        "policyRules": [
+            {
+                "pid": "639",
+                "action": "allow",
+                "target": "chrome.cloudflare-dns.com",
+                "target_name": "chrome.cloudflare-dns.com",
+                "type": "dns",
+                "direction": "outbound",
+                "disabled": 0,
+            },
+            {
+                "pid": "650",
+                "action": "block",
+                "target": "vin15.pbs.ovhnextmillmedia.com",
+                "target_name": "vin15.pbs.ovhnextmillmedia.com",
+                "type": "dns",
+                "direction": "bidirection",
+                "disabled": 0,
+                "method": "auto",
+                "alarm_type": "ALARM_INTEL",
+                "blockby": "fastdns",
+                "category": "intel",
+                "reason": "ALARM_INTEL",
+            },
+        ]
+    }
+    runtime_snapshot = FirewallaRuntimeSnapshot(
+        system_info=FirewallaSystemInfo(
+            host="192.168.200.1",
+            name="Firewalla",
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        policy_rules=(
+            FirewallaPolicyRule(
+                rule_id="639",
+                action="allow",
+                target="chrome.cloudflare-dns.com",
+                target_type="dns",
+                direction="outbound",
+                enabled=True,
+                purpose=None,
+                scope=(),
+                target_name="chrome.cloudflare-dns.com",
+                raw_update_payload=dict(runtime_payload["policyRules"][0]),
+            ),
+            FirewallaPolicyRule(
+                rule_id="650",
+                action="block",
+                target="vin15.pbs.ovhnextmillmedia.com",
+                target_type="dns",
+                direction="bidirection",
+                enabled=True,
+                purpose=None,
+                scope=(),
+                target_name="vin15.pbs.ovhnextmillmedia.com",
+                raw_update_payload=dict(runtime_payload["policyRules"][1]),
+            ),
+        ),
+        exception_rule_count=0,
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=runtime_payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=runtime_snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.coordinator.last_init_payload == runtime_payload
+    assert entry.runtime_data.rule_manager.get_switch_candidate_choices() == {
+        "639": "[639] allow dns chrome.cloudflare-dns.com (enabled)"
+    }
+
+
 async def test_get_runtime_inventory_service_rejects_unknown_entry(
     hass: HomeAssistant,
 ) -> None:
@@ -374,9 +523,15 @@ async def test_get_runtime_inventory_service_rejects_unknown_entry(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -422,9 +577,15 @@ async def test_get_runtime_inventory_service_requires_selector_with_multiple_ent
     first_entry.add_to_hass(hass)
     second_entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_mock_snapshot()),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
     ):
         assert await hass.config_entries.async_setup(first_entry.entry_id)
         if second_entry.state is ConfigEntryState.NOT_LOADED:

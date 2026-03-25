@@ -28,6 +28,9 @@ from custom_components.firewalla_local.const import (
     DEFAULT_FIREWALLA_HOST,
     DOMAIN,
 )
+from custom_components.firewalla_local.helpers.runtime_inventory import (
+    build_runtime_inventory_report,
+)
 from custom_components.firewalla_local.managers import FirewallaRuleManager
 from custom_components.firewalla_local.models import (
     FirewallaPolicyRule,
@@ -757,6 +760,200 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
             }
         ],
     }
+
+
+async def test_options_flow_fallback_excludes_system_managed_rules(hass) -> None:
+    """Test the snapshot fallback still excludes system-managed rules."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_SELECTED_RULE_IDS: []},
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            data=FirewallaRuntimeSnapshot(
+                system_info=FirewallaSystemInfo(
+                    host="fire.walla",
+                    name="Firewalla",
+                    model="gold",
+                    serial_number="serial-123",
+                    software_version="1.0.0",
+                ),
+                policy_rules=(
+                    FirewallaPolicyRule(
+                        rule_id="639",
+                        action="allow",
+                        target="chrome.cloudflare-dns.com",
+                        target_type="dns",
+                        direction="outbound",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=(),
+                        target_name="chrome.cloudflare-dns.com",
+                        raw_update_payload={
+                            "pid": "639",
+                            "action": "allow",
+                            "target": "chrome.cloudflare-dns.com",
+                            "target_name": "chrome.cloudflare-dns.com",
+                            "type": "dns",
+                            "direction": "outbound",
+                            "disabled": 0,
+                            "notes": (
+                                "Device Kadens Chromebook (192.168.255.159) "
+                                "accessed chrome.cloudflare-dns.com on ."
+                            ),
+                        },
+                    ),
+                    FirewallaPolicyRule(
+                        rule_id="641",
+                        action="block",
+                        target="vin17.pbs.ovhnextmillmedia.com",
+                        target_type="dns",
+                        direction="bidirection",
+                        enabled=True,
+                        purpose=None,
+                        scope=(),
+                        tag_refs=(),
+                        target_name="vin17.pbs.ovhnextmillmedia.com",
+                        raw_update_payload={
+                            "pid": "641",
+                            "action": "block",
+                            "target": "vin17.pbs.ovhnextmillmedia.com",
+                            "target_name": "vin17.pbs.ovhnextmillmedia.com",
+                            "type": "dns",
+                            "direction": "bidirection",
+                            "disabled": 0,
+                            "method": "auto",
+                            "alarm_type": "ALARM_INTEL",
+                            "blockby": "fastdns",
+                            "category": "intel",
+                            "reason": "ALARM_INTEL",
+                        },
+                    ),
+                ),
+                exception_rule_count=0,
+            )
+        )
+    )
+    entry.add_to_hass(hass)
+
+    options_flow = FirewallaOptionsFlow(entry)
+    preview_result = await options_flow.async_step_init()
+    field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
+
+    assert field.options == {
+        "639": "[639] allow dns chrome.cloudflare-dns.com (enabled)"
+    }
+
+
+async def test_options_flow_fallback_matches_runtime_inventory_candidates(
+    hass,
+) -> None:
+    """Test the snapshot fallback matches runtime inventory candidate decisions."""
+    payload = {
+        "policyRules": [
+            {
+                "pid": "639",
+                "action": "allow",
+                "target": "chrome.cloudflare-dns.com",
+                "target_name": "chrome.cloudflare-dns.com",
+                "type": "dns",
+                "direction": "outbound",
+                "disabled": 0,
+                "notes": (
+                    "Device Kadens Chromebook (192.168.255.159) accessed "
+                    "chrome.cloudflare-dns.com on ."
+                ),
+            },
+            {
+                "pid": "641",
+                "action": "block",
+                "target": "vin17.pbs.ovhnextmillmedia.com",
+                "target_name": "vin17.pbs.ovhnextmillmedia.com",
+                "type": "dns",
+                "direction": "bidirection",
+                "disabled": 0,
+                "method": "auto",
+                "alarm_type": "ALARM_INTEL",
+                "blockby": "fastdns",
+                "category": "intel",
+                "reason": "ALARM_INTEL",
+            },
+        ]
+    }
+    snapshot = FirewallaRuntimeSnapshot(
+        system_info=FirewallaSystemInfo(
+            host="fire.walla",
+            name="Firewalla",
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        policy_rules=(
+            FirewallaPolicyRule(
+                rule_id="639",
+                action="allow",
+                target="chrome.cloudflare-dns.com",
+                target_type="dns",
+                direction="outbound",
+                enabled=True,
+                purpose=None,
+                scope=(),
+                tag_refs=(),
+                target_name="chrome.cloudflare-dns.com",
+                raw_update_payload=payload["policyRules"][0],
+            ),
+            FirewallaPolicyRule(
+                rule_id="641",
+                action="block",
+                target="vin17.pbs.ovhnextmillmedia.com",
+                target_type="dns",
+                direction="bidirection",
+                enabled=True,
+                purpose=None,
+                scope=(),
+                tag_refs=(),
+                target_name="vin17.pbs.ovhnextmillmedia.com",
+                raw_update_payload=payload["policyRules"][1],
+            ),
+        ),
+        exception_rule_count=0,
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_SELECTED_RULE_IDS: []},
+    )
+    entry.runtime_data = SimpleNamespace(coordinator=SimpleNamespace(data=snapshot))
+    entry.add_to_hass(hass)
+
+    options_flow = FirewallaOptionsFlow(entry)
+    option_ids = list(options_flow._get_rule_choices())
+    report = build_runtime_inventory_report(payload, snapshot.policy_rules)
+    report_ids = [
+        candidate["rule_id"] for candidate in report["rule_switch_candidates"]
+    ]
+
+    assert option_ids == report_ids == ["639"]
 
 
 async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:

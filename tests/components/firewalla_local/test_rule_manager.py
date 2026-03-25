@@ -112,8 +112,8 @@ def _build_manager(
     return manager, coordinator, update_rule
 
 
-def test_get_switch_candidate_rule_ids_filters_non_user_rules() -> None:
-    """Test candidate filtering keeps supported user-managed switch rules."""
+def test_get_switch_candidate_rule_ids_filters_system_managed_rules() -> None:
+    """Test candidate filtering excludes only system-managed rules."""
     candidate_rule = _build_rule("744")
     system_managed_rule = _build_rule("745", target="games", target_name="games")
     unnamed_network_rule = _build_rule(
@@ -169,9 +169,19 @@ def test_get_switch_candidate_rule_ids_filters_non_user_rules() -> None:
         snapshot,
     )
 
-    assert manager.get_switch_candidate_rule_ids() == {"744", "747", "748", "749"}
+    assert manager.get_switch_candidate_rule_ids() == {
+        "744",
+        "746",
+        "747",
+        "748",
+        "749",
+    }
     assert manager.get_switch_candidate_choices() == {
         "744": "[744] block category social for AV_SMART_TV (enabled)",
+        "746": (
+            "[746] block network 5799d896-5e0f-40a5-a776-38a5d7746204 "
+            "for AV_SMART_TV (enabled)"
+        ),
         "747": (
             "[747] allow category TL-56d856bb-efdc-4894-8e5f-c483555e09f6 "
             "for caddy-int (enabled)"

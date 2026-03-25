@@ -57,6 +57,11 @@ from custom_components.firewalla_local.models import (
 )
 
 
+def _runtime_payload() -> dict[str, object]:
+    """Return a minimal raw init payload for coordinator setup tests."""
+    return {"policyRules": []}
+
+
 def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnapshot:
     """Return a runtime snapshot with system-monitoring data."""
     return FirewallaRuntimeSnapshot(
@@ -134,9 +139,15 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_snapshot_with_monitoring(with_speed_test=True)),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_monitoring(with_speed_test=True),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -227,9 +238,15 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_snapshot_with_monitoring(with_speed_test=False)),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_monitoring(with_speed_test=False),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

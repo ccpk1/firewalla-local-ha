@@ -322,7 +322,6 @@ def supports_rule_switch(rule: FirewallaPolicyRule) -> bool:
         return (
             rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
             and rule.purpose is None
-            and rule.target_name is not None
         )
 
     if rule.target_type == RULE_TARGET_TYPE_CATEGORY:

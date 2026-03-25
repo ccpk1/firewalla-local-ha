@@ -5,10 +5,7 @@ from __future__ import annotations
 from typing import Final, TypedDict
 
 from custom_components.firewalla_local.managers.rule_manager import (
-    build_rule_management_info,
-    build_rule_review_reasons,
-    build_rule_switch_candidate_ids,
-    extract_raw_rule_extras,
+    build_switch_rule_evaluations,
 )
 from custom_components.firewalla_local.models import (
     FirewallaPolicyRule,
@@ -351,7 +348,7 @@ def build_runtime_inventory_report(
     raw_networks = payload.get(_RAW_NETWORK_PROFILES_KEY)
     host_count = len(raw_hosts) if isinstance(raw_hosts, list) else 0
     network_count = len(raw_networks) if isinstance(raw_networks, dict) else 0
-    candidate_rule_ids = build_rule_switch_candidate_ids(payload, policy_rules)
+    switch_evaluations = build_switch_rule_evaluations(payload, policy_rules)
 
     rules: list[dict[str, object]] = []
     rules_needing_review: list[dict[str, object]] = []
@@ -363,11 +360,12 @@ def build_runtime_inventory_report(
     dap_rules: list[dict[str, object]] = []
     family_rules: list[dict[str, object]] = []
     for rule in policy_rules:
-        raw_rule = raw_rule_index.get(rule.rule_id, {})
-        review_reasons = build_rule_review_reasons(rule, raw_rule)
-        raw_extras = extract_raw_rule_extras(raw_rule)
-        management = build_rule_management_info(raw_extras)
+        evaluation = switch_evaluations[rule.rule_id]
+        review_reasons = list(evaluation.review_reasons)
+        raw_extras = evaluation.raw_extras
+        management = evaluation.management
         matching = _build_rule_matching_info(rule)
+        raw_rule = raw_rule_index.get(rule.rule_id, {})
         raw_tag_refs = raw_rule.get(_RAW_RULE_TAG_REFS_KEY)
         tag_refs = (
             [tag_ref for tag_ref in raw_tag_refs if isinstance(tag_ref, str)]
@@ -413,7 +411,7 @@ def build_runtime_inventory_report(
             visible_rules.append(rule_record)
             if rule.enabled:
                 visible_enabled_rules.append(rule_record)
-        if rule.rule_id in candidate_rule_ids:
+        if evaluation.is_switch_rule:
             rule_switch_candidates.append(rule_record)
         if review_reasons:
             rules_needing_review.append(rule_record)

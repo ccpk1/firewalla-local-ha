@@ -75,6 +75,11 @@ def _snapshot(enabled: bool = True) -> FirewallaRuntimeSnapshot:
     )
 
 
+def _runtime_payload() -> dict[str, object]:
+    """Return a minimal raw init payload for coordinator setup tests."""
+    return {"policyRules": []}
+
+
 async def test_pause_rule_service_updates_matching_rule_optimistically(
     hass: HomeAssistant,
 ) -> None:
@@ -113,11 +118,7 @@ async def test_pause_rule_service_updates_matching_rule_optimistically(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot()),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -201,11 +202,7 @@ async def test_pause_rule_service_rejects_invalid_duration(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot()),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -266,11 +263,7 @@ async def test_pause_rule_service_supports_indefinite_pause(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot()),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -339,11 +332,7 @@ async def test_pause_rule_service_supports_resume_at(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot()),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -415,11 +404,7 @@ async def test_pause_rule_service_rejects_duration_and_resume_at(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot()),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -506,11 +491,7 @@ async def test_pause_rule_service_accepts_config_entry_name(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot()),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -586,11 +567,7 @@ async def test_pause_rule_service_rejects_unknown_rule_target(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot()),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -650,11 +627,7 @@ async def test_resume_rule_service_reenables_matching_rule(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
-        ),
-        patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(return_value=_snapshot(enabled=False)),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",

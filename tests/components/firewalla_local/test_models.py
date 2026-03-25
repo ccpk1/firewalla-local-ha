@@ -124,8 +124,8 @@ def test_supports_rule_switch_accepts_remote_port_rules() -> None:
     assert supports_rule_switch(rule) is True
 
 
-def test_supports_rule_switch_accepts_named_network_rules() -> None:
-    """Test readable user-managed network rules can back switches."""
+def test_supports_rule_switch_accepts_network_rules_without_names() -> None:
+    """Test network rules can back switches even without resolved names."""
     rule = FirewallaPolicyRule(
         rule_id="7",
         action="block",
@@ -135,7 +135,7 @@ def test_supports_rule_switch_accepts_named_network_rules() -> None:
         enabled=True,
         purpose=None,
         scope=(),
-        target_name="VLAN10 CORE",
+        target_name=None,
     )
 
     assert supports_rule_switch(rule) is True

@@ -33,7 +33,6 @@
     "files.exclude": {
       "**/node_modules": true,
       "**/__pycache__": true,
-      "**/.*": true,
       "**/.mypy_cache": true,
       "**/.pytest_cache": true,
       "**/.ruff_cache": true,

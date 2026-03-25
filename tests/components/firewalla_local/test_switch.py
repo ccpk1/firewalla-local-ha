@@ -90,6 +90,11 @@ def _snapshot_with_rule(
     )
 
 
+def _runtime_payload() -> dict[str, object]:
+    """Return a minimal raw init payload for coordinator setup tests."""
+    return {"policyRules": []}
+
+
 async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -> None:
     """Test the switch disables and re-enables the matched persistent rule."""
     entry = MockConfigEntry(
@@ -125,14 +130,22 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
 
     with (
         patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
             new=AsyncMock(
                 side_effect=[
-                    _snapshot_with_rule("744"),
-                    _snapshot_with_rule("744", enabled=False),
-                    _snapshot_with_rule("744", enabled=True),
+                    _runtime_payload(),
+                    _runtime_payload(),
+                    _runtime_payload(),
                 ]
             ),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=[
+                _snapshot_with_rule("744"),
+                _snapshot_with_rule("744", enabled=False),
+                _snapshot_with_rule("744", enabled=True),
+            ],
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule",
@@ -227,9 +240,15 @@ async def test_selected_rule_switch_is_unavailable_when_rule_is_missing(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_snapshot_with_rule(None)),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule(None),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -270,9 +289,15 @@ async def test_selected_rule_switch_does_not_guess_replacement_rule(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_snapshot_with_rule("999")),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule("999"),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -316,14 +341,16 @@ async def test_selected_rule_switch_exposes_pause_and_notes_attributes(
     pause_until = datetime(2026, 3, 25, 12, 0, tzinfo=UTC).timestamp()
     with (
         patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-            new=AsyncMock(
-                return_value=_snapshot_with_rule(
-                    "744",
-                    enabled=False,
-                    idle_ts=str(pause_until),
-                    notes="Pause for maintenance",
-                )
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule(
+                "744",
+                enabled=False,
+                idle_ts=str(pause_until),
+                notes="Pause for maintenance",
             ),
         ),
         patch(
@@ -378,9 +405,15 @@ async def test_deselecting_all_rules_removes_switch_entities(
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_snapshot",
-        new=AsyncMock(return_value=_snapshot_with_rule("744")),
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule("744"),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

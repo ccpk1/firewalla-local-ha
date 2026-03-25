@@ -60,7 +60,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
     async def _async_update_data(self) -> FirewallaRuntimeSnapshot:
         """Fetch data from Firewalla Local."""
         try:
-            snapshot = await self.client.async_get_runtime_snapshot()
+            payload = await self.client.async_get_runtime_init_payload()
+            self.last_init_payload = payload
+            snapshot = self.client.build_runtime_snapshot(payload)
         except FirewallaAuthError as err:
             raise ConfigEntryAuthFailed(
                 "Firewalla local credentials were rejected"

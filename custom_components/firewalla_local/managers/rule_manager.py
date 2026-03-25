@@ -102,6 +102,33 @@ class RuleManagementInfo(TypedDict):
     reasons: list[str]
 
 
+@dataclass(slots=True, frozen=True)
+class FirewallaSwitchRuleEvaluation:
+    """Single source-of-truth switch eligibility for one live rule."""
+
+    rule: FirewallaPolicyRule
+    raw_extras: dict[str, object]
+    management: RuleManagementInfo
+    review_reasons: tuple[str, ...]
+    is_switch_rule: bool
+
+
+def _build_raw_rule_index(
+    payload: Mapping[str, object],
+) -> dict[str, Mapping[str, object]]:
+    """Return raw rules keyed by PID from one payload."""
+    raw_policy_rules = payload.get(_RAW_POLICY_RULES_KEY)
+    if not isinstance(raw_policy_rules, list):
+        return {}
+
+    return {
+        raw_rule[_RAW_RULE_PID_KEY]: raw_rule
+        for raw_rule in raw_policy_rules
+        if isinstance(raw_rule, dict)
+        and isinstance(raw_rule.get(_RAW_RULE_PID_KEY), str)
+    }
+
+
 def _flatten_policy(value: object) -> object:
     """Flatten nested Firewalla policy values into stable simple values."""
     if isinstance(value, bool):
@@ -143,6 +170,21 @@ def build_rule_management_info(
     raw_extras: Mapping[str, object],
 ) -> RuleManagementInfo:
     """Classify whether a rule appears user-managed or Firewalla-managed."""
+    reasons = _get_system_managed_reasons(raw_extras)
+
+    classification: RuleManagementClassification = (
+        _RULE_MANAGEMENT_CLASSIFICATION_SYSTEM
+        if reasons
+        else _RULE_MANAGEMENT_CLASSIFICATION_USER
+    )
+    return {
+        "classification": classification,
+        "reasons": reasons,
+    }
+
+
+def _get_system_managed_reasons(raw_extras: Mapping[str, object]) -> list[str]:
+    """Return native raw-rule signals that indicate Firewalla-managed ownership."""
     reasons: list[str] = []
 
     if raw_extras.get(_RAW_RULE_METHOD_KEY) == _RAW_RULE_METHOD_AUTO_VALUE:
@@ -160,15 +202,19 @@ def build_rule_management_info(
     if isinstance(notes, str) and _AUTO_CREATED_NOTE_FRAGMENT in notes.casefold():
         reasons.append(_RULE_MANAGEMENT_REASON_AUTO_CREATION_NOTE)
 
-    classification: RuleManagementClassification = (
-        _RULE_MANAGEMENT_CLASSIFICATION_SYSTEM
-        if reasons
-        else _RULE_MANAGEMENT_CLASSIFICATION_USER
-    )
-    return {
-        "classification": classification,
-        "reasons": reasons,
-    }
+    return reasons
+
+
+def is_system_managed_rule(raw_extras: Mapping[str, object]) -> bool:
+    """Return whether direct raw rule attributes mark the rule as system-managed."""
+    return bool(_get_system_managed_reasons(raw_extras))
+
+
+def is_switch_rule_candidate(
+    rule: FirewallaPolicyRule, raw_extras: Mapping[str, object]
+) -> bool:
+    """Return whether one live rule should be exposed as a switch candidate."""
+    return supports_rule_switch(rule) and not is_system_managed_rule(raw_extras)
 
 
 def build_rule_review_reasons(
@@ -210,40 +256,52 @@ def build_rule_switch_candidate_ids(
     policy_rules: tuple[FirewallaPolicyRule, ...],
 ) -> set[str]:
     """Return the rule IDs that are valid switch candidates."""
-    raw_policy_rules = payload.get(_RAW_POLICY_RULES_KEY)
-    raw_rule_index: dict[str, Mapping[str, object]] = {}
-    if isinstance(raw_policy_rules, list):
-        raw_rule_index = {
-            raw_rule[_RAW_RULE_PID_KEY]: raw_rule
-            for raw_rule in raw_policy_rules
-            if isinstance(raw_rule, dict)
-            and isinstance(raw_rule.get(_RAW_RULE_PID_KEY), str)
-        }
+    evaluations = build_switch_rule_evaluations(payload, policy_rules)
+    return {
+        rule_id
+        for rule_id, evaluation in evaluations.items()
+        if evaluation.is_switch_rule
+    }
 
-    candidate_rule_ids: set[str] = set()
+
+def build_switch_rule_evaluations(
+    payload: Mapping[str, object],
+    policy_rules: tuple[FirewallaPolicyRule, ...],
+) -> dict[str, FirewallaSwitchRuleEvaluation]:
+    """Return the authoritative switch-rule evaluation for each live rule."""
+    raw_rule_index = _build_raw_rule_index(payload)
+
+    evaluations: dict[str, FirewallaSwitchRuleEvaluation] = {}
     for rule in policy_rules:
         raw_rule = raw_rule_index.get(rule.rule_id, {})
-        review_reasons = build_rule_review_reasons(rule, raw_rule)
+        review_reasons = tuple(build_rule_review_reasons(rule, raw_rule))
         raw_extras = extract_raw_rule_extras(raw_rule)
         management = build_rule_management_info(raw_extras)
-        blocking_review_reasons = {
-            reason
-            for reason in review_reasons
-            if reason
-            not in {
-                _RULE_REVIEW_REASON_MISSING_READABLE_TARGET_NAME,
-                _RULE_REVIEW_REASON_TARGET_LIST_REFERENCE,
-                _RULE_REVIEW_REASON_MISSING_TARGET_LIST_NAME,
-            }
-        }
-        if (
-            supports_rule_switch(rule)
-            and management["classification"] == _RULE_MANAGEMENT_CLASSIFICATION_USER
-            and not blocking_review_reasons
-        ):
-            candidate_rule_ids.add(rule.rule_id)
+        evaluations[rule.rule_id] = FirewallaSwitchRuleEvaluation(
+            rule=rule,
+            raw_extras=raw_extras,
+            management=management,
+            review_reasons=review_reasons,
+            is_switch_rule=is_switch_rule_candidate(rule, raw_extras),
+        )
 
-    return candidate_rule_ids
+    return evaluations
+
+
+def build_switch_rule_evaluations_for_rules(
+    rules: tuple[FirewallaPolicyRule, ...],
+) -> dict[str, FirewallaSwitchRuleEvaluation]:
+    """Return switch-rule evaluations using the raw payload stored on rules."""
+    return build_switch_rule_evaluations(
+        {
+            _RAW_POLICY_RULES_KEY: [
+                dict(rule.raw_update_payload)
+                for rule in rules
+                if rule.raw_update_payload
+            ]
+        },
+        rules,
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -301,15 +359,13 @@ class FirewallaRuleManager(FirewallaBaseManager):
         if not isinstance(selected_rule_ids, list):
             return ()
 
-        live_rule_index = {
-            rule.rule_id: rule
-            for rule in snapshot.policy_rules
-            if supports_rule_switch(rule)
-        }
+        live_rule_index = (
+            FirewallaRuleManager.get_switch_candidate_templates_for_snapshot(snapshot)
+        )
         return tuple(
-            FirewallaRuleTemplate.from_rule(rule)
+            template
             for rule_id in selected_rule_ids
-            if isinstance(rule_id, str) and (rule := live_rule_index.get(rule_id))
+            if isinstance(rule_id, str) and (template := live_rule_index.get(rule_id))
         )
 
     def handle_refresh(
@@ -343,8 +399,71 @@ class FirewallaRuleManager(FirewallaBaseManager):
         if not rules:
             return set()
         if self._last_payload is None:
-            return {rule.rule_id for rule in rules if supports_rule_switch(rule)}
+            return self.get_switch_candidate_rule_ids_for_rules(rules)
         return build_rule_switch_candidate_ids(self._last_payload, rules)
+
+    @staticmethod
+    def get_switch_candidate_rule_ids_for_rules(
+        rules: tuple[FirewallaPolicyRule, ...],
+    ) -> set[str]:
+        """Return switch candidate IDs using the raw payload stored on rules."""
+        evaluations = build_switch_rule_evaluations_for_rules(rules)
+        return {
+            rule_id
+            for rule_id, evaluation in evaluations.items()
+            if evaluation.is_switch_rule
+        }
+
+    @staticmethod
+    def get_switch_rule_evaluations_for_snapshot(
+        snapshot: FirewallaRuntimeSnapshot,
+    ) -> dict[str, FirewallaSwitchRuleEvaluation]:
+        """Return authoritative switch-rule evaluations for one snapshot."""
+        return build_switch_rule_evaluations_for_rules(snapshot.policy_rules)
+
+    @staticmethod
+    def get_switch_candidate_rules_for_snapshot(
+        snapshot: FirewallaRuntimeSnapshot,
+    ) -> tuple[FirewallaPolicyRule, ...]:
+        """Return snapshot rules that pass the manager-owned candidate policy."""
+        return tuple(
+            sorted(
+                (
+                    evaluation.rule
+                    for evaluation in (
+                        FirewallaRuleManager.get_switch_rule_evaluations_for_snapshot(
+                            snapshot
+                        ).values()
+                    )
+                    if evaluation.is_switch_rule
+                ),
+                key=lambda rule: rule.rule_id,
+            )
+        )
+
+    @staticmethod
+    def get_switch_candidate_choices_for_snapshot(
+        snapshot: FirewallaRuntimeSnapshot,
+    ) -> dict[str, str]:
+        """Return selectable rule choices from a snapshot without a live manager."""
+        return {
+            rule.rule_id: f"[{rule.rule_id}] {format_policy_rule_label(rule)}"
+            for rule in FirewallaRuleManager.get_switch_candidate_rules_for_snapshot(
+                snapshot
+            )
+        }
+
+    @staticmethod
+    def get_switch_candidate_templates_for_snapshot(
+        snapshot: FirewallaRuntimeSnapshot,
+    ) -> dict[str, FirewallaRuleTemplate]:
+        """Return selectable rule templates from a snapshot without a live manager."""
+        return {
+            rule.rule_id: FirewallaRuleTemplate.from_rule(rule)
+            for rule in FirewallaRuleManager.get_switch_candidate_rules_for_snapshot(
+                snapshot
+            )
+        }
 
     def get_switch_candidate_rules(self) -> tuple[FirewallaPolicyRule, ...]:
         """Return live rules that pass the manager-owned candidate policy."""
