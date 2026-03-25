@@ -7,8 +7,8 @@ rules:
     comment: Add branded assets before release.
   common-modules: done
   config-flow-test-coverage:
-    status: todo
-    comment: Expand coverage for reconfigure validation edges, reauth failure paths, and options-flow drift cases while keeping all auth coverage internal-only and fully mocked.
+    status: done
+    comment: Config-flow coverage now includes user cannot-connect handling, reauth failure and wrong-account paths, reconfigure validation, and options-flow drift behavior with all auth tests kept internal-only and fully mocked.
   config-flow: done
   dependency-transparency: done
   docs-actions: done

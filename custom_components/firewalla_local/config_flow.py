@@ -233,6 +233,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 assert pairing_result is not None
                 entry_data, _title = pairing_result
+                await self.async_set_unique_id(entry_data[CONF_LICENSE])
                 self._abort_if_unique_id_mismatch(reason=CONFIG_ERROR_WRONG_ACCOUNT)
                 return self.async_update_reload_and_abort(
                     self._get_reauth_entry(),
@@ -249,14 +250,19 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
         """Handle reconfiguration of an existing entry."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            host = _normalize_host(cast(str, user_input[CONF_HOST]))
-            self.host = host
-            entry = self._get_reconfigure_entry()
-            return self.async_update_reload_and_abort(
-                entry,
-                data_updates={CONF_HOST: host},
-            )
+            try:
+                host = _normalize_host(cast(str, user_input[CONF_HOST]))
+            except ValueError:
+                errors["base"] = CONFIG_ERROR_INVALID_HOST
+            else:
+                self.host = host
+                entry = self._get_reconfigure_entry()
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_HOST: host},
+                )
 
         entry = self._get_reconfigure_entry()
         return self.async_show_form(
@@ -269,6 +275,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                     ): str
                 }
             ),
+            errors=errors,
         )
 
 

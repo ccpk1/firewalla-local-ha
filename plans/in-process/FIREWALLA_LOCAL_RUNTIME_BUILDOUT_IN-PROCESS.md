@@ -36,7 +36,6 @@ Phase 3b status:
 
 Still open and driving the next implementation slice:
 
-- expand config-flow coverage for reconfigure validation edges, reauth failure paths, and options-flow drift cases while keeping all auth coverage internal-only and fully mocked
 - publish user-facing installation, removal, and runtime data-update documentation once the integration is ready for external users
 - add branded assets before release
 - evaluate reliable local discovery only if Firewalla exposes a durable discovery contract
