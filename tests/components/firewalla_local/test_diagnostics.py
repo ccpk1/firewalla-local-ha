@@ -13,6 +13,8 @@ from custom_components.firewalla_local.const import (
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_SELECTED_RULE_IDS,
+    CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DOMAIN,
 )
@@ -72,6 +74,22 @@ async def test_get_config_entry_diagnostics_redacts_entry_data(
                 CONF_AID: "aid-123",
                 CONF_SYMMETRIC_KEY: "symmetric-key",
             },
+            options={
+                CONF_SELECTED_RULE_IDS: ["744"],
+                CONF_SELECTED_RULE_TEMPLATES: [
+                    {
+                        "source_rule_id": "744",
+                        "name": "block social",
+                        "action": "block",
+                        "target": "social",
+                        "target_type": "category",
+                        "scope": [],
+                        "tag_refs": ["tag:17"],
+                        "dnsmasq_only": None,
+                        "use_bf": False,
+                    }
+                ],
+            },
             runtime_data=SimpleNamespace(coordinator=SimpleNamespace(data=_snapshot())),
         ),
     )
@@ -87,6 +105,22 @@ async def test_get_config_entry_diagnostics_redacts_entry_data(
         CONF_AID: "**REDACTED**",
         CONF_SYMMETRIC_KEY: "**REDACTED**",
     }
+    assert diagnostics["entry_options"] == {
+        CONF_SELECTED_RULE_IDS: ["744"],
+        CONF_SELECTED_RULE_TEMPLATES: [
+            {
+                "source_rule_id": "744",
+                "name": "block social",
+                "action": "block",
+                "target": "social",
+                "target_type": "category",
+                "scope": [],
+                "tag_refs": ["tag:17"],
+                "dnsmasq_only": None,
+                "use_bf": False,
+            }
+        ],
+    }
     assert diagnostics["runtime_snapshot"] is not None
 
 
@@ -100,6 +134,7 @@ async def test_get_config_entry_diagnostics_handles_missing_snapshot(
             domain=DOMAIN,
             title="Firewalla",
             data={CONF_LICENSE: "license-123"},
+            options={},
             runtime_data=SimpleNamespace(coordinator=SimpleNamespace(data=None)),
         ),
     )
@@ -108,4 +143,5 @@ async def test_get_config_entry_diagnostics_handles_missing_snapshot(
     entry_data = cast(dict[str, str], diagnostics["entry_data"])
 
     assert entry_data[CONF_LICENSE] == "**REDACTED**"
+    assert diagnostics["entry_options"] == {}
     assert diagnostics["runtime_snapshot"] is None

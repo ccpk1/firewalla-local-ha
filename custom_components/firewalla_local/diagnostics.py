@@ -34,6 +34,7 @@ async def async_get_config_entry_diagnostics(
     """Return diagnostics for a config entry."""
     return {
         "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
+        "entry_options": dict(getattr(entry, "options", {})),
         "runtime_snapshot": (
             asdict(entry.runtime_data.coordinator.data)
             if entry.runtime_data.coordinator.data is not None
