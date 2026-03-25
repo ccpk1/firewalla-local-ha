@@ -1,12 +1,12 @@
 {
   "domain": "firewalla_local",
   "name": "Firewalla Local",
-  "codeowners": ["@your-github-username"],
+  "codeowners": ["@ccpk1"],
   "config_flow": true,
   "documentation": "https://github.com/ccpk1/firewalla-local-ha",
   "integration_type": "device",
   "iot_class": "local_polling",
   "loggers": ["custom_components.firewalla_local"],
   "requirements": ["cryptography>=44.0.0"],
-  "version": "0.0.1"
+  "version": "1.0.0"
 }
