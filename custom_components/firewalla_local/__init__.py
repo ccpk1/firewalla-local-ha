@@ -48,6 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         aid=entry.data[CONF_AID],
         symmetric_key=entry.data[CONF_SYMMETRIC_KEY],
         device_name=DEFAULT_PAIRING_DEVICE_NAME,
+        timezone_name=hass.config.time_zone,
     )
     coordinator = FirewallaDataUpdateCoordinator(hass, entry, client)
     system_manager = FirewallaSystemManager(coordinator, entry, client)

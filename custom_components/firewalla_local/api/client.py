@@ -177,6 +177,7 @@ class FirewallaApiClient:
         aid: str,
         symmetric_key: str,
         device_name: str,
+        timezone_name: str | None = None,
     ) -> None:
         """Initialize the client."""
         self._session = session
@@ -186,6 +187,7 @@ class FirewallaApiClient:
         self.aid = aid
         self.symmetric_key = symmetric_key
         self.device_name = device_name
+        self.timezone_name = timezone_name
 
     def _build_fwmessage(
         self,
@@ -195,7 +197,9 @@ class FirewallaApiClient:
         target: str = DEFAULT_INIT_TARGET,
     ) -> dict[str, object]:
         """Build the Firewalla-style local message envelope."""
-        timezone_name = datetime.now().astimezone().tzname() or _FWMESSAGE_TIMEZONE_UTC
+        timezone_name = self.timezone_name or (
+            datetime.now().astimezone().tzname() or _FWMESSAGE_TIMEZONE_UTC
+        )
         return {
             "mtype": _FWMESSAGE_TYPE_MSG,
             _RAW_MESSAGE_KEY: {
@@ -377,6 +381,36 @@ class FirewallaApiClient:
             value[_RAW_RULE_IDLE_TS_KEY] = idle_ts
         elif _RAW_RULE_IDLE_TS_KEY in value:
             value[_RAW_RULE_IDLE_TS_KEY] = _RAW_RULE_IDLE_TS_EMPTY_VALUE
+
+        await self._async_send_local_message(
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_POLICY_UPDATE,
+                _COMMAND_VALUE_KEY: value,
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+
+    async def async_update_rule_control_only(
+        self,
+        rule_id: str,
+        *,
+        enabled: bool,
+        idle_ts: int | None = None,
+    ) -> None:
+        """Update only the control fields used for pause or resume."""
+        value: dict[str, object] = {
+            _RAW_RULE_ID_KEY: rule_id,
+            _RAW_RULE_DISABLED_KEY: (
+                _RAW_RULE_DISABLED_FALSE_VALUE
+                if enabled
+                else _RAW_RULE_DISABLED_TRUE_VALUE
+            ),
+            _RAW_RULE_UPDATED_TIME_KEY: time.time(),
+            _RAW_RULE_IDLE_TS_KEY: (
+                _RAW_RULE_IDLE_TS_EMPTY_VALUE if enabled or idle_ts is None else idle_ts
+            ),
+        }
 
         await self._async_send_local_message(
             message_type=_COMMAND_MESSAGE_TYPE,

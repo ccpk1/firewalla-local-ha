@@ -54,12 +54,12 @@ rules:
   diagnostics: done
   discovery:
     status: exempt
-    comment: No reliable local discovery contract has been confirmed for Firewalla Local.
+    comment: Auto-discovery (mDNS/DHCP) is omitted due to the firewall's stealth network defaults and generic MAC addresses; we instead leverage its native fire.walla DNS intercept for seamless setup.
   entity-category:
     status: done
     comment: Diagnostic system-monitoring sensors use the diagnostic category while the rule-backed switch remains a primary control entity.
   entity-disabled-by-default:
-    status: exempt
+    status: done
     comment: Entities are only created for rules the user explicitly selects in the options flow.
   entity-translations:
     status: done
@@ -71,8 +71,8 @@ rules:
     status: done
     comment: Rule-backed switch icons and system-monitoring sensor icons are defined in icons.json instead of inline icon strings.
   stale-devices:
-    status: exempt
-    comment: The integration exposes one stable Firewalla device per config entry and does not dynamically remove devices.
+    status: done
+    comment: The integration exposes one stable Firewalla device per config entry with availability rules and does not dynamically remove devices.  It does properly handle lifecyle when the user chooses to items from under management.
 
   # Platinum
   async-dependency:

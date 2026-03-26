@@ -142,6 +142,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             aid=credentials.aid,
             symmetric_key=credentials.symmetric_key,
             device_name=DEFAULT_PAIRING_DEVICE_NAME,
+            timezone_name=self.hass.config.time_zone,
         )
         await client.async_get_system_info()
 
@@ -295,6 +296,17 @@ class FirewallaOptionsFlow(OptionsFlow):
             return rule_manager
         return None
 
+    async def _async_refresh_runtime_state(self) -> None:
+        """Refresh the runtime snapshot before rendering rule choices when possible."""
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return
+
+        coordinator = getattr(runtime_data, "coordinator", None)
+        async_request_refresh = getattr(coordinator, "async_request_refresh", None)
+        if callable(async_request_refresh):
+            await async_request_refresh()
+
     def _get_rule_choices(self) -> dict[str, str]:
         """Return selectable rule IDs from the live coordinator snapshot."""
         if rule_manager := self._get_rule_manager():
@@ -364,6 +376,7 @@ class FirewallaOptionsFlow(OptionsFlow):
         self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
         """Manage rule-selection options."""
+        await self._async_refresh_runtime_state()
         live_rule_choices = self._get_rule_choices()
         missing_rule_choices = self._get_missing_rule_choices(live_rule_choices)
         rule_choices = {**live_rule_choices, **missing_rule_choices}

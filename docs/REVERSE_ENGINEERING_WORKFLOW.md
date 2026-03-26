@@ -244,6 +244,85 @@ The following are confirmed by repository code and live captures.
 | Internet block | `policy:create` when absent | `policy:update` with `disabled: 1` or `policy:delete` | `policy:update` with `disabled: 0` | Example: `Traffic from & to Internet` for `AV_SMART_TV` |
 | Direct DNS allow, device-scoped | existing rule observed only | `policy:update` with `disabled: 1` and `idleTs` for timed pause | inventory confirms same-rule re-enable with cleared `idleTs`; payload not captured in this run | Example: `allow dns dns.google` for Kaden's Chromebook |
 
+## Inventory-confirmed durable rule findings
+
+This section records confirmed live runtime invariants derived from inventory
+comparison and service-driven sparse mutations.
+
+These findings are durable enough to guide implementation, but they are not all
+backed by fresh packet captures in this document. Packet-level findings remain
+in the findings matrix below.
+
+For the long-term interpretation contract, see `docs/RULE_MODEL.md`.
+
+### Shared persistent control invariants
+
+The following rule families now show the same persistent pause or resume model:
+
+- `allow`
+- `block`
+- `disturb`
+- `qos`
+- port-forwarding-flavored `allow`
+
+Observed invariants:
+
+- pause changes the existing rule in place
+- pause sets `enabled = false`
+- pause clears `activated_time`
+- pause preserves `last_activated_time`
+- pause advances `updated_time`
+- pause populates raw `idleTs`
+- resume changes the same rule in place
+- resume sets `enabled = true`
+- resume clears raw `idleTs`
+- resume repopulates `activated_time`
+- resume advances `last_activated_time`
+- resume advances `updated_time`
+- family-specific metadata survives pause and resume unless explicitly changed
+
+### Current temporary-rule interpretation
+
+Current live evidence supports the following distinction:
+
+- `autoDeleteWhenExpires` alone is not enough to mark a rule as temporary
+- the strongest current temporary signature is normalized `is_temporary = true`
+  together with populated expiry metadata
+- reliable expiry indicators include:
+  - `expire_seconds`
+  - `expires_at`
+  - raw `expire`
+
+### Current metadata surfaces
+
+The following metadata groups are now confirmed and should be treated as
+descriptive fields layered on top of shared control semantics.
+
+| Metadata group | Representative fields | Interpretation |
+| --- | --- | --- |
+| Expiry | `expire_seconds`, `expires_at`, raw `expire`, `autoDeleteWhenExpires` | Temporary countdown context or durable timing hints depending on the full rule shape |
+| Schedule | raw `cronTime`, raw `duration` | Recurring active-window metadata on durable advanced rules |
+| Quota | raw `appTimeUsage`, raw `appTimeUsed` | Durable accounting and enforcement metadata |
+| App-backed category | `TLX-fw-*`, `app_name`, `app_uid` | App identity layered on normal `allow` or `block` rule control |
+| Disturb | `disturbLevel`, `disturbMethod.*` | Traffic-shaping metadata for disturb rules |
+| QoS | `trafficDirection`, `priority`, `qdisc`, `rateLimit`, `app_name`, `app_uid` | QoS metadata on durable rules that still pause and resume in place |
+| Port forwarding | `localPort`, `protocol`, `guids`, `userTargetList` | Port-forward context on durable rules that still pause and resume in place |
+
+### App-rule interpretation note
+
+Historical captures recorded an `app_block` action on a grouped app quota rule.
+
+Newer live evidence also shows app-selected rules appearing as ordinary
+category-backed `block` rules using `TLX-fw-*` targets plus `app_name` and
+`app_uid` metadata.
+
+Current interpretation:
+
+- app identity should be treated as metadata, not proof of a separate baseline
+  control family
+- if `app_block` reappears in fresh captures, treat it as a specialized app
+  enforcement shape rather than assuming all app rules use that action
+
 ## Findings matrix
 
 This section is the durable record of confirmed findings. Update it after each

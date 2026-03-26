@@ -10,6 +10,7 @@ It is a compact reference for review and maintenance. It should stay focused on 
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT_STANDARDS.md`
+- `docs/RULE_MODEL.md`
 - `AGENTS.md`
 - `custom_components/firewalla_local/quality_scale.yaml`
 
@@ -28,6 +29,7 @@ It is a compact reference for review and maintenance. It should stay focused on 
 | Error handling | API exceptions are typed and Home Assistant exception mapping is specific | `custom_components/firewalla_local/api/`, flows, services, coordinator |
 | Diagnostics and supportability | Sensitive data is redacted while diagnostics remain useful | `custom_components/firewalla_local/diagnostics.py` |
 | Runtime efficiency | Shared normalization and indexed lookup paths are used instead of repeated payload scans | managers, models, helper report modules, platform code |
+| Rule interpretation | Durable rule-control semantics, switch eligibility, and metadata grouping stay aligned with live evidence | `docs/RULE_MODEL.md`, manager logic, runtime inventory surfaces, platform attributes |
 | Boundary enforcement | Architecture rules are enforced by dedicated lint or validation checks | validation tooling and review gates |
 | Documentation quality | Repository guidance reflects durable rules and stays aligned with implementation | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, `docs/QUALITY_REFERENCE.md` |
 

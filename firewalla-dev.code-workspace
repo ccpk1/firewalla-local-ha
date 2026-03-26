@@ -36,7 +36,7 @@
       "**/.mypy_cache": true,
       "**/.pytest_cache": true,
       "**/.ruff_cache": true,
-      "**/.tmp": true,
+      // "**/.tmp": true,
       "**/site-packages": true,
       "/home/vscode/.local/ha-venv": true,
     },

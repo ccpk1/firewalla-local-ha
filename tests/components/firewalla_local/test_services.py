@@ -36,8 +36,15 @@ from custom_components.firewalla_local.models import (
 from custom_components.firewalla_local.services import _get_loaded_entry
 
 
-def _snapshot(enabled: bool = True) -> FirewallaRuntimeSnapshot:
-    """Return one selected social-category rule snapshot."""
+def _snapshot(
+    enabled: bool = True,
+    *,
+    rule_id: str = "744",
+    target: str = "social",
+    target_type: str = "category",
+    target_name: str | None = "social",
+) -> FirewallaRuntimeSnapshot:
+    """Return one selected rule snapshot."""
     return FirewallaRuntimeSnapshot(
         system_info=FirewallaSystemInfo(
             host="192.168.200.1",
@@ -48,23 +55,23 @@ def _snapshot(enabled: bool = True) -> FirewallaRuntimeSnapshot:
         ),
         policy_rules=(
             FirewallaPolicyRule(
-                rule_id="744",
+                rule_id=rule_id,
                 action="block",
-                target="social",
-                target_type="category",
+                target=target,
+                target_type=target_type,
                 direction="bidirection",
                 enabled=enabled,
                 purpose=None,
                 scope=(),
                 tag_refs=("tag:17",),
-                target_name="social",
+                target_name=target_name,
                 applies_to=("AV_SMART_TV",),
                 dnsmasq_only=True,
                 raw_update_payload={
-                    "pid": "744",
+                    "pid": rule_id,
                     "action": "block",
-                    "target": "social",
-                    "type": "category",
+                    "target": target,
+                    "type": target_type,
                     "tag": ["tag:17"],
                     "dnsmasq_only": True,
                     "disabled": 0 if enabled else 1,
@@ -125,7 +132,7 @@ async def test_pause_rule_service_updates_matching_rule_optimistically(
             return_value=_snapshot(),
         ),
         patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule",
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule_control_only",
             new=AsyncMock(),
         ) as mock_update_rule,
         patch(
@@ -162,6 +169,90 @@ async def test_pause_rule_service_updates_matching_rule_optimistically(
     state = hass.states.get(entity_id)
     assert state is not None
     assert state.state == "off"
+
+
+async def test_pause_rule_service_refreshes_runtime_before_target_lookup(
+    hass: HomeAssistant,
+) -> None:
+    """Test pause_rule sees a rule that only appears after the forced refresh."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["744"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "744",
+                    "name": "block category social for AV_SMART_TV",
+                    "action": "block",
+                    "target": "social",
+                    "target_type": "category",
+                    "scope": [],
+                    "tag_refs": ["tag:17"],
+                    "dnsmasq_only": True,
+                    "use_bf": True,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(
+                _snapshot(),
+                _snapshot(
+                    rule_id="999",
+                    target="TAG",
+                    target_type="mac",
+                    target_name="AV_SMART_TV",
+                ),
+            ),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule_control_only",
+            new=AsyncMock(),
+        ) as mock_update_rule,
+        patch(
+            "custom_components.firewalla_local.services.dt_util.utcnow",
+            return_value=datetime.fromtimestamp(1_700_000_000, UTC),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_PAUSE_RULE,
+            {
+                SERVICE_FIELD_RULE_TARGET: "999",
+                SERVICE_FIELD_RULE_DURATION: "30m",
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    assert mock_update_rule.await_args is not None
+    assert mock_update_rule.await_args.args == ("999",)
+    assert mock_update_rule.await_args.kwargs == {
+        "enabled": False,
+        "idle_ts": 1_700_001_800,
+    }
 
 
 async def test_pause_rule_service_rejects_invalid_duration(
@@ -270,7 +361,7 @@ async def test_pause_rule_service_supports_indefinite_pause(
             return_value=_snapshot(),
         ),
         patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule",
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule_control_only",
             new=AsyncMock(),
         ) as mock_update_rule,
     ):
@@ -339,7 +430,7 @@ async def test_pause_rule_service_supports_resume_at(
             return_value=_snapshot(),
         ),
         patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule",
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule_control_only",
             new=AsyncMock(),
         ) as mock_update_rule,
     ):
@@ -498,7 +589,7 @@ async def test_pause_rule_service_accepts_config_entry_name(
             return_value=_snapshot(),
         ),
         patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule",
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule_control_only",
             new=AsyncMock(),
         ) as mock_update_rule,
         patch(
@@ -634,7 +725,7 @@ async def test_resume_rule_service_reenables_matching_rule(
             return_value=_snapshot(enabled=False),
         ),
         patch(
-            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule",
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_update_rule_control_only",
             new=AsyncMock(),
         ) as mock_update_rule,
     ):

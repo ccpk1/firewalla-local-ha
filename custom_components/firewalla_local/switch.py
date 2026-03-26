@@ -7,17 +7,28 @@ from datetime import UTC, datetime
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from .const import (
+    ATTR_RULE_ACTION,
+    ATTR_RULE_CURRENT_STATE_REASON,
+    ATTR_RULE_CUSTOM_NAME,
     ATTR_RULE_ID,
     ATTR_RULE_IS_PAUSED,
+    ATTR_RULE_NAME,
     ATTR_RULE_NOTES,
+    ATTR_RULE_PAUSE_REMAINING_SECONDS,
     ATTR_RULE_PAUSE_UNTIL,
     ATTR_RULE_PURPOSE,
-    ATTR_RULE_TAG_REFS,
-    ATTR_RULE_TARGET_TYPE,
-    ATTR_RULE_TEMPLATE_TARGET,
+    ATTR_RULE_SCHEDULE_DAYS,
+    ATTR_RULE_SCHEDULE_DURATION,
+    ATTR_RULE_SCHEDULE_NEXT_END,
+    ATTR_RULE_SCHEDULE_NEXT_START,
+    ATTR_RULE_SCHEDULE_START_CRON,
+    ATTR_RULE_TIME_LIMIT_PERIOD_CRON,
+    ATTR_RULE_TIME_LIMIT_QUOTA,
+    ATTR_RULE_TIME_LIMIT_USED,
     ENTITY_SUFFIX_SWITCH,
     RULE_ACTION_BLOCK,
     TRANS_KEY_ENTITY_SWITCH_ALLOW_RULE,
@@ -78,7 +89,18 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
         """Return stable attributes that describe the selected rule template."""
         matching_rules = self.rule_manager.get_matching_rules(self._template)
         matched_rule = matching_rules[0] if len(matching_rules) == 1 else None
+        time_zone = dt_util.get_time_zone(self.coordinator.hass.config.time_zone)
         notes = [rule.notes for rule in matching_rules if isinstance(rule.notes, str)]
+        schedule_next_start = (
+            matched_rule.schedule_next_start(time_zone=time_zone)
+            if matched_rule is not None
+            else None
+        )
+        schedule_window = (
+            matched_rule.schedule_window(time_zone=time_zone)
+            if matched_rule is not None
+            else None
+        )
         pause_until = (
             datetime.fromtimestamp(matched_rule.pause_until, UTC).isoformat()
             if matched_rule is not None
@@ -86,17 +108,70 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
             and matched_rule.pause_until is not None
             else None
         )
-
-        return {
+        attributes: dict[str, object] = {
             ATTR_RULE_PURPOSE: TRANS_KEY_PURPOSE_RULE_SWITCH,
             ATTR_RULE_ID: matched_rule.rule_id if matched_rule is not None else None,
-            ATTR_RULE_TEMPLATE_TARGET: self._template.target,
-            ATTR_RULE_TARGET_TYPE: self._template.target_type,
-            ATTR_RULE_TAG_REFS: list(self._template.tag_refs),
-            ATTR_RULE_NOTES: notes,
-            ATTR_RULE_IS_PAUSED: any(rule.is_paused for rule in matching_rules),
-            ATTR_RULE_PAUSE_UNTIL: pause_until,
+            ATTR_RULE_NAME: self._template.name,
         }
+
+        if (
+            matched_rule is not None
+            and matched_rule.custom_name is not None
+            and matched_rule.custom_name != self._template.name
+        ):
+            attributes[ATTR_RULE_CUSTOM_NAME] = matched_rule.custom_name
+
+        if notes:
+            attributes[ATTR_RULE_NOTES] = "; ".join(dict.fromkeys(notes))
+
+        attributes[ATTR_RULE_ACTION] = self._template.action
+        attributes[ATTR_RULE_IS_PAUSED] = any(rule.is_paused for rule in matching_rules)
+
+        if pause_until is not None:
+            attributes[ATTR_RULE_PAUSE_UNTIL] = pause_until
+
+        if (
+            matched_rule is not None
+            and matched_rule.pause_remaining_seconds is not None
+        ):
+            attributes[ATTR_RULE_PAUSE_REMAINING_SECONDS] = (
+                matched_rule.pause_remaining_seconds
+            )
+
+        if matched_rule is not None and matched_rule.schedule_start_cron is not None:
+            attributes[ATTR_RULE_SCHEDULE_START_CRON] = matched_rule.schedule_start_cron
+
+        if matched_rule is not None and matched_rule.schedule_duration is not None:
+            attributes[ATTR_RULE_SCHEDULE_DURATION] = matched_rule.schedule_duration
+
+        if matched_rule is not None and (
+            schedule_days := matched_rule.schedule_days(time_zone=time_zone)
+        ):
+            attributes[ATTR_RULE_SCHEDULE_DAYS] = list(schedule_days)
+
+        if schedule_next_start is not None:
+            attributes[ATTR_RULE_SCHEDULE_NEXT_START] = schedule_next_start.isoformat()
+
+        if schedule_window is not None:
+            attributes[ATTR_RULE_SCHEDULE_NEXT_END] = schedule_window[1].isoformat()
+
+        if matched_rule is not None and matched_rule.time_limit_period_cron is not None:
+            attributes[ATTR_RULE_TIME_LIMIT_PERIOD_CRON] = (
+                matched_rule.time_limit_period_cron
+            )
+
+        if matched_rule is not None and matched_rule.time_limit_quota is not None:
+            attributes[ATTR_RULE_TIME_LIMIT_QUOTA] = matched_rule.time_limit_quota
+
+        if matched_rule is not None and matched_rule.time_limit_used is not None:
+            attributes[ATTR_RULE_TIME_LIMIT_USED] = matched_rule.time_limit_used
+
+        if matched_rule is not None:
+            attributes[ATTR_RULE_CURRENT_STATE_REASON] = (
+                matched_rule.current_state_reason(time_zone=time_zone)
+            )
+
+        return attributes
 
     @property
     def available(self) -> bool:

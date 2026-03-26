@@ -130,6 +130,11 @@ def _get_loaded_entry(
     )
 
 
+async def _async_refresh_runtime_state(entry: FirewallaConfigEntry) -> None:
+    """Force a fresh runtime refresh before mutating rules."""
+    await entry.runtime_data.coordinator.async_request_refresh()
+
+
 async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectType:
     """Return the current runtime inventory as markdown and structured data."""
     entry = _get_loaded_entry(
@@ -158,6 +163,8 @@ async def _async_handle_pause_rule(call: ServiceCall) -> None:
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
+    await _async_refresh_runtime_state(entry)
+
     rule_target = call.data[SERVICE_FIELD_RULE_TARGET]
     duration = call.data.get(SERVICE_FIELD_RULE_DURATION)
     resume_at = call.data.get(SERVICE_FIELD_RULE_RESUME_AT)
@@ -212,6 +219,8 @@ async def _async_handle_resume_rule(call: ServiceCall) -> None:
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
+    await _async_refresh_runtime_state(entry)
+
     rule_target = call.data[SERVICE_FIELD_RULE_TARGET]
 
     if not entry.runtime_data.rule_manager.has_rule_target(rule_target):

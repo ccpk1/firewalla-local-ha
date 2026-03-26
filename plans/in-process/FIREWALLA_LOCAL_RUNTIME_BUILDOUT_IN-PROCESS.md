@@ -44,6 +44,14 @@ Still open and driving the next implementation slice:
 - define the next bounded runtime slice after Phase 5 instead of widening the current sensor surface opportunistically
 - package the current runtime and selection-surface progress into documentation and release-prep updates rather than continuing feature expansion without a user-facing operating guide
 
+Current analysis note from live rule review:
+
+- live review of rules `763` through `766` indicates that some user-managed time-limit and disturb-style rules can remain durable update-in-place rules even when `autoDeleteWhenExpires` is present on the live payload
+- the current blanket switch-candidate exclusion for `auto_delete_when_expires = true` now appears too broad for quota-backed internet and app-limit families whose rules survive pause and resume and continue reporting usage state such as `appTimeUsed`
+- treat `autoDeleteWhenExpires` as insufficient by itself to classify a rule as ephemeral; the stronger current evidence for truly temporary rules remains the short-lived `expire` countdown behavior that ends in rule disappearance rather than simple disabled state
+- keep this as a bounded follow-on slice: refine switch eligibility for proven quota and disturb families first, then decide whether `appTimeUsed` belongs on switch attributes or a dedicated usage sensor once the remaining live mutation contract is captured cleanly
+- newer live evidence sharpens the split: the advanced app flow for internet rules exposes separate `Allow`, `Block`, `Time Limit`, and `Disturb` actions, while the simpler pause controls still create temporary rules; persistent advanced-rule variants can carry active-time schedule metadata and, for time-limit rules, quota usage fields such as `appTimeUsed`
+
 ## Critical execution note
 
 This initiative assumes a pristine buildout path.
@@ -329,6 +337,28 @@ Phase 5 execution note: Phase 5 is complete. The repository now exposes a bounde
 
 Current post-Phase 5 note: The repo is presently in a documentation-and-release-prep posture rather than a new runtime-expansion posture. The latest completed code slice tightened rule-candidate semantics, refreshed the related tests, and moved workspace-level lint and search exclusions into the checked-in workspace file so the shared dev environment better matches the current repository boundaries.
 
+Additional post-Phase 5 analysis note: New live inventory evidence from rules `763` through `766` suggests a narrower interpretation of temporary-rule semantics is needed. Category and internet quota rules with `appTimeUsage`, `appTimeUsed`, or disturb payload details can still behave as durable user-managed rules that accept pause and resume updates in place. The next runtime slice should verify the exact mutation envelope for these families, then widen `supports_rule_switch` beyond the current `auto_delete_when_expires` gate and expose the best bounded usage metadata once the contract is proven.
+
+Internet-block follow-on note: A later live capture added persistent disturb rule `767` with no auto-delete flag and with the same internet-scope targeting surface as the existing block rules, which supports treating advanced-rule `Disturb` as a separate durable family from the temporary pause controls. The current bounded implementation slice should still stop at quota-backed internet block rules first, but future work should carry forward active-time schedule metadata and disturb-shaping fields such as latency or bandwidth controls once that mutation contract is captured end to end.
+
+Scheduled-rule analysis note: The repository now has a dedicated support note at `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_SCHEDULED_ADVANCED_RULES.md` for recurring advanced-rule interpretation. Current evidence indicates that `cronTime` plus `duration` likely define the recurring active window, while rule objects remain stable across schedule boundaries. Traffic counters such as `hitCount` and `lastHitTs` are useful operational signals but are not yet trustworthy as direct schedule-active indicators, especially when traffic changes can be explained by normal household activity.
+
+Temporary-rule analysis note: Newer live captures also confirm that the same advanced `disturb` family can appear as a true one-shot temporary rule with `is_temporary: true`, populated `expire_seconds`, and auto-deletion after expiry. The repository should therefore treat recurring scheduled advanced rules and temporary expiring advanced rules as distinct runtime states, and should trust `is_temporary` plus expiry fields more than `autoDeleteWhenExpires` alone when deciding durable switch eligibility.
+
+Quota-rule analysis note: Newer live captures of grouped app time-limit rule `763` now show that quota-backed `app_block` rules can remain durable, keep `is_temporary: false`, and activate in place once the allowance is exhausted. On this family, `activated_time` and `last_activated_time` appear to be the best current native signals that enforcement has started, while `appTimeUsed` can continue past the configured quota and should be treated as usage accounting rather than a perfectly clipped threshold.
+
+Persistent-control analysis note: The latest pause test on rule `763` indicates the vendor is using the same pause or resume control model across persistent rules, regardless of whether the rule is currently enforcing because of quota exhaustion or is simply installed and waiting for its next active condition. For durable rule families, the repository should therefore treat `enabled` as the main pause or resume control state, use `idleTs` as the strongest current pause marker, and treat `activated_time` or `last_activated_time` as enforcement-state metadata rather than as the primary switch state.
+
+Sparse-mutation analysis note: The first `pause_rule_control_only` experiment against temporary rule `769` succeeded without obvious rule mangling. Firewalla accepted a minimal update that changed only control fields, and the resulting inventory preserved the same rule ID, temporary classification, raw expiry contract, and target metadata while applying `enabled: false`, `idleTs`, and a newer `updated_time`. This raises confidence that sparse control-only updates may be safer than replaying the full cached rule payload, though additional rule families still need live confirmation before the repository changes the default mutation path.
+
+Sparse-resume analysis note: The matching `resume_rule_control_only` experiment against the same temporary rule `769` also succeeded without obvious rule mangling. Firewalla restored `enabled: true`, cleared `idleTs`, repopulated `activated_time`, advanced `last_activated_time`, and restored computed `expires_at` while preserving the same rule ID, action, target, and temporary classification. This strengthens the case that control-only mutation may be a viable default path for pause or resume semantics, provided at least one durable rule family also shows the same clean behavior.
+
+Durable sparse-mutation analysis note: The first `pause_rule_control_only` experiment against durable scheduled disturb rule `768` also succeeded without obvious rule mangling. Firewalla preserved the same rule ID, recurring `cronTime`, `duration`, disturb shaping payload, notes, and durable classification while applying `enabled: false`, a newer `updated_time`, and populated `idleTs`. This is the first live confirmation that sparse control-only mutation works on both a temporary rule family and a persistent scheduled advanced-rule family, which materially strengthens the case for replacing full cached-payload pause or resume updates with a control-only default path.
+
+Durable sparse-resume analysis note: The matching `resume_rule_control_only` experiment against the same durable scheduled disturb rule `768` also succeeded without obvious rule mangling. Firewalla restored `enabled: true`, cleared `idleTs`, advanced `updated_time`, and preserved the same rule ID, recurring `cronTime`, `duration`, disturb shaping payload, notes, and durable classification, while `activated_time` and `last_activated_time` remained null. This closes the live pause or resume loop for a durable advanced-rule family and, combined with the earlier temporary-rule pair on `769`, makes the current evidence materially stronger that the integration should prefer a control-only default mutation path over replaying stale cached rule bodies.
+
+Sparse overwrite-surface analysis note: A later `pause_rule_control_only` experiment against the same durable rule `768` intentionally included a `notes` override, changing the live value from `testing rules` to `control-only overwrite test` while still applying `enabled: false`, a newer `updated_time`, and populated `idleTs`. Firewalla preserved the same rule ID, schedule metadata, and disturb-shaping payload while applying the notes overwrite in place. This materially confirms both sides of the field-mapping question: the sparse path can update correctly mapped non-control fields without replaying the cached full rule body, and any additional mapped field on that path becomes real overwrite surface that the integration must include only deliberately.
+
 ## Validation strategy
 
 Document-only updates to plans and support notes do not require repo lint, type-check, or test runs.
@@ -353,6 +383,7 @@ Document-only updates to plans and support notes do not require repo lint, type-
 - `docs/DEVELOPMENT_STANDARDS.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_SYSTEM_MONITORING_SENSORS.md`
+- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_SCHEDULED_ADVANCED_RULES.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_BUILDER_HANDOFF.md`
 - `AGENTS.md`

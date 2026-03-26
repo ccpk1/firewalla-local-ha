@@ -4,23 +4,53 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Final, TypedDict
+
+from cronsim import CronSim, CronSimError
 
 from .const import (
     RULE_ACTION_ALLOW,
     RULE_ACTION_BLOCK,
+    RULE_ACTION_DISTURB,
+    RULE_ACTION_QOS,
+    RULE_PURPOSE_DAP,
     RULE_PURPOSE_FAMILY,
+    RULE_PURPOSE_FIREWALL,
+    RULE_PURPOSE_PORT_FORWARDING,
+    RULE_STATE_REASON_DISABLED,
+    RULE_STATE_REASON_ENABLED,
+    RULE_STATE_REASON_OFF_SCHEDULE,
+    RULE_STATE_REASON_ON_SCHEDULE,
+    RULE_STATE_REASON_PAUSED,
+    RULE_STATE_REASON_TIME_LIMIT_ACTIVE,
+    RULE_STATE_REASON_TIME_LIMIT_REACHED,
     RULE_TARGET_TAG,
     RULE_TARGET_TYPE_CATEGORY,
-    RULE_TARGET_TYPE_DNS,
-    RULE_TARGET_TYPE_IP,
     RULE_TARGET_TYPE_MAC,
     RULE_TARGET_TYPE_NETWORK,
-    RULE_TARGET_TYPE_REMOTE_PORT,
 )
 
 _RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
 _RAW_UPDATE_NOTES_KEY: Final = "notes"
+_RAW_UPDATE_CUSTOM_NAME_KEY: Final = "_name"
+_RAW_UPDATE_CRON_TIME_KEY: Final = "cronTime"
+_RAW_UPDATE_APP_TIME_USAGE_KEY: Final = "appTimeUsage"
+_RAW_UPDATE_APP_TIME_USED_KEY: Final = "appTimeUsed"
+_RAW_UPDATE_LOCAL_PORT_KEY: Final = "localPort"
+_RAW_UPDATE_PROTOCOL_KEY: Final = "protocol"
+_RAW_UPDATE_TRUST_KEY: Final = "trust"
+_RAW_UPDATE_USE_BF_KEY: Final = "useBf"
+_RAW_UPDATE_UPNP_KEY: Final = "upnp"
+_RAW_UPDATE_QDISC_KEY: Final = "qdisc"
+_RAW_UPDATE_RATE_LIMIT_KEY: Final = "rateLimit"
+_RAW_UPDATE_TRAFFIC_DIRECTION_KEY: Final = "trafficDirection"
+_RAW_UPDATE_APP_NAME_KEY: Final = "app_name"
+_RAW_UPDATE_APP_UID_KEY: Final = "app_uid"
+_RAW_UPDATE_DISTURB_LEVEL_KEY: Final = "disturbLevel"
+_RAW_UPDATE_DISTURB_METHOD_KEY: Final = "disturbMethod"
+_RAW_UPDATE_DURATION_KEY: Final = "duration"
+_RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
 _STATUS_DISABLED: Final = "disabled"
 _STATUS_ENABLED: Final = "enabled"
 _TEMPLATE_DATA_ACTION_KEY: Final = "action"
@@ -49,6 +79,22 @@ _INTERNAL_IDENTIFIER_SEPARATOR: Final = "-"
 _PRETTIFIED_TARGET_SEPARATOR: Final = "_"
 _PRETTIFIED_TARGET_REPLACEMENT: Final = " "
 _TARGET_LIST_PREFIX: Final = "TL-"
+_WEEKDAY_LABELS: Final = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_WEEKDAY_ORDER: Final = {
+    weekday: index for index, weekday in enumerate(_WEEKDAY_LABELS)
+}
+_SUPPORTED_SWITCH_RULE_ACTIONS: Final = frozenset(
+    {
+        RULE_ACTION_ALLOW,
+        RULE_ACTION_BLOCK,
+        RULE_ACTION_DISTURB,
+        RULE_ACTION_QOS,
+    }
+)
+_SUPPORTED_SWITCH_RULE_PURPOSES: Final = frozenset({None, RULE_PURPOSE_PORT_FORWARDING})
+_EXCLUDED_SWITCH_RULE_PURPOSES: Final = frozenset(
+    {RULE_PURPOSE_DAP, RULE_PURPOSE_FAMILY, RULE_PURPOSE_FIREWALL}
+)
 
 
 class FirewallaRuleTemplateDict(TypedDict):
@@ -104,6 +150,74 @@ def _looks_like_internal_identifier(value: str) -> bool:
 def _normalize_ref_values(values: tuple[str, ...]) -> tuple[str, ...]:
     """Return a stable tuple for scope and tag matching."""
     return tuple(sorted(dict.fromkeys(values)))
+
+
+def _normalized_optional_string(value: object) -> str | None:
+    """Return a stripped string when one is present."""
+    if not isinstance(value, str):
+        return None
+    stripped_value = value.strip()
+    return stripped_value or None
+
+
+def _normalized_optional_bool(value: object) -> bool | None:
+    """Return a normalized boolean when Firewalla exposes one."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        stripped_value = value.strip().casefold()
+        if stripped_value == "true":
+            return True
+        if stripped_value == "false":
+            return False
+    return None
+
+
+def _normalized_metadata_value(value: object) -> object | None:
+    """Return a JSON-like metadata value when it is safe to expose."""
+    if isinstance(value, str):
+        return _normalized_optional_string(value)
+    if isinstance(value, (bool, int, float, dict, list)):
+        return value
+    return None
+
+
+def _normalized_optional_dict(value: object) -> dict[str, object] | None:
+    """Return a dictionary payload when the value is a mapping-like dict."""
+    if not isinstance(value, dict):
+        return None
+
+    normalized: dict[str, object] = {}
+    for key, nested_value in value.items():
+        if not isinstance(key, str):
+            continue
+        if (normalized_value := _normalized_metadata_value(nested_value)) is None:
+            continue
+        normalized[key] = normalized_value
+
+    return normalized or None
+
+
+def _build_cron_sim(
+    expression: str,
+    reference_time: datetime,
+    *,
+    reverse: bool = False,
+) -> CronSim | None:
+    """Return a cron iterator for one Firewalla schedule expression."""
+    try:
+        return CronSim(expression, reference_time, reverse=reverse)
+    except CronSimError:
+        return None
+
+
+def _reference_datetime(
+    reference_ts: float | None,
+    time_zone: tzinfo | None,
+) -> datetime:
+    """Return the schedule reference time in the requested timezone."""
+    seed_ts = time.time() if reference_ts is None else reference_ts
+    return datetime.fromtimestamp(seed_ts, time_zone or UTC)
 
 
 @dataclass(slots=True)
@@ -196,6 +310,13 @@ class FirewallaPolicyRule:
         return stripped_notes or None
 
     @property
+    def custom_name(self) -> str | None:
+        """Return the user-defined custom name carried on the live rule payload."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_CUSTOM_NAME_KEY)
+        )
+
+    @property
     def pause_until(self) -> float | None:
         """Return the pause boundary timestamp carried by Firewalla, if any."""
         raw_idle_ts = self.raw_update_payload.get(_RAW_UPDATE_IDLE_TS_KEY)
@@ -228,6 +349,291 @@ class FirewallaPolicyRule:
         assert self.pause_until is not None
         return max(0, int(self.pause_until - time.time()))
 
+    @property
+    def active_time_schedule(self) -> str | None:
+        """Return the active-time schedule expression, if the rule carries one."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_CRON_TIME_KEY)
+        )
+
+    @property
+    def schedule_start_cron(self) -> str | None:
+        """Return the user-facing schedule start cron expression."""
+        return self.active_time_schedule
+
+    @property
+    def app_time_period(self) -> str | None:
+        """Return the app-time period expression, if the rule carries one."""
+        raw_usage = self.raw_update_payload.get(_RAW_UPDATE_APP_TIME_USAGE_KEY)
+        if not isinstance(raw_usage, dict):
+            return None
+        raw_period = raw_usage.get("period")
+        if not isinstance(raw_period, str):
+            return None
+        stripped_period = raw_period.strip()
+        return stripped_period or None
+
+    @property
+    def local_port(self) -> str | None:
+        """Return the local port carried on the live rule payload, if any."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_LOCAL_PORT_KEY)
+        )
+
+    @property
+    def protocol(self) -> str | None:
+        """Return the protocol carried on the live rule payload, if any."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_PROTOCOL_KEY)
+        )
+
+    @property
+    def trust(self) -> bool | None:
+        """Return the normalized trust flag carried on the live rule payload."""
+        return _normalized_optional_bool(
+            self.raw_update_payload.get(_RAW_UPDATE_TRUST_KEY)
+        )
+
+    @property
+    def use_bf(self) -> bool | None:
+        """Return the normalized useBf flag carried on the live rule payload."""
+        return _normalized_optional_bool(
+            self.raw_update_payload.get(_RAW_UPDATE_USE_BF_KEY)
+        )
+
+    @property
+    def upnp(self) -> bool | None:
+        """Return the normalized UPnP flag carried on the live rule payload."""
+        return _normalized_optional_bool(
+            self.raw_update_payload.get(_RAW_UPDATE_UPNP_KEY)
+        )
+
+    @property
+    def qdisc(self) -> str | None:
+        """Return the QoS queueing discipline carried on the live rule payload."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_QDISC_KEY)
+        )
+
+    @property
+    def rate_limit(self) -> object | None:
+        """Return the rate-limit metadata carried on the live rule payload."""
+        return _normalized_metadata_value(
+            self.raw_update_payload.get(_RAW_UPDATE_RATE_LIMIT_KEY)
+        )
+
+    @property
+    def traffic_direction(self) -> str | None:
+        """Return the traffic-direction metadata carried on the live rule payload."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_TRAFFIC_DIRECTION_KEY)
+        )
+
+    @property
+    def app_name(self) -> str | None:
+        """Return the app name carried on the live rule payload, if any."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_APP_NAME_KEY)
+        )
+
+    @property
+    def app_uid(self) -> str | None:
+        """Return the app UID carried on the live rule payload, if any."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_APP_UID_KEY)
+        )
+
+    @property
+    def disturb_level(self) -> str | None:
+        """Return the disturb level carried on the live rule payload, if any."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_DISTURB_LEVEL_KEY)
+        )
+
+    @property
+    def disturb_method(self) -> dict[str, object] | None:
+        """Return the disturb-method payload carried on the live rule payload."""
+        return _normalized_optional_dict(
+            self.raw_update_payload.get(_RAW_UPDATE_DISTURB_METHOD_KEY)
+        )
+
+    @property
+    def duration(self) -> str | None:
+        """Return the duration carried on the live rule payload, if any."""
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_DURATION_KEY)
+        )
+
+    @property
+    def schedule_duration(self) -> int | None:
+        """Return the schedule duration in seconds, when the rule carries one."""
+        raw_duration = self.duration
+        if raw_duration is None or not raw_duration.isdigit():
+            return None
+        return int(raw_duration)
+
+    @property
+    def auto_delete_when_expires_raw(self) -> bool | None:
+        """Return the raw auto-delete flag when Firewalla carries a live variant."""
+        return _normalized_optional_bool(
+            self.raw_update_payload.get(_RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY)
+        )
+
+    @property
+    def app_time_quota(self) -> int | None:
+        """Return the configured app-time quota, if the rule carries one."""
+        raw_usage = self.raw_update_payload.get(_RAW_UPDATE_APP_TIME_USAGE_KEY)
+        if not isinstance(raw_usage, dict):
+            return None
+        raw_quota = raw_usage.get("quota")
+        if isinstance(raw_quota, bool):
+            return None
+        if isinstance(raw_quota, int):
+            return raw_quota
+        if isinstance(raw_quota, float):
+            return int(raw_quota)
+        if isinstance(raw_quota, str):
+            stripped_quota = raw_quota.strip()
+            if stripped_quota.isdigit():
+                return int(stripped_quota)
+        return None
+
+    @property
+    def app_time_used(self) -> int | None:
+        """Return the used app-time value, if the rule carries one."""
+        raw_used = self.raw_update_payload.get(_RAW_UPDATE_APP_TIME_USED_KEY)
+        if isinstance(raw_used, bool):
+            return None
+        if isinstance(raw_used, int):
+            return raw_used
+        if isinstance(raw_used, float):
+            return int(raw_used)
+        if isinstance(raw_used, str):
+            stripped_used = raw_used.strip()
+            if stripped_used.isdigit():
+                return int(stripped_used)
+        return None
+
+    @property
+    def time_limit_period_cron(self) -> str | None:
+        """Return the user-facing time-limit period cron expression."""
+        return self.app_time_period
+
+    @property
+    def time_limit_quota(self) -> int | None:
+        """Return the configured user-facing time-limit quota."""
+        return self.app_time_quota
+
+    @property
+    def time_limit_used(self) -> int | None:
+        """Return the used user-facing time-limit value."""
+        return self.app_time_used
+
+    def schedule_days(
+        self,
+        reference_ts: float | None = None,
+        time_zone: tzinfo | None = None,
+    ) -> tuple[str, ...] | None:
+        """Return weekday labels inferred from the active schedule."""
+        if (schedule := self.schedule_start_cron) is None:
+            return None
+
+        cron = _build_cron_sim(schedule, _reference_datetime(reference_ts, time_zone))
+        if cron is None:
+            return None
+
+        days: list[str] = []
+        seen_days: set[str] = set()
+        for _ in range(14):
+            next_run = next(cron)
+            weekday = _WEEKDAY_LABELS[next_run.weekday()]
+            if weekday in seen_days:
+                continue
+            seen_days.add(weekday)
+            days.append(weekday)
+            if len(seen_days) == len(_WEEKDAY_LABELS):
+                break
+
+        if not days:
+            return None
+
+        return tuple(sorted(days, key=_WEEKDAY_ORDER.__getitem__))
+
+    def schedule_next_start(
+        self,
+        reference_ts: float | None = None,
+        time_zone: tzinfo | None = None,
+    ) -> datetime | None:
+        """Return the next scheduled start time, if one can be derived."""
+        if (schedule := self.schedule_start_cron) is None:
+            return None
+
+        cron = _build_cron_sim(schedule, _reference_datetime(reference_ts, time_zone))
+        if cron is None:
+            return None
+        return next(cron)
+
+    def schedule_window(
+        self,
+        reference_ts: float | None = None,
+        time_zone: tzinfo | None = None,
+    ) -> tuple[datetime, datetime] | None:
+        """Return the current or next schedule window for the rule."""
+        if (schedule := self.schedule_start_cron) is None:
+            return None
+        if (duration := self.schedule_duration) is None:
+            return None
+
+        now = _reference_datetime(reference_ts, time_zone)
+        previous_cron = _build_cron_sim(
+            schedule,
+            now + timedelta(seconds=1),
+            reverse=True,
+        )
+        next_cron = _build_cron_sim(schedule, now)
+        if previous_cron is None or next_cron is None:
+            return None
+
+        previous_start = next(previous_cron)
+        previous_end = previous_start + timedelta(seconds=duration)
+        if previous_start <= now < previous_end:
+            return previous_start, previous_end
+
+        next_start = next(next_cron)
+        return next_start, next_start + timedelta(seconds=duration)
+
+    def current_state_reason(
+        self,
+        reference_ts: float | None = None,
+        time_zone: tzinfo | None = None,
+    ) -> str:
+        """Return a compact user-facing explanation for the rule's current state."""
+        if self.is_paused:
+            return RULE_STATE_REASON_PAUSED
+
+        if (
+            self.time_limit_quota is not None
+            and self.time_limit_used is not None
+            and self.time_limit_used >= self.time_limit_quota
+        ):
+            return RULE_STATE_REASON_TIME_LIMIT_REACHED
+
+        if self.schedule_start_cron is not None and self.schedule_duration is not None:
+            window = self.schedule_window(reference_ts, time_zone)
+            if window is not None:
+                now = _reference_datetime(reference_ts, time_zone)
+                if window[0] <= now < window[1]:
+                    return RULE_STATE_REASON_ON_SCHEDULE
+                return RULE_STATE_REASON_OFF_SCHEDULE
+
+        if self.time_limit_quota is not None:
+            return RULE_STATE_REASON_TIME_LIMIT_ACTIVE
+
+        if self.enabled:
+            return RULE_STATE_REASON_ENABLED
+
+        return RULE_STATE_REASON_DISABLED
+
 
 @dataclass(slots=True)
 class FirewallaRuntimeSnapshot:
@@ -242,6 +648,9 @@ class FirewallaRuntimeSnapshot:
 
 def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:
     """Build a readable state-free name for one normalized policy rule."""
+    if rule.custom_name is not None:
+        return rule.custom_name
+
     applicability = f" for {', '.join(rule.applies_to)}" if rule.applies_to else ""
 
     if rule.target_type == RULE_TARGET_TYPE_MAC and rule.target == RULE_TARGET_TAG:
@@ -287,50 +696,16 @@ def format_policy_rule_label(rule: FirewallaPolicyRule) -> str:
 
 def supports_rule_switch(rule: FirewallaPolicyRule) -> bool:
     """Return whether a persistent existing rule can back an update-only switch."""
-    if rule.auto_delete_when_expires is True or rule.is_temporary:
+    if rule.is_temporary:
         return False
 
-    if rule.purpose == RULE_PURPOSE_FAMILY:
+    if rule.action not in _SUPPORTED_SWITCH_RULE_ACTIONS:
         return False
 
-    if (
-        rule.action == RULE_ACTION_BLOCK
-        and rule.target_type == RULE_TARGET_TYPE_MAC
-        and rule.target == RULE_TARGET_TAG
-    ):
-        return True
+    if rule.purpose in _EXCLUDED_SWITCH_RULE_PURPOSES:
+        return False
 
-    if rule.target_type == RULE_TARGET_TYPE_DNS:
-        return (
-            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
-            and rule.purpose is None
-        )
-
-    if rule.target_type == RULE_TARGET_TYPE_IP:
-        return (
-            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
-            and rule.purpose is None
-        )
-
-    if rule.target_type == RULE_TARGET_TYPE_REMOTE_PORT:
-        return (
-            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
-            and rule.purpose is None
-        )
-
-    if rule.target_type == RULE_TARGET_TYPE_NETWORK:
-        return (
-            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
-            and rule.purpose is None
-        )
-
-    if rule.target_type == RULE_TARGET_TYPE_CATEGORY:
-        return (
-            rule.action in {RULE_ACTION_ALLOW, RULE_ACTION_BLOCK}
-            and rule.purpose is None
-        )
-
-    return False
+    return rule.purpose in _SUPPORTED_SWITCH_RULE_PURPOSES
 
 
 @dataclass(slots=True, frozen=True)

@@ -725,6 +725,7 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
         "735": "[735] block category games for KADEN's Devices (KADEN) (enabled)",
         "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)",
         "737": "[737] allow dns spotify.com for KADEN's Devices (KADEN) (enabled)",
+        "741": "[741] block category social for KADEN's Devices (KADEN) (enabled)",
         "740": "[740] block category social for KADEN's Devices (KADEN) (enabled)",
         "742": (
             "[742] allow category TL-56d856bb-efdc-4894-8e5f-c483555e09f6 "
@@ -759,6 +760,72 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
                 "use_bf": True,
             }
         ],
+    }
+
+
+async def test_options_flow_refreshes_runtime_before_building_selector(hass) -> None:
+    """Test opening the options flow refreshes the live runtime list first."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_SELECTED_RULE_IDS: []},
+    )
+
+    initial_snapshot = FirewallaRuntimeSnapshot(
+        system_info=FirewallaSystemInfo(
+            host="fire.walla",
+            name="Firewalla",
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    refreshed_snapshot = FirewallaRuntimeSnapshot(
+        system_info=initial_snapshot.system_info,
+        policy_rules=(
+            FirewallaPolicyRule(
+                rule_id="737",
+                action="allow",
+                target="spotify.com",
+                target_type="dns",
+                direction="outbound",
+                enabled=True,
+                purpose=None,
+                scope=(),
+                tag_refs=("tag:10",),
+                applies_to=("KADEN's Devices (KADEN)",),
+            ),
+        ),
+        exception_rule_count=0,
+    )
+
+    coordinator = SimpleNamespace(data=initial_snapshot)
+
+    async def _async_request_refresh() -> None:
+        coordinator.data = refreshed_snapshot
+
+    coordinator.async_request_refresh = AsyncMock(side_effect=_async_request_refresh)
+    entry.runtime_data = SimpleNamespace(coordinator=coordinator)
+    entry.add_to_hass(hass)
+
+    options_flow = FirewallaOptionsFlow(entry)
+    result = await options_flow.async_step_init()
+
+    field = result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
+    assert coordinator.async_request_refresh.await_count == 1
+    assert field.options == {
+        "737": "[737] allow dns spotify.com for KADEN's Devices (KADEN) (enabled)"
     }
 
 

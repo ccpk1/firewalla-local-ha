@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Final, TypedDict
 
 from custom_components.firewalla_local.managers.rule_manager import (
+    RuleManagementInfo,
     build_switch_rule_evaluations,
 )
 from custom_components.firewalla_local.models import (
     FirewallaPolicyRule,
     format_policy_rule_label,
+    format_policy_rule_name,
 )
 
 _RAW_POLICY_STATE_KEY: Final = "state"
@@ -24,6 +27,31 @@ _RAW_RULE_TAG_REFS_KEY: Final = "tag"
 _RAW_HOSTS_KEY: Final = "hosts"
 _RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
 _RAW_GROUP_USER_TAGS_KEY: Final = "userTags"
+_RAW_UPDATE_CUSTOM_NAME_KEY: Final = "_name"
+_RAW_UPDATE_NOTES_KEY: Final = "notes"
+_RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
+_RAW_UPDATE_CRON_TIME_KEY: Final = "cronTime"
+_RAW_UPDATE_APP_TIME_USAGE_KEY: Final = "appTimeUsage"
+_RAW_UPDATE_APP_TIME_USED_KEY: Final = "appTimeUsed"
+_RAW_UPDATE_LOCAL_PORT_KEY: Final = "localPort"
+_RAW_UPDATE_PROTOCOL_KEY: Final = "protocol"
+_RAW_UPDATE_TRUST_KEY: Final = "trust"
+_RAW_UPDATE_USE_BF_KEY: Final = "useBf"
+_RAW_UPDATE_UPNP_KEY: Final = "upnp"
+_RAW_UPDATE_QDISC_KEY: Final = "qdisc"
+_RAW_UPDATE_RATE_LIMIT_KEY: Final = "rateLimit"
+_RAW_UPDATE_TRAFFIC_DIRECTION_KEY: Final = "trafficDirection"
+_RAW_UPDATE_APP_NAME_KEY: Final = "app_name"
+_RAW_UPDATE_APP_UID_KEY: Final = "app_uid"
+_RAW_UPDATE_DISTURB_LEVEL_KEY: Final = "disturbLevel"
+_RAW_UPDATE_DISTURB_METHOD_KEY: Final = "disturbMethod"
+_RAW_UPDATE_DURATION_KEY: Final = "duration"
+_RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
+_RAW_RULE_UPDATED_TIME_KEY: Final = "updatedTime"
+_RAW_RULE_ACTIVATED_TIME_KEY: Final = "activatedTime"
+_RAW_RULE_LAST_ACTIVATED_TIME_KEY: Final = "lastActivatedTime"
+_RAW_RULE_EXPIRE_TS_KEY: Final = "expireTs"
+_RAW_RULE_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
 
 _RULE_MATCH_KIND_INTERNET_SCOPE: Final = "internet_scope"
 _RULE_MATCH_KIND_TARGET_LIST: Final = "target_list"
@@ -51,6 +79,36 @@ _RULE_PURPOSE_DAP: Final = "dap"
 _RULE_PURPOSE_FAMILY: Final = "family"
 _RULE_MANAGEMENT_CLASSIFICATION_SYSTEM: Final = "system_managed"
 _RULE_MANAGEMENT_CLASSIFICATION_USER: Final = "user_managed"
+
+_PROMOTED_RAW_EXTRA_KEYS: Final = frozenset(
+    {
+        _RAW_UPDATE_CUSTOM_NAME_KEY,
+        _RAW_UPDATE_NOTES_KEY,
+        _RAW_UPDATE_IDLE_TS_KEY,
+        _RAW_UPDATE_CRON_TIME_KEY,
+        _RAW_UPDATE_APP_TIME_USAGE_KEY,
+        _RAW_UPDATE_APP_TIME_USED_KEY,
+        _RAW_UPDATE_LOCAL_PORT_KEY,
+        _RAW_UPDATE_PROTOCOL_KEY,
+        _RAW_UPDATE_TRUST_KEY,
+        _RAW_UPDATE_USE_BF_KEY,
+        _RAW_UPDATE_UPNP_KEY,
+        _RAW_UPDATE_QDISC_KEY,
+        _RAW_UPDATE_RATE_LIMIT_KEY,
+        _RAW_UPDATE_TRAFFIC_DIRECTION_KEY,
+        _RAW_UPDATE_APP_NAME_KEY,
+        _RAW_UPDATE_APP_UID_KEY,
+        _RAW_UPDATE_DISTURB_LEVEL_KEY,
+        _RAW_UPDATE_DISTURB_METHOD_KEY,
+        _RAW_UPDATE_DURATION_KEY,
+        _RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY,
+        _RAW_RULE_UPDATED_TIME_KEY,
+        _RAW_RULE_ACTIVATED_TIME_KEY,
+        _RAW_RULE_LAST_ACTIVATED_TIME_KEY,
+        _RAW_RULE_EXPIRE_TS_KEY,
+        _RAW_RULE_DNSMASQ_ONLY_KEY,
+    }
+)
 
 
 class RuntimeUserRecord(TypedDict):
@@ -93,6 +151,134 @@ class RuleMatchingInfo(TypedDict):
     kind: str
     references_target_list: bool
     has_readable_target_name: bool
+
+
+def _build_report_raw_extras(raw_extras: dict[str, object]) -> dict[str, object]:
+    """Return only raw rule extras that are not already promoted elsewhere."""
+    return {
+        key: value
+        for key, value in raw_extras.items()
+        if key not in _PROMOTED_RAW_EXTRA_KEYS
+    }
+
+
+def _build_rule_record(
+    rule: FirewallaPolicyRule,
+    *,
+    management: RuleManagementInfo,
+    matching: RuleMatchingInfo,
+    review_reasons: list[str],
+    raw_extras: dict[str, object],
+    tag_refs: list[str],
+) -> dict[str, object]:
+    """Build one normalized inventory rule record."""
+    return {
+        "rule_id": rule.rule_id,
+        "name": format_policy_rule_name(rule),
+        "custom_name": rule.custom_name,
+        "label": format_policy_rule_label(rule),
+        "action": rule.action,
+        "target": rule.target,
+        "target_name": rule.target_name,
+        "target_type": rule.target_type,
+        "direction": rule.direction,
+        "purpose": rule.purpose,
+        "enabled": rule.enabled,
+        "scope": list(rule.scope),
+        "applies_to": list(rule.applies_to),
+        "activated_time": rule.activated_time,
+        "updated_time": rule.updated_time,
+        "last_activated_time": rule.last_activated_time,
+        "expire_seconds": rule.expire_seconds,
+        "expires_at": rule.expires_at,
+        "auto_delete_when_expires": rule.auto_delete_when_expires,
+        "dnsmasq_only": rule.dnsmasq_only,
+        "is_temporary": rule.is_temporary,
+        "tag_refs": tag_refs,
+        "notes": rule.notes,
+        "is_paused": rule.is_paused,
+        "pause_until": rule.pause_until,
+        "pause_remaining_seconds": rule.pause_remaining_seconds,
+        "active_time_schedule": rule.active_time_schedule,
+        "app_time_period": rule.app_time_period,
+        "app_time_quota": rule.app_time_quota,
+        "app_time_used": rule.app_time_used,
+        "local_port": rule.local_port,
+        "protocol": rule.protocol,
+        "trust": rule.trust,
+        "use_bf": rule.use_bf,
+        "upnp": rule.upnp,
+        "qdisc": rule.qdisc,
+        "rate_limit": rule.rate_limit,
+        "traffic_direction": rule.traffic_direction,
+        "app_name": rule.app_name,
+        "app_uid": rule.app_uid,
+        "disturb_level": rule.disturb_level,
+        "disturb_method": rule.disturb_method,
+        "duration": rule.duration,
+        "raw_extras": _build_report_raw_extras(raw_extras),
+        "management": management,
+        "matching": matching,
+        "review_reasons": review_reasons,
+    }
+
+
+def _append_optional_rule_detail(
+    lines: list[str],
+    *,
+    label: str,
+    value: object,
+) -> None:
+    """Append one optional rule detail line when a value is present."""
+    if value in (None, "", [], {}):
+        return
+    lines.append(f"  - {label}: {value}")
+
+
+def _append_rule_reference_section(
+    lines: list[str],
+    *,
+    title: str,
+    rules: object,
+    suffix_builder: Callable[[dict[str, object]], str] | None = None,
+) -> None:
+    """Append a compact rule-reference section to the markdown report."""
+    lines.extend(["", f"## {title}", ""])
+    if not isinstance(rules, list) or not rules:
+        lines.append("- none")
+        return
+
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        line = f"- {rule.get('rule_id')}: {rule.get('name')}"
+        if suffix_builder is not None:
+            suffix = suffix_builder(rule)
+            if suffix:
+                line = f"{line} -> {suffix}"
+        lines.append(line)
+
+
+def _management_reasons_summary(rule: dict[str, object]) -> str:
+    """Return a readable management-reasons summary for one rule record."""
+    management = rule.get("management")
+    if not isinstance(management, dict):
+        return ""
+
+    reasons = management.get("reasons")
+    if not isinstance(reasons, list):
+        return ""
+
+    return ", ".join(str(reason) for reason in reasons)
+
+
+def _review_reasons_summary(rule: dict[str, object]) -> str:
+    """Return a readable review-reasons summary for one rule record."""
+    review_reasons = rule.get("review_reasons")
+    if not isinstance(review_reasons, list):
+        return "unknown"
+
+    return ", ".join(str(reason) for reason in review_reasons)
 
 
 def _flatten_policy(value: object) -> object:
@@ -372,32 +558,14 @@ def build_runtime_inventory_report(
             if isinstance(raw_tag_refs, list)
             else []
         )
-        rule_record: dict[str, object] = {
-            "rule_id": rule.rule_id,
-            "label": format_policy_rule_label(rule),
-            "action": rule.action,
-            "target": rule.target,
-            "target_name": rule.target_name,
-            "target_type": rule.target_type,
-            "direction": rule.direction,
-            "purpose": rule.purpose,
-            "enabled": rule.enabled,
-            "scope": list(rule.scope),
-            "applies_to": list(rule.applies_to),
-            "activated_time": rule.activated_time,
-            "updated_time": rule.updated_time,
-            "last_activated_time": rule.last_activated_time,
-            "expire_seconds": rule.expire_seconds,
-            "expires_at": rule.expires_at,
-            "auto_delete_when_expires": rule.auto_delete_when_expires,
-            "dnsmasq_only": rule.dnsmasq_only,
-            "is_temporary": rule.is_temporary,
-            "tag_refs": tag_refs,
-            "raw_extras": raw_extras,
-            "management": management,
-            "matching": matching,
-            "review_reasons": review_reasons,
-        }
+        rule_record = _build_rule_record(
+            rule,
+            management=management,
+            matching=matching,
+            review_reasons=review_reasons,
+            raw_extras=raw_extras,
+            tag_refs=tag_refs,
+        )
         rules.append(rule_record)
         if management["classification"] == _RULE_MANAGEMENT_CLASSIFICATION_SYSTEM:
             system_managed_rules.append(rule_record)
@@ -506,32 +674,18 @@ def render_runtime_inventory_markdown(report: dict[str, object]) -> str:
     else:
         lines.append("- none")
 
-    lines.extend(["", "## User-managed Rules", ""])
-    if isinstance(user_managed_rules, list) and user_managed_rules:
-        for rule in user_managed_rules:
-            if not isinstance(rule, dict):
-                continue
-            lines.append(f"- {rule.get('label')} [id: {rule.get('rule_id')}]")
-    else:
-        lines.append("- none")
+    _append_rule_reference_section(
+        lines,
+        title="User-managed Rules",
+        rules=user_managed_rules,
+    )
 
-    lines.extend(["", "## System-managed Rules", ""])
-    if isinstance(system_managed_rules, list) and system_managed_rules:
-        for rule in system_managed_rules:
-            if not isinstance(rule, dict):
-                continue
-            management = rule.get("management")
-            management_reasons = (
-                ", ".join(str(reason) for reason in management.get("reasons", []))
-                if isinstance(management, dict)
-                else "unknown"
-            )
-            lines.append(
-                f"- {rule.get('label')} [id: {rule.get('rule_id')}] -> "
-                f"{management_reasons}"
-            )
-    else:
-        lines.append("- none")
+    _append_rule_reference_section(
+        lines,
+        title="System-managed Rules",
+        rules=system_managed_rules,
+        suffix_builder=_management_reasons_summary,
+    )
 
     lines.extend(["", "## Group Policy Controls", ""])
     if isinstance(group_policy_controls, list) and group_policy_controls:
@@ -570,34 +724,183 @@ def render_runtime_inventory_markdown(report: dict[str, object]) -> str:
             if not isinstance(rule, dict):
                 continue
             lines.append(f"- {rule.get('label')} [id: {rule.get('rule_id')}]")
+            _append_optional_rule_detail(
+                lines,
+                label="name",
+                value=rule.get("name"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="custom_name",
+                value=rule.get("custom_name"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="target",
+                value=rule.get("target"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="target_type",
+                value=rule.get("target_type"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="direction",
+                value=rule.get("direction"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="purpose",
+                value=rule.get("purpose"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="scope",
+                value=rule.get("scope"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="applies_to",
+                value=rule.get("applies_to"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="tag_refs",
+                value=rule.get("tag_refs"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="notes",
+                value=rule.get("notes"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="pause_until",
+                value=rule.get("pause_until"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="active_time_schedule",
+                value=rule.get("active_time_schedule"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="app_time_period",
+                value=rule.get("app_time_period"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="app_time_quota",
+                value=rule.get("app_time_quota"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="app_time_used",
+                value=rule.get("app_time_used"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="local_port",
+                value=rule.get("local_port"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="protocol",
+                value=rule.get("protocol"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="trust",
+                value=rule.get("trust"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="use_bf",
+                value=rule.get("use_bf"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="upnp",
+                value=rule.get("upnp"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="qdisc",
+                value=rule.get("qdisc"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="rate_limit",
+                value=rule.get("rate_limit"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="traffic_direction",
+                value=rule.get("traffic_direction"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="app_name",
+                value=rule.get("app_name"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="app_uid",
+                value=rule.get("app_uid"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="disturb_level",
+                value=rule.get("disturb_level"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="disturb_method",
+                value=rule.get("disturb_method"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="duration",
+                value=rule.get("duration"),
+            )
+            management = rule.get("management")
+            if isinstance(management, dict):
+                _append_optional_rule_detail(
+                    lines,
+                    label="management_classification",
+                    value=management.get("classification"),
+                )
+                _append_optional_rule_detail(
+                    lines,
+                    label="management_reasons",
+                    value=management.get("reasons"),
+                )
+            _append_optional_rule_detail(
+                lines,
+                label="review_reasons",
+                value=rule.get("review_reasons"),
+            )
+            _append_optional_rule_detail(
+                lines,
+                label="raw_extras",
+                value=rule.get("raw_extras"),
+            )
     else:
         lines.append("- none")
 
-    lines.extend(["", "## Rule Switch Candidates", ""])
-    if isinstance(rule_switch_candidates, list) and rule_switch_candidates:
-        for rule in rule_switch_candidates:
-            if not isinstance(rule, dict):
-                continue
-            lines.append(f"- {rule.get('label')} [id: {rule.get('rule_id')}]")
-    else:
-        lines.append("- none")
+    _append_rule_reference_section(
+        lines,
+        title="Rule Switch Candidates",
+        rules=rule_switch_candidates,
+    )
 
-    lines.extend(["", "## Rules Needing Review", ""])
-    if isinstance(rules_needing_review, list) and rules_needing_review:
-        for rule in rules_needing_review:
-            if not isinstance(rule, dict):
-                continue
-            review_reasons = rule.get("review_reasons")
-            joined_reasons = (
-                ", ".join(str(reason) for reason in review_reasons)
-                if isinstance(review_reasons, list)
-                else "unknown"
-            )
-            lines.append(
-                f"- {rule.get('label')} [id: {rule.get('rule_id')}] -> {joined_reasons}"
-            )
-    else:
-        lines.append("- none")
+    _append_rule_reference_section(
+        lines,
+        title="Rules Needing Review",
+        rules=rules_needing_review,
+        suffix_builder=_review_reasons_summary,
+    )
 
     lines.extend(["", "## Target List References", ""])
     if isinstance(target_list_references, list) and target_list_references:

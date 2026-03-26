@@ -74,6 +74,24 @@ def test_format_policy_rule_name_hides_internal_qos_uuid() -> None:
     assert format_policy_rule_name(rule) == "qos category QoS Zoom"
 
 
+def test_format_policy_rule_name_prefers_custom_name() -> None:
+    """Test a user-defined custom rule name overrides generated labels."""
+    rule = FirewallaPolicyRule(
+        rule_id="10",
+        action="allow",
+        target="choreops.com",
+        target_type="dns",
+        direction="bidirection",
+        enabled=True,
+        purpose=None,
+        scope=(),
+        applies_to=("AV_SMART_TV",),
+        raw_update_payload={"_name": "ChoreOps Custom Allow"},
+    )
+
+    assert format_policy_rule_name(rule) == "ChoreOps Custom Allow"
+
+
 def test_supports_rule_switch_excludes_opaque_translation_list_categories() -> None:
     """Test TL category targets can back switches even without a resolved name."""
     rule = FirewallaPolicyRule(
@@ -124,6 +142,40 @@ def test_supports_rule_switch_accepts_remote_port_rules() -> None:
     assert supports_rule_switch(rule) is True
 
 
+def test_supports_rule_switch_accepts_qos_rules() -> None:
+    """Test QoS rules can back switches."""
+    rule = FirewallaPolicyRule(
+        rule_id="11",
+        action="qos",
+        target="QoS Zoom",
+        target_type="category",
+        direction="bidirection",
+        enabled=True,
+        purpose=None,
+        scope=(),
+        target_name="QoS Zoom",
+    )
+
+    assert supports_rule_switch(rule) is True
+
+
+def test_supports_rule_switch_accepts_disturb_rules() -> None:
+    """Test disturb rules can back switches."""
+    rule = FirewallaPolicyRule(
+        rule_id="12",
+        action="disturb",
+        target="games",
+        target_type="category",
+        direction="bidirection",
+        enabled=True,
+        purpose=None,
+        scope=(),
+        target_name="games",
+    )
+
+    assert supports_rule_switch(rule) is True
+
+
 def test_supports_rule_switch_accepts_network_rules_without_names() -> None:
     """Test network rules can back switches even without resolved names."""
     rule = FirewallaPolicyRule(
@@ -153,6 +205,72 @@ def test_supports_rule_switch_excludes_family_rules() -> None:
         purpose="family",
         scope=(),
         target_name="porn",
+    )
+
+    assert supports_rule_switch(rule) is False
+
+
+def test_supports_rule_switch_excludes_dap_rules() -> None:
+    """Test Device Active Protect rules are not offered as switches."""
+    rule = FirewallaPolicyRule(
+        rule_id="13",
+        action="allow",
+        target="dap_08f9e076ca6f",
+        target_type="category",
+        direction="outbound",
+        enabled=False,
+        purpose="dap",
+        scope=("08:F9:E0:76:CA:6F",),
+        target_name="DAP - 08:F9:E0:76:CA:6F",
+    )
+
+    assert supports_rule_switch(rule) is False
+
+
+def test_supports_rule_switch_accepts_port_forwarding_rules() -> None:
+    """Test port-forwarding rules are offered as switches."""
+    rule = FirewallaPolicyRule(
+        rule_id="14",
+        action="allow",
+        target="US",
+        target_type="country",
+        direction="inbound",
+        enabled=True,
+        purpose="port_forwarding",
+        scope=("00:AA:BB:CC:62:53",),
+        target_name=None,
+    )
+
+    assert supports_rule_switch(rule) is True
+
+
+def test_supports_rule_switch_excludes_unknown_non_null_purposes() -> None:
+    """Test unknown product purposes stay out of the switch surface."""
+    rule = FirewallaPolicyRule(
+        rule_id="15",
+        action="block",
+        target="TAG",
+        target_type="mac",
+        direction="bidirection",
+        enabled=True,
+        purpose="new_product_surface",
+        scope=(),
+    )
+
+    assert supports_rule_switch(rule) is False
+
+
+def test_supports_rule_switch_excludes_firewall_rules() -> None:
+    """Test firewall-purpose rules are not offered as switches."""
+    rule = FirewallaPolicyRule(
+        rule_id="16",
+        action="block",
+        target="TAG",
+        target_type="mac",
+        direction="bidirection",
+        enabled=True,
+        purpose="firewall",
+        scope=(),
     )
 
     assert supports_rule_switch(rule) is False

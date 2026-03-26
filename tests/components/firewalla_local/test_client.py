@@ -487,6 +487,46 @@ async def test_update_rule_sends_live_rule_payload_with_changed_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_rule_control_only_resumes_existing_rule() -> None:
+    """Test sparse control-only update sends only pause or resume fields."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with (
+            patch(
+                "custom_components.firewalla_local.api.client.time.time",
+                return_value=1774310993.8565822,
+            ),
+            patch.object(
+                client, "_async_send_local_message", AsyncMock(return_value={})
+            ) as mock_send,
+        ):
+            await client.async_update_rule_control_only("211", enabled=True)
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "cmd",
+        "data": {
+            "item": "policy:update",
+            "value": {
+                "pid": "211",
+                "disabled": 0,
+                "idleTs": "",
+                "updatedTime": 1774310993.8565822,
+            },
+        },
+        "target": "0.0.0.0",
+    }
+
+
+@pytest.mark.asyncio
 async def test_get_system_info_retries_once_on_unauthorized() -> None:
     """Test a single 401 is retried before decoding the local response."""
     async with ClientSession() as session:

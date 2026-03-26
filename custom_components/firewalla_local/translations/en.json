@@ -156,26 +156,71 @@
               "purpose_rule_control": "Pauses or resumes the firewall rule"
             }
           },
-          "rule_id": {
-            "name": "Rule ID"
+          "rule_name": {
+            "name": "Rule name"
           },
-          "target": {
-            "name": "Target"
+          "custom_name": {
+            "name": "Custom name"
           },
-          "target_type": {
-            "name": "Target type"
-          },
-          "tag_refs": {
-            "name": "Tag refs"
+          "action": {
+            "name": "Action",
+            "state": {
+              "allow": "Allow",
+              "block": "Block",
+              "disturb": "Disturb",
+              "qos": "QoS"
+            }
           },
           "notes": {
             "name": "Notes"
+          },
+          "rule_id": {
+            "name": "Rule ID"
           },
           "is_paused": {
             "name": "Is paused"
           },
           "pause_until": {
             "name": "Pause until"
+          },
+          "pause_remaining_seconds": {
+            "name": "Pause remaining seconds"
+          },
+          "schedule_start_cron": {
+            "name": "Schedule start cron"
+          },
+          "schedule_duration": {
+            "name": "Schedule duration"
+          },
+          "schedule_days": {
+            "name": "Schedule days"
+          },
+          "schedule_next_start": {
+            "name": "Schedule next start"
+          },
+          "schedule_next_end": {
+            "name": "Schedule next end"
+          },
+          "time_limit_period_cron": {
+            "name": "Time limit period cron"
+          },
+          "time_limit_quota": {
+            "name": "Time limit quota"
+          },
+          "time_limit_used": {
+            "name": "Time limit used"
+          },
+          "current_state_reason": {
+            "name": "Current state reason",
+            "state": {
+              "disabled": "Disabled",
+              "enabled": "Enabled",
+              "off_schedule": "Off schedule",
+              "on_schedule": "On schedule",
+              "paused": "Paused",
+              "time_limit_active": "Time limit active",
+              "time_limit_reached": "Time limit reached"
+            }
           }
         }
       },
@@ -188,26 +233,71 @@
               "purpose_rule_control": "Pauses or resumes the firewall rule"
             }
           },
-          "rule_id": {
-            "name": "Rule ID"
+          "rule_name": {
+            "name": "Rule name"
           },
-          "target": {
-            "name": "Target"
+          "custom_name": {
+            "name": "Custom name"
           },
-          "target_type": {
-            "name": "Target type"
-          },
-          "tag_refs": {
-            "name": "Tag refs"
+          "action": {
+            "name": "Action",
+            "state": {
+              "allow": "Allow",
+              "block": "Block",
+              "disturb": "Disturb",
+              "qos": "QoS"
+            }
           },
           "notes": {
             "name": "Notes"
+          },
+          "rule_id": {
+            "name": "Rule ID"
           },
           "is_paused": {
             "name": "Is paused"
           },
           "pause_until": {
             "name": "Pause until"
+          },
+          "pause_remaining_seconds": {
+            "name": "Pause remaining seconds"
+          },
+          "schedule_start_cron": {
+            "name": "Schedule start cron"
+          },
+          "schedule_duration": {
+            "name": "Schedule duration"
+          },
+          "schedule_days": {
+            "name": "Schedule days"
+          },
+          "schedule_next_start": {
+            "name": "Schedule next start"
+          },
+          "schedule_next_end": {
+            "name": "Schedule next end"
+          },
+          "time_limit_period_cron": {
+            "name": "Time limit period cron"
+          },
+          "time_limit_quota": {
+            "name": "Time limit quota"
+          },
+          "time_limit_used": {
+            "name": "Time limit used"
+          },
+          "current_state_reason": {
+            "name": "Current state reason",
+            "state": {
+              "disabled": "Disabled",
+              "enabled": "Enabled",
+              "off_schedule": "Off schedule",
+              "on_schedule": "On schedule",
+              "paused": "Paused",
+              "time_limit_active": "Time limit active",
+              "time_limit_reached": "Time limit reached"
+            }
           }
         }
       }
@@ -286,9 +376,53 @@
         }
       }
     },
+    "pause_rule_control_only": {
+      "name": "Pause rule (control only)",
+      "description": "Experimental. Pause one managed Firewalla rule using only the rule ID and pause control fields in the update payload. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.",
+      "fields": {
+        "rule_target": {
+          "name": "Rule target",
+          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Optional. How long to pause the rule, for example 30m, 4h, or 2d 4h 30m."
+        },
+        "resume_at": {
+          "name": "Resume at",
+          "description": "Optional. A local date and time when the rule should resume."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "resume_rule": {
       "name": "Resume rule",
       "description": "Resume one managed Firewalla rule immediately.",
+      "fields": {
+        "rule_target": {
+          "name": "Rule target",
+          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "resume_rule_control_only": {
+      "name": "Resume rule (control only)",
+      "description": "Experimental. Resume one managed Firewalla rule using only the rule ID and pause control fields in the update payload.",
       "fields": {
         "rule_target": {
           "name": "Rule target",

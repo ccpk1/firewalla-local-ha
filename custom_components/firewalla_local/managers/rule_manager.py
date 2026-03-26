@@ -20,6 +20,7 @@ from ..models import (
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     format_policy_rule_label,
+    format_policy_rule_name,
     supports_rule_switch,
 )
 from .base_manager import FirewallaBaseManager
@@ -352,6 +353,18 @@ class FirewallaRuleManager(FirewallaBaseManager):
                 if template := FirewallaRuleTemplate.from_dict(raw_template):
                     templates.append(template)
 
+        if templates and snapshot is not None:
+            live_rule_index = {rule.rule_id: rule for rule in snapshot.policy_rules}
+            templates = [
+                replace(
+                    template,
+                    name=format_policy_rule_name(live_rule),
+                )
+                if (live_rule := live_rule_index.get(template.source_rule_id))
+                else template
+                for template in templates
+            ]
+
         if templates or snapshot is None:
             return tuple(templates)
 
@@ -359,13 +372,14 @@ class FirewallaRuleManager(FirewallaBaseManager):
         if not isinstance(selected_rule_ids, list):
             return ()
 
-        live_rule_index = (
+        candidate_template_index = (
             FirewallaRuleManager.get_switch_candidate_templates_for_snapshot(snapshot)
         )
         return tuple(
             template
             for rule_id in selected_rule_ids
-            if isinstance(rule_id, str) and (template := live_rule_index.get(rule_id))
+            if isinstance(rule_id, str)
+            and (template := candidate_template_index.get(rule_id))
         )
 
     def handle_refresh(
@@ -570,7 +584,9 @@ class FirewallaRuleManager(FirewallaBaseManager):
 
         await asyncio.gather(
             *(
-                self.client.async_update_rule(rule, enabled=False, idle_ts=resume_ts)
+                self.client.async_update_rule_control_only(
+                    rule.rule_id, enabled=False, idle_ts=resume_ts
+                )
                 for rule in rules
             )
         )
@@ -585,7 +601,10 @@ class FirewallaRuleManager(FirewallaBaseManager):
             return
 
         await asyncio.gather(
-            *(self.client.async_update_rule(rule, enabled=True) for rule in rules)
+            *(
+                self.client.async_update_rule_control_only(rule.rule_id, enabled=True)
+                for rule in rules
+            )
         )
         self._apply_optimistic_rule_update(
             tuple(rule.rule_id for rule in rules), enabled=True, idle_ts=None
@@ -622,7 +641,10 @@ class FirewallaRuleManager(FirewallaBaseManager):
         updated_time = time.time()
         updated_rules = tuple(
             self._build_optimistic_rule(
-                rule, enabled=enabled, idle_ts=idle_ts, updated_time=updated_time
+                rule,
+                enabled=enabled,
+                idle_ts=idle_ts,
+                updated_time=updated_time,
             )
             if rule.rule_id in rule_ids
             else rule

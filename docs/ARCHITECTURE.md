@@ -34,6 +34,8 @@ Use these documents together:
 - `docs/ARCHITECTURE.md`: structural contracts and ownership boundaries
 - `docs/DEVELOPMENT_STANDARDS.md`: coding, typing, translation, and lifecycle rules
 - `docs/QUALITY_REFERENCE.md`: compact mapping from quality expectations to repository evidence
+- `docs/RULE_MODEL.md`: durable policy-rule interpretation, switch eligibility,
+  and metadata contracts
 
 ## Lexicon standards
 
@@ -360,12 +362,32 @@ Rules:
 - groups, users, networks, tags, and targets may inform entity behavior but are not automatically entity types themselves
 - rule-backed pause actions are service-driven unless a later architecture decision explicitly introduces a native entity control for them
 
+Rule control model:
+
+- persistent user-managed rules that support pause or resume must be treated as
+	one shared control family unless evidence proves otherwise
+- switch eligibility must be derived from shared control semantics rather than
+	target type alone
+- family-specific fields such as schedule, quota, disturb, QoS, app identity,
+	and port-forward details are metadata surfaces layered on top of the shared
+	control model, not separate control systems
+- temporary rules remain a separate family defined by true expiry behavior, not
+	by descriptive metadata alone
+- the durable interpretation details live in `docs/RULE_MODEL.md`
+
 Switch-enabled rule policy:
 
 - switch eligibility must be defined through one manager-owned logic path
 - the same switch-candidate policy must drive live manager behavior, options-flow fallback behavior, and runtime inventory reporting
-- only a subset of Firewalla rules should be switch-enabled because the integration is intentionally limited to rule shapes that behave like stable user-managed on or off controls
+- only a subset of Firewalla rules should be switch-enabled because the
+	integration is intentionally limited to rule shapes that behave like stable
+	user-managed on or off controls
+- the switch policy should be action and purpose driven, not target-type driven
 - Firewalla-managed, temporary, auto-expiring, or otherwise non-persistent rule shapes must remain outside the switch surface
+- review reasons and missing readable names are presentation hints and must not
+	be used as the sole reason to treat a rule as non-controllable
+- explicit purpose exclusions may narrow the exposed subset further even when a
+	rule is technically controllable
 - user-facing documentation may describe this as a supported subset, but the exact filtering logic remains an internal manager contract
 
 Shared entity rules:
@@ -385,6 +407,9 @@ Entity metadata rules:
 - entity attributes should expose a concise `purpose` or equivalent metadata field when it materially helps users understand what the entity controls or represents
 - purpose metadata must clarify the intended scope of the entity without leaking internal implementation detail or sensitive payload fields
 - metadata should be manager-derived and consistent across platforms rather than improvised independently by each entity class
+- metadata should be exposed as optional grouped rule details such as schedule,
+  expiry, quota, app identity, disturb shaping, QoS, and port-forward context
+  when those fields exist on the normalized or raw rule surface
 
 Parallel update rules:
 
