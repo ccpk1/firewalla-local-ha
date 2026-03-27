@@ -16,13 +16,16 @@ Firewalla box over the verified local protocol.
 
 ## Installation
 
-### HACS installation
+### One-click HACS install
 
-1. Ensure HACS is installed in Home Assistant.
-2. Open **HACS -> Integrations -> Custom repositories**.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ccpk1&repository=firewalla-local-ha&category=integration)
+
+### Manual HACS setup
+
+1. Ensure HACS is installed.
+2. In Home Assistant, open **HACS -> Integrations -> Custom repositories**.
 3. Add `https://github.com/ccpk1/firewalla-local-ha` as an **Integration** repository.
-4. Install **Firewalla Local** from HACS.
-5. Restart Home Assistant.
+4. Search for **Firewalla Local**, install it, and restart Home Assistant.
 
 ### Add the integration and pair your device
 
