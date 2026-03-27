@@ -15,7 +15,7 @@ rules:
   docs-high-level-description: done
   docs-installation-instructions:
     status: done
-    comment: README and USER_GUIDE now document HACS installation, QR-based setup, and the initial runtime surfaces.
+    comment: README and USER_GUIDE now document HACS installation, QR-based setup, options-flow management, and the current runtime surfaces.
   docs-removal-instructions:
     status: done
     comment: USER_GUIDE now documents config-entry removal and HACS repository removal.
@@ -57,19 +57,19 @@ rules:
     comment: Auto-discovery (mDNS/DHCP) is omitted due to the firewall's stealth network defaults and generic MAC addresses; we instead leverage its native fire.walla DNS intercept for seamless setup.
   entity-category:
     status: done
-    comment: Diagnostic system-monitoring sensors use the diagnostic category while the rule-backed switch remains a primary control entity.
+    comment: "Primary rule, appliance-monitoring, watched-device, and watched-user entities remain uncategorized, with entity categories reserved for surfaces that are truly diagnostic."
   entity-disabled-by-default:
     status: done
-    comment: Entities are only created for rules the user explicitly selects in the options flow.
+    comment: "Rule-backed switches plus watched-device and watched-user entities are created only when the user selects them in options, while core appliance-monitoring entities remain always available."
   entity-translations:
     status: done
-    comment: Rule-backed switches and system-monitoring sensors use translation-backed names, states, and attributes without inline user-facing strings.
+    comment: "Rule-backed switches, appliance-monitoring entities, watched-device entities, and watched-user entities use translation-backed names, states, and attributes without inline user-facing strings."
   exception-translations:
     status: done
     comment: Config flow and service validation now use distinct translation keys for host, QR, entry-scope, duration, and rule-target failures.
   icon-translations:
     status: done
-    comment: Rule-backed switch icons and system-monitoring sensor icons are defined in icons.json instead of inline icon strings.
+    comment: "Rule-backed switch, appliance-monitoring, watched-device, and watched-user icons are defined in icons.json instead of inline icon strings."
   stale-devices:
     status: done
     comment: The integration exposes one stable Firewalla device per config entry with availability rules and does not dynamically remove devices.  It does properly handle lifecyle when the user chooses to items from under management.

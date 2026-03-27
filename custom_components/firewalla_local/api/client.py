@@ -20,12 +20,17 @@ from ..const import (
     FIREWALLA_PROTOCOL_CLIENT_VERSION,
 )
 from ..models import (
+    FirewallaApplianceIdentityInput,
+    FirewallaApplianceRuntimeInput,
+    FirewallaDiskUsageInput,
+    FirewallaHostRuntime,
+    FirewallaHostVpnClient,
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
-    FirewallaSpeedTestResult,
-    FirewallaSystemInfo,
-    FirewallaSystemStatus,
+    FirewallaSpeedTestRecord,
+    FirewallaUserAppUsage,
+    FirewallaUserRuntime,
 )
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
@@ -85,6 +90,7 @@ _RAW_SYSTEM_DDNS_KEY: Final = "ddns"
 _RAW_SYSTEM_FIRMWARE_RELEASE_TYPE_KEY: Final = "firmwareReleaseType"
 _RAW_SYSTEM_PUBLIC_IP_KEY: Final = "publicIp"
 _RAW_SYSTEM_PUBLIC_IPS_KEY: Final = "publicIps"
+_RAW_SYSTEM_OS_UPTIME_KEY: Final = "osUptime"
 _RAW_SYSTEM_SYS_METRICS_KEY: Final = "sysMetrics"
 _RAW_SYSTEM_SYS_METRICS_CPU_LOAD_5_KEY: Final = "load5"
 _RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY: Final = "memUsage"
@@ -108,6 +114,22 @@ _RAW_USER_TAGS_KEY: Final = "userTags"
 _RAW_HOSTS_KEY: Final = "hosts"
 _RAW_HOST_MAC_KEY: Final = "mac"
 _RAW_HOST_BACKUP_NAME_KEY: Final = "bname"
+_RAW_HOST_IP_KEY: Final = "ip"
+_RAW_HOST_LAST_ACTIVE_KEY: Final = "lastActive"
+_RAW_HOST_FLOWSUMMARY_KEY: Final = "flowsummary"
+_RAW_HOST_STALE_KEY: Final = "stale"
+_RAW_HOST_POLICY_KEY: Final = "policy"
+_RAW_HOST_VPN_CLIENT_KEY: Final = "vpnClient"
+_RAW_HOST_STATE_KEY: Final = "state"
+_RAW_HOST_PROFILE_ID_KEY: Final = "profileId"
+_RAW_USER_AFFILIATED_TAG_KEY: Final = "affiliatedTag"
+_RAW_USER_APP_TIME_USAGE_TODAY_KEY: Final = "appTimeUsageToday"
+_RAW_USER_INTERNET_TIME_USAGE_TODAY_KEY: Final = "internetTimeUsageToday"
+_RAW_USER_TOTAL_MINS_KEY: Final = "totalMins"
+_RAW_USER_UNIQUE_MINS_KEY: Final = "uniqueMins"
+_RAW_USER_CATEGORY_KEY: Final = "category"
+_RAW_USER_UID_KEY: Final = "uid"
+_RAW_USER_TYPE_KEY: Final = "type"
 _RAW_EXCEPTION_RULES_KEY: Final = "exceptionRules"
 _RAW_POLICY_RULES_KEY: Final = "policyRules"
 _RAW_SPEED_TEST_RESULTS_KEY: Final = "internetSpeedtestResults"
@@ -155,14 +177,6 @@ _DISABLED_TRUE_VALUES: Final = {"1", "true", "True", 1}
 _RAW_RULE_DISABLED_FALSE_VALUE: Final = 0
 _RAW_RULE_DISABLED_TRUE_VALUE: Final = 1
 _RAW_RULE_IDLE_TS_EMPTY_VALUE: Final = ""
-_SYSTEM_STATUS_PRIMARY_DISK_MOUNTS: Final = (
-    "/",
-    "/boot",
-    "/boot/efi",
-    "/var/lib/docker",
-    "/log",
-    "/data",
-)
 
 
 class FirewallaApiClient:
@@ -421,18 +435,29 @@ class FirewallaApiClient:
             target=DEFAULT_INIT_TARGET,
         )
 
-    def _build_system_info(self, data: dict[str, object]) -> FirewallaSystemInfo:
-        """Build normalized system information from the init payload."""
+    def _extract_appliance_identity(
+        self, data: dict[str, object]
+    ) -> FirewallaApplianceIdentityInput:
+        """Extract the protocol-facing appliance identity input."""
         model = data.get(_RAW_SYSTEM_MODEL_KEY)
         serial_number = data.get(_RAW_SYSTEM_CPU_ID_KEY)
         software_version = data.get(_RAW_SYSTEM_LONG_VERSION_KEY)
 
-        return FirewallaSystemInfo(
+        return FirewallaApplianceIdentityInput(
             host=self.host,
-            name=str(
-                data.get(_RAW_SYSTEM_GROUP_NAME_KEY)
-                or data.get(_RAW_SYSTEM_DEVICE_NAME_KEY)
-                or _DEFAULT_BOX_NAME
+            group_name=(
+                group_name
+                if isinstance((group_name := data.get(_RAW_SYSTEM_GROUP_NAME_KEY)), str)
+                and group_name
+                else None
+            ),
+            device_name=(
+                device_name
+                if isinstance(
+                    (device_name := data.get(_RAW_SYSTEM_DEVICE_NAME_KEY)), str
+                )
+                and device_name
+                else None
             ),
             model=model if isinstance(model, str) else None,
             serial_number=serial_number if isinstance(serial_number, str) else None,
@@ -441,17 +466,50 @@ class FirewallaApiClient:
             ),
         )
 
-    def _build_system_status(self, data: dict[str, object]) -> FirewallaSystemStatus:
-        """Build normalized system-status state from the init payload."""
+    def _extract_appliance_runtime(
+        self, data: dict[str, object]
+    ) -> FirewallaApplianceRuntimeInput:
+        """Extract the protocol-facing appliance runtime input."""
         raw_sys_metrics = data.get(_RAW_SYSTEM_SYS_METRICS_KEY)
         sys_metrics = raw_sys_metrics if isinstance(raw_sys_metrics, dict) else {}
-        wan_ips = self._build_wan_ips(data)
-        memory_usage_ratio = self._coerce_float(
-            sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY)
+        raw_public_ips = data.get(_RAW_SYSTEM_PUBLIC_IPS_KEY)
+        public_ips = (
+            {
+                interface_name: public_ip
+                for interface_name, public_ip in raw_public_ips.items()
+                if isinstance(interface_name, str)
+                and interface_name
+                and isinstance(public_ip, str)
+                and public_ip
+            }
+            if isinstance(raw_public_ips, dict)
+            else {}
         )
-        memory_usage_percent = self._build_memory_usage_percent(sys_metrics)
 
-        return FirewallaSystemStatus(
+        raw_disk_info = sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_DISK_INFO_KEY)
+        disk_info = raw_disk_info if isinstance(raw_disk_info, list) else []
+        disk_usages = tuple(
+            FirewallaDiskUsageInput(
+                mount=mount,
+                capacity_ratio=self._coerce_float(
+                    raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_CAPACITY_KEY)
+                ),
+                used_bytes=self._coerce_float(
+                    raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_USED_KEY)
+                ),
+                size_bytes=self._coerce_float(
+                    raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_SIZE_KEY)
+                ),
+            )
+            for raw_disk in disk_info
+            if isinstance(raw_disk, dict)
+            and isinstance(
+                (mount := raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_MOUNT_KEY)), str
+            )
+            and mount
+        )
+
+        return FirewallaApplianceRuntimeInput(
             booting_complete=self._coerce_boolish(
                 data.get(_RAW_SYSTEM_BOOTING_COMPLETE_KEY)
             ),
@@ -476,238 +534,167 @@ class FirewallaApiClient:
                 and firmware_release_type
                 else None
             ),
-            wan_ip=self._build_wan_ip(data, wan_ips),
-            wan_ips=wan_ips,
+            public_ip=(
+                public_ip
+                if isinstance((public_ip := data.get(_RAW_SYSTEM_PUBLIC_IP_KEY)), str)
+                and public_ip
+                else None
+            ),
+            public_ips=public_ips or None,
             cpu_load_5m=self._coerce_float(
                 sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_CPU_LOAD_5_KEY)
             ),
-            memory_usage_percent=memory_usage_percent,
-            memory_free_mb=self._build_memory_free_mb(sys_metrics, memory_usage_ratio),
-            disk_usage_percent_by_mount=self._build_disk_usage_percent_by_mount(
-                sys_metrics
+            memory_usage_ratio=self._coerce_float(
+                sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY)
             ),
+            total_memory_mb=self._coerce_float(
+                sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_TOTAL_MEMORY_KEY)
+            ),
+            uptime_seconds=self._coerce_int(data.get(_RAW_SYSTEM_OS_UPTIME_KEY)),
+            disk_usages=disk_usages,
         )
 
-    def _build_wan_ip(
-        self, data: dict[str, object], wan_ips: dict[str, str] | None
-    ) -> str | None:
-        """Build the primary WAN public IP from the init payload."""
-        raw_public_ip = data.get(_RAW_SYSTEM_PUBLIC_IP_KEY)
-        if isinstance(raw_public_ip, str) and raw_public_ip:
-            return raw_public_ip
-        if wan_ips:
-            return next(iter(wan_ips.values()))
-        return None
-
-    def _build_wan_ips(self, data: dict[str, object]) -> dict[str, str] | None:
-        """Build the WAN public IP map keyed by interface name."""
-        raw_public_ips = data.get(_RAW_SYSTEM_PUBLIC_IPS_KEY)
-        if not isinstance(raw_public_ips, dict):
-            return None
-
-        wan_ips = {
-            interface_name: public_ip
-            for interface_name, public_ip in raw_public_ips.items()
-            if isinstance(interface_name, str)
-            and interface_name
-            and isinstance(public_ip, str)
-            and public_ip
-        }
-        return wan_ips or None
-
-    def _build_memory_usage_percent(
-        self, sys_metrics: dict[str, object]
-    ) -> float | None:
-        """Build the memory usage percentage from the sysMetrics payload."""
-        memory_usage_ratio = self._coerce_float(
-            sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY)
-        )
-        if memory_usage_ratio is None:
-            return None
-        return round(memory_usage_ratio * 100, 1)
-
-    def _build_memory_free_mb(
-        self, sys_metrics: dict[str, object], memory_usage_ratio: float | None
-    ) -> float | None:
-        """Build free memory in megabytes from the sysMetrics payload."""
-        total_memory_mb = self._coerce_float(
-            sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_TOTAL_MEMORY_KEY)
-        )
-        if total_memory_mb is None or memory_usage_ratio is None:
-            return None
-        return round(total_memory_mb * (1 - memory_usage_ratio), 1)
-
-    def _build_disk_usage_percent_by_mount(
-        self, sys_metrics: dict[str, object]
-    ) -> dict[str, int] | None:
-        """Build a filtered disk usage map for important system mounts."""
-        raw_disk_info = sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_DISK_INFO_KEY)
-        if not isinstance(raw_disk_info, list):
-            return None
-
-        usage_by_mount: dict[str, int] = {}
-        for raw_disk in raw_disk_info:
-            if not isinstance(raw_disk, dict):
-                continue
-
-            mount = raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_MOUNT_KEY)
-            if (
-                not isinstance(mount, str)
-                or mount not in _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS
-            ):
-                continue
-
-            usage_ratio = self._coerce_float(
-                raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_CAPACITY_KEY)
-            )
-            if usage_ratio is None:
-                used = self._coerce_float(
-                    raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_USED_KEY)
-                )
-                size = self._coerce_float(
-                    raw_disk.get(_RAW_SYSTEM_SYS_METRICS_DISK_SIZE_KEY)
-                )
-                if used is None or size is None or size == 0:
-                    continue
-                usage_ratio = used / size
-
-            usage_by_mount[mount] = round(usage_ratio * 100)
-
-        filtered_usage = {
-            mount: usage_by_mount[mount]
-            for mount in _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS
-            if mount in usage_by_mount
-        }
-        return filtered_usage or None
-
-    def _build_latest_speed_test(
+    def _extract_speed_test_records(
         self, data: dict[str, object]
-    ) -> FirewallaSpeedTestResult | None:
-        """Build the latest successful internet speed-test result."""
+    ) -> tuple[FirewallaSpeedTestRecord, ...]:
+        """Extract protocol-facing speed-test records from the payload."""
         raw_results = data.get(_RAW_SPEED_TEST_RESULTS_KEY)
         if not isinstance(raw_results, list):
-            return None
+            return ()
 
-        successful_results: list[tuple[float, dict[str, object]]] = []
+        records: list[FirewallaSpeedTestRecord] = []
         for raw_result in raw_results:
             if not isinstance(raw_result, dict):
                 continue
 
-            timestamp = self._coerce_float(
-                raw_result.get(_RAW_SPEED_TEST_TIMESTAMP_KEY)
-            )
-            success = self._coerce_boolish(raw_result.get(_RAW_SPEED_TEST_SUCCESS_KEY))
-            if timestamp is None or success is not True:
-                continue
+            raw_client = raw_result.get(_RAW_SPEED_TEST_CLIENT_KEY)
+            raw_measurement = raw_result.get(_RAW_SPEED_TEST_RESULT_KEY)
+            raw_server = raw_result.get(_RAW_SPEED_TEST_SERVER_KEY)
 
-            successful_results.append((timestamp, raw_result))
+            client = raw_client if isinstance(raw_client, dict) else {}
+            measurement = raw_measurement if isinstance(raw_measurement, dict) else {}
+            server = raw_server if isinstance(raw_server, dict) else {}
 
-        if not successful_results:
-            return None
-
-        latest_timestamp, latest_result = max(
-            successful_results,
-            key=lambda item: item[0],
-        )
-
-        raw_client = latest_result.get(_RAW_SPEED_TEST_CLIENT_KEY)
-        raw_measurement = latest_result.get(_RAW_SPEED_TEST_RESULT_KEY)
-        raw_server = latest_result.get(_RAW_SPEED_TEST_SERVER_KEY)
-
-        client = raw_client if isinstance(raw_client, dict) else {}
-        measurement = raw_measurement if isinstance(raw_measurement, dict) else {}
-        server = raw_server if isinstance(raw_server, dict) else {}
-
-        return FirewallaSpeedTestResult(
-            tested_at_timestamp=latest_timestamp,
-            download_mbps=self._coerce_float(
-                measurement.get(_RAW_SPEED_TEST_DOWNLOAD_KEY)
-            ),
-            upload_mbps=self._coerce_float(measurement.get(_RAW_SPEED_TEST_UPLOAD_KEY)),
-            latency_ms=self._coerce_float(measurement.get(_RAW_SPEED_TEST_LATENCY_KEY)),
-            jitter_ms=self._coerce_float(measurement.get(_RAW_SPEED_TEST_JITTER_KEY)),
-            packet_loss_percent=self._coerce_float(
-                measurement.get(_RAW_SPEED_TEST_PACKET_LOSS_KEY)
-            ),
-            download_megabytes=self._coerce_float(
-                measurement.get(_RAW_SPEED_TEST_DOWNLOAD_MBYTES_KEY)
-            ),
-            upload_megabytes=self._coerce_float(
-                measurement.get(_RAW_SPEED_TEST_UPLOAD_MBYTES_KEY)
-            ),
-            isp=(
-                isp
-                if isinstance((isp := client.get(_RAW_SPEED_TEST_ISP_KEY)), str) and isp
-                else None
-            ),
-            public_ip=(
-                public_ip
-                if isinstance(
-                    (public_ip := client.get(_RAW_SPEED_TEST_PUBLIC_IP_KEY)), str
-                )
-                and public_ip
-                else None
-            ),
-            server_country=(
-                server_country
-                if isinstance(
-                    (server_country := server.get(_RAW_SPEED_TEST_SERVER_COUNTRY_KEY)),
-                    str,
-                )
-                and server_country
-                else None
-            ),
-            server_host=(
-                server_host
-                if isinstance(
-                    (server_host := server.get(_RAW_SPEED_TEST_SERVER_HOST_KEY)), str
-                )
-                and server_host
-                else None
-            ),
-            server_id=(
-                server_id
-                if isinstance(
-                    (server_id := server.get(_RAW_SPEED_TEST_SERVER_ID_KEY)),
-                    str,
-                )
-                and server_id
-                else None
-            ),
-            server_location=(
-                server_location
-                if isinstance(
-                    (
-                        server_location := server.get(
-                            _RAW_SPEED_TEST_SERVER_LOCATION_KEY
-                        )
+            records.append(
+                FirewallaSpeedTestRecord(
+                    tested_at_timestamp=self._coerce_float(
+                        raw_result.get(_RAW_SPEED_TEST_TIMESTAMP_KEY)
                     ),
-                    str,
+                    download_mbps=self._coerce_float(
+                        measurement.get(_RAW_SPEED_TEST_DOWNLOAD_KEY)
+                    ),
+                    upload_mbps=self._coerce_float(
+                        measurement.get(_RAW_SPEED_TEST_UPLOAD_KEY)
+                    ),
+                    latency_ms=self._coerce_float(
+                        measurement.get(_RAW_SPEED_TEST_LATENCY_KEY)
+                    ),
+                    jitter_ms=self._coerce_float(
+                        measurement.get(_RAW_SPEED_TEST_JITTER_KEY)
+                    ),
+                    packet_loss_percent=self._coerce_float(
+                        measurement.get(_RAW_SPEED_TEST_PACKET_LOSS_KEY)
+                    ),
+                    download_megabytes=self._coerce_float(
+                        measurement.get(_RAW_SPEED_TEST_DOWNLOAD_MBYTES_KEY)
+                    ),
+                    upload_megabytes=self._coerce_float(
+                        measurement.get(_RAW_SPEED_TEST_UPLOAD_MBYTES_KEY)
+                    ),
+                    isp=(
+                        isp
+                        if isinstance((isp := client.get(_RAW_SPEED_TEST_ISP_KEY)), str)
+                        and isp
+                        else None
+                    ),
+                    public_ip=(
+                        public_ip
+                        if isinstance(
+                            (public_ip := client.get(_RAW_SPEED_TEST_PUBLIC_IP_KEY)),
+                            str,
+                        )
+                        and public_ip
+                        else None
+                    ),
+                    server_country=(
+                        server_country
+                        if isinstance(
+                            (
+                                server_country := server.get(
+                                    _RAW_SPEED_TEST_SERVER_COUNTRY_KEY
+                                )
+                            ),
+                            str,
+                        )
+                        and server_country
+                        else None
+                    ),
+                    server_host=(
+                        server_host
+                        if isinstance(
+                            (
+                                server_host := server.get(
+                                    _RAW_SPEED_TEST_SERVER_HOST_KEY
+                                )
+                            ),
+                            str,
+                        )
+                        and server_host
+                        else None
+                    ),
+                    server_id=(
+                        server_id
+                        if isinstance(
+                            (server_id := server.get(_RAW_SPEED_TEST_SERVER_ID_KEY)),
+                            str,
+                        )
+                        and server_id
+                        else None
+                    ),
+                    server_location=(
+                        server_location
+                        if isinstance(
+                            (
+                                server_location := server.get(
+                                    _RAW_SPEED_TEST_SERVER_LOCATION_KEY
+                                )
+                            ),
+                            str,
+                        )
+                        and server_location
+                        else None
+                    ),
+                    server_sponsor=(
+                        server_sponsor
+                        if isinstance(
+                            (
+                                server_sponsor := server.get(
+                                    _RAW_SPEED_TEST_SERVER_SPONSOR_KEY
+                                )
+                            ),
+                            str,
+                        )
+                        and server_sponsor
+                        else None
+                    ),
+                    manual=self._coerce_boolish(
+                        raw_result.get(_RAW_SPEED_TEST_MANUAL_KEY)
+                    ),
+                    success=self._coerce_boolish(
+                        raw_result.get(_RAW_SPEED_TEST_SUCCESS_KEY)
+                    ),
+                    vendor=(
+                        vendor
+                        if isinstance(
+                            (vendor := raw_result.get(_RAW_SPEED_TEST_VENDOR_KEY)), str
+                        )
+                        and vendor
+                        else None
+                    ),
                 )
-                and server_location
-                else None
-            ),
-            server_sponsor=(
-                server_sponsor
-                if isinstance(
-                    (server_sponsor := server.get(_RAW_SPEED_TEST_SERVER_SPONSOR_KEY)),
-                    str,
-                )
-                and server_sponsor
-                else None
-            ),
-            manual=self._coerce_boolish(latest_result.get(_RAW_SPEED_TEST_MANUAL_KEY)),
-            success=True,
-            vendor=(
-                vendor
-                if isinstance(
-                    (vendor := latest_result.get(_RAW_SPEED_TEST_VENDOR_KEY)),
-                    str,
-                )
-                and vendor
-                else None
-            ),
-        )
+            )
+
+        return tuple(records)
 
     def _build_category_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of category identifiers to human-readable names."""
@@ -846,28 +833,351 @@ class FirewallaApiClient:
 
     def _build_host_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of host MAC addresses to host names."""
+        return {
+            host.mac: host.display_name for host in self._normalize_host_inventory(data)
+        }
+
+    @staticmethod
+    def _normalized_optional_string(value: object) -> str | None:
+        """Return a stripped string when one is present."""
+        if not isinstance(value, str):
+            return None
+        stripped_value = value.strip()
+        return stripped_value or None
+
+    def _resolve_host_display_names(
+        self, raw_host: dict[str, object]
+    ) -> tuple[str, str | None]:
+        """Resolve the best display name and one fallback name for a host."""
+        raw_candidates = (
+            raw_host.get(_RAW_NAME_KEY),
+            raw_host.get(_RAW_HOST_BACKUP_NAME_KEY),
+            raw_host.get("dhcpName"),
+            raw_host.get("bonjourName"),
+            raw_host.get("localDomain"),
+        )
+        candidates = [
+            candidate
+            for raw_candidate in raw_candidates
+            if (candidate := self._normalized_optional_string(raw_candidate))
+        ]
+        unique_candidates = tuple(dict.fromkeys(candidates))
+
+        if unique_candidates:
+            return unique_candidates[0], unique_candidates[1] if len(
+                unique_candidates
+            ) > 1 else None
+
+        if ip_address := self._normalized_optional_string(
+            raw_host.get(_RAW_HOST_IP_KEY)
+        ):
+            return ip_address, None
+
+        host_mac = self._normalized_optional_string(raw_host.get(_RAW_HOST_MAC_KEY))
+        return host_mac or _DEFAULT_BOX_NAME, None
+
+    def _resolve_host_group_name(
+        self,
+        raw_host: dict[str, object],
+        *,
+        tags: dict[str, str],
+        affiliated_users: dict[str, tuple[str, ...]],
+    ) -> str | None:
+        """Resolve one readable group label from host tag references."""
+        raw_tags = raw_host.get("tags")
+        if not isinstance(raw_tags, list):
+            return None
+
+        resolved_tags: list[str] = []
+        for raw_tag_id in raw_tags:
+            if not isinstance(raw_tag_id, str) or not raw_tag_id:
+                continue
+            if not (tag_name := tags.get(raw_tag_id)):
+                continue
+            if user_names := affiliated_users.get(raw_tag_id):
+                resolved_tags.append(f"{tag_name} ({', '.join(user_names)})")
+            else:
+                resolved_tags.append(tag_name)
+
+        if not resolved_tags:
+            return None
+        return ", ".join(dict.fromkeys(resolved_tags))
+
+    def _resolve_host_connection_type(
+        self,
+        raw_host: dict[str, object],
+        *,
+        device_tags: dict[str, str],
+    ) -> str | None:
+        """Resolve one readable connection-type label from host device tags."""
+        raw_device_tags = raw_host.get(_RAW_DEVICE_TAGS_KEY)
+        if not isinstance(raw_device_tags, list):
+            return None
+
+        resolved_types = [
+            device_tag_name
+            for raw_device_tag in raw_device_tags
+            if isinstance(raw_device_tag, str)
+            and (device_tag_name := device_tags.get(raw_device_tag))
+        ]
+        if not resolved_types:
+            return None
+        return ", ".join(dict.fromkeys(resolved_types))
+
+    def _normalize_host_vpn_client(
+        self, raw_host: dict[str, object]
+    ) -> FirewallaHostVpnClient | None:
+        """Normalize the minimal VPN client reference exposed on one host."""
+        raw_policy = raw_host.get(_RAW_HOST_POLICY_KEY)
+        if not isinstance(raw_policy, dict):
+            return None
+
+        raw_vpn_client = raw_policy.get(_RAW_HOST_VPN_CLIENT_KEY)
+        if not isinstance(raw_vpn_client, dict):
+            return None
+
+        profile_id = self._normalized_optional_string(
+            raw_vpn_client.get(_RAW_HOST_PROFILE_ID_KEY)
+        )
+        state = self._coerce_boolish(raw_vpn_client.get(_RAW_HOST_STATE_KEY))
+
+        if profile_id is None and state is None:
+            return None
+
+        return FirewallaHostVpnClient(profile_id=profile_id, state=state)
+
+    def _normalize_host_inventory(
+        self, data: dict[str, object]
+    ) -> tuple[FirewallaHostRuntime, ...]:
+        """Normalize the minimal host inventory used by watched-device surfaces."""
         raw_hosts = data.get(_RAW_HOSTS_KEY)
         if not isinstance(raw_hosts, list):
-            return {}
+            return ()
 
-        host_lookup: dict[str, str] = {}
+        network_lookup = self._build_network_lookup(data)
+        tag_lookup = self._build_named_lookup(data, "tags")
+        device_tag_lookup = self._build_named_lookup(data, _RAW_DEVICE_TAGS_KEY)
+        affiliated_user_lookup = self._build_affiliated_user_lookup(data)
+
+        normalized_hosts: list[FirewallaHostRuntime] = []
         for raw_host in raw_hosts:
             if not isinstance(raw_host, dict):
                 continue
 
-            host_mac = raw_host.get(_RAW_HOST_MAC_KEY)
-            host_name = raw_host.get(_RAW_NAME_KEY) or raw_host.get(
-                _RAW_HOST_BACKUP_NAME_KEY
-            )
-            if (
-                isinstance(host_mac, str)
-                and host_mac
-                and isinstance(host_name, str)
-                and host_name
-            ):
-                host_lookup[host_mac] = host_name
+            host_mac = self._normalized_optional_string(raw_host.get(_RAW_HOST_MAC_KEY))
+            if host_mac is None:
+                continue
 
-        return host_lookup
+            display_name, fallback_name = self._resolve_host_display_names(raw_host)
+            flowsummary = raw_host.get(_RAW_HOST_FLOWSUMMARY_KEY)
+            normalized_hosts.append(
+                FirewallaHostRuntime(
+                    mac=host_mac,
+                    display_name=display_name,
+                    fallback_name=fallback_name,
+                    ip_address=self._normalized_optional_string(
+                        raw_host.get(_RAW_HOST_IP_KEY)
+                    ),
+                    group_name=self._resolve_host_group_name(
+                        raw_host,
+                        tags=tag_lookup,
+                        affiliated_users=affiliated_user_lookup,
+                    ),
+                    network_name=(
+                        network_lookup.get(interface_id)
+                        if (
+                            interface_id := self._normalized_optional_string(
+                                raw_host.get(_RAW_INTF_KEY)
+                            )
+                        )
+                        is not None
+                        else None
+                    ),
+                    connection_type=self._resolve_host_connection_type(
+                        raw_host,
+                        device_tags=device_tag_lookup,
+                    ),
+                    last_active=self._coerce_float(
+                        raw_host.get(_RAW_HOST_LAST_ACTIVE_KEY)
+                    ),
+                    download_bytes=(
+                        self._coerce_int(flowsummary.get("inbytes"))
+                        if isinstance(flowsummary, dict)
+                        else None
+                    ),
+                    upload_bytes=(
+                        self._coerce_int(flowsummary.get("outbytes"))
+                        if isinstance(flowsummary, dict)
+                        else None
+                    ),
+                    stale=self._coerce_boolish(raw_host.get(_RAW_HOST_STALE_KEY)),
+                    vpn_client=self._normalize_host_vpn_client(raw_host),
+                    group_ids=tuple(
+                        sorted(
+                            raw_group_id
+                            for raw_group_id in raw_host.get("tags", [])
+                            if isinstance(raw_group_id, str) and raw_group_id
+                        )
+                    )
+                    if isinstance(raw_host.get("tags"), list)
+                    else (),
+                    user_ids=tuple(
+                        sorted(
+                            raw_user_id
+                            for raw_user_id in raw_host.get(_RAW_USER_TAGS_KEY, [])
+                            if isinstance(raw_user_id, str) and raw_user_id
+                        )
+                    )
+                    if isinstance(raw_host.get(_RAW_USER_TAGS_KEY), list)
+                    else (),
+                )
+            )
+
+        return tuple(normalized_hosts)
+
+    def _normalize_user_inventory(
+        self, data: dict[str, object]
+    ) -> tuple[FirewallaUserRuntime, ...]:
+        """Normalize watched-user data from the local runtime payload."""
+        raw_user_tags = data.get(_RAW_USER_TAGS_KEY)
+        if not isinstance(raw_user_tags, dict):
+            return ()
+
+        group_lookup = self._build_named_lookup(data, "tags")
+        normalized_users: list[FirewallaUserRuntime] = []
+        for raw_user_id, raw_user in raw_user_tags.items():
+            if not isinstance(raw_user_id, str) or not raw_user_id:
+                continue
+            if not isinstance(raw_user, dict):
+                continue
+
+            user_type = self._normalized_optional_string(
+                raw_user.get(_RAW_USER_TYPE_KEY)
+            )
+            if user_type is not None and user_type != "user":
+                continue
+
+            user_id = self._normalized_optional_string(raw_user.get(_RAW_USER_UID_KEY))
+            if user_id is None:
+                user_id = raw_user_id
+
+            user_name = self._normalized_optional_string(raw_user.get(_RAW_NAME_KEY))
+            if user_name is None:
+                user_name = user_id
+
+            affiliated_group_id = self._normalized_optional_string(
+                raw_user.get(_RAW_USER_AFFILIATED_TAG_KEY)
+            )
+            raw_app_usage_today = raw_user.get(_RAW_USER_APP_TIME_USAGE_TODAY_KEY)
+            raw_internet_usage_today = raw_user.get(
+                _RAW_USER_INTERNET_TIME_USAGE_TODAY_KEY
+            )
+            app_usage_today = (
+                self._normalize_user_app_usage_today(raw_app_usage_today)
+                if isinstance(raw_app_usage_today, dict)
+                else ()
+            )
+            raw_total_minutes_today = (
+                self._coerce_int(raw_internet_usage_today.get(_RAW_USER_TOTAL_MINS_KEY))
+                if isinstance(raw_internet_usage_today, dict)
+                else None
+            )
+            raw_unique_minutes_today = (
+                self._coerce_int(
+                    raw_internet_usage_today.get(_RAW_USER_UNIQUE_MINS_KEY)
+                )
+                if isinstance(raw_internet_usage_today, dict)
+                else None
+            )
+
+            if raw_total_minutes_today is None and isinstance(
+                raw_app_usage_today, dict
+            ):
+                raw_total_minutes_today = self._coerce_int(
+                    raw_app_usage_today.get(_RAW_USER_TOTAL_MINS_KEY)
+                )
+
+            if raw_unique_minutes_today is None and isinstance(
+                raw_app_usage_today, dict
+            ):
+                raw_unique_minutes_today = self._coerce_int(
+                    raw_app_usage_today.get(_RAW_USER_UNIQUE_MINS_KEY)
+                )
+
+            total_minutes_today = raw_total_minutes_today
+            if total_minutes_today is None and app_usage_today:
+                total_minutes_today = sum(
+                    usage.total_minutes for usage in app_usage_today
+                )
+
+            unique_minutes_today = raw_unique_minutes_today
+            if unique_minutes_today is None and app_usage_today:
+                unique_minutes_today = sum(
+                    usage.unique_minutes for usage in app_usage_today
+                )
+
+            normalized_users.append(
+                FirewallaUserRuntime(
+                    user_id=user_id,
+                    name=user_name,
+                    affiliated_group_id=affiliated_group_id,
+                    affiliated_group_name=(
+                        group_lookup.get(affiliated_group_id)
+                        if affiliated_group_id is not None
+                        else None
+                    ),
+                    total_minutes_today=total_minutes_today,
+                    unique_minutes_today=unique_minutes_today,
+                    app_usage_today=app_usage_today,
+                )
+            )
+
+        return tuple(
+            sorted(
+                normalized_users,
+                key=lambda user: (user.name.casefold(), user.user_id),
+            )
+        )
+
+    def _normalize_user_app_usage_today(
+        self, raw_app_usage_today: dict[str, object]
+    ) -> tuple[FirewallaUserAppUsage, ...]:
+        """Normalize per-app usage buckets from one user payload."""
+        normalized_usage: list[FirewallaUserAppUsage] = []
+        for app_id, raw_app_usage in raw_app_usage_today.items():
+            if app_id in {_RAW_USER_TOTAL_MINS_KEY, _RAW_USER_UNIQUE_MINS_KEY}:
+                continue
+            if not isinstance(app_id, str) or not app_id:
+                continue
+            if not isinstance(raw_app_usage, dict):
+                continue
+
+            total_minutes = self._coerce_int(
+                raw_app_usage.get(_RAW_USER_TOTAL_MINS_KEY)
+            )
+            unique_minutes = self._coerce_int(
+                raw_app_usage.get(_RAW_USER_UNIQUE_MINS_KEY)
+            )
+            if total_minutes is None and unique_minutes is None:
+                continue
+
+            normalized_usage.append(
+                FirewallaUserAppUsage(
+                    app_id=app_id,
+                    category=self._normalized_optional_string(
+                        raw_app_usage.get(_RAW_USER_CATEGORY_KEY)
+                    ),
+                    total_minutes=0 if total_minutes is None else total_minutes,
+                    unique_minutes=0 if unique_minutes is None else unique_minutes,
+                )
+            )
+
+        return tuple(
+            sorted(
+                normalized_usage,
+                key=lambda usage: (-usage.total_minutes, usage.app_id.casefold()),
+            )
+        )
 
     def _resolve_tag_reference_name(
         self,
@@ -1033,7 +1343,10 @@ class FirewallaApiClient:
         return None
 
     def _normalize_policy_rules(
-        self, data: dict[str, object]
+        self,
+        data: dict[str, object],
+        *,
+        host_lookup: dict[str, str],
     ) -> tuple[FirewallaPolicyRule, ...]:
         """Normalize Firewalla policy rules into a stable typed MVP shape."""
         raw_rules = data.get(_RAW_POLICY_RULES_KEY)
@@ -1046,8 +1359,6 @@ class FirewallaApiClient:
         device_tag_lookup = self._build_named_lookup(data, _RAW_DEVICE_TAGS_KEY)
         user_tag_lookup = self._build_named_lookup(data, _RAW_USER_TAGS_KEY)
         affiliated_user_lookup = self._build_affiliated_user_lookup(data)
-        host_lookup = self._build_host_lookup(data)
-
         normalized_rules: list[FirewallaPolicyRule] = []
         for raw_rule in raw_rules:
             if not isinstance(raw_rule, dict):
@@ -1164,18 +1475,21 @@ class FirewallaApiClient:
         self, data: dict[str, object]
     ) -> FirewallaRuntimeSnapshot:
         """Build a coordinator-ready snapshot from one raw init payload."""
+        hosts = self._normalize_host_inventory(data)
+        users = self._normalize_user_inventory(data)
         return FirewallaRuntimeSnapshot(
-            system_info=self._build_system_info(data),
-            policy_rules=self._normalize_policy_rules(data),
+            appliance_identity=self._extract_appliance_identity(data),
+            appliance_runtime=self._extract_appliance_runtime(data),
+            policy_rules=self._normalize_policy_rules(
+                data,
+                host_lookup={host.mac: host.display_name for host in hosts},
+            ),
             exception_rule_count=self._count_exception_rules(data),
-            system_status=self._build_system_status(data),
-            latest_speed_test=self._build_latest_speed_test(data),
+            hosts=hosts,
+            users=users,
+            speed_test_results=self._extract_speed_test_records(data),
         )
 
     async def async_get_runtime_snapshot(self) -> FirewallaRuntimeSnapshot:
         """Fetch the runtime snapshot used by the coordinator."""
         return self.build_runtime_snapshot(await self.async_get_runtime_init_payload())
-
-    async def async_get_system_info(self) -> FirewallaSystemInfo:
-        """Fetch basic system information from the local init response."""
-        return (await self.async_get_runtime_snapshot()).system_info

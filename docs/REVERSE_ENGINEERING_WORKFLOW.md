@@ -19,6 +19,7 @@ This document is intentionally operational. It is not vendor documentation.
 This workflow covers:
 
 - reuse of a working Home Assistant config entry for live local protocol access
+- direct runtime pulls for current-value comparison without re-pairing
 - runtime inventory capture before and after user actions
 - remote `tcpdump` capture on the Firewalla box
 - decryption and inspection of local port `8833` traffic
@@ -51,6 +52,21 @@ This is used as the source of truth for the live Firewalla config entry during
 protocol capture work. It avoids re-pairing while reverse engineering the local
 runtime.
 
+### Direct runtime pull helper
+
+- `utils/pull_runtime.py`
+
+This helper:
+
+- loads the first working `firewalla_local` config entry from Home Assistant storage
+- constructs `FirewallaApiClient` with the stored local runtime credentials
+- pulls the current raw init payload from the box without re-pairing
+- writes a timestamped comparison artifact set under `.artifacts/runtime-pull/`
+- writes a compact per-user usage summary to speed up watched-user investigations, including current internet totals, unique totals, and per-app buckets when present
+
+Use this first when the question is about what the box reports right now, for
+example current user usage fields or the exact contents of `userTags`.
+
 ### Runtime inventory capture helper
 
 - `.tmp/capture_runtime_inventory.py`
@@ -65,7 +81,7 @@ This script:
 
 ### Packet capture analysis helper
 
-- `.tmp/analyze_capture.py`
+- `utils/analyze_capture.py`
 
 This script:
 
@@ -86,7 +102,17 @@ trying to infer mutations from Home Assistant alone.
 
 ## Artifact conventions
 
-Artifacts are currently stored under `.tmp/`.
+Artifacts are split by workflow.
+
+Current-value runtime pulls should be written under `.artifacts/runtime-pull/`.
+
+Recommended runtime-pull contents:
+
+- `.artifacts/runtime-pull/<timestamp>/runtime_init.json`
+- `.artifacts/runtime-pull/<timestamp>/user_usage_summary.json`
+- `.artifacts/runtime-pull/<timestamp>/summary.json`
+
+Mutation-capture artifacts remain under `.tmp/`.
 
 Recommended naming pattern:
 
@@ -102,6 +128,65 @@ Examples already used:
 - `.tmp/firewalla_mutation_persistent_capture.pcap`
 - `.tmp/capture_internet_after_off.json`
 - `.tmp/firewalla_internet_reenable_capture.pcap`
+
+## Preferred current-value workflow
+
+Use this workflow whenever you need a fresh comparison pull from the live box
+and do not need packet-level mutation evidence.
+
+### 1. Reuse the working Home Assistant credentials
+
+Use the existing `firewalla_local` config entry in
+`core/config/.storage/core.config_entries`.
+
+Reason:
+
+- this avoids re-pairing, QR churn, and cloud-link timing issues
+
+### 2. Run the direct runtime pull helper
+
+Run:
+
+```bash
+python -m utils.pull_runtime
+```
+
+Optional custom artifact root:
+
+```bash
+python -m utils.pull_runtime --artifact-dir .artifacts/runtime-pull
+```
+
+Outputs:
+
+- `runtime_init.json`: the raw local payload the integration currently reads
+- `user_usage_summary.json`: compact current user usage values and per-app buckets
+- `summary.json`: capture metadata and high-level counts
+
+### 3. Compare the current pull before escalating
+
+Inspect the fresh `runtime_init.json` for the fields you care about before
+moving to packet capture. This is the preferred first step for questions like:
+
+- whether a user usage field exists in the local payload at all
+- whether `totalMins` and `uniqueMins` changed since the last pull
+- whether a value shown in the Firewalla app appears in the current local init payload
+
+Current watched-user baseline:
+
+- `internetTimeUsageToday` is the first-choice source for user total and unique
+  internet usage minutes when present
+- `appTimeUsageToday` is the source for per-app watched-user usage buckets
+- associated watched-user device and activity metadata may require
+  integration-side joins against normalized hosts and affiliated groups
+
+### 4. Escalate to packet capture only when needed
+
+Move to `tcpdump` plus `utils/analyze_capture.py` only when you need proof of:
+
+- exact mutation message shapes
+- encrypted request or response ordering
+- fields that appear only during a live action and not in steady-state runtime data
 
 ## Standard workflow
 
@@ -188,7 +273,7 @@ Purpose:
 
 ### 8. Decrypt the packet capture
 
-Run `.tmp/analyze_capture.py <pcap_path>`.
+Run `utils/analyze_capture.py <pcap_path>`.
 
 Inspect the decoded request for:
 

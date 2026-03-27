@@ -13,10 +13,11 @@ from custom_components.firewalla_local.coordinator import (
 )
 from custom_components.firewalla_local.managers.rule_manager import FirewallaRuleManager
 from custom_components.firewalla_local.models import (
+    FirewallaApplianceIdentityInput,
+    FirewallaApplianceRuntimeInput,
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
-    FirewallaSystemInfo,
 )
 
 
@@ -79,13 +80,15 @@ def _build_rule(
 def _build_snapshot(*rules: FirewallaPolicyRule) -> FirewallaRuntimeSnapshot:
     """Build one runtime snapshot for manager tests."""
     return FirewallaRuntimeSnapshot(
-        system_info=FirewallaSystemInfo(
+        appliance_identity=FirewallaApplianceIdentityInput(
             host="192.168.200.1",
-            name="Firewalla",
+            group_name="Firewalla",
+            device_name=None,
             model="gold",
             serial_number="serial-123",
             software_version="1.0.0",
         ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=rules,
         exception_rule_count=0,
     )

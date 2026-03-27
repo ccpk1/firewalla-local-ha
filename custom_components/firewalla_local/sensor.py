@@ -9,7 +9,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory, UnitOfDataRate
+from homeassistant.const import UnitOfDataRate, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -32,29 +32,24 @@ from .const import (
     ATTR_SPEED_TEST_UPLOAD,
     ATTR_SPEED_TEST_UPLOAD_MBYTES,
     ATTR_SPEED_TEST_VENDOR,
-    ATTR_SYSTEM_BOOT_COMPLETE,
-    ATTR_SYSTEM_CLOUD_CONNECTED,
-    ATTR_SYSTEM_CPU_LOAD_5M,
-    ATTR_SYSTEM_DDNS,
-    ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT,
-    ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE,
-    ATTR_SYSTEM_MEMORY_FREE_MB,
-    ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
-    ATTR_SYSTEM_WAN_IP,
-    ATTR_SYSTEM_WAN_IPS,
+    ATTR_WATCHED_USER_APP_USAGE_BY_APP,
+    ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT,
+    ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP,
+    ATTR_WATCHED_USER_ASSOCIATED_DEVICES,
+    ATTR_WATCHED_USER_LAST_ACTIVE,
+    ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     ENTITY_SUFFIX_SENSOR,
-    SYSTEM_STATUS_STATE_AVAILABLE,
-    SYSTEM_STATUS_STATE_UNAVAILABLE,
     TRANS_KEY_ENTITY_SENSOR_LATEST_SPEED_TEST_DOWNLOAD,
-    TRANS_KEY_ENTITY_SENSOR_SYSTEM_STATUS,
-    TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS,
+    TRANS_KEY_ENTITY_SENSOR_WATCHED_USER_TODAY_USAGE,
+    TRANS_KEY_PURPOSE_SPEED_TEST,
+    TRANS_KEY_PURPOSE_WATCHED_USER_USAGE,
 )
 from .coordinator import FirewallaConfigEntry
 from .entity import FirewallaEntity
+from .models import FirewallaWatchedUser
 
 PARALLEL_UPDATES = 0
 
-_SYSTEM_STATUS_OBJECT_ID = "system_status"
 _LATEST_SPEED_TEST_OBJECT_ID = "latest_speed_test_download"
 
 
@@ -67,83 +62,21 @@ async def async_setup_entry(
     del _hass
     async_add_entities(
         [
-            FirewallaSystemStatusSensor(entry),
             FirewallaLatestSpeedTestDownloadSensor(entry),
+            *[
+                FirewallaWatchedUserTodayUsageSensor(entry, user_id)
+                for user_id in (
+                    entry.runtime_data.user_manager.configured_watched_user_ids
+                )
+            ],
         ]
     )
-
-
-class FirewallaSystemStatusSensor(FirewallaEntity, SensorEntity):
-    """Expose the Firewalla boot-status sensor surface."""
-
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_translation_key = TRANS_KEY_ENTITY_SENSOR_SYSTEM_STATUS
-
-    def __init__(self, entry: FirewallaConfigEntry) -> None:
-        """Initialize the system-status sensor."""
-        super().__init__(entry, entry.runtime_data.coordinator)
-        self._attr_unique_id = self.system_manager.build_entity_unique_id(
-            object_id=_SYSTEM_STATUS_OBJECT_ID,
-            suffix=ENTITY_SUFFIX_SENSOR,
-        )
-        self._attr_suggested_object_id = _SYSTEM_STATUS_OBJECT_ID
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the overall availability-style system state for the box."""
-        system_status = self.coordinator.data.system_status
-        if system_status is None:
-            return SYSTEM_STATUS_STATE_UNAVAILABLE
-        return SYSTEM_STATUS_STATE_AVAILABLE
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        """Return stable system-status metadata attributes."""
-        system_status = self.coordinator.data.system_status
-        return {
-            ATTR_PURPOSE: TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS,
-            ATTR_SYSTEM_BOOT_COMPLETE: (
-                system_status.booting_complete if system_status is not None else None
-            ),
-            ATTR_SYSTEM_WAN_IP: (
-                system_status.wan_ip if system_status is not None else None
-            ),
-            ATTR_SYSTEM_WAN_IPS: (
-                system_status.wan_ips if system_status is not None else None
-            ),
-            ATTR_SYSTEM_CPU_LOAD_5M: (
-                system_status.cpu_load_5m if system_status is not None else None
-            ),
-            ATTR_SYSTEM_MEMORY_USAGE_PERCENT: (
-                system_status.memory_usage_percent
-                if system_status is not None
-                else None
-            ),
-            ATTR_SYSTEM_MEMORY_FREE_MB: (
-                system_status.memory_free_mb if system_status is not None else None
-            ),
-            ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT: (
-                system_status.disk_usage_percent_by_mount
-                if system_status is not None
-                else None
-            ),
-            ATTR_SYSTEM_CLOUD_CONNECTED: (
-                system_status.cloud_connected if system_status is not None else None
-            ),
-            ATTR_SYSTEM_DDNS: system_status.ddns if system_status is not None else None,
-            ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE: (
-                system_status.firmware_release_type
-                if system_status is not None
-                else None
-            ),
-        }
 
 
 class FirewallaLatestSpeedTestDownloadSensor(FirewallaEntity, SensorEntity):
     """Expose the latest successful speed-test download result."""
 
     _attr_device_class = SensorDeviceClass.DATA_RATE
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = UnitOfDataRate.MEGABITS_PER_SECOND
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_translation_key = TRANS_KEY_ENTITY_SENSOR_LATEST_SPEED_TEST_DOWNLOAD
@@ -151,23 +84,23 @@ class FirewallaLatestSpeedTestDownloadSensor(FirewallaEntity, SensorEntity):
     def __init__(self, entry: FirewallaConfigEntry) -> None:
         """Initialize the latest-speed-test download sensor."""
         super().__init__(entry, entry.runtime_data.coordinator)
-        self._attr_unique_id = self.system_manager.build_entity_unique_id(
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
             object_id=_LATEST_SPEED_TEST_OBJECT_ID,
             suffix=ENTITY_SUFFIX_SENSOR,
         )
-        self._attr_suggested_object_id = _LATEST_SPEED_TEST_OBJECT_ID
 
     @property
     def native_value(self) -> float | None:
         """Return the latest successful download speed in Mbps."""
-        speed_test = self.coordinator.data.latest_speed_test
+        speed_test = self.latest_speed_test
         return speed_test.download_mbps if speed_test is not None else None
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
         """Return stable attributes describing the latest speed test."""
-        speed_test = self.coordinator.data.latest_speed_test
+        speed_test = self.latest_speed_test
         return {
+            ATTR_PURPOSE: TRANS_KEY_PURPOSE_SPEED_TEST,
             ATTR_SPEED_TEST_TESTED_AT: (
                 datetime.fromtimestamp(speed_test.tested_at_timestamp, UTC).isoformat()
                 if speed_test is not None
@@ -218,5 +151,92 @@ class FirewallaLatestSpeedTestDownloadSensor(FirewallaEntity, SensorEntity):
             ),
             ATTR_SPEED_TEST_VENDOR: (
                 speed_test.vendor if speed_test is not None else None
+            ),
+        }
+
+
+class FirewallaWatchedUserTodayUsageSensor(FirewallaEntity, SensorEntity):
+    """Expose today's total usage for one selected watched user."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_translation_key = TRANS_KEY_ENTITY_SENSOR_WATCHED_USER_TODAY_USAGE
+
+    def __init__(self, entry: FirewallaConfigEntry, user_id: str) -> None:
+        """Initialize one watched-user today-usage sensor."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._user_id = user_id
+        self._update_translation_placeholders()
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id=user_id,
+            suffix=ENTITY_SUFFIX_SENSOR,
+        )
+
+    @property
+    def _watched_user(self) -> FirewallaWatchedUser | None:
+        """Return the current watched-user view."""
+        return self.get_watched_user(self._user_id)
+
+    def _update_translation_placeholders(self) -> None:
+        """Refresh name placeholders from the latest watched-user view."""
+        watched_user = self._watched_user
+        self._attr_translation_placeholders = {
+            "user_name": (
+                watched_user.name if watched_user is not None else self._user_id
+            )
+        }
+        self.__dict__.pop("name", None)
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh dynamic placeholders before writing updated state."""
+        self._update_translation_placeholders()
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the selected watched user is present in the runtime."""
+        return super().available and self._watched_user is not None
+
+    @property
+    def native_value(self) -> int | None:
+        """Return today's total usage minutes for the watched user."""
+        watched_user = self._watched_user
+        return watched_user.total_minutes_today if watched_user is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return bounded watched-user metadata attributes."""
+        watched_user = self._watched_user
+        return {
+            ATTR_PURPOSE: TRANS_KEY_PURPOSE_WATCHED_USER_USAGE,
+            ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP: (
+                watched_user.affiliated_group_name if watched_user is not None else None
+            ),
+            ATTR_WATCHED_USER_ASSOCIATED_DEVICES: (
+                list(watched_user.associated_host_names)
+                if watched_user is not None
+                else None
+            ),
+            ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT: (
+                len(watched_user.associated_host_names)
+                if watched_user is not None
+                else None
+            ),
+            ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY: (
+                watched_user.unique_minutes_today if watched_user is not None else None
+            ),
+            ATTR_WATCHED_USER_APP_USAGE_BY_APP: (
+                {
+                    usage.app_id: usage.total_minutes
+                    for usage in watched_user.app_usage_today
+                    if usage.total_minutes > 0
+                }
+                if watched_user is not None
+                else None
+            ),
+            ATTR_WATCHED_USER_LAST_ACTIVE: (
+                datetime.fromtimestamp(watched_user.last_active, UTC).isoformat()
+                if watched_user is not None and watched_user.last_active is not None
+                else None
             ),
         }

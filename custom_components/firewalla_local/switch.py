@@ -8,7 +8,6 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
-from homeassistant.util import slugify
 
 from .const import (
     ATTR_RULE_ACTION,
@@ -39,7 +38,9 @@ from .const import (
 from .coordinator import FirewallaConfigEntry
 from .entity import FirewallaEntity
 from .models import (
+    FirewallaPolicyRule,
     FirewallaRuleTemplate,
+    format_policy_rule_name,
 )
 
 PARALLEL_UPDATES = 0
@@ -68,11 +69,8 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
         super().__init__(entry, entry.runtime_data.coordinator)
         self._template = template
         self._attr_translation_key = self._get_translation_key(template)
-        self._attr_translation_placeholders = {
-            TRANS_PLACEHOLDER_RULE_NAME: template.name
-        }
-        self._attr_suggested_object_id = slugify(template.name)
-        self._attr_unique_id = self.system_manager.build_entity_unique_id(
+        self._update_translation_placeholders()
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
             object_id=template.source_rule_id,
             suffix=ENTITY_SUFFIX_SWITCH,
         )
@@ -85,10 +83,39 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
         return TRANS_KEY_ENTITY_SWITCH_ALLOW_RULE
 
     @property
+    def _matching_rules(self) -> tuple[FirewallaPolicyRule, ...]:
+        """Return the currently resolved live rules for this template."""
+        return self.rule_manager.get_matching_rules(self._template)
+
+    @property
+    def _matched_rule(self) -> FirewallaPolicyRule | None:
+        """Return the single live rule when the template resolves uniquely."""
+        matching_rules = self._matching_rules
+        return matching_rules[0] if len(matching_rules) == 1 else None
+
+    def _resolved_rule_name(self) -> str:
+        """Return the current user-facing rule label for translation naming."""
+        if (matched_rule := self._matched_rule) is not None:
+            return format_policy_rule_name(matched_rule)
+        return self._template.name
+
+    def _update_translation_placeholders(self) -> None:
+        """Refresh name placeholders from the latest live rule state."""
+        self._attr_translation_placeholders = {
+            TRANS_PLACEHOLDER_RULE_NAME: self._resolved_rule_name()
+        }
+        self.__dict__.pop("name", None)
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh dynamic placeholders before writing updated state."""
+        self._update_translation_placeholders()
+        super()._handle_coordinator_update()
+
+    @property
     def extra_state_attributes(self) -> dict[str, object]:
         """Return stable attributes that describe the selected rule template."""
-        matching_rules = self.rule_manager.get_matching_rules(self._template)
-        matched_rule = matching_rules[0] if len(matching_rules) == 1 else None
+        matching_rules = self._matching_rules
+        matched_rule = self._matched_rule
         time_zone = dt_util.get_time_zone(self.coordinator.hass.config.time_zone)
         notes = [rule.notes for rule in matching_rules if isinstance(rule.notes, str)]
         schedule_next_start = (
@@ -176,9 +203,7 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
     @property
     def available(self) -> bool:
         """Return whether the selected backing rule still exists."""
-        return super().available and bool(
-            self.rule_manager.get_matching_rules(self._template)
-        )
+        return super().available and bool(self._matching_rules)
 
     @property
     def is_on(self) -> bool:

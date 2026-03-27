@@ -40,7 +40,7 @@ If this handoff appears to conflict with the architecture or standards docs, the
 Builder must not:
 
 - move config-entry writes out of the coordinator
-- remove or weaken the minimum `SystemManager` plus `RuleManager` architecture
+- remove or weaken the minimum `IntegrationManager`, `HostManager`, and `RuleManager` architecture
 - move business logic back into entities, services, platform files, or helpers
 - change UID-first naming into generated human-readable defaults
 - remove entry-scoped unique-ID requirements
@@ -85,7 +85,8 @@ Create or update:
 
 - `custom_components/firewalla_local/managers/__init__.py`
 - `custom_components/firewalla_local/managers/base_manager.py`
-- `custom_components/firewalla_local/managers/system_manager.py`
+- `custom_components/firewalla_local/managers/integration_manager.py`
+- `custom_components/firewalla_local/managers/host_manager.py`
 - `custom_components/firewalla_local/managers/rule_manager.py`
 - `custom_components/firewalla_local/entity.py`
 - `custom_components/firewalla_local/__init__.py`
@@ -95,8 +96,8 @@ Create or update:
 ### Checklist
 
 - [ ] add `managers/` package
-- [ ] add `BaseManager` with the minimum shared runtime contract needed by `SystemManager` and `RuleManager`
-- [ ] instantiate `SystemManager` and `RuleManager` during setup and place them in `entry.runtime_data`
+- [ ] add `BaseManager` with the minimum shared runtime contract needed by `IntegrationManager`, `HostManager`, and `RuleManager`
+- [ ] instantiate `IntegrationManager`, `HostManager`, and `RuleManager` during setup and place them in `entry.runtime_data`
 - [ ] create `entity.py` as the shared base entity module
 - [ ] move common availability handling, typed coordinator access, typed manager access, shared `DeviceInfo`, and common metadata behavior into `entity.py`
 - [ ] remove duplicated matching or orchestration logic from `switch.py` and any other platform files touched in this phase
@@ -105,7 +106,7 @@ Create or update:
 
 - `entity.py` is a shared entity module only, not a manager or helper surrogate
 - `BaseManager` must not become a storage layer or protocol layer
-- `SystemManager` and `RuleManager` must have clear boundaries; do not blur them into one generic catch-all manager
+- `IntegrationManager`, `HostManager`, and `RuleManager` must have clear boundaries; do not blur them into one generic catch-all manager
 
 ### Done criteria
 
@@ -147,7 +148,7 @@ Create or update:
 
 Create or update:
 
-- `custom_components/firewalla_local/managers/system_manager.py`
+- `custom_components/firewalla_local/managers/integration_manager.py`
 - `custom_components/firewalla_local/entity.py`
 - relevant platform files such as `switch.py`
 - helper modules only if needed for read-only registry or entity-registry glue
@@ -299,7 +300,7 @@ Builder must verify all of the following are true:
 - [ ] no config-entry writes remain outside coordinator-owned paths
 - [ ] no unowned specialized root modules remain where ownership belongs in `managers/`, `helpers/`, or `utils/`
 - [ ] `entity.py` is present and used for shared entity behavior
-- [ ] `SystemManager` and `RuleManager` both exist and have non-overlapping responsibilities
+- [ ] `IntegrationManager`, `HostManager`, and `RuleManager` all exist and have non-overlapping responsibilities
 - [ ] unique IDs are entry-scoped and suffix-stable
 - [ ] device identity remains license-anchored
 - [ ] runtime inventory ownership is explicit and manager-backed

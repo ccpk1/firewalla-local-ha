@@ -231,6 +231,45 @@ class FirewallaSystemInfo:
     software_version: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class FirewallaApplianceIdentityInput:
+    """Protocol-facing appliance identity input extracted from one payload."""
+
+    host: str
+    group_name: str | None
+    device_name: str | None
+    model: str | None
+    serial_number: str | None
+    software_version: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaDiskUsageInput:
+    """Protocol-facing disk usage input for one system mount."""
+
+    mount: str
+    capacity_ratio: float | None
+    used_bytes: float | None
+    size_bytes: float | None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaApplianceRuntimeInput:
+    """Protocol-facing appliance runtime input extracted from one payload."""
+
+    booting_complete: bool | None = None
+    cloud_connected: bool | None = None
+    ddns: str | None = None
+    firmware_release_type: str | None = None
+    public_ip: str | None = None
+    public_ips: dict[str, str] | None = None
+    cpu_load_5m: float | None = None
+    memory_usage_ratio: float | None = None
+    total_memory_mb: float | None = None
+    uptime_seconds: int | None = None
+    disk_usages: tuple[FirewallaDiskUsageInput, ...] = ()
+
+
 @dataclass(slots=True)
 class FirewallaSystemStatus:
     """Normalized system-status state for the Firewalla appliance."""
@@ -244,6 +283,7 @@ class FirewallaSystemStatus:
     cpu_load_5m: float | None = None
     memory_usage_percent: float | None = None
     memory_free_mb: float | None = None
+    uptime_seconds: int | None = None
     disk_usage_percent_by_mount: dict[str, int] | None = None
 
 
@@ -269,6 +309,96 @@ class FirewallaSpeedTestResult:
     manual: bool | None
     success: bool
     vendor: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaSpeedTestRecord:
+    """Protocol-facing speed-test record extracted from one payload item."""
+
+    tested_at_timestamp: float | None
+    download_mbps: float | None
+    upload_mbps: float | None
+    latency_ms: float | None
+    jitter_ms: float | None
+    packet_loss_percent: float | None
+    download_megabytes: float | None
+    upload_megabytes: float | None
+    isp: str | None
+    public_ip: str | None
+    server_country: str | None
+    server_host: str | None
+    server_id: str | None
+    server_location: str | None
+    server_sponsor: str | None
+    manual: bool | None
+    success: bool | None
+    vendor: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaHostVpnClient:
+    """Minimal VPN client reference carried on one normalized host."""
+
+    profile_id: str | None = None
+    state: bool | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaHostRuntime:
+    """Minimal normalized host inventory used for watched-device surfaces."""
+
+    mac: str
+    display_name: str
+    fallback_name: str | None
+    ip_address: str | None
+    group_name: str | None
+    network_name: str | None
+    connection_type: str | None
+    last_active: float | None
+    download_bytes: int | None
+    upload_bytes: int | None
+    stale: bool | None
+    vpn_client: FirewallaHostVpnClient | None = None
+    group_ids: tuple[str, ...] = ()
+    user_ids: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUserAppUsage:
+    """Normalized per-app usage bucket for one Firewalla user."""
+
+    app_id: str
+    category: str | None
+    total_minutes: int
+    unique_minutes: int
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUserRuntime:
+    """Normalized user usage extracted from the local runtime payload."""
+
+    user_id: str
+    name: str
+    affiliated_group_id: str | None
+    affiliated_group_name: str | None
+    total_minutes_today: int | None
+    unique_minutes_today: int | None
+    app_usage_today: tuple[FirewallaUserAppUsage, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWatchedUser:
+    """Manager-owned watched-user view with resolved associations."""
+
+    user_id: str
+    name: str
+    affiliated_group_name: str | None
+    total_minutes_today: int | None
+    unique_minutes_today: int | None
+    app_usage_today: tuple[FirewallaUserAppUsage, ...]
+    associated_host_names: tuple[str, ...]
+    associated_host_macs: tuple[str, ...]
+    last_active: float | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -639,11 +769,13 @@ class FirewallaPolicyRule:
 class FirewallaRuntimeSnapshot:
     """Coordinator-ready runtime snapshot fetched from the local API."""
 
-    system_info: FirewallaSystemInfo
+    appliance_identity: FirewallaApplianceIdentityInput
+    appliance_runtime: FirewallaApplianceRuntimeInput
     policy_rules: tuple[FirewallaPolicyRule, ...]
     exception_rule_count: int
-    system_status: FirewallaSystemStatus | None = None
-    latest_speed_test: FirewallaSpeedTestResult | None = None
+    hosts: tuple[FirewallaHostRuntime, ...] = ()
+    users: tuple[FirewallaUserRuntime, ...] = ()
+    speed_test_results: tuple[FirewallaSpeedTestRecord, ...] = ()
 
 
 def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:

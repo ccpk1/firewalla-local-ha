@@ -33,6 +33,9 @@ from .const import (
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
+    CONF_UPDATE_INTERVAL,
+    CONF_WATCHED_DEVICES,
+    CONF_WATCHED_USERS,
     CONFIG_ERROR_CANNOT_CONNECT,
     CONFIG_ERROR_INVALID_HOST,
     CONFIG_ERROR_INVALID_QR,
@@ -40,9 +43,13 @@ from .const import (
     DEFAULT_BOX_NAME,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_PAIRING_DEVICE_NAME,
+    DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
+    MAX_UPDATE_INTERVAL_MINUTES,
+    MIN_UPDATE_INTERVAL_MINUTES,
 )
-from .managers import FirewallaRuleManager
+from .coordinator import async_update_entry_options
+from .managers import FirewallaHostManager, FirewallaRuleManager, FirewallaUserManager
 from .models import (
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
@@ -50,11 +57,20 @@ from .models import (
 )
 
 _STEP_ID_INIT: Final = "init"
+_STEP_ID_EDIT_RULE_SELECTION: Final = "edit_rule_selection"
+_STEP_ID_EDIT_WATCHED_DEVICES: Final = "edit_watched_devices"
+_STEP_ID_EDIT_WATCHED_USERS: Final = "edit_watched_users"
+_STEP_ID_GENERAL_OPTIONS: Final = "general_options"
 _STEP_ID_REAUTH_CONFIRM: Final = "reauth_confirm"
 _STEP_ID_RECONFIGURE: Final = "reconfigure"
+_STEP_ID_RULE_SELECTION: Final = "rule_selection"
+_STEP_ID_SYSTEM_SETTINGS: Final = "system_settings"
 _STEP_ID_USER: Final = "user"
+_OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
 _UNAVAILABLE_RULE_LABEL: Final = "Unavailable rule"
 _UNAVAILABLE_RULE_SUFFIX: Final = "(unavailable)"
+_UNAVAILABLE_WATCHED_DEVICE_LABEL: Final = "Unavailable device"
+_UNAVAILABLE_WATCHED_USER_LABEL: Final = "Unavailable user"
 
 
 class PairingUserInput(TypedDict):
@@ -68,6 +84,28 @@ class RuleSelectionOptionsInput(TypedDict, total=False):
     """Validated user input for the options flow."""
 
     selected_rule_ids: list[str]
+    return_to_main_menu: bool
+
+
+class SystemSettingsOptionsInput(TypedDict):
+    """Validated system-settings input for the options flow."""
+
+    update_interval: int
+    return_to_main_menu: bool
+
+
+class WatchedDevicesOptionsInput(TypedDict, total=False):
+    """Validated watched-device input for the options flow."""
+
+    watched_devices: list[str]
+    return_to_main_menu: bool
+
+
+class WatchedUsersOptionsInput(TypedDict, total=False):
+    """Validated watched-user input for the options flow."""
+
+    watched_users: list[str]
+    return_to_main_menu: bool
 
 
 def _normalize_host(host: str) -> str:
@@ -144,7 +182,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             device_name=DEFAULT_PAIRING_DEVICE_NAME,
             timezone_name=self.hass.config.time_zone,
         )
-        await client.async_get_system_info()
+        await client.async_get_runtime_init_payload()
 
         title_name = credentials.box_name or DEFAULT_BOX_NAME
         return (
@@ -285,6 +323,7 @@ class FirewallaOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize the options flow."""
         self._config_entry = config_entry
+        self._runtime_refreshed = False
 
     def _get_rule_manager(self) -> FirewallaRuleManager | None:
         """Return the loaded rule manager when runtime data is available."""
@@ -294,6 +333,26 @@ class FirewallaOptionsFlow(OptionsFlow):
         rule_manager = getattr(runtime_data, "rule_manager", None)
         if isinstance(rule_manager, FirewallaRuleManager):
             return rule_manager
+        return None
+
+    def _get_host_manager(self) -> FirewallaHostManager | None:
+        """Return the loaded host manager when runtime data is available."""
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return None
+        host_manager = getattr(runtime_data, "host_manager", None)
+        if isinstance(host_manager, FirewallaHostManager):
+            return host_manager
+        return None
+
+    def _get_user_manager(self) -> FirewallaUserManager | None:
+        """Return the loaded user manager when runtime data is available."""
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return None
+        user_manager = getattr(runtime_data, "user_manager", None)
+        if isinstance(user_manager, FirewallaUserManager):
+            return user_manager
         return None
 
     async def _async_refresh_runtime_state(self) -> None:
@@ -306,6 +365,14 @@ class FirewallaOptionsFlow(OptionsFlow):
         async_request_refresh = getattr(coordinator, "async_request_refresh", None)
         if callable(async_request_refresh):
             await async_request_refresh()
+
+    async def _async_refresh_runtime_state_once(self) -> None:
+        """Refresh runtime state once per options-flow session."""
+        if self._runtime_refreshed:
+            return
+
+        await self._async_refresh_runtime_state()
+        self._runtime_refreshed = True
 
     def _get_rule_choices(self) -> dict[str, str]:
         """Return selectable rule IDs from the live coordinator snapshot."""
@@ -372,11 +439,188 @@ class FirewallaOptionsFlow(OptionsFlow):
             snapshot
         )
 
+    def _get_stored_update_interval(self) -> int:
+        """Return the persisted update interval or the default when unset."""
+        raw_update_interval: object = self._config_entry.options.get(
+            CONF_UPDATE_INTERVAL,
+            DEFAULT_UPDATE_INTERVAL_MINUTES,
+        )
+        if isinstance(raw_update_interval, bool) or not isinstance(
+            raw_update_interval, int
+        ):
+            return DEFAULT_UPDATE_INTERVAL_MINUTES
+
+        if not (
+            MIN_UPDATE_INTERVAL_MINUTES
+            <= raw_update_interval
+            <= MAX_UPDATE_INTERVAL_MINUTES
+        ):
+            return DEFAULT_UPDATE_INTERVAL_MINUTES
+
+        return raw_update_interval
+
+    def _get_stored_rule_selection(
+        self,
+    ) -> tuple[list[str], tuple[FirewallaRuleTemplate, ...]]:
+        """Return the current persisted rule selection state."""
+        stored_selected_rule_ids = self._config_entry.options.get(
+            CONF_SELECTED_RULE_IDS, []
+        )
+        if not isinstance(stored_selected_rule_ids, list):
+            return [], ()
+
+        stored_rule_templates = self._get_stored_rule_templates()
+        selected_rule_ids = [
+            rule_id
+            for rule_id in stored_selected_rule_ids
+            if isinstance(rule_id, str) and rule_id in stored_rule_templates
+        ]
+        return selected_rule_ids, tuple(
+            stored_rule_templates[rule_id] for rule_id in selected_rule_ids
+        )
+
+    def _get_stored_watched_devices(self) -> list[str]:
+        """Return the currently persisted watched-device MACs."""
+        raw_watched_devices = self._config_entry.options.get(CONF_WATCHED_DEVICES, [])
+        if not isinstance(raw_watched_devices, list):
+            return []
+        return [mac for mac in raw_watched_devices if isinstance(mac, str) and mac]
+
+    def _get_stored_watched_users(self) -> list[str]:
+        """Return the currently persisted watched-user identifiers."""
+        raw_watched_users = self._config_entry.options.get(CONF_WATCHED_USERS, [])
+        if not isinstance(raw_watched_users, list):
+            return []
+        return [
+            user_id
+            for user_id in raw_watched_users
+            if isinstance(user_id, str) and user_id
+        ]
+
+    def _get_watched_device_choices(self) -> dict[str, str]:
+        """Return selectable watched devices keyed by MAC."""
+        if host_manager := self._get_host_manager():
+            return host_manager.get_watched_device_choices()
+
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return {}
+
+        snapshot = runtime_data.coordinator.data
+        if snapshot is None:
+            return {}
+
+        return FirewallaHostManager.get_watched_device_choices_for_hosts(snapshot.hosts)
+
+    def _get_missing_watched_device_choices(
+        self, live_watched_device_choices: dict[str, str]
+    ) -> dict[str, str]:
+        """Return watched-device selections missing from the latest runtime."""
+        return {
+            mac: f"[{mac}] {_UNAVAILABLE_WATCHED_DEVICE_LABEL}"
+            for mac in self._get_stored_watched_devices()
+            if mac not in live_watched_device_choices
+        }
+
+    def _get_watched_user_choices(self) -> dict[str, str]:
+        """Return selectable watched users keyed by user identifier."""
+        if user_manager := self._get_user_manager():
+            return user_manager.get_watched_user_choices()
+
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return {}
+
+        snapshot = runtime_data.coordinator.data
+        if snapshot is None:
+            return {}
+
+        return FirewallaUserManager.get_watched_user_choices_for_snapshot(snapshot)
+
+    def _get_missing_watched_user_choices(
+        self, live_watched_user_choices: dict[str, str]
+    ) -> dict[str, str]:
+        """Return watched-user selections missing from the latest runtime."""
+        return {
+            user_id: f"[{user_id}] {_UNAVAILABLE_WATCHED_USER_LABEL}"
+            for user_id in self._get_stored_watched_users()
+            if user_id not in live_watched_user_choices
+        }
+
+    def _build_options_payload(
+        self,
+        *,
+        selected_rule_ids: list[str] | None = None,
+        selected_rule_templates: tuple[FirewallaRuleTemplate, ...] | None = None,
+        watched_devices: list[str] | None = None,
+        watched_users: list[str] | None = None,
+        update_interval: int | None = None,
+    ) -> dict[str, object]:
+        """Build one complete options payload while preserving untouched settings."""
+        stored_rule_ids, stored_rule_templates = self._get_stored_rule_selection()
+        return {
+            CONF_SELECTED_RULE_IDS: (
+                stored_rule_ids if selected_rule_ids is None else selected_rule_ids
+            ),
+            CONF_SELECTED_RULE_TEMPLATES: [
+                template.to_dict()
+                for template in (
+                    stored_rule_templates
+                    if selected_rule_templates is None
+                    else selected_rule_templates
+                )
+            ],
+            CONF_WATCHED_DEVICES: (
+                self._get_stored_watched_devices()
+                if watched_devices is None
+                else watched_devices
+            ),
+            CONF_WATCHED_USERS: (
+                self._get_stored_watched_users()
+                if watched_users is None
+                else watched_users
+            ),
+            CONF_UPDATE_INTERVAL: (
+                self._get_stored_update_interval()
+                if update_interval is None
+                else update_interval
+            ),
+        }
+
+    def _update_entry_options(self, options: dict[str, object]) -> None:
+        """Persist options while keeping the options flow open."""
+        async_update_entry_options(self.hass, self._config_entry, options)
+
     async def async_step_init(
         self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
+        """Show the top-level options menu after one runtime refresh."""
+        del user_input
+        await self._async_refresh_runtime_state_once()
+        return self.async_show_menu(
+            step_id=_STEP_ID_INIT,
+            menu_options=[
+                _STEP_ID_RULE_SELECTION,
+                _STEP_ID_EDIT_WATCHED_DEVICES,
+                _STEP_ID_EDIT_WATCHED_USERS,
+                _STEP_ID_GENERAL_OPTIONS,
+            ],
+        )
+
+    async def async_step_rule_selection(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
+        """Show the rule-selection submenu."""
+        del user_input
+        return self.async_show_menu(
+            step_id=_STEP_ID_RULE_SELECTION,
+            menu_options=[_STEP_ID_EDIT_RULE_SELECTION, _STEP_ID_INIT],
+        )
+
+    async def async_step_edit_rule_selection(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
         """Manage rule-selection options."""
-        await self._async_refresh_runtime_state()
         live_rule_choices = self._get_rule_choices()
         missing_rule_choices = self._get_missing_rule_choices(live_rule_choices)
         rule_choices = {**live_rule_choices, **missing_rule_choices}
@@ -386,40 +630,214 @@ class FirewallaOptionsFlow(OptionsFlow):
             typed_user_input = RuleSelectionOptionsInput(
                 selected_rule_ids=cast(
                     list[str], user_input.get(CONF_SELECTED_RULE_IDS, [])
-                )
+                ),
+                return_to_main_menu=cast(
+                    bool, user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False)
+                ),
             )
+            if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
+                return await self.async_step_init()
+
             selected_rule_ids = sorted(
                 rule_id
                 for rule_id in typed_user_input.get(CONF_SELECTED_RULE_IDS, [])
                 if rule_id in rule_templates
             )
-            return self.async_create_entry(
-                title="",
-                data={
-                    CONF_SELECTED_RULE_IDS: selected_rule_ids,
-                    CONF_SELECTED_RULE_TEMPLATES: [
-                        rule_templates[rule_id].to_dict()
-                        for rule_id in selected_rule_ids
-                    ],
-                },
+            self._update_entry_options(
+                self._build_options_payload(
+                    selected_rule_ids=selected_rule_ids,
+                    selected_rule_templates=tuple(
+                        rule_templates[rule_id] for rule_id in selected_rule_ids
+                    ),
+                )
             )
+            return await self.async_step_init()
 
-        stored_selected_rule_ids = self._config_entry.options.get(
-            CONF_SELECTED_RULE_IDS, []
-        )
+        stored_selected_rule_ids, _stored_templates = self._get_stored_rule_selection()
         selected_rule_ids = [
-            rule_id
-            for rule_id in stored_selected_rule_ids
-            if isinstance(rule_id, str) and rule_id in rule_choices
+            rule_id for rule_id in stored_selected_rule_ids if rule_id in rule_choices
         ]
         return self.async_show_form(
-            step_id=_STEP_ID_INIT,
+            step_id=_STEP_ID_EDIT_RULE_SELECTION,
             data_schema=vol.Schema(
                 {
                     vol.Optional(
                         CONF_SELECTED_RULE_IDS,
                         default=selected_rule_ids,
-                    ): cv.multi_select(rule_choices)
+                    ): cv.multi_select(rule_choices),
+                    vol.Optional(
+                        _OPTION_RETURN_TO_MAIN_MENU,
+                        default=False,
+                    ): bool,
+                }
+            ),
+        )
+
+    async def async_step_edit_watched_devices(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
+        """Manage watched-device selection options."""
+        live_watched_device_choices = self._get_watched_device_choices()
+        missing_watched_device_choices = self._get_missing_watched_device_choices(
+            live_watched_device_choices
+        )
+        watched_device_choices = {
+            **live_watched_device_choices,
+            **missing_watched_device_choices,
+        }
+
+        if user_input is not None:
+            typed_user_input = WatchedDevicesOptionsInput(
+                watched_devices=cast(
+                    list[str], user_input.get(CONF_WATCHED_DEVICES, [])
+                ),
+                return_to_main_menu=cast(
+                    bool, user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False)
+                ),
+            )
+            if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
+                return await self.async_step_init()
+
+            watched_devices = sorted(
+                mac
+                for mac in typed_user_input.get(CONF_WATCHED_DEVICES, [])
+                if mac in watched_device_choices
+            )
+            self._update_entry_options(
+                self._build_options_payload(watched_devices=watched_devices)
+            )
+            return await self.async_step_init()
+
+        selected_watched_devices = [
+            mac
+            for mac in self._get_stored_watched_devices()
+            if mac in watched_device_choices
+        ]
+        return self.async_show_form(
+            step_id=_STEP_ID_EDIT_WATCHED_DEVICES,
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_WATCHED_DEVICES,
+                        default=selected_watched_devices,
+                    ): cv.multi_select(watched_device_choices),
+                    vol.Optional(
+                        _OPTION_RETURN_TO_MAIN_MENU,
+                        default=False,
+                    ): bool,
+                }
+            ),
+        )
+
+    async def async_step_edit_watched_users(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
+        """Manage watched-user selection options."""
+        live_watched_user_choices = self._get_watched_user_choices()
+        missing_watched_user_choices = self._get_missing_watched_user_choices(
+            live_watched_user_choices
+        )
+        watched_user_choices = {
+            **live_watched_user_choices,
+            **missing_watched_user_choices,
+        }
+
+        if user_input is not None:
+            typed_user_input = WatchedUsersOptionsInput(
+                watched_users=cast(list[str], user_input.get(CONF_WATCHED_USERS, [])),
+                return_to_main_menu=cast(
+                    bool, user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False)
+                ),
+            )
+            if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
+                return await self.async_step_init()
+
+            watched_users = sorted(
+                user_id
+                for user_id in typed_user_input.get(CONF_WATCHED_USERS, [])
+                if user_id in watched_user_choices
+            )
+            self._update_entry_options(
+                self._build_options_payload(watched_users=watched_users)
+            )
+            return await self.async_step_init()
+
+        selected_watched_users = [
+            user_id
+            for user_id in self._get_stored_watched_users()
+            if user_id in watched_user_choices
+        ]
+        return self.async_show_form(
+            step_id=_STEP_ID_EDIT_WATCHED_USERS,
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_WATCHED_USERS,
+                        default=selected_watched_users,
+                    ): cv.multi_select(watched_user_choices),
+                    vol.Optional(
+                        _OPTION_RETURN_TO_MAIN_MENU,
+                        default=False,
+                    ): bool,
+                }
+            ),
+        )
+
+    async def async_step_general_options(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
+        """Show the general-options menu."""
+        del user_input
+        return self.async_show_menu(
+            step_id=_STEP_ID_GENERAL_OPTIONS,
+            menu_options=[_STEP_ID_SYSTEM_SETTINGS, _STEP_ID_INIT],
+        )
+
+    async def async_step_system_settings(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
+        """Manage coordinator-owned mutable system settings."""
+        stored_selected_rule_ids, stored_selected_rule_templates = (
+            self._get_stored_rule_selection()
+        )
+
+        if user_input is not None:
+            typed_user_input = SystemSettingsOptionsInput(
+                update_interval=cast(int, user_input[CONF_UPDATE_INTERVAL]),
+                return_to_main_menu=cast(
+                    bool, user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False)
+                ),
+            )
+            if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
+                return await self.async_step_init()
+
+            self._update_entry_options(
+                self._build_options_payload(
+                    selected_rule_ids=stored_selected_rule_ids,
+                    selected_rule_templates=stored_selected_rule_templates,
+                    update_interval=typed_user_input[CONF_UPDATE_INTERVAL],
+                )
+            )
+            return await self.async_step_init()
+
+        return self.async_show_form(
+            step_id=_STEP_ID_SYSTEM_SETTINGS,
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_UPDATE_INTERVAL,
+                        default=self._get_stored_update_interval(),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(
+                            min=MIN_UPDATE_INTERVAL_MINUTES,
+                            max=MAX_UPDATE_INTERVAL_MINUTES,
+                        ),
+                    ),
+                    vol.Optional(
+                        _OPTION_RETURN_TO_MAIN_MENU,
+                        default=False,
+                    ): bool,
                 }
             ),
         )

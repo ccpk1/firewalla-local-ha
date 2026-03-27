@@ -38,19 +38,166 @@
   "options": {
     "step": {
       "init": {
+        "description": "Choose which Firewalla options you want to manage.",
+        "menu_options": {
+          "edit_watched_devices": "Manage watched devices",
+          "edit_watched_users": "Manage watched users",
+          "general_options": "General options",
+          "rule_selection": "Manage rule selection"
+        },
+        "title": "Firewalla Local options"
+      },
+      "general_options": {
+        "description": "Choose a general Firewalla runtime setting to manage.",
+        "menu_options": {
+          "init": "Back to main menu",
+          "system_settings": "Update interval"
+        },
+        "title": "General options"
+      },
+      "rule_selection": {
+        "description": "Choose how you want to manage Firewalla rule exposure.",
+        "menu_options": {
+          "edit_rule_selection": "Edit exposed rules",
+          "init": "Back to main menu"
+        },
+        "title": "Rule selection"
+      },
+      "edit_rule_selection": {
         "data": {
+          "return_to_main_menu": "Back to main menu without saving",
           "selected_rule_ids": "Rules to expose as switches"
         },
         "description": "Select which discovered Firewalla category rules should be exposed as rule-backed switches.",
-        "title": "Rule selection"
+        "title": "Edit rule selection"
+      },
+      "edit_watched_devices": {
+        "data": {
+          "return_to_main_menu": "Back to main menu without saving",
+          "watched_devices": "Devices to monitor"
+        },
+        "description": "Select which discovered Firewalla devices should be exposed as watched-device connectivity sensors.",
+        "title": "Edit watched devices"
+      },
+      "edit_watched_users": {
+        "data": {
+          "return_to_main_menu": "Back to main menu without saving",
+          "watched_users": "Users to monitor"
+        },
+        "description": "Select which discovered Firewalla users should be exposed as watched-user usage sensors.",
+        "title": "Edit watched users"
+      },
+      "system_settings": {
+        "data": {
+          "return_to_main_menu": "Back to main menu without saving",
+          "update_interval": "Update interval (minutes)"
+        },
+        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API.",
+        "title": "System settings"
       }
     }
   },
   "entity": {
+    "binary_sensor": {
+      "system_status": {
+        "name": "System Status",
+        "state_attributes": {
+          "boot_complete": {
+            "name": "Boot complete"
+          },
+          "cpu_load_5m": {
+            "name": "CPU load (5 min)"
+          },
+          "cloud_connected": {
+            "name": "Cloud connected"
+          },
+          "devices_offline": {
+            "name": "Devices offline"
+          },
+          "devices_online": {
+            "name": "Devices online"
+          },
+          "devices_total": {
+            "name": "Devices total"
+          },
+          "ddns": {
+            "name": "DDNS"
+          },
+          "disk_usage_percent_by_mount": {
+            "name": "Disk usage by mount"
+          },
+          "firmware_release_type": {
+            "name": "Firmware release type"
+          },
+          "memory_free_mb": {
+            "name": "Memory free (MB)"
+          },
+          "memory_usage_percent": {
+            "name": "Memory usage (%)"
+          },
+          "uptime": {
+            "name": "Uptime"
+          },
+          "uptime_seconds": {
+            "name": "Uptime seconds"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_system_boot_status": "Shows whether the Firewalla box is available and exposes system information"
+            }
+          },
+          "wan_ip": {
+            "name": "WAN IP"
+          },
+          "wan_ips": {
+            "name": "WAN IPs"
+          }
+        }
+      },
+      "watched_device": {
+        "name": "{host_name}",
+        "state_attributes": {
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_watched_device_connectivity": "Shows whether the selected watched device is currently present and online"
+            }
+          },
+          "connection_type": {
+            "name": "Connection type"
+          },
+          "device_group": {
+            "name": "Device group"
+          },
+          "download_usage": {
+            "name": "Data downloaded"
+          },
+          "ip_address": {
+            "name": "IP address"
+          },
+          "last_active": {
+            "name": "Last active"
+          },
+          "network_name": {
+            "name": "Network name"
+          },
+          "upload_usage": {
+            "name": "Data uploaded"
+          }
+        }
+      }
+    },
     "sensor": {
       "latest_speed_test_download": {
-        "name": "Latest speed test download",
+        "name": "Speed Test",
         "state_attributes": {
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_speed_test": "Shows the latest successful speed test result reported by the Firewalla box"
+            }
+          },
           "download_megabytes": {
             "name": "Download megabytes"
           },
@@ -104,44 +251,32 @@
           }
         }
       },
-      "system_status": {
-        "name": "System status",
+      "watched_user_today_usage": {
+        "name": "{user_name} Usage",
         "state_attributes": {
-          "boot_complete": {
-            "name": "Boot complete"
-          },
-          "cpu_load_5m": {
-            "name": "CPU load (5 min)"
-          },
-          "cloud_connected": {
-            "name": "Cloud connected"
-          },
-          "ddns": {
-            "name": "DDNS"
-          },
-          "disk_usage_percent_by_mount": {
-            "name": "Disk usage by mount"
-          },
-          "firmware_release_type": {
-            "name": "Firmware release type"
-          },
-          "memory_free_mb": {
-            "name": "Memory free (MB)"
-          },
-          "memory_usage_percent": {
-            "name": "Memory usage (%)"
-          },
           "purpose": {
             "name": "Purpose",
             "state": {
-              "purpose_system_boot_status": "Shows whether the Firewalla box is available and exposes system information"
+              "purpose_watched_user_usage": "Shows the current total internet usage today for the selected user"
             }
           },
-          "wan_ip": {
-            "name": "WAN IP"
+          "app_usage_by_app": {
+            "name": "App usage by app"
           },
-          "wan_ips": {
-            "name": "WAN IPs"
+          "associated_device_count": {
+            "name": "Associated device count"
+          },
+          "associated_device_group": {
+            "name": "Associated device group"
+          },
+          "associated_devices": {
+            "name": "Associated devices"
+          },
+          "last_active": {
+            "name": "Last active"
+          },
+          "unique_usage_today": {
+            "name": "Unique usage today"
           }
         }
       }

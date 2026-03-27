@@ -22,7 +22,7 @@ The architecture supports:
 - QR-based pairing and credential establishment
 - signed local REST communication over port `8833`
 - coordinator-backed runtime polling
-- rule-backed Home Assistant entities and services
+- rule-backed switches, appliance-monitoring entities, watched-device monitoring, watched-user daily-usage monitoring, and supporting services
 - diagnostics, reauthentication, and repair-ready user flows
 
 The architecture does not support speculative fallback paths, duplicate runtime layers, or convenience abstractions that blur ownership boundaries.
@@ -105,7 +105,8 @@ The runtime should converge on named directories with clear ownership:
 - `custom_components/firewalla_local/managers/`
 	- `__init__.py`
 	- `base_manager.py`
-	- `system_manager.py`
+	- `integration_manager.py`
+	- `host_manager.py`
 	- `rule_manager.py`
 	- additional manager files only when a separate orchestration boundary is justified
 - `custom_components/firewalla_local/helpers/`
@@ -144,8 +145,10 @@ The runtime should converge on named directories with clear ownership:
 - config-entry writes belong to the coordinator because the coordinator owns the integration instance lifecycle and reload semantics
 - `managers/` is the single source of truth for rule resolution and command orchestration
 - at minimum the runtime should have:
-	- `SystemManager` for config-entry-scoped lifecycle, device lifecycle, entity lifecycle, and shared orchestration concerns
+	- `IntegrationManager` for config-entry-scoped lifecycle, Firewalla appliance device lifecycle, entity lifecycle, and shared orchestration concerns
+	- `HostManager` for normalized endpoint-host inventory and watched-device orchestration
 	- `RuleManager` for rule resolution, registry indexing, command handling, optimistic updates, and read-model generation for rule-backed surfaces
+	- `UserManager` for watched-user identity, usage shaping, total and unique fallback handling, and host-association joins
 - `helpers/` contains Home Assistant-aware shared helper code only and must not become a second manager layer
 - `utils/` contains pure functions only and must not import `homeassistant.*`
 - entities must consume manager-owned resolved state and must not re-implement matching, filtering, or mutation payload construction
@@ -207,8 +210,10 @@ Manager modules under `custom_components/firewalla_local/managers/` own:
 
 At minimum:
 
-- `SystemManager` owns shared system concerns that cut across platforms or rule actions, including device lifecycle, entity lifecycle, startup or reload coordination, and other entry-scoped orchestration that should not live in the coordinator
+- `IntegrationManager` owns shared integration concerns that cut across platforms or rule actions, including Firewalla appliance device lifecycle, entity lifecycle, startup or reload coordination, and other entry-scoped orchestration that should not live in the coordinator
+- `HostManager` owns normalized endpoint-host inventory, watched-device lookup state, and host-scoped orchestration for watched-device and host-derived summary surfaces
 - `RuleManager` owns rule-specific behavior, including registry indexing, rule-template matching, runtime inventory inputs, and rule-command orchestration
+- `UserManager` owns watched-user identity, usage shaping, selection lookups, host association joins, total and unique fallback handling, and user-scoped orchestration for the proven user-usage surface
 
 Manager methods are the single write and mutation path for runtime behavior above the API layer.
 
@@ -419,14 +424,16 @@ Parallel update rules:
 
 ## Naming contract
 
-The repository uses UID-first naming.
+The repository uses translation-owned naming.
 
 Rules:
 
-- the integration supplies stable unique IDs and stable default object ID inputs anchored to immutable identifiers
+- the integration supplies stable unique IDs anchored to immutable identifiers
 - Home Assistant owns the final `entity_id`
-- the integration must not generate descriptive default names from mutable rule text solely for UI polish
-- any future move away from UID-first naming requires an explicit architecture decision
+- user-facing names must come from translation keys, not Python-side `_attr_name` strings or forced suggested object IDs
+- mutable labels such as rule names, watched users, and watched devices must flow through `_attr_translation_placeholders`
+- entities with mutable labels must refresh `_attr_translation_placeholders` during coordinator updates and invalidate the cached `name` before writing state
+- unique IDs must remain stable and name-independent so app-side renames never create duplicate entities or replace entity identity
 
 ## Translation and error contract
 

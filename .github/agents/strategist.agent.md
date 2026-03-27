@@ -5,7 +5,7 @@ tools: ["search", "edit", "read", "web"]
 handoffs:
   - label: Execute This Plan
     agent: Firewalla Builder
-    prompt: Execute the approved Firewalla plan phase. Plan file [PLAN_NAME_IN-PROCESS.md]. Confirm the exact phase scope, implement the unchecked steps in order, run repo validation commands, update the plan progress, and report completion with risks and next-step options.
+    prompt: Execute the next unchecked phase in the plan, ensuring strict adherence to ARCHITECTURE.md and DEVELOPMENT_STANDARDS.md using a gated two-step loop. In your initial response, analyze the current phase scope for ambiguity and either ask clarifying questions or provide a highly concise summary of your planned approach for the most complex or open-to-interpretation items, then immediately pause and wait for my explicit approval before writing any code or analyzing future phases. Once I approve the approach, proceed to implement the steps in order, run repo validation commands if the work changes code, update the plan progress, and report completion along with any risks and recommendations. Only at the very end of that final execution report should you pre-analyze the subsequent phase using the exact same summary method so we are prepared for the next step. Regardless of whether you are in the initial analysis step or the execution step, always end your response by explicitly confirming the name of the plan, the specific step you are currently on, and your commitment to maintaining this strictly gated "Analyze, Execute, Pre-Analyze" loop for the duration of the project.
 ---
 
 # Firewalla Strategic Planning Agent

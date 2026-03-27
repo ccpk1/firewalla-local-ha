@@ -189,8 +189,8 @@ Regression and verify-only files:
   - verify no config-entry writes or family-specific mutation branching drift back into the coordinator
 - `custom_components/firewalla_local/entity.py`
   - verify entity behavior still consumes manager-owned rule views instead of calling client mutations directly
-- `custom_components/firewalla_local/managers/system_manager.py`
-  - verify no mutation ownership leaks into the system manager
+- `custom_components/firewalla_local/managers/integration_manager.py`
+  - verify no mutation ownership leaks into the integration manager
 
 Expected test ownership:
 
@@ -415,7 +415,7 @@ Tie the quality-scale file to evidence and blockers so Phase 4 can close truthfu
 | entity-translations | done | `translations/en.json`, `switch.py` | none | keep aligned with any broader switch-family coverage |
 | exception-translations | done | `translations/en.json`, `config_flow.py`, `services.py` | none | extend with any new failure class |
 | icon-translations | done | `icons.json`, `switch.py` | none | keep Python-side icon drift out of future platform work |
-| devices | done | `entity.py`, `managers/system_manager.py`, `test_init.py`, `test_switch.py` | none | keep device attachment aligned with license-anchored identity |
+| devices | done | `entity.py`, `managers/integration_manager.py`, `test_init.py`, `test_switch.py` | none | keep device attachment aligned with license-anchored identity |
 | entity registry stability | partial | `switch.py`, `entity.py`, `test_switch.py` | current tests prove unique IDs and entity registration for the first switch slice but not broader cleanup or future registry drift | add explicit registry assertions when broader switch-family coverage starts |
 | docs-high-level-description | done | `README.md`, `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md` | none | keep README scope summary aligned with implemented surfaces |
 | docs-data-update | todo | `quality_scale.yaml`, architecture docs, coordinator behavior | current runtime snapshot and polling behavior are described in architecture notes, not in user-facing docs | add concise user-facing data update documentation before closing this rule |

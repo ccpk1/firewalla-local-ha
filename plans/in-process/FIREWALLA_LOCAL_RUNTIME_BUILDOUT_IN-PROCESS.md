@@ -18,7 +18,7 @@ Implemented and verified in the repository:
 - config flow pairing against the live protocol, including local runtime validation before entry creation
 - reauthentication with fresh QR input and reconfigure support for host updates
 - options flow for persisted rule selection using readable normalized rule labels
-- coordinator-backed typed runtime snapshots with normalized system and policy-rule state
+- coordinator-backed typed runtime snapshots with protocol-facing appliance inputs, manager-owned appliance shaping, and normalized policy-rule state
 - log-once unavailability and recovery behavior in the coordinator
 - runtime inventory reporting and a response-returning Home Assistant service for live inspection
 - typed timing fields on normalized policy rules, including temporary-rule derivation based on current evidence
@@ -27,8 +27,14 @@ Implemented and verified in the repository:
 - update-in-place rule toggling for the first supported switchable rule families
 - switch attributes for rule ID, match count, pause state, pause duration, and notes
 - license-anchored switch and device identity with UID-based default naming rather than generated entity names
+- bounded appliance monitoring surfaces, including the system-status binary sensor and latest-speed-test sensor
+- bounded watched-device monitoring with options-flow selection, host-manager ownership, and connectivity binary sensors
+- bounded watched-user monitoring with options-flow selection, user-manager ownership, and daily-usage sensors from the proven local `userTags` payload
+- adjustable per-entry polling interval through the options flow
+- system-status attribute refinements, including device summary, uptime, and compact plus raw uptime formatting
 - focused tests covering client normalization, config flow behavior, runtime service behavior, and inventory reporting
 - focused tests covering switch setup, availability, toggle behavior, and pause metadata
+- focused tests covering watched-device setup, lifecycle, config-flow selection, and appliance monitoring attribute behavior
 - expanded options-flow and runtime-inventory switch-candidate coverage for additional user-managed rule families, including `ip`, `remotePort`, and target-list-backed category rules that should remain selectable even when only partially named at runtime
 - tightened editor-workspace hygiene for local development by moving repo-specific diagnostic exclusions into `firewalla-dev.code-workspace` instead of relying on ad hoc local VS Code settings
 
@@ -38,11 +44,9 @@ Phase 3b status:
 
 Still open and driving the next implementation slice:
 
-- publish user-facing installation, removal, and runtime data-update documentation once the integration is ready for external users
 - add branded assets before release
 - evaluate reliable local discovery only if Firewalla exposes a durable discovery contract
-- define the next bounded runtime slice after Phase 5 instead of widening the current sensor surface opportunistically
-- package the current runtime and selection-surface progress into documentation and release-prep updates rather than continuing feature expansion without a user-facing operating guide
+- package the current runtime progress into release-prep updates rather than continuing feature expansion without stable external-facing guidance
 
 Current analysis note from live rule review:
 
@@ -87,6 +91,8 @@ Rules:
 3. What exact config flow UX should collect QR JSON, validate pairing, and persist connection material without exposing secrets?
 4. Which fields belong in `ConfigEntry.data` versus `ConfigEntry.options` at first implementation?
 5. What implementation evidence, if any, would justify an exception to the accepted three-tier storage contract?
+6. Which native host payload fields are honest enough to drive a binary watched-device online state, and what threshold policy should remain integration-derived rather than claimed as native Firewalla state?
+7. Which raw VPN surfaces can be truthfully mapped to one watched host for a `vpn_active` attribute: `ovpnClientProfiles`, `wgvpnClientProfiles`, `awgPeers`, or another verified payload slice?
 
 ## Phase summary table
 
@@ -98,6 +104,8 @@ Rules:
 | 3b | Platinum hygiene and orchestration hardening | Domain-manager and lifecycle plan | Closes the architecture gap between raw protocol transport and HA entities |
 | 4 | Validation and implementation handoff | Test plan and builder-ready scope | Makes the runtime plan executable for implementation |
 | 5 | System-monitoring sensor expansion | Bounded sensor plan for system status and speed test data | Extends the runtime model only where the decrypted local payload already proves stable fields |
+| 6 | Multi-instance verification and watched-device buildout | Entry-isolation proof, adjustable polling plan, and opt-in endpoint monitoring plan | Verifies domain-global services stay entry-safe and adds bounded host watchlist monitoring from proven local payload fields |
+| 7 | Watched-user monitoring buildout | Discovery-gated user monitoring plan with usage-surface proof rules | Completed with a bounded watched-user surface backed by captured top-level `userTags` usage data and manager-owned host joins |
 
 ## Per-phase details with checkboxes
 
@@ -202,11 +210,13 @@ Gate note: Phase 3b is the required pause-and-harden phase. No additional platfo
 - [x] Workstream A: Establish the minimum manager architecture
   - add `custom_components/firewalla_local/managers/` with at minimum:
     - `base_manager.py`
-    - `system_manager.py`
+    - `integration_manager.py`
+    - `host_manager.py`
     - `rule_manager.py`
   - add `custom_components/firewalla_local/entity.py` as a required shared base entity module before the first sensor platform expansion so common availability, typed coordinator and manager access, shared `DeviceInfo`, and shared metadata behavior do not fragment across platforms
   - store manager instances in `entry.runtime_data` alongside the API client and coordinator
-  - make `SystemManager` the owner of shared entry-scoped orchestration such as device lifecycle, entity lifecycle, startup coordination, and reload-time reconciliation routing that should not live in the coordinator
+  - make `IntegrationManager` the owner of shared entry-scoped orchestration such as appliance device lifecycle, entity lifecycle, startup coordination, and reload-time reconciliation routing that should not live in the coordinator
+  - make `HostManager` the owner of normalized endpoint-host inventory and watched-device orchestration
   - make `RuleManager` the owner of rule-template matching, rule resolution, indexed registry lookups, rule-command orchestration, and read-model generation for rule-backed surfaces
   - move `_load_selected_templates` and similar configuration-derived business logic out of `switch.py` into the owning manager layer
   - ensure entities consume manager-owned resolved objects instead of re-implementing matching and filtering logic in platform files
@@ -218,7 +228,7 @@ Gate note: Phase 3b is the required pause-and-harden phase. No additional platfo
   - keep availability transitions, refresh cadence, and refresh-input handoff in the coordinator while moving rule-domain decisions out of it
 
 - [x] Workstream C: Centralize lifecycle reconciliation and multi-instance identity
-  - define a shared entity lifecycle policy owned by `SystemManager` for add, update, remove, orphan handling, and startup safety-net cleanup
+  - define a shared entity lifecycle policy owned by `IntegrationManager` for add, update, remove, orphan handling, and startup safety-net cleanup
   - define cleanup behavior for missing backing rules so entities do not remain indefinitely orphaned without a deliberate policy
   - define the base entity contract in `entity.py`, including shared `DeviceInfo`, common availability behavior, typed coordinator and manager access, purpose metadata conventions, and cleanup assumptions used across platforms
   - update entity unique-ID rules in implementation to include the integration instance identifier, the immutable object identifier, and a stable suffix
@@ -254,7 +264,7 @@ Gate note: Phase 3b is the required pause-and-harden phase. No additional platfo
   - include entry scope and a stable suffix in entity unique IDs so future multi-instance cleanup remains deterministic
   - if a later design wants human-readable defaults again, require an explicit architecture decision because it conflicts with the current UID-first rule already accepted for this repository
 
-Phase 3b execution note: This phase now has working code behind the accepted contracts. The repository has a minimum `SystemManager` plus `RuleManager` architecture stored in `entry.runtime_data`, a shared `entity.py` base, coordinator-owned reload and config-entry migration paths, entry-scoped unique IDs, manager-owned optimistic rule mutation, a dedicated `services.py` layer with `pause_rule`, duration parsing under `utils/`, owned runtime inventory helpers under `helpers/`, boundary-enforcement tests, and a trued-up `quality_scale.yaml`. The current switch platform now consumes manager-owned rule views instead of directly owning matching and mutation logic, which means future platforms can build on the same manager and entity foundation rather than duplicating orchestration at the entity edge.
+Phase 3b execution note: This phase now has working code behind the accepted contracts. The repository has a minimum `IntegrationManager`, `HostManager`, and `RuleManager` architecture stored in `entry.runtime_data`, a shared `entity.py` base, coordinator-owned reload and config-entry migration paths, entry-scoped unique IDs, manager-owned optimistic rule mutation, a dedicated `services.py` layer with `pause_rule`, duration parsing under `utils/`, owned runtime inventory helpers under `helpers/`, boundary-enforcement tests, and a trued-up `quality_scale.yaml`. The current switch platform now consumes manager-owned rule views instead of directly owning matching and mutation logic, which means future platforms can build on the same manager and entity foundation rather than duplicating orchestration at the entity edge.
 
 ### Phase 4: Validation and implementation handoff
 
@@ -333,7 +343,7 @@ Support note: See `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_
 
 Phase 5 entry criteria: The work may begin immediately because the repository now has a manager-owned runtime architecture, a stable coordinator snapshot, and decrypted local-payload evidence for both box-level status fields and internet speed-test history. The required constraint is to keep the slice bounded to the proven fields documented in the Phase 5 support note.
 
-Phase 5 execution note: Phase 5 is complete. The repository now exposes a bounded system-status sensor and a latest-speed-test download sensor backed by typed runtime models, API-side normalization, constants-backed attributes, translation-backed sensor metadata, and internal-only validation. Deferred metrics remain explicitly out of scope until the local payload proves a stable contract for them.
+Phase 5 execution note: Phase 5 is complete. The repository now exposes a bounded system-status binary sensor and a latest-speed-test download sensor backed by typed runtime models, API-side protocol extraction, manager-owned appliance shaping in `IntegrationManager`, constants-backed attributes, translation-backed sensor metadata, and internal-only validation. Later payload-backed refinements extended the system-status surface with device summary and uptime attributes once those values were proven clearly enough in the local payload.
 
 Current post-Phase 5 note: The repo is presently in a documentation-and-release-prep posture rather than a new runtime-expansion posture. The latest completed code slice tightened rule-candidate semantics, refreshed the related tests, and moved workspace-level lint and search exclusions into the checked-in workspace file so the shared dev environment better matches the current repository boundaries.
 
@@ -359,6 +369,165 @@ Durable sparse-resume analysis note: The matching `resume_rule_control_only` exp
 
 Sparse overwrite-surface analysis note: A later `pause_rule_control_only` experiment against the same durable rule `768` intentionally included a `notes` override, changing the live value from `testing rules` to `control-only overwrite test` while still applying `enabled: false`, a newer `updated_time`, and populated `idleTs`. Firewalla preserved the same rule ID, schedule metadata, and disturb-shaping payload while applying the notes overwrite in place. This materially confirms both sides of the field-mapping question: the sparse path can update correctly mapped non-control fields without replaying the cached full rule body, and any additional mapped field on that path becomes real overwrite surface that the integration must include only deliberately.
 
+### Phase 6: Multi-instance verification, adjustable polling, and opt-in watched-device monitoring
+
+Goal: Prove the existing integration remains safe under multiple loaded Firewalla entries, add a bounded per-entry polling-interval option, and expose opt-in watched-device monitoring from the already captured local host payload.
+
+Gate note: Phase 6 must preserve the current entry-scoped contracts instead of weakening them for convenience. No service, device-registry, polling, or watched-device behavior may assume a single loaded Firewalla box. No watched-device state may guess native meaning where the local payload only proves raw counters or timestamps.
+
+Current verified baseline before implementation:
+
+- `config_entry.unique_id` is already anchored to `qr_data.license` in `config_flow.py`
+- `async_setup_services()` already uses `hass.services.has_service()` guards, so service registration is domain-global rather than per-entry
+- service handlers already resolve the target entry through `_get_loaded_entry()` using explicit `config_entry_id` or `config_entry_name` when needed
+- `FirewallaIntegrationManager.build_device_info()` already uses the immutable license as the device identifier
+- the current raw payload already proves a host inventory surface under `hosts[]`, with stable examples of `mac`, `name`, `bname`, `ip`, `lastActive`, and `flowsummary.inbytes` plus `flowsummary.outbytes`
+- the current raw payload also proves VPN-related top-level arrays such as `ovpnClientProfiles`, `wgvpnClientProfiles`, and `awgPeers`, but the exact host-to-VPN mapping contract still needs explicit verification before a `vpn_active` attribute is treated as truthful
+
+Implementation note: The user-facing online or offline state requested for watched devices should be modeled as a `binary_sensor` platform rather than overloaded into `sensor.py`, because Home Assistant binary semantics are the honest fit for presence-like state. Usage and VPN fields can remain attributes on that binary entity for the first bounded slice.
+
+- [x] Phase 6A: Multi-instance verification and entry-isolation proof
+  - add explicit multi-entry verification coverage in `tests/components/firewalla_local/test_init.py` to prove that two loaded Firewalla config entries remain distinct in the device registry because `IntegrationManager.build_device_info()` uses the immutable license identifier rather than host, `gid`, or title
+  - add explicit service-registration coverage in `tests/components/firewalla_local/test_init.py` or `tests/components/firewalla_local/test_services.py` to prove `async_setup_services()` only registers each domain service once even when multiple config entries are set up sequentially
+  - add explicit multi-instance service-resolution coverage in `tests/components/firewalla_local/test_services.py` to prove the existing service handlers operate on the `config_entry_id` passed in the call instead of mutating the first loaded entry or an arbitrary loaded entry
+  - verify `_get_loaded_entry()` remains the single entry-resolution path for domain services and document in tests that ambiguous no-ID service calls still fail honestly when more than one Firewalla entry is loaded
+  - keep entity and device identity rules unchanged: device identity remains license-anchored, while entity unique IDs remain entry-scoped through `IntegrationManager.build_entity_unique_id()` so cleanup and registry isolation stay deterministic
+
+Phase 6A execution note: Completed with verification-only repository changes. The current runtime already satisfied the required multi-instance contracts, so the implementation work stayed limited to focused tests proving license-anchored device separation, one-time domain service registration, explicit `config_entry_id` routing for mutation services, and honest selector failures when multiple entries are loaded.
+
+- [x] Phase 6B: Adjustable coordinator update interval through options
+  - add `CONF_UPDATE_INTERVAL` in `custom_components/firewalla_local/const.py` as an options-only integer setting with default `3`, minimum `1`, and maximum `10`
+  - add a distinct `System Settings` surface in `custom_components/firewalla_local/config_flow.py` for this option; if the Home Assistant options-form schema cannot render true section headers cleanly, implement this as a dedicated options-flow step rather than faking a section inside the existing rule selector form
+  - add translation-backed UI text in `custom_components/firewalla_local/translations/en.json` describing the setting and the performance trade-off: lower intervals such as `1m` provide faster updates but increase load on the Firewalla local API
+  - keep the value in `ConfigEntry.options`, not `ConfigEntry.data`, because it is mutable runtime preference rather than pairing identity
+  - update `custom_components/firewalla_local/coordinator.py` so the coordinator reads the configured interval from options during startup and exposes one entry-scoped method for updating `update_interval` after options changes are saved
+  - preserve coordinator ownership of config-entry writes and reload flow; if the chosen implementation updates the interval without a full reload, it must still flow through the coordinator rather than through managers or platform files
+  - add focused options and coordinator tests in `tests/components/firewalla_local/test_config_flow.py` and `tests/components/firewalla_local/test_init.py` to prove the option persists, enforces the `1` to `10` minute bounds, and updates the entry-scoped coordinator interval rather than a shared domain-global timer
+
+Phase 6B execution note: Completed with a menu-driven options flow that scales cleanly for future runtime management. The options entrypoint now performs one runtime refresh when the main menu loads, then routes to separate `rule_selection` and `general_options` branches so rule management stays fast on subsequent navigation. `CONF_UPDATE_INTERVAL` lives in `ConfigEntry.options`, the coordinator reads the configured interval at startup, and update-interval-only option changes update the live coordinator in place without forcing a config-entry reload. Full repository validation passed after the menu refactor, translation updates, and focused tests were added.
+
+- [x] Phase 6C: Introduce a bounded watched-device runtime model
+  - extend `custom_components/firewalla_local/models.py` with explicit typed host-monitoring models for the minimal watched-device slice instead of exposing raw host dictionaries to platform code
+  - extend `FirewallaRuntimeSnapshot` to carry a normalized host inventory and the minimal VPN-related runtime slices needed for watched-device attribute derivation
+  - treat `wg_peer:*` host records as standalone Firewalla hosts rather than merging them into the physical device that may also appear elsewhere in the inventory
+  - normalize only the fields already proven in `.artifacts/poc/20260323-174620/local_response_decrypted.json`: host `mac`, preferred display name, fallback name, IP, `lastActive`, `flowsummary.inbytes`, `flowsummary.outbytes`, and any verified VPN-reference fields needed to derive `vpn_active`
+  - keep the typed contract intentionally narrow and do not widen into full per-host diagnostics, open-port inventories, policy mirrors, or category histories in this phase
+  - define clear ownership for watched-device orchestration in `custom_components/firewalla_local/managers/host_manager.py`; do not overload `IntegrationManager` with host-watchlist business logic, and keep platform files presentation-only
+
+Phase 6C execution note: Completed with a bounded host-runtime slice and a dedicated `host_manager.py`. The runtime snapshot now carries typed host inventory records with resolved display name, fallback name, IP, group label, network name, connection type, last activity, flow totals, stale state, and minimal VPN-client references. `wg_peer:*` entries remain independent Firewalla hosts instead of being merged into the corresponding physical endpoint, and the coordinator now routes the shared snapshot into `HostManager` without adding any extra runtime fetches.
+
+- [x] Phase 6D: Add watched-device selection to the options flow
+  - extend `custom_components/firewalla_local/config_flow.py` with a multi-select options field for watched devices, keyed by MAC address and labeled by the best available host name plus IP fallback from the latest coordinator snapshot
+  - add `CONF_WATCHED_DEVICES` in `custom_components/firewalla_local/const.py` as an options-only list of selected host MAC addresses
+  - refresh the live runtime snapshot before building watched-device choices in the same way the rule-selection options already refresh before rendering, so users do not choose from stale host inventory when the entry is loaded
+  - define missing-device tolerance rules similar to persisted rule-template tolerance: if a previously watched MAC is not present in the latest payload, preserve the stored selection long enough to let the runtime mark the entity unavailable rather than silently dropping it during the next options save
+  - add focused options-flow tests in `tests/components/firewalla_local/test_config_flow.py` covering populated host choices, stale watched-device preservation, and mixed rule-selection plus system-settings behavior in one entry-scoped options flow
+
+- [x] Phase 6E: Add the first watched-device platform
+  - add `custom_components/firewalla_local/binary_sensor.py` for the watched-device presence surface instead of reusing `sensor.py`, because the requested primary state is binary online or offline
+  - use one connectivity-style binary sensor per selected watched host with `stale == false` as the primary online signal; keep `wg_peer:*` tunnel peers separate from any physical phone or laptop host that may also exist in the same runtime inventory
+  - dynamically create one watched-device binary sensor per selected MAC address and attach it to the existing license-anchored Firewalla device rather than introducing a full child-device registry model in this first slice
+  - use manager-owned resolved host views rather than parsing raw host payloads inside the entity class
+  - define entity unique IDs from the entry scope, watched host MAC, and a stable binary-sensor suffix so multi-instance cleanup remains deterministic
+  - keep watched-device business logic in `custom_components/firewalla_local/managers/host_manager.py` plus helper modules if a shared presentation adapter is needed; `binary_sensor.py` remains a thin presentation surface only
+  - expose the requested usage attributes from `flowsummary.outbytes` and `flowsummary.inbytes` as stable constants-backed attributes such as `upload_usage` and `download_usage`
+  - expose attributes in this order when present: local IP address, device group, network name, connection type when the device-tag mapping is verified, data downloaded, data uploaded, and last active as an ISO timestamp
+  - expose `vpn_active` only after the host-to-VPN mapping contract is explicitly verified against the raw payload; if the mapping remains ambiguous during implementation, stop and record the blocker rather than shipping a guessed boolean
+  - derive the primary online or offline state honestly from proven host runtime fields, and clearly mark the state as integration-derived if it depends on a `lastActive` freshness threshold rather than a native Firewalla online flag
+  - add translation-backed metadata, names, and attribute labels in `custom_components/firewalla_local/translations/en.json` for the new watched-device surface
+
+- [x] Phase 6F: Validate watched-device normalization, lifecycle, and performance boundaries
+  - add API and model normalization coverage in `tests/components/firewalla_local/test_client.py` and `tests/components/firewalla_local/test_models.py` for the new host and VPN runtime slices
+  - add platform coverage in a new `tests/components/firewalla_local/test_binary_sensor.py` or an expanded sensor-focused test module to prove watched-device entity creation, availability transitions, attribute stability, and entry-scoped unique IDs
+  - add lifecycle coverage proving watched-device entities reconcile cleanly when a watched host disappears from the latest payload, reappears later, or is removed from `CONF_WATCHED_DEVICES`
+  - add multi-instance watched-device tests proving two Firewalla entries can watch the same endpoint MAC independently without entity-ID or unique-ID collisions because the entry scope remains part of the unique ID
+  - keep validation internal-only and fixture-driven; no live protocol experimentation should be hidden inside the watched-device implementation pass
+  - if Builder introduces `host_manager.py`, add focused boundary coverage in `tests/components/firewalla_local/test_boundaries.py` so watched-device lifecycle and selection logic remains manager-owned rather than drifting into platform files
+
+Phase 6D execution note: Completed with a top-level options-flow entry for watched devices plus stale-selection tolerance. The options flow now refreshes runtime state before presenting watched-device choices, persists `CONF_WATCHED_DEVICES` in `ConfigEntry.options`, preserves previously selected MAC addresses when the host is temporarily missing from the latest payload, and keeps watched-device management separate from rule selection and general system settings.
+
+Phase 6E execution note: Completed with watched-device connectivity binary sensors in `binary_sensor.py`. Each selected MAC address now produces one entry-scoped watched-device entity attached to the existing Firewalla device, with manager-owned host lookup, stable usage and last-activity attributes, and translation-backed names and metadata. The same platform also carries the main system-status binary sensor surface for the Firewalla box.
+
+Phase 6F execution note: Completed with focused config-flow, binary-sensor, init, and sensor coverage. Validation now proves watched-device entity creation, missing-host unavailability, lifecycle reconciliation when a selected host disappears or is deselected, reload behavior when watched-device options change, and entry-scoped identity safety. The current watched-device slice intentionally leaves `vpn_active` deferred until the raw host-to-VPN mapping contract is proven, and the system-level aggregate online and offline counts use an integration-derived recent-activity fallback only where the payload does not provide a trustworthy aggregate online signal.
+
+Current post-Phase 6 note: The repository now ships three bounded runtime surfaces: rule-backed switches, appliance-monitoring entities, and watched-device monitoring. The current emphasis should move from adding adjacent surfaces opportunistically to keeping README, user guide, architecture, standards, and release-prep materials aligned with the implementation that now exists.
+
+Phase 6 completion note: Phase 6 is complete. The watched-device, adjustable-polling, and multi-instance verification scope is now implemented, documented, and validated well enough that follow-on work should be treated as a new runtime slice rather than continued Phase 6 expansion.
+
+Phase 6 entry criteria: This phase may begin immediately because the current repository already proves license-anchored config-entry identity, entry-scoped unique IDs, domain-global service registration, and a raw host payload that includes `hosts[]` with `mac`, `ip`, `lastActive`, and `flowsummary` usage fields. The blocking unknown is not host inventory itself; it is the exact truthful contract for derived watched-device online state and `vpn_active` mapping.
+
+Phase 6 execution guardrails:
+
+- treat `async_setup_services()` registration and service resolution as verification work first, not as speculative refactoring work
+- keep `CONF_UPDATE_INTERVAL` and `CONF_WATCHED_DEVICES` in `ConfigEntry.options`
+- keep the coordinator as the owner of polling cadence and live interval updates
+- keep watched-device state manager-owned and entry-scoped
+- use `binary_sensor.py` for the watched-device primary state even if the user-facing feature is described broadly as device monitoring
+- do not guess that `devicePresence`, `lastActive`, `ovpnClientProfiles`, `wgvpnClientProfiles`, or `awgPeers` are sufficient for truthful presence or VPN state until the implementation proves the mapping against captured payloads
+
+### Phase 7: Watched-user monitoring buildout
+
+Goal: Add a bounded watched-user surface that lets one Firewalla entry expose selected household users with truthful usage and association metadata, starting from the already proven `userTags` and group-linkage data rather than assuming the full app UI contract is already available locally.
+
+Gate note: Phase 7 remained discovery-gated. Implementation only proceeded after the local capture proved top-level `userTags` user records carrying durable identifiers, display names, affiliated group metadata, and `appTimeUsageToday` usage totals, while still leaving unsupported fields such as last-app-used out of scope.
+
+Implementation note: The initial user-facing concept should mirror watched devices operationally, with opt-in selection in the options flow and one entity per selected user, but it should not blindly mirror watched-device semantics. If the strongest truthful primary value is a daily usage counter such as `totalMins`, use a sensor surface; if only binary presence-like state is proven initially, stop and narrow the slice instead of shipping an overloaded entity model.
+
+- [x] Phase 7A: Confirm the local user-linkage and usage contract before any entity design
+  - capture and document the concrete local payload slices or endpoints that expose Firewalla users, using the existing evidence in `.artifacts/poc/20260323-175408/local_response_decrypted.json` plus any additional targeted capture needed to prove user-level usage fields
+  - distinguish three evidence tiers explicitly before implementation starts:
+    - proven now: group-level `user_ids`, `user_names`, and `policy.userTags`, plus host-level `userTags`
+    - plausible but unproven: a durable per-user object carrying totals such as `totalMins`, `appTimeUsageTotalToday`, `appTimeUsageToday`, associated device group, last app used, or last active
+    - out of scope until proven: cloud-only or app-computed views that do not appear in the local contract
+  - record which payload fields are raw vendor values versus integration-derived joins, especially for associated device group and aggregated last-active values
+  - stop and update the plan if the necessary per-user usage surface is not available from the current local runtime endpoint, rather than inferring it from rule quota fields like `appTimeUsage` or `appTimeUsed`
+
+- [x] Phase 7B: Define the typed runtime model and manager ownership for watched users
+  - extend `custom_components/firewalla_local/models.py` only after the user contract is proven, adding explicit typed models for user identity, host associations, and whatever bounded usage fields are actually present
+  - decide manager ownership deliberately: either extend `custom_components/firewalla_local/managers/host_manager.py` to own user-to-host association if the surface is fundamentally host-derived, or introduce a dedicated `user_manager.py` only if the contract clearly justifies a separate owner
+  - keep the coordinator as the router for normalized user data and any new selection state, not the owner of user-business logic
+  - define how associated groups and associated hosts are resolved so platform code receives a stable manager-owned user view instead of raw tags and ad hoc joins
+  - keep the typed contract narrow on the first pass: user identifier, display name, associated group or groups, associated host count or host list if proven, last active if proven, and only the daily usage counters that are explicitly present in the local payload
+
+- [x] Phase 7C: Add watched-user selection and the first entity surface
+  - extend `custom_components/firewalla_local/config_flow.py` with a dedicated watched-user selection step keyed by stable user identifier, following the same stale-selection tolerance used for watched devices
+  - add `CONF_WATCHED_USERS` in `custom_components/firewalla_local/const.py` as an options-only list of selected user identifiers
+  - choose the platform type based on the proven primary value:
+    - if a bounded numeric daily-usage value such as `totalMins` is proven, add a user-monitoring sensor surface
+    - if only categorical or timestamp state is proven initially, prefer a simpler sensor with those attributes rather than inventing a misleading binary state
+  - expose only translation-backed, constants-backed attributes from the proven contract, with candidate fields limited to associated device group, last active, app-usage totals, per-app usage breakdown, and last app used when each is explicitly evidenced
+  - attach watched-user entities to the existing license-anchored Firewalla device in the first slice rather than creating child devices unless the registry contract later demands it
+
+- [x] Phase 7D: Validate watched-user lifecycle, entry isolation, and proof boundaries
+  - add focused tests under `tests/components/firewalla_local/` for user normalization, options-flow selection, entity creation, stale-selection preservation, missing-user unavailability, and reload behavior
+  - add multi-instance coverage proving two Firewalla entries can watch the same logical user identifier independently without unique-ID collisions because entry scope remains part of the unique ID
+  - add boundary coverage proving user selection, user-to-host resolution, and usage shaping stay manager-owned rather than drifting into entity or config-flow code
+  - keep validation fixture-driven and capture-backed; no live protocol exploration should be hidden inside implementation tests
+  - update `README.md`, `docs/USER_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, and `custom_components/firewalla_local/quality_scale.yaml` only after the bounded watched-user contract is implemented and validated, not while the payload contract is still speculative
+
+Phase 7A execution note: Completed by confirming that the local runtime payload exposes top-level `userTags` user objects with `uid`, `name`, `type`, `affiliatedTag`, and `appTimeUsageToday`, while groups and hosts continue to provide the association layer through `user_ids`, `user_names`, `policy.userTags`, and host-level `userTags`. The implementation treats `totalMins`, `uniqueMins`, and per-app usage totals as proven raw vendor values, while associated hosts and last-active are explicit integration-derived joins.
+
+Phase 7B execution note: Completed by extending the runtime model with typed user records and adding `custom_components/firewalla_local/managers/user_manager.py`. A dedicated user manager was justified because the local contract now exposes a first-class user surface rather than only host-derived hints, and the manager now owns watched-user selection lookups, user shaping, and host-association joins.
+
+Phase 7C execution note: Completed with a dedicated watched-user options step keyed by stable user identifier plus one sensor per selected user in `sensor.py`. The first bounded entity surface uses today's total usage minutes as the primary state and exposes only translation-backed attributes that are either directly present in the proven payload or clearly integration-derived from associated hosts.
+
+Phase 7D execution note: Completed with focused config-flow, init, and sensor coverage plus full repository validation. Validation now proves watched-user normalization, stale-selection preservation, missing-user unavailability, entry-scoped unique IDs, and manager-owned lifecycle behavior without relying on live protocol exploration inside tests.
+
+Current post-Phase 7 note: The repository now ships four bounded runtime surfaces: rule-backed switches, appliance-monitoring entities, watched-device monitoring, and watched-user monitoring. Follow-on work should stay disciplined about release prep, discovery research, and any future user analytics expansion that would require new protocol evidence.
+
+Phase 7 completion note: Phase 7 is complete. The repository now exposes an evidence-backed watched-user slice built from the proven local `userTags` contract, with unsupported fields such as last-app-used intentionally deferred until they are captured and normalized truthfully.
+
+Phase 7 entry criteria: This phase may begin once the repository has a capture-backed answer for where user records and any per-user usage counters actually live in the local contract. The currently sufficient starting evidence is the linkage surface in groups and hosts; the currently insufficient evidence is the exact local contract for values the app appears to show, such as `totalMins`, per-app usage totals, and last-app-used details.
+
+Phase 7 execution guardrails:
+
+- start from the proven `userTags` linkage surface and build joins explicitly instead of assuming there is already a clean top-level user model
+- do not reuse rule-level quota fields such as `appTimeUsage` or `appTimeUsed` as stand-ins for per-user usage without direct proof that the vendor uses the same semantics on the user surface
+- prefer one bounded watched-user entity type for the first slice rather than mixing sensors, binary sensors, and diagnostic helpers prematurely
+- keep watched-user selection state in `ConfigEntry.options`
+- keep all user-facing labels, purpose text, and attributes translation-ready from the first implementation pass
+- if the local contract only proves identity plus associations and not meaningful usage state, narrow Phase 7 to that honest surface or split usage exploration into a later phase instead of shipping guessed counters
+
 ## Validation strategy
 
 Document-only updates to plans and support notes do not require repo lint, type-check, or test runs.
@@ -376,6 +545,7 @@ Document-only updates to plans and support notes do not require repo lint, type-
 - The plan should prefer a clean rename and replacement path over wrapper-based migration.
 - The plan must identify unresolved protocol items explicitly before implementation starts.
 - Sensor-expansion planning must stay bounded to fields proven in the captured local payload and must not infer unsupported monitoring metrics.
+- Watched-user planning must distinguish proven user-association surfaces from unverified per-user usage counters and app-only views.
 
 ## References
 
@@ -386,6 +556,7 @@ Document-only updates to plans and support notes do not require repo lint, type-
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_SCHEDULED_ADVANCED_RULES.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md`
 - `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_BUILDER_HANDOFF.md`
+- `docs/REVERSE_ENGINEERING_WORKFLOW.md`
 - `AGENTS.md`
 - `README.md`
 - `custom_components/firewalla_local/manifest.json`

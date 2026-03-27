@@ -23,10 +23,15 @@ from .coordinator import (
     FirewallaRuntimeData,
     async_migrate_entry_host,
 )
-from .managers import FirewallaRuleManager, FirewallaSystemManager
+from .managers import (
+    FirewallaHostManager,
+    FirewallaIntegrationManager,
+    FirewallaRuleManager,
+    FirewallaUserManager,
+)
 from .services import async_remove_services, async_setup_services
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -51,23 +56,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         timezone_name=hass.config.time_zone,
     )
     coordinator = FirewallaDataUpdateCoordinator(hass, entry, client)
-    system_manager = FirewallaSystemManager(coordinator, entry, client)
+    host_manager = FirewallaHostManager(coordinator, entry, client)
+    integration_manager = FirewallaIntegrationManager(coordinator, entry, client)
     rule_manager = FirewallaRuleManager(coordinator, entry, client)
+    user_manager = FirewallaUserManager(coordinator, entry, client)
     coordinator.attach_managers(
-        system_manager=system_manager,
+        host_manager=host_manager,
+        integration_manager=integration_manager,
         rule_manager=rule_manager,
+        user_manager=user_manager,
     )
 
     await coordinator.async_config_entry_first_refresh()
-    await system_manager.async_reconcile_rule_switch_entities(
+    await integration_manager.async_reconcile_rule_switch_entities(
         rule_manager.selected_templates
     )
 
     entry.runtime_data = FirewallaRuntimeData(
         client=client,
         coordinator=coordinator,
-        system_manager=system_manager,
+        host_manager=host_manager,
+        integration_manager=integration_manager,
         rule_manager=rule_manager,
+        user_manager=user_manager,
     )
     entry.async_on_unload(
         entry.add_update_listener(coordinator.async_handle_entry_reload_requested)

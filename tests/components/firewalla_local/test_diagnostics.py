@@ -23,22 +23,25 @@ from custom_components.firewalla_local.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from custom_components.firewalla_local.models import (
+    FirewallaApplianceIdentityInput,
+    FirewallaApplianceRuntimeInput,
     FirewallaPolicyRule,
     FirewallaRuntimeSnapshot,
-    FirewallaSystemInfo,
 )
 
 
 def _snapshot() -> FirewallaRuntimeSnapshot:
     """Return a representative runtime snapshot for diagnostics tests."""
     return FirewallaRuntimeSnapshot(
-        system_info=FirewallaSystemInfo(
+        appliance_identity=FirewallaApplianceIdentityInput(
             host="192.168.200.1",
-            name="Firewalla",
+            group_name="Firewalla",
+            device_name=None,
             model="gold",
             serial_number="serial-123",
             software_version="1.0.0",
         ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(
             FirewallaPolicyRule(
                 rule_id="744",

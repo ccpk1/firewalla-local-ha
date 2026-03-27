@@ -142,9 +142,11 @@ Rules:
 
 - all rule mutations above the API layer must flow through manager methods
 - entities, flows, and services must not duplicate command logic or payload construction once manager methods exist
-- the minimum manager set should include `system_manager.py` and `rule_manager.py`
-- `SystemManager` owns shared lifecycle concerns such as device lifecycle and entity lifecycle
+- the minimum manager set should include `integration_manager.py`, `host_manager.py`, and `rule_manager.py`
+- `IntegrationManager` owns shared lifecycle concerns such as Firewalla appliance device lifecycle and entity lifecycle
+- `HostManager` owns endpoint-host inventory, watched-device orchestration, and host-derived appliance summary lookups
 - `RuleManager` owns rule-specific orchestration, indexed lookup state, runtime inventory inputs, and rule-command behavior
+- `UserManager` is the owner for watched-user joins, usage shaping, and fallback handling over the proven local user payload
 - direct cross-manager writes are forbidden
 - managers may use explicit entry-scoped signals or other centralized orchestration contracts for cross-manager reactions
 - direct read-only manager calls are acceptable only when they do not create hidden mutation coupling
@@ -178,6 +180,9 @@ Rules:
 - they must delegate business logic to manager methods
 - they must not perform protocol calls directly
 - they must map failures into specific Home Assistant exception types and translation keys
+- watched-user entity attributes must distinguish raw payload facts from
+	integration-derived joins, especially for totals, per-app usage, and
+	host-derived `last_active` metadata
 
 ## Async and event loop rules
 
@@ -199,10 +204,15 @@ Rules:
 
 ### Entity naming
 
-- all entities must set `_attr_has_entity_name = True`
+- prefer `_attr_has_entity_name = True` for entity surfaces attached to the shared Firewalla device
+- user-facing names must be owned by translation keys
+- do not hardcode `_attr_name` for production entity names
+- do not force entity-ID shaping with `_attr_suggested_object_id` for presentation reasons
+- mutable labels such as rule names, watched users, and watched devices must use `_attr_translation_placeholders`
+- when mutable placeholders can change at runtime, refresh `_attr_translation_placeholders` in `_handle_coordinator_update()` and invalidate the cached `name` before calling the base implementation
 - entity names must not embed the device name
-- the repository follows a UID-first naming contract
-- the integration must not generate descriptive default names from mutable rule text solely for presentation polish
+- the repository follows a translation-owned naming contract
+- unique IDs must remain anchored to immutable identifiers and must not depend on the current friendly name
 
 ### Entity identity
 
@@ -235,6 +245,7 @@ Rules:
 
 - add concise purpose-oriented metadata when it materially helps users understand what an entity is for
 - keep purpose metadata stable, readable, and manager-derived
+- primary control and monitoring entities should remain uncategorized unless their semantics are truly diagnostic
 - do not expose internal debugging structures or sensitive payloads just to make an entity feel richer
 
 ### Platform concurrency

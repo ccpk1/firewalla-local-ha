@@ -43,10 +43,11 @@ from custom_components.firewalla_local.const import (
     TRANS_KEY_PURPOSE_RULE_SWITCH,
 )
 from custom_components.firewalla_local.models import (
+    FirewallaApplianceIdentityInput,
+    FirewallaApplianceRuntimeInput,
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
-    FirewallaSystemInfo,
 )
 
 
@@ -108,13 +109,15 @@ def _snapshot_with_rule(
         )
 
     return FirewallaRuntimeSnapshot(
-        system_info=FirewallaSystemInfo(
+        appliance_identity=FirewallaApplianceIdentityInput(
             host="192.168.200.1",
-            name="Firewalla",
+            group_name="Firewalla",
+            device_name=None,
             model="gold",
             serial_number="serial-123",
             software_version="1.0.0",
         ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=policy_rules,
         exception_rule_count=0,
     )
@@ -190,7 +193,6 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
         registry = er.async_get(hass)
         entity_entry = registry.async_get(entity_id)
 
-        assert entity_id.endswith("block_category_social_for_av_smart_tv")
         assert state is not None
         assert state.name == "Firewalla block category social for AV_SMART_TV"
         assert entity_entry is not None
@@ -308,13 +310,15 @@ async def test_selected_rule_switch_uses_live_custom_name(
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
             return_value=FirewallaRuntimeSnapshot(
-                system_info=FirewallaSystemInfo(
+                appliance_identity=FirewallaApplianceIdentityInput(
                     host="192.168.200.1",
-                    name="Firewalla",
+                    group_name="Firewalla",
+                    device_name=None,
                     model="gold",
                     serial_number="serial-123",
                     software_version="1.0.0",
                 ),
+                appliance_runtime=FirewallaApplianceRuntimeInput(),
                 policy_rules=(live_rule,),
                 exception_rule_count=0,
             ),
@@ -326,10 +330,140 @@ async def test_selected_rule_switch_uses_live_custom_name(
     entity_id = next(iter(hass.states.async_entity_ids("switch")))
     state = hass.states.get(entity_id)
 
-    assert entity_id.endswith("choreops_custom_allow")
     assert state is not None
     assert state.name == "Firewalla ChoreOps Custom Allow"
     assert ATTR_RULE_CUSTOM_NAME not in state.attributes
+
+
+async def test_selected_rule_switch_name_updates_after_rule_rename(
+    hass: HomeAssistant,
+) -> None:
+    """Test selected-rule friendly names track live rule renames after refresh."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["772"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "772",
+                    "name": "allow dns choreops.com for AV_SMART_TV",
+                    "action": "allow",
+                    "target": "choreops.com",
+                    "target_type": "dns",
+                    "scope": [],
+                    "tag_refs": ["tag:17"],
+                    "dnsmasq_only": False,
+                    "use_bf": True,
+                }
+            ],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    initial_rule = FirewallaPolicyRule(
+        rule_id="772",
+        action="allow",
+        target="choreops.com",
+        target_type="dns",
+        direction="bidirection",
+        enabled=True,
+        purpose=None,
+        scope=(),
+        tag_refs=("tag:17",),
+        applies_to=("AV_SMART_TV",),
+        raw_update_payload={
+            "pid": "772",
+            "action": "allow",
+            "target": "choreops.com",
+            "type": "dns",
+            "tag": ["tag:17"],
+            "disabled": 0,
+            "_name": "ChoreOps Custom Allow",
+        },
+    )
+    renamed_rule = FirewallaPolicyRule(
+        rule_id="772",
+        action="allow",
+        target="choreops.com",
+        target_type="dns",
+        direction="bidirection",
+        enabled=True,
+        purpose=None,
+        scope=(),
+        tag_refs=("tag:17",),
+        applies_to=("AV_SMART_TV",),
+        raw_update_payload={
+            "pid": "772",
+            "action": "allow",
+            "target": "choreops.com",
+            "type": "dns",
+            "tag": ["tag:17"],
+            "disabled": 0,
+            "_name": "ChoreOps Family Allow",
+        },
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=[
+                FirewallaRuntimeSnapshot(
+                    appliance_identity=FirewallaApplianceIdentityInput(
+                        host="192.168.200.1",
+                        group_name="Firewalla",
+                        device_name=None,
+                        model="gold",
+                        serial_number="serial-123",
+                        software_version="1.0.0",
+                    ),
+                    appliance_runtime=FirewallaApplianceRuntimeInput(),
+                    policy_rules=(initial_rule,),
+                    exception_rule_count=0,
+                ),
+                FirewallaRuntimeSnapshot(
+                    appliance_identity=FirewallaApplianceIdentityInput(
+                        host="192.168.200.1",
+                        group_name="Firewalla",
+                        device_name=None,
+                        model="gold",
+                        serial_number="serial-123",
+                        software_version="1.0.0",
+                    ),
+                    appliance_runtime=FirewallaApplianceRuntimeInput(),
+                    policy_rules=(renamed_rule,),
+                    exception_rule_count=0,
+                ),
+            ],
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        entity_id = next(iter(hass.states.async_entity_ids("switch")))
+        initial_state = hass.states.get(entity_id)
+        assert initial_state is not None
+        assert initial_state.name == "Firewalla ChoreOps Custom Allow"
+
+        await entry.runtime_data.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    renamed_state = hass.states.get(entity_id)
+    assert renamed_state is not None
+    assert renamed_state.name == "Firewalla ChoreOps Family Allow"
 
 
 async def test_selected_rule_switch_is_unavailable_when_rule_is_missing(

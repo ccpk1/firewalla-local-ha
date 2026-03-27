@@ -1,11 +1,15 @@
 """Manager exports for Firewalla Local."""
 
 from .base_manager import FirewallaBaseManager
+from .host_manager import FirewallaHostManager
+from .integration_manager import FirewallaIntegrationManager
 from .rule_manager import FirewallaRuleManager
-from .system_manager import FirewallaSystemManager
+from .user_manager import FirewallaUserManager
 
 __all__ = [
     "FirewallaBaseManager",
+    "FirewallaHostManager",
+    "FirewallaIntegrationManager",
     "FirewallaRuleManager",
-    "FirewallaSystemManager",
+    "FirewallaUserManager",
 ]

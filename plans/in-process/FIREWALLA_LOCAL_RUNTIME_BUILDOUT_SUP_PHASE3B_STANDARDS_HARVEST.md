@@ -177,7 +177,7 @@ These ChoreOps practices are valuable but must be simplified for Firewalla Local
 The standards refresh produced these durable Firewalla-specific outcomes:
 
 - coordinator owns config-entry writes and runtime routing
-- minimum manager architecture is explicit: `SystemManager` plus `RuleManager`
+- minimum manager architecture is explicit: `IntegrationManager`, `HostManager`, and `RuleManager`
 - `managers/`, `helpers/`, `utils/`, and `entity.py` now have named ownership boundaries
 - `runtime_inventory.py` is no longer acceptable as an unowned root-level specialized module
 - entity unique IDs must include entry scope, immutable object identity, and stable suffix

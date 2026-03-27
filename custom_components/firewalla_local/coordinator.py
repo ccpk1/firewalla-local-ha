@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -14,14 +16,93 @@ from .api import FirewallaApiClient, FirewallaApiError, FirewallaAuthError
 from .const import (
     CONF_HOST,
     CONF_LOCAL_IP,
+    CONF_SELECTED_RULE_IDS,
+    CONF_UPDATE_INTERVAL,
+    CONF_WATCHED_DEVICES,
+    CONF_WATCHED_USERS,
     DEFAULT_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
     LOGGER,
+    MAX_UPDATE_INTERVAL_MINUTES,
+    MIN_UPDATE_INTERVAL_MINUTES,
 )
 from .models import FirewallaRuntimeSnapshot
 
 if TYPE_CHECKING:
-    from .managers import FirewallaRuleManager, FirewallaSystemManager
+    from .managers import (
+        FirewallaHostManager,
+        FirewallaIntegrationManager,
+        FirewallaRuleManager,
+        FirewallaUserManager,
+    )
+
+
+def _get_selected_rule_ids(options: Mapping[str, object]) -> tuple[str, ...]:
+    """Return the stored selected rule IDs in a stable order."""
+    raw_selected_rule_ids = options.get(CONF_SELECTED_RULE_IDS, [])
+    if not isinstance(raw_selected_rule_ids, list):
+        return ()
+
+    return tuple(
+        sorted(rule_id for rule_id in raw_selected_rule_ids if isinstance(rule_id, str))
+    )
+
+
+def _get_watched_device_macs(options: Mapping[str, object]) -> tuple[str, ...]:
+    """Return the stored watched-device MACs in a stable order."""
+    raw_watched_devices = options.get(CONF_WATCHED_DEVICES, [])
+    if not isinstance(raw_watched_devices, list):
+        return ()
+
+    return tuple(
+        sorted(mac for mac in raw_watched_devices if isinstance(mac, str) and mac)
+    )
+
+
+def _get_watched_user_ids(options: Mapping[str, object]) -> tuple[str, ...]:
+    """Return the stored watched-user identifiers in a stable order."""
+    raw_watched_users = options.get(CONF_WATCHED_USERS, [])
+    if not isinstance(raw_watched_users, list):
+        return ()
+
+    return tuple(
+        sorted(
+            user_id
+            for user_id in raw_watched_users
+            if isinstance(user_id, str) and user_id
+        )
+    )
+
+
+def get_configured_update_interval(options: Mapping[str, object]) -> timedelta:
+    """Return the validated polling interval configured in entry options."""
+    raw_update_interval = options.get(
+        CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_MINUTES
+    )
+    if isinstance(raw_update_interval, bool) or not isinstance(
+        raw_update_interval, int
+    ):
+        return DEFAULT_UPDATE_INTERVAL
+
+    if not (
+        MIN_UPDATE_INTERVAL_MINUTES
+        <= raw_update_interval
+        <= MAX_UPDATE_INTERVAL_MINUTES
+    ):
+        return DEFAULT_UPDATE_INTERVAL
+
+    return timedelta(minutes=raw_update_interval)
+
+
+@callback
+def async_update_entry_options(
+    hass: HomeAssistant,
+    entry: FirewallaConfigEntry | ConfigEntry,
+    options: Mapping[str, object],
+) -> None:
+    """Persist config-entry options through the coordinator-owned boundary."""
+    hass.config_entries.async_update_entry(entry, options=options)
 
 
 class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnapshot]):
@@ -36,26 +117,32 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         """Initialize the coordinator."""
         self.client = client
         self.last_init_payload: dict[str, object] | None = None
-        self.system_manager: FirewallaSystemManager | None = None
+        self.host_manager: FirewallaHostManager | None = None
+        self.integration_manager: FirewallaIntegrationManager | None = None
         self.rule_manager: FirewallaRuleManager | None = None
+        self.user_manager: FirewallaUserManager | None = None
         self._unavailable_logged = False
         super().__init__(
             hass,
             LOGGER,
             name=DOMAIN,
-            update_interval=DEFAULT_UPDATE_INTERVAL,
+            update_interval=get_configured_update_interval(config_entry.options),
             config_entry=config_entry,
         )
 
     def attach_managers(
         self,
         *,
-        system_manager: FirewallaSystemManager,
+        host_manager: FirewallaHostManager,
+        integration_manager: FirewallaIntegrationManager,
         rule_manager: FirewallaRuleManager,
+        user_manager: FirewallaUserManager,
     ) -> None:
         """Attach the entry-scoped manager objects to refresh routing."""
-        self.system_manager = system_manager
+        self.host_manager = host_manager
+        self.integration_manager = integration_manager
         self.rule_manager = rule_manager
+        self.user_manager = user_manager
 
     async def _async_update_data(self) -> FirewallaRuntimeSnapshot:
         """Fetch data from Firewalla Local."""
@@ -77,6 +164,12 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
             LOGGER.info("The Firewalla box is back online")
             self._unavailable_logged = False
 
+        if self.integration_manager is not None:
+            self.integration_manager.handle_refresh(snapshot)
+        if self.host_manager is not None:
+            self.host_manager.handle_refresh(snapshot)
+        if self.user_manager is not None:
+            self.user_manager.handle_refresh(snapshot)
         if self.rule_manager is not None:
             self.rule_manager.handle_refresh(self.last_init_payload or {}, snapshot)
 
@@ -86,7 +179,33 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self, hass: HomeAssistant, entry: FirewallaConfigEntry
     ) -> None:
         """Reload a config entry after mutable updates such as options changes."""
+        self.async_update_interval_from_entry(entry)
+
+        current_selected_rule_ids = tuple(
+            sorted(
+                template.source_rule_id
+                for template in entry.runtime_data.rule_manager.selected_templates
+            )
+        )
+        current_watched_device_macs = (
+            entry.runtime_data.host_manager.configured_watched_device_macs
+        )
+        current_watched_user_ids = (
+            entry.runtime_data.user_manager.configured_watched_user_ids
+        )
+        if (
+            current_selected_rule_ids == _get_selected_rule_ids(entry.options)
+            and current_watched_device_macs == _get_watched_device_macs(entry.options)
+            and current_watched_user_ids == _get_watched_user_ids(entry.options)
+        ):
+            return
+
         await hass.config_entries.async_reload(entry.entry_id)
+
+    @callback
+    def async_update_interval_from_entry(self, entry: FirewallaConfigEntry) -> None:
+        """Apply the configured polling interval from the latest entry options."""
+        self.update_interval = get_configured_update_interval(entry.options)
 
 
 async def async_migrate_entry_host(
@@ -108,8 +227,10 @@ class FirewallaRuntimeData:
 
     client: FirewallaApiClient
     coordinator: FirewallaDataUpdateCoordinator
-    system_manager: FirewallaSystemManager
+    host_manager: FirewallaHostManager
+    integration_manager: FirewallaIntegrationManager
     rule_manager: FirewallaRuleManager
+    user_manager: FirewallaUserManager
 
 
 type FirewallaConfigEntry = ConfigEntry[FirewallaRuntimeData]

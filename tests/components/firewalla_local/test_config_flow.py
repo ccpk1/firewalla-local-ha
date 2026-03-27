@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+# pylint: disable=too-many-lines
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -25,17 +28,27 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
+    CONF_UPDATE_INTERVAL,
+    CONF_WATCHED_DEVICES,
+    CONF_WATCHED_USERS,
     DEFAULT_FIREWALLA_HOST,
+    DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
+    MAX_UPDATE_INTERVAL_MINUTES,
+    MIN_UPDATE_INTERVAL_MINUTES,
 )
 from custom_components.firewalla_local.helpers.runtime_inventory import (
     build_runtime_inventory_report,
 )
 from custom_components.firewalla_local.managers import FirewallaRuleManager
 from custom_components.firewalla_local.models import (
+    FirewallaApplianceIdentityInput,
+    FirewallaApplianceRuntimeInput,
+    FirewallaHostRuntime,
     FirewallaPolicyRule,
     FirewallaRuntimeSnapshot,
-    FirewallaSystemInfo,
+    FirewallaUserAppUsage,
+    FirewallaUserRuntime,
 )
 
 TEST_QR_JSON = (
@@ -53,10 +66,10 @@ def _mock_keys() -> GeneratedKeys:
 
 
 def _mock_credentials(
-    *, license: str = "license-123"
+    *, license_id: str = "license-123"
 ) -> FirewallaProvisionedCredentials:
     return FirewallaProvisionedCredentials(
-        license=license,
+        license=license_id,
         host="192.168.200.1",
         gid="gid-123",
         eid="eid-123",
@@ -86,8 +99,8 @@ async def test_user_flow_creates_entry(hass) -> None:
             new=AsyncMock(return_value=_mock_credentials()),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_system_info",
-            new=AsyncMock(),
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value={}),
         ),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -251,8 +264,8 @@ async def test_reauth_updates_existing_entry(hass) -> None:
             new=AsyncMock(return_value=_mock_credentials()),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_system_info",
-            new=AsyncMock(),
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value={}),
         ),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -436,11 +449,11 @@ async def test_reauth_wrong_account_aborts(hass) -> None:
         ),
         patch(
             "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
-            new=AsyncMock(return_value=_mock_credentials(license="license-999")),
+            new=AsyncMock(return_value=_mock_credentials(license_id="license-999")),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_system_info",
-            new=AsyncMock(),
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value={}),
         ),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -534,8 +547,24 @@ async def test_options_flow_handles_missing_runtime_data(hass) -> None:
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
 
-    assert result["type"] is FlowResultType.FORM
+    assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "rule_selection"},
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "rule_selection"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_rule_selection"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "edit_rule_selection"
 
     field = result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
     assert field.options == {"736": "[736] Unavailable rule"}
@@ -545,10 +574,14 @@ async def test_options_flow_handles_missing_runtime_data(hass) -> None:
         user_input={CONF_SELECTED_RULE_IDS: []},
     )
 
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
         CONF_SELECTED_RULE_IDS: [],
         CONF_SELECTED_RULE_TEMPLATES: [],
+        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+        CONF_WATCHED_DEVICES: [],
+        CONF_WATCHED_USERS: [],
     }
 
 
@@ -571,13 +604,15 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
     entry.runtime_data = SimpleNamespace(
         coordinator=SimpleNamespace(
             data=FirewallaRuntimeSnapshot(
-                system_info=FirewallaSystemInfo(
+                appliance_identity=FirewallaApplianceIdentityInput(
                     host="fire.walla",
-                    name="Firewalla",
+                    group_name="Firewalla",
+                    device_name=None,
                     model="gold",
                     serial_number="serial-123",
                     software_version="1.0.0",
                 ),
+                appliance_runtime=FirewallaApplianceRuntimeInput(),
                 policy_rules=(
                     FirewallaPolicyRule(
                         rule_id="736",
@@ -719,7 +754,9 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
-    preview_result = await options_flow.async_step_init()
+    await options_flow.async_step_init()
+    await options_flow.async_step_rule_selection()
+    preview_result = await options_flow.async_step_edit_rule_selection()
     field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
     assert field.options == {
         "735": "[735] block category games for KADEN's Devices (KADEN) (enabled)",
@@ -736,16 +773,33 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
 
-    assert result["type"] is FlowResultType.FORM
+    assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "rule_selection"},
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "rule_selection"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_rule_selection"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "edit_rule_selection"
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={CONF_SELECTED_RULE_IDS: ["736"]},
     )
 
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
         CONF_SELECTED_RULE_IDS: ["736"],
         CONF_SELECTED_RULE_TEMPLATES: [
             {
@@ -760,11 +814,328 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
                 "use_bf": True,
             }
         ],
+        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+        CONF_WATCHED_DEVICES: [],
+        CONF_WATCHED_USERS: [],
     }
 
 
-async def test_options_flow_refreshes_runtime_before_building_selector(hass) -> None:
-    """Test opening the options flow refreshes the live runtime list first."""
+async def test_options_flow_updates_watched_devices(hass) -> None:
+    """Test the options flow persists watched-device MAC selections."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_UPDATE_INTERVAL: 5,
+            CONF_WATCHED_DEVICES: [],
+            CONF_WATCHED_USERS: [],
+        },
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            data=FirewallaRuntimeSnapshot(
+                appliance_identity=FirewallaApplianceIdentityInput(
+                    host="fire.walla",
+                    group_name="Firewalla",
+                    device_name=None,
+                    model="gold",
+                    serial_number="serial-123",
+                    software_version="1.0.0",
+                ),
+                appliance_runtime=FirewallaApplianceRuntimeInput(),
+                policy_rules=(),
+                exception_rule_count=0,
+                hosts=(
+                    FirewallaHostRuntime(
+                        mac="AA:BB:CC:DD:EE:FF",
+                        display_name="Kaden Phone",
+                        fallback_name=None,
+                        ip_address="192.168.200.25",
+                        group_name=None,
+                        network_name=None,
+                        connection_type=None,
+                        last_active=None,
+                        download_bytes=None,
+                        upload_bytes=None,
+                        stale=False,
+                    ),
+                    FirewallaHostRuntime(
+                        mac="wg_peer:test-peer",
+                        display_name="WireGuard Kaden",
+                        fallback_name=None,
+                        ip_address="10.42.0.2",
+                        group_name=None,
+                        network_name=None,
+                        connection_type=None,
+                        last_active=None,
+                        download_bytes=None,
+                        upload_bytes=None,
+                        stale=False,
+                    ),
+                ),
+            ),
+            async_request_refresh=AsyncMock(),
+        ),
+        rule_manager=None,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_watched_devices"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "edit_watched_devices"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"]},
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
+        CONF_SELECTED_RULE_IDS: [],
+        CONF_SELECTED_RULE_TEMPLATES: [],
+        CONF_UPDATE_INTERVAL: 5,
+        CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"],
+        CONF_WATCHED_USERS: [],
+    }
+
+
+async def test_options_flow_preserves_missing_selected_watched_device(hass) -> None:
+    """Test missing watched devices remain selectable long enough to stay managed."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+            CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"],
+            CONF_WATCHED_USERS: [],
+        },
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(data=None, async_request_refresh=AsyncMock()),
+        host_manager=SimpleNamespace(get_watched_device_choices=lambda: {}),
+        rule_manager=None,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_watched_devices"},
+    )
+
+    field = result["data_schema"].schema[CONF_WATCHED_DEVICES]
+    assert field.options == {
+        "AA:BB:CC:DD:EE:FF": "[AA:BB:CC:DD:EE:FF] Unavailable device"
+    }
+
+
+async def test_options_flow_updates_watched_users(hass) -> None:
+    """Test the options flow persists watched-user selections."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_UPDATE_INTERVAL: 5,
+            CONF_WATCHED_DEVICES: [],
+            CONF_WATCHED_USERS: [],
+        },
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            data=FirewallaRuntimeSnapshot(
+                appliance_identity=FirewallaApplianceIdentityInput(
+                    host="fire.walla",
+                    group_name="Firewalla",
+                    device_name=None,
+                    model="gold",
+                    serial_number="serial-123",
+                    software_version="1.0.0",
+                ),
+                appliance_runtime=FirewallaApplianceRuntimeInput(),
+                policy_rules=(),
+                exception_rule_count=0,
+                hosts=(
+                    FirewallaHostRuntime(
+                        mac="AA:BB:CC:DD:EE:FF",
+                        display_name="Kaden Phone",
+                        fallback_name=None,
+                        ip_address="192.168.200.25",
+                        group_name="KADEN's Devices",
+                        network_name=None,
+                        connection_type=None,
+                        last_active=1774287984.272,
+                        download_bytes=None,
+                        upload_bytes=None,
+                        stale=False,
+                        user_ids=("21",),
+                    ),
+                ),
+                users=(
+                    FirewallaUserRuntime(
+                        user_id="21",
+                        name="KADEN",
+                        affiliated_group_id="10",
+                        affiliated_group_name="KADEN's Devices",
+                        total_minutes_today=410,
+                        unique_minutes_today=381,
+                        app_usage_today=(
+                            FirewallaUserAppUsage(
+                                app_id="youtube",
+                                category="av",
+                                total_minutes=47,
+                                unique_minutes=44,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            async_request_refresh=AsyncMock(),
+        ),
+        host_manager=None,
+        rule_manager=None,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_watched_users"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "edit_watched_users"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_WATCHED_USERS: ["21"]},
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
+        CONF_SELECTED_RULE_IDS: [],
+        CONF_SELECTED_RULE_TEMPLATES: [],
+        CONF_UPDATE_INTERVAL: 5,
+        CONF_WATCHED_DEVICES: [],
+        CONF_WATCHED_USERS: ["21"],
+    }
+
+
+async def test_options_flow_preserves_missing_selected_watched_user(hass) -> None:
+    """Test missing watched users remain selectable long enough to stay managed."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+            CONF_WATCHED_DEVICES: [],
+            CONF_WATCHED_USERS: ["21"],
+        },
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(data=None, async_request_refresh=AsyncMock()),
+        host_manager=None,
+        user_manager=SimpleNamespace(get_watched_user_choices=lambda: {}),
+        rule_manager=None,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_watched_users"},
+    )
+
+    field = result["data_schema"].schema[CONF_WATCHED_USERS]
+    assert field.options == {"21": "[21] Unavailable user"}
+
+
+async def test_options_flow_system_settings_enforces_update_interval_bounds(
+    hass,
+) -> None:
+    """Test the system-settings step enforces the configured update interval range."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_SELECTED_RULE_IDS: [], CONF_UPDATE_INTERVAL: 5},
+    )
+    entry.add_to_hass(hass)
+
+    options_flow = FirewallaOptionsFlow(entry)
+    await options_flow.async_step_init()
+    result = await options_flow.async_step_system_settings()
+
+    update_interval_marker = next(
+        marker
+        for marker in result["data_schema"].schema
+        if marker == CONF_UPDATE_INTERVAL
+    )
+    assert update_interval_marker.default() == 5
+
+    with pytest.raises(vol.Invalid):
+        result["data_schema"]({CONF_UPDATE_INTERVAL: MIN_UPDATE_INTERVAL_MINUTES - 1})
+
+    with pytest.raises(vol.Invalid):
+        result["data_schema"]({CONF_UPDATE_INTERVAL: MAX_UPDATE_INTERVAL_MINUTES + 1})
+
+
+async def test_options_flow_refreshes_runtime_on_main_menu_only(hass) -> None:
+    """Test opening the options flow refreshes once on the main menu only."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -781,18 +1152,21 @@ async def test_options_flow_refreshes_runtime_before_building_selector(hass) -> 
     )
 
     initial_snapshot = FirewallaRuntimeSnapshot(
-        system_info=FirewallaSystemInfo(
+        appliance_identity=FirewallaApplianceIdentityInput(
             host="fire.walla",
-            name="Firewalla",
+            group_name="Firewalla",
+            device_name=None,
             model="gold",
             serial_number="serial-123",
             software_version="1.0.0",
         ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
     )
     refreshed_snapshot = FirewallaRuntimeSnapshot(
-        system_info=initial_snapshot.system_info,
+        appliance_identity=initial_snapshot.appliance_identity,
+        appliance_runtime=initial_snapshot.appliance_runtime,
         policy_rules=(
             FirewallaPolicyRule(
                 rule_id="737",
@@ -822,6 +1196,25 @@ async def test_options_flow_refreshes_runtime_before_building_selector(hass) -> 
     options_flow = FirewallaOptionsFlow(entry)
     result = await options_flow.async_step_init()
 
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert coordinator.async_request_refresh.await_count == 1
+
+    result = await options_flow.async_step_rule_selection()
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "rule_selection"
+    assert coordinator.async_request_refresh.await_count == 1
+
+    result = await options_flow.async_step_init()
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert coordinator.async_request_refresh.await_count == 1
+
+    await options_flow.async_step_rule_selection()
+    result = await options_flow.async_step_edit_rule_selection()
+
     field = result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
     assert coordinator.async_request_refresh.await_count == 1
     assert field.options == {
@@ -848,13 +1241,15 @@ async def test_options_flow_fallback_excludes_system_managed_rules(hass) -> None
     entry.runtime_data = SimpleNamespace(
         coordinator=SimpleNamespace(
             data=FirewallaRuntimeSnapshot(
-                system_info=FirewallaSystemInfo(
+                appliance_identity=FirewallaApplianceIdentityInput(
                     host="fire.walla",
-                    name="Firewalla",
+                    group_name="Firewalla",
+                    device_name=None,
                     model="gold",
                     serial_number="serial-123",
                     software_version="1.0.0",
                 ),
+                appliance_runtime=FirewallaApplianceRuntimeInput(),
                 policy_rules=(
                     FirewallaPolicyRule(
                         rule_id="639",
@@ -915,7 +1310,9 @@ async def test_options_flow_fallback_excludes_system_managed_rules(hass) -> None
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
-    preview_result = await options_flow.async_step_init()
+    await options_flow.async_step_init()
+    await options_flow.async_step_rule_selection()
+    preview_result = await options_flow.async_step_edit_rule_selection()
     field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
 
     assert field.options == {
@@ -959,13 +1356,15 @@ async def test_options_flow_fallback_matches_runtime_inventory_candidates(
         ]
     }
     snapshot = FirewallaRuntimeSnapshot(
-        system_info=FirewallaSystemInfo(
+        appliance_identity=FirewallaApplianceIdentityInput(
             host="fire.walla",
-            name="Firewalla",
+            group_name="Firewalla",
+            device_name=None,
             model="gold",
             serial_number="serial-123",
             software_version="1.0.0",
         ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(
             FirewallaPolicyRule(
                 rule_id="639",
@@ -1014,7 +1413,12 @@ async def test_options_flow_fallback_matches_runtime_inventory_candidates(
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
-    option_ids = list(options_flow._get_rule_choices())
+    await options_flow.async_step_init()
+    await options_flow.async_step_rule_selection()
+    preview_result = await options_flow.async_step_edit_rule_selection()
+    option_ids = list(
+        preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS].options
+    )
     report = build_runtime_inventory_report(payload, snapshot.policy_rules)
     report_ids = [
         candidate["rule_id"] for candidate in report["rule_switch_candidates"]
@@ -1068,13 +1472,15 @@ async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
     entry.runtime_data = SimpleNamespace(
         coordinator=SimpleNamespace(
             data=FirewallaRuntimeSnapshot(
-                system_info=FirewallaSystemInfo(
+                appliance_identity=FirewallaApplianceIdentityInput(
                     host="fire.walla",
-                    name="Firewalla",
+                    group_name="Firewalla",
+                    device_name=None,
                     model="gold",
                     serial_number="serial-123",
                     software_version="1.0.0",
                 ),
+                appliance_runtime=FirewallaApplianceRuntimeInput(),
                 policy_rules=(
                     FirewallaPolicyRule(
                         rule_id="736",
@@ -1096,7 +1502,9 @@ async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
-    preview_result = await options_flow.async_step_init()
+    await options_flow.async_step_init()
+    await options_flow.async_step_rule_selection()
+    preview_result = await options_flow.async_step_edit_rule_selection()
     field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
     assert field.options == {
         "736": "[736] block internet for KADEN's Devices (KADEN) (enabled)",
@@ -1104,13 +1512,29 @@ async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
     }
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.MENU
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "rule_selection"},
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "rule_selection"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_rule_selection"},
+    )
+
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={CONF_SELECTED_RULE_IDS: ["736"]},
     )
 
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
         CONF_SELECTED_RULE_IDS: ["736"],
         CONF_SELECTED_RULE_TEMPLATES: [
             {
@@ -1125,6 +1549,155 @@ async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
                 "use_bf": True,
             }
         ],
+        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+        CONF_WATCHED_DEVICES: [],
+        CONF_WATCHED_USERS: [],
+    }
+
+
+async def test_edit_rule_selection_can_return_to_main_menu_without_saving(hass) -> None:
+    """Test the editable rule-selection form can return to the main menu."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_SELECTED_RULE_IDS: ["736"], CONF_WATCHED_DEVICES: []},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "rule_selection"},
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_rule_selection"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_SELECTED_RULE_IDS: [],
+            "return_to_main_menu": True,
+        },
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
+        CONF_SELECTED_RULE_IDS: ["736"],
+        CONF_WATCHED_DEVICES: [],
+    }
+
+
+async def test_system_settings_returns_to_main_menu_after_save(hass) -> None:
+    """Test saving update interval returns to the main menu and persists options."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_UPDATE_INTERVAL: 5,
+            CONF_WATCHED_DEVICES: [],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "general_options"},
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "system_settings"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "system_settings"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_UPDATE_INTERVAL: 4},
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
+        CONF_SELECTED_RULE_IDS: [],
+        CONF_SELECTED_RULE_TEMPLATES: [],
+        CONF_UPDATE_INTERVAL: 4,
+        CONF_WATCHED_DEVICES: [],
+        CONF_WATCHED_USERS: [],
+    }
+
+
+async def test_system_settings_can_return_to_main_menu_without_saving(hass) -> None:
+    """Test the update-interval form can return to the main menu without saving."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_UPDATE_INTERVAL: 5,
+            CONF_WATCHED_DEVICES: [],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "general_options"},
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "system_settings"},
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_UPDATE_INTERVAL: 4,
+            "return_to_main_menu": True,
+        },
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == {
+        CONF_SELECTED_RULE_IDS: [],
+        CONF_UPDATE_INTERVAL: 5,
+        CONF_WATCHED_DEVICES: [],
     }
 
 
@@ -1145,13 +1718,15 @@ async def test_options_flow_uses_manager_candidate_logic_for_rule_choices() -> N
         options={CONF_SELECTED_RULE_IDS: []},
     )
     snapshot = FirewallaRuntimeSnapshot(
-        system_info=FirewallaSystemInfo(
+        appliance_identity=FirewallaApplianceIdentityInput(
             host="fire.walla",
-            name="Firewalla",
+            group_name="Firewalla",
+            device_name=None,
             model="gold",
             serial_number="serial-123",
             software_version="1.0.0",
         ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(
             FirewallaPolicyRule(
                 rule_id="736",
@@ -1213,7 +1788,9 @@ async def test_options_flow_uses_manager_candidate_logic_for_rule_choices() -> N
     )
 
     options_flow = FirewallaOptionsFlow(entry)
-    preview_result = await options_flow.async_step_init()
+    await options_flow.async_step_init()
+    await options_flow.async_step_rule_selection()
+    preview_result = await options_flow.async_step_edit_rule_selection()
     field = preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
 
     assert field.options == {

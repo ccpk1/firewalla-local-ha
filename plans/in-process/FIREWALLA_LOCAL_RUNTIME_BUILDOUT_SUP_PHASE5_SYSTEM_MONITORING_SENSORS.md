@@ -108,7 +108,7 @@ Implementation outcome:
 - `custom_components/firewalla_local/models.py`
 - `custom_components/firewalla_local/api/client.py`
 - `custom_components/firewalla_local/coordinator.py`
-- `custom_components/firewalla_local/managers/system_manager.py`
+- `custom_components/firewalla_local/managers/integration_manager.py`
 - `custom_components/firewalla_local/__init__.py`
 - `custom_components/firewalla_local/quality_scale.yaml`
 - `tests/components/firewalla_local/test_client.py`

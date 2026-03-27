@@ -22,13 +22,13 @@ It is a compact reference for review and maintenance. It should stay focused on 
 | Strict typing | Stable structures use strong typing and mypy remains authoritative | `docs/DEVELOPMENT_STANDARDS.md`, `pyproject.toml`, `custom_components/firewalla_local/` |
 | Entry scope safety | Runtime behavior remains scoped to one config entry | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, setup, services, and flow code |
 | Entity reliability | Entities have stable identity, defined lifecycle handling, and correct device attachment | `docs/ARCHITECTURE.md`, platform files, entity base logic if introduced |
-| Entity quality | Shared entity behavior, explicit concurrency policy, and user-meaningful metadata are standardized across platforms | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, `custom_components/firewalla_local/entity.py`, platform files |
+| Entity quality | Shared entity behavior, explicit concurrency policy, and user-meaningful metadata are standardized across rule, appliance-monitoring, watched-device, and watched-user platforms, including watched-user usage totals and association metadata | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, `custom_components/firewalla_local/entity.py`, platform files |
 | Mutation discipline | Manager methods are the single write path above the API layer | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, manager and service code |
 | Config-entry discipline | Config-entry writes remain coordinator-owned and entry-scoped | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, coordinator and flow code |
 | Translation posture | User-facing failures and service surfaces are translation-ready | translations, flows, services, repair surfaces |
 | Error handling | API exceptions are typed and Home Assistant exception mapping is specific | `custom_components/firewalla_local/api/`, flows, services, coordinator |
 | Diagnostics and supportability | Sensitive data is redacted while diagnostics remain useful | `custom_components/firewalla_local/diagnostics.py` |
-| Runtime efficiency | Shared normalization and indexed lookup paths are used instead of repeated payload scans | managers, models, helper report modules, platform code |
+| Runtime efficiency | Shared normalization and indexed lookup paths are used instead of repeated payload scans, including watched-user usage shaping and host-association joins | managers, models, helper report modules, platform code |
 | Rule interpretation | Durable rule-control semantics, switch eligibility, and metadata grouping stay aligned with live evidence | `docs/RULE_MODEL.md`, manager logic, runtime inventory surfaces, platform attributes |
 | Boundary enforcement | Architecture rules are enforced by dedicated lint or validation checks | validation tooling and review gates |
 | Documentation quality | Repository guidance reflects durable rules and stays aligned with implementation | `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_STANDARDS.md`, `docs/QUALITY_REFERENCE.md` |
