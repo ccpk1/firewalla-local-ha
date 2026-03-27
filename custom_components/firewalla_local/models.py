@@ -263,7 +263,7 @@ class FirewallaApplianceRuntimeInput:
     firmware_release_type: str | None = None
     public_ip: str | None = None
     public_ips: dict[str, str] | None = None
-    cpu_load_5m: float | None = None
+    cpu_usage_1m: float | None = None
     memory_usage_ratio: float | None = None
     total_memory_mb: float | None = None
     uptime_seconds: int | None = None
@@ -280,7 +280,7 @@ class FirewallaSystemStatus:
     firmware_release_type: str | None = None
     wan_ip: str | None = None
     wan_ips: dict[str, str] | None = None
-    cpu_load_5m: float | None = None
+    cpu_usage_1m: float | None = None
     memory_usage_percent: float | None = None
     memory_free_mb: float | None = None
     uptime_seconds: int | None = None

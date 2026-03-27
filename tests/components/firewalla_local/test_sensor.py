@@ -32,7 +32,7 @@ from custom_components.firewalla_local.const import (
     ATTR_SPEED_TEST_VENDOR,
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_CLOUD_CONNECTED,
-    ATTR_SYSTEM_CPU_LOAD_5M,
+    ATTR_SYSTEM_CPU_USAGE_1M,
     ATTR_SYSTEM_DDNS,
     ATTR_SYSTEM_DEVICES_OFFLINE,
     ATTR_SYSTEM_DEVICES_ONLINE,
@@ -110,7 +110,7 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
             firmware_release_type="alpha" if with_speed_test else None,
             public_ip="23.245.207.179" if with_speed_test else None,
             public_ips={"eth0": "23.245.207.179"} if with_speed_test else None,
-            cpu_load_5m=2.8037109375 if with_speed_test else 1.25,
+            cpu_usage_1m=42.1 if with_speed_test else 22.5,
             memory_usage_ratio=0.7638814708714687 if with_speed_test else 0.25,
             total_memory_mb=3861.65625 if with_speed_test else 1000.0,
             uptime_seconds=22690936 if with_speed_test else None,
@@ -272,7 +272,7 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is True
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] == "23.245.207.179"
     assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] == {"eth0": "23.245.207.179"}
-    assert system_state.attributes[ATTR_SYSTEM_CPU_LOAD_5M] == 2.8037109375
+    assert system_state.attributes[ATTR_SYSTEM_CPU_USAGE_1M] == 42.1
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_USAGE_PERCENT] == 76.4
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_FREE_MB] == 911.8
     assert system_state.attributes[ATTR_SYSTEM_UPTIME] == "262d 15h 02m"
@@ -387,7 +387,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is False
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] is None
     assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] is None
-    assert system_state.attributes[ATTR_SYSTEM_CPU_LOAD_5M] == 1.25
+    assert system_state.attributes[ATTR_SYSTEM_CPU_USAGE_1M] == 22.5
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_USAGE_PERCENT] == 25.0
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_FREE_MB] == 750.0
     assert system_state.attributes[ATTR_SYSTEM_UPTIME] is None

@@ -53,7 +53,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
             firmware_release_type="alpha",
             public_ip=None,
             public_ips={"wan": "23.245.207.179"},
-            cpu_load_5m=1.5,
+            cpu_usage_1m=37.5,
             memory_usage_ratio=0.25,
             total_memory_mb=1000,
             disk_usages=(
@@ -151,6 +151,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
     assert manager.system_info.host == "192.168.200.1"
     assert manager.system_status is not None
     assert manager.system_status.wan_ip == "23.245.207.179"
+    assert manager.system_status.cpu_usage_1m == 37.5
     assert manager.system_status.memory_usage_percent == 25.0
     assert manager.system_status.memory_free_mb == 750.0
     assert manager.system_status.disk_usage_percent_by_mount == {

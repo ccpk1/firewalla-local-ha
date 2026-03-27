@@ -92,7 +92,7 @@ _RAW_SYSTEM_PUBLIC_IP_KEY: Final = "publicIp"
 _RAW_SYSTEM_PUBLIC_IPS_KEY: Final = "publicIps"
 _RAW_SYSTEM_OS_UPTIME_KEY: Final = "osUptime"
 _RAW_SYSTEM_SYS_METRICS_KEY: Final = "sysMetrics"
-_RAW_SYSTEM_SYS_METRICS_CPU_LOAD_5_KEY: Final = "load5"
+_RAW_SYSTEM_SYS_METRICS_CPU_USAGE_1_KEY: Final = "cpuUsage1"
 _RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY: Final = "memUsage"
 _RAW_SYSTEM_SYS_METRICS_TOTAL_MEMORY_KEY: Final = "totalMem"
 _RAW_SYSTEM_SYS_METRICS_DISK_INFO_KEY: Final = "diskInfo"
@@ -541,9 +541,7 @@ class FirewallaApiClient:
                 else None
             ),
             public_ips=public_ips or None,
-            cpu_load_5m=self._coerce_float(
-                sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_CPU_LOAD_5_KEY)
-            ),
+            cpu_usage_1m=self._extract_cpu_usage_1m(sys_metrics),
             memory_usage_ratio=self._coerce_float(
                 sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_MEMORY_USAGE_KEY)
             ),
@@ -553,6 +551,30 @@ class FirewallaApiClient:
             uptime_seconds=self._coerce_int(data.get(_RAW_SYSTEM_OS_UPTIME_KEY)),
             disk_usages=disk_usages,
         )
+
+    def _extract_cpu_usage_1m(self, sys_metrics: dict[str, object]) -> float | None:
+        """Extract a 1-minute average CPU usage percent from cpuUsage1 samples."""
+        raw_samples = sys_metrics.get(_RAW_SYSTEM_SYS_METRICS_CPU_USAGE_1_KEY)
+        if not isinstance(raw_samples, list):
+            return None
+
+        used_percent_samples: list[float] = []
+        for raw_sample in raw_samples:
+            if not isinstance(raw_sample, dict):
+                continue
+
+            user_percent = self._coerce_float(raw_sample.get("user"))
+            sys_percent = self._coerce_float(raw_sample.get("sys"))
+            iowait_percent = self._coerce_float(raw_sample.get("iowait"))
+            if user_percent is None or sys_percent is None or iowait_percent is None:
+                continue
+
+            used_percent_samples.append(user_percent + sys_percent + iowait_percent)
+
+        if not used_percent_samples:
+            return None
+
+        return round(sum(used_percent_samples) / len(used_percent_samples), 1)
 
     def _extract_speed_test_records(
         self, data: dict[str, object]

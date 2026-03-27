@@ -56,7 +56,20 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                     "publicIps": {"eth0": "23.245.207.179"},
                     "osUptime": 22690936,
                     "sysMetrics": {
-                        "load5": 2.8037109375,
+                        "cpuUsage1": [
+                            {"user": 21, "sys": 17, "iowait": 0},
+                            {"user": 25, "sys": 19, "iowait": 0},
+                            {"user": 18, "sys": 17, "iowait": 0},
+                            {"user": 23, "sys": 17, "iowait": 0},
+                            {"user": 19, "sys": 16, "iowait": 0},
+                            {"user": 21, "sys": 18, "iowait": 0},
+                            {"user": 20, "sys": 22, "iowait": 0},
+                            {"user": 28, "sys": 29, "iowait": 0},
+                            {"user": 33, "sys": 18, "iowait": 0},
+                            {"user": 21, "sys": 19, "iowait": 0},
+                            {"user": 20, "sys": 17, "iowait": 0},
+                            {"user": 26, "sys": 21, "iowait": 0},
+                        ],
                         "memUsage": 0.7638814708714687,
                         "totalMem": 3861.65625,
                         "diskInfo": [
@@ -243,7 +256,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert snapshot.appliance_runtime.firmware_release_type == "alpha"
     assert snapshot.appliance_runtime.public_ip == "23.245.207.179"
     assert snapshot.appliance_runtime.public_ips == {"eth0": "23.245.207.179"}
-    assert snapshot.appliance_runtime.cpu_load_5m == 2.8037109375
+    assert snapshot.appliance_runtime.cpu_usage_1m == 42.1
     assert snapshot.appliance_runtime.memory_usage_ratio == 0.7638814708714687
     assert snapshot.appliance_runtime.total_memory_mb == 3861.65625
     assert snapshot.appliance_runtime.uptime_seconds == 22690936
@@ -633,7 +646,10 @@ async def test_get_runtime_snapshot_omits_latest_speed_test_without_success() ->
                     "bootingComplete": False,
                     "cloudConnected": False,
                     "sysMetrics": {
-                        "load5": 1.25,
+                        "cpuUsage1": [
+                            {"user": 10, "sys": 5, "iowait": 0},
+                            {"user": 20, "sys": 10, "iowait": 0},
+                        ],
                         "memUsage": 0.25,
                         "totalMem": 1000,
                     },
@@ -653,7 +669,7 @@ async def test_get_runtime_snapshot_omits_latest_speed_test_without_success() ->
 
     assert snapshot.appliance_runtime.booting_complete is False
     assert snapshot.appliance_runtime.cloud_connected is False
-    assert snapshot.appliance_runtime.cpu_load_5m == 1.25
+    assert snapshot.appliance_runtime.cpu_usage_1m == 22.5
     assert snapshot.appliance_runtime.memory_usage_ratio == 0.25
     assert snapshot.appliance_runtime.total_memory_mb == 1000
     assert snapshot.appliance_runtime.uptime_seconds is None

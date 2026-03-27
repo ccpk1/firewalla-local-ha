@@ -105,8 +105,8 @@
           "boot_complete": {
             "name": "Boot complete"
           },
-          "cpu_load_5m": {
-            "name": "CPU load (5 min)"
+          "cpu_usage_1m": {
+            "name": "CPU usage (%)"
           },
           "cloud_connected": {
             "name": "Cloud connected"

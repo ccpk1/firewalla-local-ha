@@ -124,7 +124,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             firmware_release_type=appliance_runtime.firmware_release_type,
             wan_ip=self._build_wan_ip(appliance_runtime),
             wan_ips=appliance_runtime.public_ips,
-            cpu_load_5m=appliance_runtime.cpu_load_5m,
+            cpu_usage_1m=appliance_runtime.cpu_usage_1m,
             memory_usage_percent=self._build_memory_usage_percent(appliance_runtime),
             memory_free_mb=self._build_memory_free_mb(appliance_runtime),
             uptime_seconds=appliance_runtime.uptime_seconds,

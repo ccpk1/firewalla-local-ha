@@ -15,7 +15,7 @@ from .const import (
     ATTR_PURPOSE,
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_CLOUD_CONNECTED,
-    ATTR_SYSTEM_CPU_LOAD_5M,
+    ATTR_SYSTEM_CPU_USAGE_1M,
     ATTR_SYSTEM_DDNS,
     ATTR_SYSTEM_DEVICES_OFFLINE,
     ATTR_SYSTEM_DEVICES_ONLINE,
@@ -124,8 +124,8 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_SYSTEM_DEVICES_TOTAL: self.host_manager.count_total_devices(),
             ATTR_SYSTEM_DEVICES_ONLINE: self.host_manager.count_online_devices(),
             ATTR_SYSTEM_DEVICES_OFFLINE: self.host_manager.count_offline_devices(),
-            ATTR_SYSTEM_CPU_LOAD_5M: (
-                system_status.cpu_load_5m if system_status is not None else None
+            ATTR_SYSTEM_CPU_USAGE_1M: (
+                system_status.cpu_usage_1m if system_status is not None else None
             ),
             ATTR_SYSTEM_MEMORY_USAGE_PERCENT: (
                 system_status.memory_usage_percent
