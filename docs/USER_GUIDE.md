@@ -35,7 +35,7 @@ Because this integration communicates entirely locally, it uses the exact same s
 
 **Step 2: Generate the pairing code (Firewalla App)**
 1. Open the Firewalla app on your phone.
-2. Tap the gear icon to open **Settings**, then find and tap **Allow Additional Pairing**.
+2. Tap the gear icon to open **Settings -> Advanced**, then find and tap **Allow Additional Pairing**.
 3. Toggle the switch to **On**. A QR code will appear on your screen.
 
 **Step 3: Extract the raw QR JSON**

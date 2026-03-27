@@ -159,11 +159,25 @@ Phase 3 outcome summary:
 
 Goal: Turn the release-prep work into a concrete launch checklist with explicit stop conditions.
 
-- [ ] Define the release-candidate checklist covering metadata consistency, docs readiness, support posture, validation success, and known-risk disclosure.
-- [ ] Record launch blockers versus launch defers so unresolved future work does not silently block release if it is not truly required.
-- [ ] Define the first-release smoke checks after tagging or publishing, including HACS install verification, config-flow setup verification, and at least one end-to-end local runtime validation against a real box.
-- [ ] Define the rollback or hotfix expectations if the first public release exposes a packaging, setup, or migration problem.
-- [ ] Record the final release exit criteria in a form that a builder can execute without re-opening strategic questions.
+- [x] Define the release-candidate checklist covering metadata consistency, docs readiness, support posture, validation success, and known-risk disclosure.
+- [x] Record launch blockers versus launch defers so unresolved future work does not silently block release if it is not truly required.
+- [x] Define the first-release smoke checks after tagging or publishing, including HACS install verification, config-flow setup verification, and at least one end-to-end local runtime validation against a real box.
+- [x] Define the rollback or hotfix expectations if the first public release exposes a packaging, setup, or migration problem.
+- [x] Record the final release exit criteria in a form that a builder can execute without re-opening strategic questions.
+
+Phase 4 execution note: Phase 4 is complete.
+
+- `docs/RELEASE_CHECKLIST.md` is now the authoritative release-candidate gate for the 1.0.0 line.
+- The checklist now distinguishes hard launch blockers from acceptable first-release defers so unresolved future work does not silently block publication.
+- The live smoke requirements are explicit: HACS install or upgrade, successful config flow against a real Firewalla box, one successful runtime refresh, and one representative service action.
+- The rollback posture is explicit: do not rewrite tags after publication failure; prepare a patch release if packaging, setup, or migration problems are discovered.
+- Release exit criteria are now concrete and executable: clean worktree, local quality gates passing, GitHub workflow validation passing, docs aligned, live smoke completed, and known risks documented before publication.
+
+Phase 4 outcome summary:
+
+- the release-prep initiative now has a fully defined launch gate rather than an implied one
+- the remaining work for publication is operational execution of the checklist, not further planning
+- first-release unknowns are now separated cleanly into blockers, acceptable defers, and post-release follow-up
 
 ## Validation strategy
 
