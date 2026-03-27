@@ -19,6 +19,9 @@ dev = [
     "ruff>=0.11.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["custom_components*"]
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 asyncio_mode = "auto"
