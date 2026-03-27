@@ -1,6 +1,6 @@
-# Contributing to ChoreOps
+# Contributing to Firewalla Local
 
-Thanks for contributing to ChoreOps.
+Thanks for contributing to Firewalla Local.
 
 ## Quick start
 
@@ -14,9 +14,9 @@ Thanks for contributing to ChoreOps.
 
 Run these before opening a PR:
 
-- `./utils/quick_lint.sh --fix`
-- `mypy custom_components/firewalla_local/`
-- `python -m pytest tests/ -v --tb=line`
+- `bash ./utils/quick_lint.sh --fix`
+- `python -m mypy custom_components/firewalla_local`
+- `python -m pytest tests/ -v`
 
 If your change only affects a narrow area, you may run a targeted test suite, but include rationale in your PR.
 
@@ -39,15 +39,15 @@ If your change only affects a narrow area, you may run a targeted test suite, bu
 
 ## Before merging to main
 
-Use a pull request to `main` so automation can close issues and categorize release notes.
+Use a pull request to `main` so the repository validation workflow can run before merge.
 
 - Include a closing keyword in the PR body when applicable (`Closes #...`)
-- Apply the correct release-note label for the change type
-- Remove excluded triage or status labels before merge
-- Use a release-note-friendly PR title
-- Complete the PR template sections for validation and release notes
+- Use a clear PR title because release notes may reuse it later
+- Include the validation commands you ran in the PR body
+- Add a short user-facing release summary in the PR body when behavior changes
+- Keep the release summary concise; this repository uses a simple release summary model rather than a separate changelog pipeline
 
-See `docs/DEVELOPMENT_STANDARDS.md` for the canonical main-merge and release automation contract.
+See `docs/DEVELOPMENT_STANDARDS.md` for the canonical repository engineering rules.
 
 ## Discussions vs issues
 
@@ -57,4 +57,4 @@ See `docs/DEVELOPMENT_STANDARDS.md` for the canonical main-merge and release aut
 ## Need help?
 
 - Support and usage questions: GitHub Discussions
-- Bug reports: GitHub Issues templates
+- Bug reports: GitHub Issues

@@ -587,7 +587,7 @@ Current conclusion from this snapshot:
 
 ## References
 
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_IN-PROCESS.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_COMPLETE.md`
 - `custom_components/firewalla_local/models.py`
 - `custom_components/firewalla_local/switch.py`
 - `custom_components/firewalla_local/helpers/runtime_inventory.py`

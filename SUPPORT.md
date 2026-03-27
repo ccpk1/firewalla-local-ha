@@ -3,7 +3,7 @@
 ## Where to ask for help
 
 - **Usage questions / setup help:** GitHub Discussions
-- **Bug reports:** GitHub Issues (use the bug template)
-- **Feature requests:** GitHub Issues (use the feature template)
+- **Bug reports:** GitHub Issues
+- **Feature requests:** GitHub Issues or GitHub Discussions
 - **Security concerns:** See `SECURITY.md`
 

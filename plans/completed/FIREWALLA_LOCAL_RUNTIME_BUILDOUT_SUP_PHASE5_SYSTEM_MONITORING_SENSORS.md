@@ -103,7 +103,7 @@ Implementation outcome:
 
 ## References
 
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_IN-PROCESS.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_COMPLETE.md`
 - `docs/ARCHITECTURE.md`
 - `custom_components/firewalla_local/models.py`
 - `custom_components/firewalla_local/api/client.py`

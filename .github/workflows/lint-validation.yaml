@@ -1,0 +1,35 @@
+name: Lint and validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install project and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run Ruff lint and format checks
+        run: bash ./utils/quick_lint.sh
+
+      - name: Run MyPy
+        run: python -m mypy custom_components/firewalla_local
+
+      - name: Run pytest
+        run: python -m pytest tests/ -v

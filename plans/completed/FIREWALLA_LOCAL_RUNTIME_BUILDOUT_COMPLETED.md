@@ -3,7 +3,7 @@
 ## Initiative snapshot
 
 - Initiative: Firewalla Local runtime buildout
-- Status: In process
+- Status: Complete
 - Owner: Firewalla Strategist
 - Primary outcome: Define the executable implementation plan that turns the documented Firewalla Local architecture into the first real runtime integration under the `firewalla_local` package layout.
 - Why now: The foundation docs are complete, and implementation should now follow a concrete runtime plan instead of growing from the legacy scaffold ad hoc.
@@ -136,7 +136,7 @@ Goal: Define the implementation sequence and module responsibilities for local p
 
 Gate note: Phase 2 must prove the protocol path in the pure `api/` boundary first. Home Assistant orchestration should not be used to compensate for unclear protocol behavior.
 
-Support note: See `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE2_PAIRING_SEQUENCE.md` for the pairing sequence, async or executor boundaries, and explicit protocol assumptions.
+Support note: See `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE2_PAIRING_SEQUENCE.md` for the pairing sequence, async or executor boundaries, and explicit protocol assumptions.
 
 - [x] Define the pairing sequence from QR JSON input through local credential establishment, including which steps run in async code versus the executor.
 - [x] Define the `cryptography` usage boundaries for RSA generation, PKCS#8 private PEM serialization, and SPKI public PEM serialization.
@@ -199,7 +199,7 @@ Gate note: Phase 3b is the required pause-and-harden phase. No additional platfo
     - `docs/QUALITY_REFERENCE.md`
     - `docs/ARCHITECTURE.md`
     - `docs/DEVELOPMENT_STANDARDS.md`
-  - use `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md` to separate portable patterns from ChoreOps-specific complexity that should not be copied into this simpler repository
+  - use `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md` to separate portable patterns from ChoreOps-specific complexity that should not be copied into this simpler repository
   - update `docs/ARCHITECTURE.md` so the domain-manager layer, registry pipeline, lifecycle reconciliation, service orchestration, UID-first naming contract, and optimistic-update boundaries are explicit architectural rules rather than one-off implementation notes
   - update `docs/DEVELOPMENT_STANDARDS.md` so the manager, coordinator, entity, service, translation, typing, and error-mapping expectations are defined as build rules for all future work, not just this switch initiative
   - create a compact Firewalla-specific quality reference document after the architecture and standards refresh so repository-specific Platinum expectations, quality contracts, and evidence locations live in a durable review surface rather than only in `quality_scale.yaml` or plan prose
@@ -276,11 +276,11 @@ Gate note: Phase 4 must optimize for fast iteration. Pure `api/` unit tests shou
   - define the fast-lane validation matrix for pure `api/` and utility behavior, including owning test modules and current coverage state
   - define the slow-lane validation matrix for Home Assistant integration behavior, including setup, reauth, reconfigure, services, entity availability, diagnostics redaction, and registry stability
   - record current coverage as `present`, `partial`, or `missing` so the next builder slice adds tests to named files instead of broad areas
-  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`, including executable lane commands for the current repo test layout
+  - completed in `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`, including executable lane commands for the current repo test layout
 - [x] Phase 4B: Builder handoff by file surface
   - convert the next runtime slice into ordered work packages for mutation proof, service hardening, and switch-first follow-on coverage
   - assign touch-first files, verify-only files, test owners, and explicit stop conditions for each package
-  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` as a concrete file-scoped execution map grounded in the current `api/client.py`, `services.py`, `switch.py`, and `managers/rule_manager.py` surfaces
+  - completed in `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` as a concrete file-scoped execution map grounded in the current `api/client.py`, `services.py`, `switch.py`, and `managers/rule_manager.py` surfaces
   - execution started and validated with direct manager mutation tests in `tests/components/firewalla_local/test_rule_manager.py` and additional service-resolution coverage in `tests/components/firewalla_local/test_services.py`
 - [x] Define the minimum code-quality gates for the first implementation pass:
   - `python -m ruff check .`
@@ -290,14 +290,14 @@ Gate note: Phase 4 must optimize for fast iteration. Pure `api/` unit tests shou
 - [x] Phase 4C: Remaining protocol unknowns and implementation risks
   - separate confirmed mutation contracts from unconfirmed rule-family behavior so Builder does not generalize from the currently proven slice
   - record explicit stop conditions for additional mutation families, pause or resume semantics, create or update payload variance, and rule-template stability under broader coverage
-  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` as a concrete risk register tied to the current `api/client.py`, `services.py`, `models.py`, `switch.py`, and `managers/rule_manager.py` surfaces, including explicit allowed assumptions, prohibited assumptions, proof requirements, and stop/go decision rules
+  - completed in `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` as a concrete risk register tied to the current `api/client.py`, `services.py`, `models.py`, `switch.py`, and `managers/rule_manager.py` surfaces, including explicit allowed assumptions, prohibited assumptions, proof requirements, and stop/go decision rules
 - [x] Phase 4D: Quality-scale closure matrix and exit criteria
   - map relevant quality-scale rules to concrete evidence, explicit blockers, or deliberate defer decisions
   - distinguish runtime-slice blockers from later documentation or release-prep work so Phase 4 can close honestly
   - define exit criteria for Phase 4 completion in terms that are testable and reviewable
-  - completed in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` with a trued-up closure matrix tied to `quality_scale.yaml`, the current implementation surfaces, and explicit defer reasons for release-prep items
+  - completed in `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md` with a trued-up closure matrix tied to `quality_scale.yaml`, the current implementation surfaces, and explicit defer reasons for release-prep items
 
-Phase 4 execution note: Phase 4 planning and handoff are now complete. The repository has a documented fast-lane versus slow-lane validation matrix, a file-scoped builder handoff, a concrete protocol risk register with stop/go rules, and a quality-scale closure matrix tied to current evidence and explicit defers. Remaining open items in `quality_scale.yaml` are now clearly separated into runtime blockers versus release-prep or future-protocol work rather than being mixed into architecture planning. Detailed execution scaffolding for that work lives in `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`.
+Phase 4 execution note: Phase 4 planning and handoff are now complete. The repository has a documented fast-lane versus slow-lane validation matrix, a file-scoped builder handoff, a concrete protocol risk register with stop/go rules, and a quality-scale closure matrix tied to current evidence and explicit defers. Remaining open items in `quality_scale.yaml` are now clearly separated into runtime blockers versus release-prep or future-protocol work rather than being mixed into architecture planning. Detailed execution scaffolding for that work lives in `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`.
 
 ### Phase 5: System-monitoring sensor expansion
 
@@ -305,7 +305,7 @@ Goal: Add the first non-rule sensor surfaces by exposing a bounded set of high-v
 
 Gate note: Phase 5 must remain evidence-driven. The builder must only promote fields that are clearly present in the decrypted local payload and that fit Home Assistant sensor semantics. Sensitive values such as `ddnsToken` must remain excluded, and speculative CPU, memory, disk, uptime, or thermal metrics must not be promised until the local contract is explicitly proven.
 
-Support note: See `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_SYSTEM_MONITORING_SENSORS.md` for the payload-backed field inventory, recommended sensor surfaces, non-goals, and builder guardrails.
+Support note: See `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_SYSTEM_MONITORING_SENSORS.md` for the payload-backed field inventory, recommended sensor surfaces, non-goals, and builder guardrails.
 
 - [x] Phase 5A: Extend the typed runtime model for system-monitoring data
   - add explicit typed models in `custom_components/firewalla_local/models.py` for the main Firewalla system-status sensor payload and the latest speed-test payload instead of exposing raw dict fragments to platform code
@@ -351,7 +351,7 @@ Additional post-Phase 5 analysis note: New live inventory evidence from rules `7
 
 Internet-block follow-on note: A later live capture added persistent disturb rule `767` with no auto-delete flag and with the same internet-scope targeting surface as the existing block rules, which supports treating advanced-rule `Disturb` as a separate durable family from the temporary pause controls. The current bounded implementation slice should still stop at quota-backed internet block rules first, but future work should carry forward active-time schedule metadata and disturb-shaping fields such as latency or bandwidth controls once that mutation contract is captured end to end.
 
-Scheduled-rule analysis note: The repository now has a dedicated support note at `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_SCHEDULED_ADVANCED_RULES.md` for recurring advanced-rule interpretation. Current evidence indicates that `cronTime` plus `duration` likely define the recurring active window, while rule objects remain stable across schedule boundaries. Traffic counters such as `hitCount` and `lastHitTs` are useful operational signals but are not yet trustworthy as direct schedule-active indicators, especially when traffic changes can be explained by normal household activity.
+Scheduled-rule analysis note: The repository now has a dedicated support note at `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_SCHEDULED_ADVANCED_RULES.md` for recurring advanced-rule interpretation. Current evidence indicates that `cronTime` plus `duration` likely define the recurring active window, while rule objects remain stable across schedule boundaries. Traffic counters such as `hitCount` and `lastHitTs` are useful operational signals but are not yet trustworthy as direct schedule-active indicators, especially when traffic changes can be explained by normal household activity.
 
 Temporary-rule analysis note: Newer live captures also confirm that the same advanced `disturb` family can appear as a true one-shot temporary rule with `is_temporary: true`, populated `expire_seconds`, and auto-deletion after expiry. The repository should therefore treat recurring scheduled advanced rules and temporary expiring advanced rules as distinct runtime states, and should trust `is_temporary` plus expiry fields more than `autoDeleteWhenExpires` alone when deciding durable switch eligibility.
 
@@ -551,11 +551,11 @@ Document-only updates to plans and support notes do not require repo lint, type-
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT_STANDARDS.md`
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_SYSTEM_MONITORING_SENSORS.md`
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_SCHEDULED_ADVANCED_RULES.md`
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md`
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_BUILDER_HANDOFF.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE4_VALIDATION_AND_HANDOFF.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE5_SYSTEM_MONITORING_SENSORS.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_SCHEDULED_ADVANCED_RULES.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_STANDARDS_HARVEST.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_SUP_PHASE3B_BUILDER_HANDOFF.md`
 - `docs/REVERSE_ENGINEERING_WORKFLOW.md`
 - `AGENTS.md`
 - `README.md`

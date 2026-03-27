@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/github/v/release/ccpk1/firewalla-local-ha?include_prereleases&label=Version&color=1E88E5)](https://github.com/ccpk1/firewalla-local-ha/releases)
 [![Stars](https://img.shields.io/github/stars/ccpk1/firewalla-local-ha)](https://github.com/ccpk1/firewalla-local-ha/stargazers)
 
-![Firewalla Local](<docs/assets/3-1 Logo Rectangle.png>)
+![Firewalla Local](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/assets/3-1%20Logo%20Rectangle.png)
 
 > ### **Local control. Zero latency. No subscription. Native Home Assistant.**
 
@@ -106,7 +106,7 @@ Financial support is **never required**, but it is the strongest motivation for 
 
 ## 📖 **User Guide**
 
-The operating guide lives here: [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+The operating guide lives here: [docs/USER_GUIDE.md](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md).
 
 It covers:
 
@@ -144,6 +144,11 @@ Repository layout:
 - Issues and feature requests: https://github.com/ccpk1/firewalla-local-ha/issues
 - Discussions: https://github.com/ccpk1/firewalla-local-ha/discussions
 - Pull requests: https://github.com/ccpk1/firewalla-local-ha/pulls
+
+Repository automation notes:
+
+- GitHub Actions validates Ruff, MyPy, pytest, HACS structure, and hassfest on repository changes.
+- The HACS validation workflow intentionally ignores the `brands` check because Home Assistant 2026.3 no longer accepts custom integration branding, even though this repository still keeps the brand assets staged per repository guidance.
 
 ## 🔒 **Security and Support Posture**
 

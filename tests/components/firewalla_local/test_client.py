@@ -947,9 +947,7 @@ async def test_get_runtime_init_payload_retries_once_on_unauthorized() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_runtime_init_payload_raises_auth_error_after_second_unauthorized() -> (
-    None
-):
+async def test_get_runtime_init_payload_raises_auth_error_after_retry_401s() -> None:
     """Test repeated 401 responses raise a typed auth error."""
     async with ClientSession() as session:
         client = FirewallaApiClient(

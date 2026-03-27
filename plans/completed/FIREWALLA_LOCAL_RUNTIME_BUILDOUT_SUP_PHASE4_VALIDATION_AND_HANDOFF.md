@@ -26,7 +26,7 @@ Builder must follow these documents in this order:
 1. `docs/ARCHITECTURE.md`
 2. `docs/DEVELOPMENT_STANDARDS.md`
 3. `docs/QUALITY_REFERENCE.md`
-4. `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_IN-PROCESS.md`
+4. `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_COMPLETE.md`
 5. this support file
 
 Guardrails:

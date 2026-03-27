@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-firewalla-local"
-version = "0.1.0"
-description = "Private Home Assistant custom integration scaffold for Firewalla"
+version = "1.0.0"
+description = "Local-first Home Assistant custom integration for Firewalla"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = []
@@ -52,6 +52,4 @@ ignore-paths = [
 ]
 
 [tool.pylint."messages control"]
-disable = [
-    "line-too-long",
-]
+disable = ["line-too-long"]

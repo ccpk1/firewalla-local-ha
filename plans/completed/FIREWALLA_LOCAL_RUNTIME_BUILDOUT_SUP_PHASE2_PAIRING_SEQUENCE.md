@@ -97,7 +97,7 @@ Open protocol risk that remains after this phase:
 
 - `docs/ARCHITECTURE.md`
 - `docs/DEVELOPMENT_STANDARDS.md`
-- `plans/in-process/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_IN-PROCESS.md`
+- `plans/completed/FIREWALLA_LOCAL_RUNTIME_BUILDOUT_COMPLETE.md`
 - `plans/completed/PLATINUM_FOUNDATION_DOCS_SUP_PROTOCOL_AND_ARCH_TRAPS.md`
 - `custom_components/firewalla_local/config_flow.py`
 - `custom_components/firewalla_local/api/auth.py`

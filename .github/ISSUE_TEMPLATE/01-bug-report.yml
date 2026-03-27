@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible problem in Firewalla Local.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        Before submitting, confirm you tested against the latest main branch or latest published version and reviewed the README plus user guide.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps needed to reproduce the issue.
+      placeholder: |
+        1. Open ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Firewalla Local version
+      description: Version from the integration manifest or installed release.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: home_assistant_version
+    attributes:
+      label: Home Assistant version
+      placeholder: 2026.3.x
+    validations:
+      required: true
+  - type: dropdown
+    id: hardware_model
+    attributes:
+      label: Firewalla model
+      options:
+        - Gold
+        - Gold Pro
+        - Purple
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Paste relevant logs or screenshots. Redact secrets before posting.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add any extra context that may help narrow the problem.
+    validations:
+      required: false
