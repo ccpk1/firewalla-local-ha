@@ -145,11 +145,6 @@ Repository layout:
 - Discussions: https://github.com/ccpk1/firewalla-local-ha/discussions
 - Pull requests: https://github.com/ccpk1/firewalla-local-ha/pulls
 
-Repository automation notes:
-
-- GitHub Actions validates Ruff, MyPy, pytest, HACS structure, and hassfest on repository changes.
-- The HACS validation workflow intentionally ignores the `brands` check because Home Assistant 2026.3 no longer accepts custom integration branding, even though this repository still keeps the brand assets staged per repository guidance.
-
 ## 🔒 **Security and Support Posture**
 
 - Vulnerability reporting guidance lives in `SECURITY.md`
