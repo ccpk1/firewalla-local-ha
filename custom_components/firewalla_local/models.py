@@ -309,6 +309,8 @@ class FirewallaSpeedTestResult:
     manual: bool | None
     success: bool
     vendor: str | None
+    wan_uuid: str | None = None
+    wan_name: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -333,6 +335,45 @@ class FirewallaSpeedTestRecord:
     manual: bool | None
     success: bool | None
     vendor: str | None
+    wan_uuid: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanInterface:
+    """Normalized WAN interface metadata available in the runtime payload."""
+
+    uuid: str
+    name: str
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanUsageSample:
+    """One normalized WAN usage data point."""
+
+    timestamp: int
+    value: int
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanUsagePeriod:
+    """One normalized WAN usage period."""
+
+    bucket_timestamp: int | None = None
+    begin_timestamp: int | None = None
+    end_timestamp: int | None = None
+    total_download_bytes: int | None = None
+    total_upload_bytes: int | None = None
+    download_samples: tuple[FirewallaWanUsageSample, ...] = ()
+    upload_samples: tuple[FirewallaWanUsageSample, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanUsageView:
+    """Normalized WAN usage view returned for one WAN interface."""
+
+    wan_uuid: str
+    wan_name: str | None
+    periods: tuple[FirewallaWanUsagePeriod, ...]
 
 
 @dataclass(slots=True, frozen=True)

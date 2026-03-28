@@ -242,6 +242,52 @@ This is useful when you want to:
 - inspect rule IDs before using pause or resume services
 - compare what is live on the box with what is currently exposed in Home Assistant
 
+### Run internet speed test
+
+Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
+
+- choose the WAN with `wan_uuid` for deterministic automations or `wan_name`
+   for interactive use
+- if only one WAN is available, you can omit the WAN selector
+- the service returns an acknowledgement with the resolved WAN and command
+   payload
+- the service does not wait for the completed measurement because the test may
+   take around 30 seconds
+
+### Get speed test results
+
+Use `firewalla_local.get_speed_test_results` to read normalized speed test
+results.
+
+- by default it refreshes once and returns only the most recent result
+- use `limit` to request more than one record
+- use `wan_uuid` or `wan_name` to filter to one WAN when needed
+- the response includes `latest` for the common case and `results` for the full
+   returned list
+
+### Get WAN usage
+
+Use `firewalla_local.get_wan_usage` to read the current-month data-usage view
+for each WAN.
+
+- by default it returns every discovered WAN in one response
+- use `wan_uuid` or `wan_name` to filter to one WAN when needed
+- each WAN entry includes total upload and download bytes plus the current-month
+   sample series
+- timestamps are returned both as raw epoch values and readable UTC ISO fields
+
+### Get WAN usage history
+
+Use `firewalla_local.get_wan_usage_history` to read the last 12 monthly WAN
+usage buckets.
+
+- by default it returns every discovered WAN in one response
+- use `wan_uuid` or `wan_name` to filter to one WAN when needed
+- each month bucket includes total upload and download bytes plus the normalized
+   sample series
+- when Firewalla omits explicit month bounds, the integration derives begin and
+   end timestamps from the available sample coverage
+
 ### Pause rule
 
 Use `firewalla_local.pause_rule` to pause a managed rule.
@@ -280,5 +326,7 @@ creating a new rule for you.
    `appTimeUsageToday` user payloads; fields not present there remain out of
    scope until they are directly verified
 - watched-user entities do not expose a last-app-used field because that value is not yet proven in the local contract
+- current WAN usage is exposed as a status-sensor attribute for summary and
+   automation use, not as separate per-WAN entities
 - broader mutation surfaces are still intentionally out of scope until they are proven by protocol evidence
 - this is a community integration and not an official Firewalla support channel

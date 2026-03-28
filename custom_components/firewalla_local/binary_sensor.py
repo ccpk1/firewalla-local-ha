@@ -16,6 +16,7 @@ from .const import (
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_CLOUD_CONNECTED,
     ATTR_SYSTEM_CPU_USAGE_1M,
+    ATTR_SYSTEM_CURRENT_WAN_USAGE,
     ATTR_SYSTEM_DDNS,
     ATTR_SYSTEM_DEVICES_OFFLINE,
     ATTR_SYSTEM_DEVICES_ONLINE,
@@ -43,7 +44,7 @@ from .const import (
 )
 from .coordinator import FirewallaConfigEntry
 from .entity import FirewallaEntity
-from .models import FirewallaHostRuntime
+from .models import FirewallaHostRuntime, FirewallaWanUsageView
 
 PARALLEL_UPDATES = 0
 
@@ -121,6 +122,7 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_SYSTEM_WAN_IPS: (
                 system_status.wan_ips if system_status is not None else None
             ),
+            ATTR_SYSTEM_CURRENT_WAN_USAGE: self._build_current_wan_usage_attribute(),
             ATTR_SYSTEM_DEVICES_TOTAL: self.host_manager.count_total_devices(),
             ATTR_SYSTEM_DEVICES_ONLINE: self.host_manager.count_online_devices(),
             ATTR_SYSTEM_DEVICES_OFFLINE: self.host_manager.count_offline_devices(),
@@ -141,6 +143,36 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
                 else None
             ),
         }
+
+    def _build_current_wan_usage_attribute(
+        self,
+    ) -> dict[str, dict[str, int | None]]:
+        """Return the current WAN usage summary keyed by WAN name."""
+        usage_by_wan_name: dict[str, dict[str, int | None]] = {}
+
+        for usage_view in self.integration_manager.get_current_wan_usage():
+            if not usage_view.periods:
+                continue
+
+            wan_name = self._resolve_wan_usage_name(usage_view, usage_by_wan_name)
+            latest_period = usage_view.periods[-1]
+            usage_by_wan_name[wan_name] = {
+                "download_bytes": latest_period.total_download_bytes,
+                "upload_bytes": latest_period.total_upload_bytes,
+            }
+
+        return usage_by_wan_name
+
+    @staticmethod
+    def _resolve_wan_usage_name(
+        usage_view: FirewallaWanUsageView,
+        usage_by_wan_name: dict[str, dict[str, int | None]],
+    ) -> str:
+        """Return a stable WAN usage key without clobbering duplicates."""
+        wan_name = usage_view.wan_name or usage_view.wan_uuid
+        if wan_name not in usage_by_wan_name:
+            return wan_name
+        return usage_view.wan_uuid
 
     @staticmethod
     def _format_uptime(uptime_seconds: int | None) -> str | None:

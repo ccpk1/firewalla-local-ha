@@ -32,7 +32,26 @@ def _build_manager(
         unique_id=unique_id,
         data={CONF_LICENSE: "license-123"},
     )
-    return FirewallaIntegrationManager(coordinator, entry, MagicMock())
+    manager = FirewallaIntegrationManager(coordinator, entry, MagicMock())
+    coordinator.last_init_payload = {
+        "networkMonitorData": {
+            "overall_wan_state:overall_wan_state": {
+                "labels": {
+                    "wanStatus": {
+                        "eth0": {
+                            "wan_intf_name": "WAN-ONE",
+                            "wan_intf_uuid": "wan-1",
+                        },
+                        "eth1": {
+                            "wan_intf_name": "WAN-TWO",
+                            "wan_intf_uuid": "wan-2",
+                        },
+                    }
+                }
+            }
+        }
+    }
+    return manager
 
 
 def test_handle_refresh_shapes_appliance_views() -> None:
@@ -99,6 +118,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
                 manual=False,
                 success=True,
                 vendor="ookla",
+                wan_uuid="wan-1",
             ),
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=2000,
@@ -119,6 +139,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
                 manual=True,
                 success=False,
                 vendor="ookla",
+                wan_uuid="wan-2",
             ),
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1500,
@@ -139,6 +160,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
                 manual=True,
                 success=True,
                 vendor="ookla",
+                wan_uuid="wan-1",
             ),
         ),
     )
@@ -162,6 +184,8 @@ def test_handle_refresh_shapes_appliance_views() -> None:
     assert manager.latest_speed_test.tested_at_timestamp == 1500
     assert manager.latest_speed_test.download_mbps == 150
     assert manager.latest_speed_test.success is True
+    assert manager.latest_speed_test.wan_uuid == "wan-1"
+    assert manager.latest_speed_test.wan_name == "WAN-ONE"
 
 
 def test_build_device_info_uses_default_name_and_entry_unique_id() -> None:
@@ -234,3 +258,121 @@ def test_latest_speed_test_is_none_without_successful_records() -> None:
     manager.handle_refresh(snapshot)
 
     assert manager.latest_speed_test is None
+
+
+def test_get_speed_test_results_reuses_shaped_speed_test_path() -> None:
+    """Test speed-test result lists reuse the same shaping logic as the sensor view."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        speed_test_results=(
+            FirewallaSpeedTestRecord(
+                tested_at_timestamp=1000,
+                download_mbps=100,
+                upload_mbps=20,
+                latency_ms=10,
+                jitter_ms=1,
+                packet_loss_percent=0,
+                download_megabytes=50,
+                upload_megabytes=10,
+                isp="ISP",
+                public_ip="23.245.207.179",
+                server_country="United States",
+                server_host="server-a",
+                server_id="1",
+                server_location="Columbus, OH",
+                server_sponsor="Boost Mobile",
+                manual=False,
+                success=True,
+                vendor="ookla",
+                wan_uuid="wan-1",
+            ),
+            FirewallaSpeedTestRecord(
+                tested_at_timestamp=2000,
+                download_mbps=200,
+                upload_mbps=30,
+                latency_ms=11,
+                jitter_ms=2,
+                packet_loss_percent=1,
+                download_megabytes=60,
+                upload_megabytes=11,
+                isp="ISP",
+                public_ip="23.245.207.180",
+                server_country="United States",
+                server_host="server-b",
+                server_id="2",
+                server_location="Chicago, IL",
+                server_sponsor="Carrier",
+                manual=True,
+                success=False,
+                vendor="ookla",
+                wan_uuid="wan-2",
+            ),
+        ),
+    )
+    manager = _build_manager(snapshot)
+
+    results = manager.get_speed_test_results(limit=2)
+    wan_filtered_results = manager.get_speed_test_results(wan_uuid="wan-1", limit=2)
+
+    assert [result.tested_at_timestamp for result in results] == [2000, 1000]
+    assert results[0].wan_name == "WAN-TWO"
+    assert len(wan_filtered_results) == 1
+    assert wan_filtered_results[0].wan_uuid == "wan-1"
+
+
+def test_get_available_wans_includes_speed_test_uuid_fallback() -> None:
+    """Test WAN discovery falls back to speed-test UUIDs when names are missing."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        speed_test_results=(
+            FirewallaSpeedTestRecord(
+                tested_at_timestamp=1000,
+                download_mbps=100,
+                upload_mbps=20,
+                latency_ms=10,
+                jitter_ms=1,
+                packet_loss_percent=0,
+                download_megabytes=50,
+                upload_megabytes=10,
+                isp="ISP",
+                public_ip="23.245.207.179",
+                server_country="United States",
+                server_host="server-a",
+                server_id="1",
+                server_location="Columbus, OH",
+                server_sponsor="Boost Mobile",
+                manual=False,
+                success=True,
+                vendor="ookla",
+                wan_uuid="wan-3",
+            ),
+        ),
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {}
+
+    available_wans = manager.get_available_wans()
+
+    assert len(available_wans) == 1
+    assert available_wans[0].uuid == "wan-3"
+    assert available_wans[0].name == "wan-3"

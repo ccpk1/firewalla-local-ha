@@ -34,8 +34,12 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_GET_RUNTIME_INVENTORY,
+    SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_WAN_USAGE,
+    SERVICE_GET_WAN_USAGE_HISTORY,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
+    SERVICE_RUN_INTERNET_SPEED_TEST,
 )
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
@@ -496,14 +500,22 @@ async def test_setup_multiple_entries_registers_domain_services_once(
     ) == sorted(
         [
             (DOMAIN, SERVICE_GET_RUNTIME_INVENTORY),
+            (DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS),
+            (DOMAIN, SERVICE_GET_WAN_USAGE),
+            (DOMAIN, SERVICE_GET_WAN_USAGE_HISTORY),
             (DOMAIN, SERVICE_PAUSE_RULE),
             (DOMAIN, SERVICE_RESUME_RULE),
+            (DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST),
         ]
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
         SERVICE_GET_RUNTIME_INVENTORY,
+        SERVICE_GET_SPEED_TEST_RESULTS,
+        SERVICE_GET_WAN_USAGE,
+        SERVICE_GET_WAN_USAGE_HISTORY,
         SERVICE_PAUSE_RULE,
         SERVICE_RESUME_RULE,
+        SERVICE_RUN_INTERNET_SPEED_TEST,
     }
 
 

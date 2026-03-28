@@ -111,6 +111,9 @@
           "cloud_connected": {
             "name": "Cloud connected"
           },
+          "current_wan_usage": {
+            "name": "Current WAN usage"
+          },
           "devices_offline": {
             "name": "Devices offline"
           },
@@ -466,6 +469,18 @@
     "rule_target_not_found": {
       "message": "The rule target \"{rule_target}\" does not match a managed live rule."
     },
+    "speed_test_wan_name_ambiguous": {
+      "message": "More than one Firewalla WAN matches the name \"{wan_name}\". Use the WAN UUID instead."
+    },
+    "speed_test_wan_not_found": {
+      "message": "No Firewalla WAN matched the requested selector. Check the WAN name or UUID and try again."
+    },
+    "speed_test_wan_required": {
+      "message": "Choose a WAN name or WAN UUID before running the internet speed test."
+    },
+    "speed_test_wan_selector_conflict": {
+      "message": "Provide either a WAN UUID or a WAN name, not both."
+    },
     "wrong_integration_entry": {
       "message": "The requested config entry does not belong to Firewalla Local."
     }
@@ -475,6 +490,84 @@
       "name": "Get runtime inventory",
       "description": "Return the current Firewalla runtime objects as markdown and structured data.",
       "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_speed_test_results": {
+      "name": "Get speed test results",
+      "description": "Return normalized Firewalla internet speed test results from the coordinator refresh path.",
+      "fields": {
+        "wan_uuid": {
+          "name": "WAN UUID (Optional)",
+          "description": "Filter results to one WAN UUID."
+        },
+        "wan_name": {
+          "name": "WAN name (Optional)",
+          "description": "Filter results to one WAN display name."
+        },
+        "limit": {
+          "name": "Result limit",
+          "description": "Optional. Defaults to 1 so the service can easily return only the most recent result."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading results."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_wan_usage": {
+      "name": "Get WAN usage",
+      "description": "Return normalized current-month WAN usage from the coordinator runtime payload.",
+      "fields": {
+        "wan_uuid": {
+          "name": "WAN UUID (Optional)",
+          "description": "Filter results to one WAN UUID."
+        },
+        "wan_name": {
+          "name": "WAN name (Optional)",
+          "description": "Filter results to one WAN display name."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading usage."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_wan_usage_history": {
+      "name": "Get WAN usage history",
+      "description": "Return normalized last-12-month WAN usage history from the Firewalla local API.",
+      "fields": {
+        "wan_uuid": {
+          "name": "WAN UUID (Optional)",
+          "description": "Filter results to one WAN UUID."
+        },
+        "wan_name": {
+          "name": "WAN name (Optional)",
+          "description": "Filter results to one WAN display name."
+        },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
           "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
@@ -500,6 +593,28 @@
         "resume_at": {
           "name": "Resume at",
           "description": "Optional. A local date and time when the rule should resume."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "run_internet_speed_test": {
+      "name": "Run internet speed test",
+      "description": "Start an internet speed test on one Firewalla WAN interface.",
+      "fields": {
+        "wan_uuid": {
+          "name": "WAN UUID (Optional)",
+          "description": "Use the Firewalla WAN UUID for deterministic automations."
+        },
+        "wan_name": {
+          "name": "WAN name (Optional)",
+          "description": "Use the WAN display name shown by Firewalla. If only one WAN is available, you can omit both WAN selectors."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

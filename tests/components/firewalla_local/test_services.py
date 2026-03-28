@@ -24,11 +24,19 @@ from custom_components.firewalla_local.const import (
     DOMAIN,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
+    SERVICE_FIELD_LIMIT,
+    SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
+    SERVICE_FIELD_WAN_NAME,
+    SERVICE_FIELD_WAN_UUID,
+    SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_WAN_USAGE,
+    SERVICE_GET_WAN_USAGE_HISTORY,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
+    SERVICE_RUN_INTERNET_SPEED_TEST,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
 from custom_components.firewalla_local.models import (
@@ -36,6 +44,7 @@ from custom_components.firewalla_local.models import (
     FirewallaApplianceRuntimeInput,
     FirewallaPolicyRule,
     FirewallaRuntimeSnapshot,
+    FirewallaSpeedTestRecord,
 )
 from custom_components.firewalla_local.services import _get_loaded_entry
 
@@ -90,7 +99,147 @@ def _snapshot(
 
 def _runtime_payload() -> dict[str, object]:
     """Return a minimal raw init payload for coordinator setup tests."""
-    return {"policyRules": []}
+    return {
+        "policyRules": [],
+        "monthlyDataUsageOnWans": {
+            "wan-1": {
+                "download": [
+                    [1_743_480_000, 1024],
+                    [1_743_566_400, 2048],
+                ],
+                "upload": [
+                    [1_743_480_000, 512],
+                    [1_743_566_400, 768],
+                ],
+                "totalDownload": 3072,
+                "totalUpload": 1280,
+                "monthlyBeginTs": 1_743_292_800,
+                "monthlyEndTs": 1_745_971_199,
+            },
+            "wan-2": {
+                "download": [[1_743_480_000, 900]],
+                "upload": [[1_743_480_000, 450]],
+                "totalDownload": 900,
+                "totalUpload": 450,
+                "monthlyBeginTs": 1_743_292_800,
+                "monthlyEndTs": 1_745_971_199,
+            },
+        },
+        "networkMonitorData": {
+            "overall_wan_state:overall_wan_state": {
+                "labels": {
+                    "wanStatus": {
+                        "eth0": {
+                            "wan_intf_name": "WAN-ONE",
+                            "wan_intf_uuid": "wan-1",
+                        },
+                        "eth1": {
+                            "wan_intf_name": "WAN-TWO",
+                            "wan_intf_uuid": "wan-2",
+                        },
+                    }
+                }
+            }
+        },
+    }
+
+
+def _wan_usage_history_payload() -> dict[str, object]:
+    """Return one normalized-looking raw last-12-month WAN usage payload."""
+    return {
+        "wan-1": [
+            {
+                "ts": 1_740_996_000,
+                "stats": {
+                    "download": [[1_740_996_000, 8192]],
+                    "upload": [[1_740_996_000, 4096]],
+                    "totalDownload": 8192,
+                    "totalUpload": 4096,
+                },
+            },
+            {
+                "ts": 1_743_675_200,
+                "stats": {
+                    "download": [[1_743_675_200, 16384]],
+                    "upload": [[1_743_675_200, 6144]],
+                    "totalDownload": 16384,
+                    "totalUpload": 6144,
+                },
+            },
+        ],
+        "wan-2": [
+            {
+                "ts": 1_743_675_200,
+                "stats": {
+                    "download": [[1_743_675_200, 2048]],
+                    "upload": [[1_743_675_200, 1024]],
+                    "totalDownload": 2048,
+                    "totalUpload": 1024,
+                },
+            }
+        ],
+    }
+
+
+def _speed_test_snapshot() -> FirewallaRuntimeSnapshot:
+    """Return a runtime snapshot with normalized speed-test records."""
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        speed_test_results=(
+            FirewallaSpeedTestRecord(
+                tested_at_timestamp=1_774_519_230.541,
+                download_mbps=82.65986251831055,
+                upload_mbps=50.29832458496094,
+                latency_ms=28.195942,
+                jitter_ms=1.458138,
+                packet_loss_percent=-1,
+                download_megabytes=161.26446723937988,
+                upload_megabytes=58.01159858703613,
+                isp="Atlantic Broadband",
+                public_ip="23.245.207.179",
+                server_country="United States",
+                server_host="speedtest-cmh.dish-wireless.com:8080",
+                server_id="53971",
+                server_location="Columbus, OH",
+                server_sponsor="Boost Mobile",
+                manual=False,
+                success=True,
+                vendor="ookla",
+                wan_uuid="wan-1",
+            ),
+            FirewallaSpeedTestRecord(
+                tested_at_timestamp=1_774_200_026.511,
+                download_mbps=63.15821075439453,
+                upload_mbps=51.20576858520508,
+                latency_ms=27.404289,
+                jitter_ms=1.714381,
+                packet_loss_percent=-1,
+                download_megabytes=89.23129463195801,
+                upload_megabytes=60.53947830200195,
+                isp="Atlantic Broadband",
+                public_ip="23.245.207.179",
+                server_country="United States",
+                server_host="speedtest-cmh.dish-wireless.com:8080",
+                server_id="53971",
+                server_location="Columbus, OH",
+                server_sponsor="Boost Mobile",
+                manual=False,
+                success=True,
+                vendor="ookla",
+                wan_uuid="wan-2",
+            ),
+        ),
+    )
 
 
 async def test_pause_rule_service_updates_matching_rule_optimistically(
@@ -1008,3 +1157,342 @@ async def test_resume_rule_service_reenables_matching_rule(
     assert mock_update_rule.await_args is not None
     assert mock_update_rule.await_count == 1
     assert mock_update_rule.await_args.kwargs == {"enabled": True}
+
+
+async def test_run_internet_speed_test_service_returns_acknowledgement(
+    hass: HomeAssistant,
+) -> None:
+    """Test the speed-test trigger service resolves one WAN and returns an ack."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_run_internet_speed_test",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_run_speed_test,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RUN_INTERNET_SPEED_TEST,
+            {
+                SERVICE_FIELD_WAN_NAME: "WAN-ONE",
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_run_speed_test.await_args is not None
+    assert mock_run_speed_test.await_args.args == ("wan-1",)
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "wan": {"uuid": "wan-1", "name": "WAN-ONE"},
+        "command": {
+            "item": "runInternetSpeedtest",
+            "value": {"wan_uuid": "wan-1"},
+        },
+        "command_response": {"ok": True},
+    }
+
+
+async def test_get_speed_test_results_service_defaults_to_latest_result(
+    hass: HomeAssistant,
+) -> None:
+    """Test the speed-test results service returns the latest result by default."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SPEED_TEST_RESULTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["config_entry_id"] == entry.entry_id
+    assert response["refreshed"] is True
+    assert response["count"] == 1
+    assert response["wan"] is None
+    assert response["latest"] is not None
+    assert response["latest"]["wan_uuid"] == "wan-1"
+    assert response["latest"]["wan_name"] == "WAN-ONE"
+    assert response["results"] == [response["latest"]]
+
+
+async def test_get_speed_test_results_service_filters_one_wan_without_refresh(
+    hass: HomeAssistant,
+) -> None:
+    """Test the speed-test results service can filter one WAN from cached data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ) as mock_get_runtime,
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SPEED_TEST_RESULTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_WAN_UUID: "wan-2",
+                SERVICE_FIELD_LIMIT: 2,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_runtime.await_count == 1
+    assert response is not None
+    assert response["refreshed"] is False
+    assert response["wan"] == {"uuid": "wan-2", "name": "WAN-TWO"}
+    assert response["count"] == 1
+    assert response["latest"]["wan_uuid"] == "wan-2"
+
+
+async def test_run_internet_speed_test_service_requires_selector_for_multiple_wans(
+    hass: HomeAssistant,
+) -> None:
+    """Test the speed-test trigger requires a selector when multiple WANs exist."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_RUN_INTERNET_SPEED_TEST,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+
+async def test_get_wan_usage_service_returns_current_month_view(
+    hass: HomeAssistant,
+) -> None:
+    """Test the current WAN usage service returns the coordinator-backed view."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_USAGE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["config_entry_id"] == entry.entry_id
+    assert response["refreshed"] is True
+    assert response["wan"] is None
+    assert response["count"] == 2
+    first_view = response["results"][0]
+    assert first_view["wan_uuid"] == "wan-1"
+    assert first_view["wan_name"] == "WAN-ONE"
+    assert first_view["periods"][0]["total_download_bytes"] == 3072
+    assert (
+        first_view["periods"][0]["begin_timestamp_iso"] == "2025-03-30T00:00:00+00:00"
+    )
+    assert first_view["periods"][0]["end_timestamp_iso"] == "2025-04-29T23:59:59+00:00"
+    assert first_view["periods"][0]["download_samples"][0] == {
+        "timestamp": 1_743_480_000,
+        "timestamp_iso": "2025-04-01T04:00:00+00:00",
+        "value": 1024,
+    }
+
+
+async def test_get_wan_usage_history_service_filters_one_wan_without_refresh(
+    hass: HomeAssistant,
+) -> None:
+    """Test the WAN history service returns the direct-read view for one WAN."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_last12_monthly_wan_usage_payload",
+            new=AsyncMock(return_value=_wan_usage_history_payload()),
+        ) as mock_get_history,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_USAGE_HISTORY,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_WAN_UUID: "wan-1",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_history.await_count == 1
+    assert response is not None
+    assert response["config_entry_id"] == entry.entry_id
+    assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
+    assert response["count"] == 1
+    first_period = response["results"][0]["periods"][0]
+    assert first_period["bucket_timestamp"] == 1_740_996_000
+    assert first_period["bucket_timestamp_iso"] == "2025-03-03T10:00:00+00:00"
+    assert first_period["begin_timestamp"] == 1_740_996_000
+    assert first_period["begin_timestamp_iso"] == "2025-03-03T10:00:00+00:00"
+    assert first_period["end_timestamp"] == 1_740_996_000
+    assert first_period["end_timestamp_iso"] == "2025-03-03T10:00:00+00:00"
+    assert first_period["total_download_bytes"] == 8192
+    assert first_period["upload_samples"][0] == {
+        "timestamp": 1_740_996_000,
+        "timestamp_iso": "2025-03-03T10:00:00+00:00",
+        "value": 4096,
+    }

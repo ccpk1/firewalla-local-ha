@@ -33,6 +33,7 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_CLOUD_CONNECTED,
     ATTR_SYSTEM_CPU_USAGE_1M,
+    ATTR_SYSTEM_CURRENT_WAN_USAGE,
     ATTR_SYSTEM_DDNS,
     ATTR_SYSTEM_DEVICES_OFFLINE,
     ATTR_SYSTEM_DEVICES_ONLINE,
@@ -89,7 +90,43 @@ def _state_for_unique_suffix(hass: HomeAssistant, domain: str, unique_suffix: st
 
 def _runtime_payload() -> dict[str, object]:
     """Return a minimal raw init payload for coordinator setup tests."""
-    return {"policyRules": []}
+    return {
+        "policyRules": [],
+        "monthlyDataUsageOnWans": {
+            "wan-1": {
+                "download": [[1_743_480_000, 1024]],
+                "upload": [[1_743_480_000, 512]],
+                "totalDownload": 3072,
+                "totalUpload": 1280,
+                "monthlyBeginTs": 1_743_292_800,
+                "monthlyEndTs": 1_745_971_199,
+            },
+            "wan-2": {
+                "download": [[1_743_480_000, 900]],
+                "upload": [[1_743_480_000, 450]],
+                "totalDownload": 900,
+                "totalUpload": 450,
+                "monthlyBeginTs": 1_743_292_800,
+                "monthlyEndTs": 1_745_971_199,
+            },
+        },
+        "networkMonitorData": {
+            "overall_wan_state:overall_wan_state": {
+                "labels": {
+                    "wanStatus": {
+                        "eth0": {
+                            "wan_intf_name": "WAN-ONE",
+                            "wan_intf_uuid": "wan-1",
+                        },
+                        "eth1": {
+                            "wan_intf_name": "WAN-TWO",
+                            "wan_intf_uuid": "wan-2",
+                        },
+                    }
+                }
+            }
+        },
+    }
 
 
 def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnapshot:
@@ -272,6 +309,10 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is True
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] == "23.245.207.179"
     assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] == {"eth0": "23.245.207.179"}
+    assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {
+        "WAN-ONE": {"download_bytes": 3072, "upload_bytes": 1280},
+        "WAN-TWO": {"download_bytes": 900, "upload_bytes": 450},
+    }
     assert system_state.attributes[ATTR_SYSTEM_CPU_USAGE_1M] == 42.1
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_USAGE_PERCENT] == 76.4
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_FREE_MB] == 911.8
@@ -364,7 +405,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_runtime_payload()),
+            new=AsyncMock(return_value={"policyRules": []}),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -387,6 +428,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is False
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] is None
     assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] is None
+    assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {}
     assert system_state.attributes[ATTR_SYSTEM_CPU_USAGE_1M] == 22.5
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_USAGE_PERCENT] == 25.0
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_FREE_MB] == 750.0

@@ -130,6 +130,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                             },
                             "success": True,
                             "timestamp": 1774260026.511,
+                            "uuid": "wan-2",
                             "vendor": "ookla",
                         },
                         {
@@ -156,6 +157,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                             },
                             "success": True,
                             "timestamp": 1774293094.481,
+                            "uuid": "wan-1",
                             "vendor": "ookla",
                         },
                         {
@@ -308,7 +310,9 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
         manual=True,
         success=True,
         vendor="ookla",
+        wan_uuid="wan-1",
     )
+    assert snapshot.speed_test_results[0].wan_uuid == "wan-2"
     assert rules[0].rule_id == "739"
     assert rules[0].enabled is False
     assert rules[0].target_name == "Kitchen speaker"

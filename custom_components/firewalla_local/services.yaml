@@ -13,6 +13,146 @@ get_runtime_inventory:
       selector:
         text:
 
+run_internet_speed_test:
+  name: Run internet speed test
+  description: Start an internet speed test on one Firewalla WAN interface.
+  fields:
+    wan_uuid:
+      required: false
+      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      selector:
+        text:
+      name: WAN UUID
+      description: Optional. Use the Firewalla WAN UUID for deterministic automations.
+    wan_name:
+      required: false
+      example: "WAN-ONE"
+      selector:
+        text:
+      name: WAN name
+      description: Optional. Use the WAN display name shown by Firewalla. If only one WAN is available, you can omit both WAN selectors.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+get_speed_test_results:
+  name: Get speed test results
+  description: Return normalized Firewalla internet speed test results from the coordinator refresh path.
+  fields:
+    wan_uuid:
+      required: false
+      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      selector:
+        text:
+      name: WAN UUID
+      description: Optional. Filter results to one WAN UUID.
+    wan_name:
+      required: false
+      example: "WAN-ONE"
+      selector:
+        text:
+      name: WAN name
+      description: Optional. Filter results to one WAN display name.
+    limit:
+      required: false
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+      name: Result limit
+      description: Optional. Defaults to 1 so the service can easily return only the most recent result.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before reading results.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+get_wan_usage:
+  name: Get WAN usage
+  description: Return normalized current-month WAN usage from the coordinator runtime payload.
+  fields:
+    wan_uuid:
+      required: false
+      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      selector:
+        text:
+      name: WAN UUID
+      description: Optional. Filter results to one WAN UUID.
+    wan_name:
+      required: false
+      example: "WAN-ONE"
+      selector:
+        text:
+      name: WAN name
+      description: Optional. Filter results to one WAN display name.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before reading usage.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+get_wan_usage_history:
+  name: Get WAN usage history
+  description: Return normalized last-12-month WAN usage history from the Firewalla local API.
+  fields:
+    wan_uuid:
+      required: false
+      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      selector:
+        text:
+      name: WAN UUID
+      description: Optional. Filter results to one WAN UUID.
+    wan_name:
+      required: false
+      example: "WAN-ONE"
+      selector:
+        text:
+      name: WAN name
+      description: Optional. Filter results to one WAN display name.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
 pause_rule:
   name: Pause rule
   description: Pause a managed Firewalla rule. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.

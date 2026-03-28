@@ -52,6 +52,7 @@ _RAW_MESSAGE_CODE_KEY: Final = "code"
 _RAW_MESSAGE_TIMESTAMP_KEY: Final = "timestamp"
 
 _COMMAND_MESSAGE_TYPE: Final = "cmd"
+_GET_MESSAGE_TYPE: Final = "get"
 _INIT_MESSAGE_TYPE: Final = "init"
 _COMMAND_ITEM_KEY: Final = "item"
 _COMMAND_VALUE_KEY: Final = "value"
@@ -59,6 +60,7 @@ _COMMAND_GET_KEY: Final = "get"
 _COMMAND_POLICY_CREATE: Final = "policy:create"
 _COMMAND_POLICY_DELETE: Final = "policy:delete"
 _COMMAND_POLICY_UPDATE: Final = "policy:update"
+_COMMAND_RUN_INTERNET_SPEED_TEST: Final = "runInternetSpeedtest"
 _COMMAND_POLICY_ID_KEY: Final = "policyID"
 
 _RAW_RULE_ID_KEY: Final = "pid"
@@ -140,6 +142,7 @@ _RAW_SPEED_TEST_TIMESTAMP_KEY: Final = "timestamp"
 _RAW_SPEED_TEST_MANUAL_KEY: Final = "manual"
 _RAW_SPEED_TEST_SUCCESS_KEY: Final = "success"
 _RAW_SPEED_TEST_VENDOR_KEY: Final = "vendor"
+_RAW_SPEED_TEST_WAN_UUID_KEY: Final = "wanUUID"
 _RAW_SPEED_TEST_PUBLIC_IP_KEY: Final = "publicIp"
 _RAW_SPEED_TEST_ISP_KEY: Final = "isp"
 _RAW_SPEED_TEST_DOWNLOAD_KEY: Final = "download"
@@ -154,6 +157,8 @@ _RAW_SPEED_TEST_SERVER_HOST_KEY: Final = "host"
 _RAW_SPEED_TEST_SERVER_ID_KEY: Final = "id"
 _RAW_SPEED_TEST_SERVER_LOCATION_KEY: Final = "location"
 _RAW_SPEED_TEST_SERVER_SPONSOR_KEY: Final = "sponsor"
+_RAW_MONTHLY_WAN_USAGE_KEY: Final = "monthlyDataUsageOnWans"
+_RAW_LAST12_WAN_USAGE_KEY: Final = "last12monthlyDataUsageOnWans"
 
 _RAW_TAG_PREFIX_GROUP: Final = "tag"
 _RAW_TAG_PREFIX_DEVICE: Final = "dtag"
@@ -435,6 +440,28 @@ class FirewallaApiClient:
             target=DEFAULT_INIT_TARGET,
         )
 
+    async def async_run_internet_speed_test(self, wan_uuid: str) -> dict[str, object]:
+        """Run one internet speed test for the requested WAN interface."""
+        return await self._async_send_local_message(
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_RUN_INTERNET_SPEED_TEST,
+                _COMMAND_VALUE_KEY: {_RAW_SPEED_TEST_WAN_UUID_KEY: wan_uuid},
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+
+    async def async_get_last12_monthly_wan_usage_payload(self) -> dict[str, object]:
+        """Fetch the last-12-month WAN usage payload from the local runtime."""
+        return await self._async_send_local_message(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _RAW_LAST12_WAN_USAGE_KEY,
+                _COMMAND_VALUE_KEY: {},
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+
     def _extract_appliance_identity(
         self, data: dict[str, object]
     ) -> FirewallaApplianceIdentityInput:
@@ -711,6 +738,15 @@ class FirewallaApiClient:
                             (vendor := raw_result.get(_RAW_SPEED_TEST_VENDOR_KEY)), str
                         )
                         and vendor
+                        else None
+                    ),
+                    wan_uuid=(
+                        wan_uuid
+                        if isinstance(
+                            (wan_uuid := raw_result.get(_RAW_UUID_KEY)),
+                            str,
+                        )
+                        and wan_uuid
                         else None
                     ),
                 )
