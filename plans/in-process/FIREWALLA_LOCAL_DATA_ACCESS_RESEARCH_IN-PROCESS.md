@@ -680,7 +680,7 @@ Implementation note:
 
 ### Sequencing recommendation
 
-- [ ] Implement the shared client and model normalization first so the initial services share one parsing path.
+- [x] Implement the shared client and model normalization first so the initial services share one parsing path.
 - [x] Land usage history, internet speed test, and WAN usage before WAN events and network-segment services because they are the clearest quick wins with the lowest ambiguity.
 - [ ] Defer any new entities until service payloads have been validated through the existing service and model test suite and real-world usage has confirmed which views are actually worth promoting.
 
