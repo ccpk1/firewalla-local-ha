@@ -13,6 +13,42 @@ get_runtime_inventory:
       selector:
         text:
 
+get_network_interfaces:
+  name: Get network interfaces
+  description: Return normalized network-segment interface summaries from the Firewalla local API.
+  fields:
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Optional. Filter results to one network UUID for deterministic automations.
+    network_name:
+      required: false
+      example: "VLAN10 CORE"
+      selector:
+        text:
+      name: Network name
+      description: Optional. Filter results to one Firewalla network display name.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving network selectors.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
 run_internet_speed_test:
   name: Run internet speed test
   description: Start an internet speed test on one Firewalla WAN interface.
@@ -88,6 +124,70 @@ get_speed_test_results:
       selector:
         text:
 
+get_usage_history:
+  name: Get usage history
+  description: Return normalized scoped usage history from the Firewalla local API.
+  fields:
+    scope_kind:
+      required: true
+      example: "device"
+      selector:
+        select:
+          options:
+            - "device"
+            - "group"
+            - "user"
+      name: Scope kind
+      description: Required. Choose whether the target is a device, group, or user.
+    scope_target:
+      required: true
+      example: "EC:0D:51:CC:BA:BC"
+      selector:
+        text:
+      name: Scope target
+      description: Required. Use a stable ID or the current display label for the selected scope.
+    begin:
+      required: true
+      example: "2026-03-20 00:00:00"
+      selector:
+        datetime:
+      name: Begin
+      description: Required. Local date and time for the beginning of the usage window.
+    end:
+      required: true
+      example: "2026-03-27 00:00:00"
+      selector:
+        datetime:
+      name: End
+      description: Required. Local date and time for the end of the usage window.
+    granularity:
+      required: true
+      example: "day"
+      selector:
+        select:
+          options:
+            - "day"
+            - "hour"
+      name: Granularity
+      description: Required. Day and hour are the currently proven slot-based granularities.
+    app_ids:
+      required: false
+      example: "internet,facebook"
+      selector:
+        text:
+      name: App IDs
+      description: Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app buckets.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
 get_wan_usage:
   name: Get WAN usage
   description: Return normalized current-month WAN usage from the coordinator runtime payload.
@@ -142,6 +242,55 @@ get_wan_usage_history:
         text:
       name: WAN name
       description: Optional. Filter results to one WAN display name.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+get_wan_events:
+  name: Get WAN events
+  description: Return normalized WAN health timeline events from the Firewalla local API.
+  fields:
+    wan_uuid:
+      required: false
+      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      selector:
+        text:
+      name: WAN UUID
+      description: Optional. Filter events to one WAN UUID when the event applies to that WAN.
+    wan_name:
+      required: false
+      example: "WAN-ONE"
+      selector:
+        text:
+      name: WAN name
+      description: Optional. Filter events to one WAN display name.
+    limit:
+      required: false
+      example: 100
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box
+      name: Event limit
+      description: Optional. Defaults to 100. Firewalla app captures confirmed paged reads through limit_count.
+    offset:
+      required: false
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 5000
+          mode: box
+      name: Event offset
+      description: Optional. Defaults to 0 so you can page older events.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

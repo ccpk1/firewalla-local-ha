@@ -14,6 +14,7 @@ from custom_components.firewalla_local.api.exceptions import FirewallaAuthError
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaDiskUsageInput,
+    FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaHostVpnClient,
     FirewallaPolicyRule,
@@ -331,6 +332,10 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert rules[5].auto_delete_when_expires is True
     assert rules[5].dnsmasq_only is True
     assert rules[5].is_temporary is True
+    assert snapshot.groups == (
+        FirewallaGroupRuntime(group_id="10", name="KADEN's Devices"),
+        FirewallaGroupRuntime(group_id="12", name="Quarantine"),
+    )
 
 
 @pytest.mark.asyncio
@@ -975,3 +980,220 @@ async def test_get_runtime_init_payload_raises_auth_error_after_retry_401s() -> 
             await client.async_get_runtime_init_payload()
 
     assert mock_post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_usage_history_payload_sends_scoped_get_request() -> None:
+    """Test usage-history pulls use the confirmed scoped get shape."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"ok": True}),
+        ) as mock_send:
+            await client.async_get_usage_history_payload(
+                scope_type="tag",
+                target="10",
+                begin_timestamp=1_774_065_600,
+                end_timestamp=1_774_670_400,
+                granularity="day",
+                app_ids=("internet", "facebook"),
+            )
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "appTimeUsage",
+            "type": "tag",
+            "begin": 1_774_065_600,
+            "end": 1_774_670_400,
+            "granularity": "day",
+            "apps": ["internet", "facebook"],
+        },
+        "target": "10",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_wan_events_payload_accepts_list_response() -> None:
+    """Test WAN events pulls accept the confirmed list-shaped data payload."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        encrypted_message = aes256_cbc_encrypt_to_base64(
+            json.dumps(
+                {
+                    "code": 200,
+                    "data": [
+                        {
+                            "event_type": "action",
+                            "action_type": "ping_RTT",
+                            "action_value": 1,
+                            "labels": {
+                                "rtt": 53.2,
+                                "rttLimit": 35.3,
+                                "target": "1.1.1.1",
+                                "wan_intf_name": "WAN-ONE",
+                                "wan_intf_uuid": "wan-1",
+                            },
+                            "ts": 1774036038371,
+                        }
+                    ],
+                },
+                separators=(",", ":"),
+            ),
+            TEST_SYMMETRIC_KEY,
+        )
+
+        with patch.object(
+            client,
+            "_async_post_local_payload",
+            AsyncMock(return_value=(200, json.dumps({"message": encrypted_message}))),
+        ):
+            payload = await client.async_get_wan_events_payload(
+                limit_count=100,
+                limit_offset=0,
+            )
+
+    assert payload == [
+        {
+            "event_type": "action",
+            "action_type": "ping_RTT",
+            "action_value": 1,
+            "labels": {
+                "rtt": 53.2,
+                "rttLimit": 35.3,
+                "target": "1.1.1.1",
+                "wan_intf_name": "WAN-ONE",
+                "wan_intf_uuid": "wan-1",
+            },
+            "ts": 1774036038371,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_network_interface_payload_accepts_dict_response() -> None:
+    """Test item=intf pulls accept the confirmed dict-shaped data payload."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        encrypted_message = aes256_cbc_encrypt_to_base64(
+            json.dumps(
+                {
+                    "code": 200,
+                    "data": {
+                        "intf": "bond0.10",
+                        "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                        "monitoring": True,
+                    },
+                },
+                separators=(",", ":"),
+            ),
+            TEST_SYMMETRIC_KEY,
+        )
+
+        with patch.object(
+            client,
+            "_async_post_local_payload",
+            AsyncMock(return_value=(200, json.dumps({"message": encrypted_message}))),
+        ):
+            payload = await client.async_get_network_interface_payload(
+                network_uuid="5799d896-5e0f-40a5-a776-38a5d7746204"
+            )
+
+    assert payload == {
+        "intf": "bond0.10",
+        "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+        "monitoring": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_wan_events_payload_sends_paged_get_request() -> None:
+    """Test WAN events pulls use the confirmed paged get shape."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value=[]),
+        ) as mock_send:
+            await client.async_get_wan_events_payload(limit_count=250, limit_offset=25)
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "events",
+            "value": {
+                "limit_count": 250,
+                "limit_offset": 25,
+                "parse_json": True,
+                "reverse": True,
+            },
+        },
+        "target": "0.0.0.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_network_interface_payload_sends_targeted_get_request() -> None:
+    """Test item=intf pulls use the confirmed targeted get shape."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={}),
+        ) as mock_send:
+            await client.async_get_network_interface_payload(
+                network_uuid="5799d896-5e0f-40a5-a776-38a5d7746204"
+            )
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {"item": "intf"},
+        "target": "5799d896-5e0f-40a5-a776-38a5d7746204",
+    }

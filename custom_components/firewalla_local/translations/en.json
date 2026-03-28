@@ -460,6 +460,15 @@
     "multiple_entries_loaded": {
       "message": "Multiple Firewalla entries are loaded. Use config_entry_id or config_entry_name."
     },
+    "network_name_ambiguous": {
+      "message": "More than one Firewalla network matches the name \"{network_name}\". Use the network UUID instead."
+    },
+    "network_not_found": {
+      "message": "No Firewalla network matched the requested selector. Check the network name or UUID and try again."
+    },
+    "network_selector_conflict": {
+      "message": "Provide either a network UUID or a network name, not both."
+    },
     "pause_rule_timing_conflict": {
       "message": "Provide either a duration or a resume time, not both."
     },
@@ -500,6 +509,32 @@
         }
       }
     },
+    "get_network_interfaces": {
+      "name": "Get network interfaces",
+      "description": "Return normalized network-segment interface summaries from the Firewalla local API.",
+      "fields": {
+        "network_uuid": {
+          "name": "Network UUID (Optional)",
+          "description": "Filter results to one network UUID for deterministic automations."
+        },
+        "network_name": {
+          "name": "Network name (Optional)",
+          "description": "Filter results to one Firewalla network display name."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving network selectors."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "get_speed_test_results": {
       "name": "Get speed test results",
       "description": "Return normalized Firewalla internet speed test results from the coordinator refresh path.",
@@ -519,6 +554,44 @@
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading results."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_usage_history": {
+      "name": "Get usage history",
+      "description": "Return normalized scoped usage history from the Firewalla local API.",
+      "fields": {
+        "scope_kind": {
+          "name": "Scope kind",
+          "description": "Required. Choose whether the target is a device, group, or user."
+        },
+        "scope_target": {
+          "name": "Scope target",
+          "description": "Required. Use a stable ID or the current display label for the selected scope."
+        },
+        "begin": {
+          "name": "Begin",
+          "description": "Required. Local date and time for the beginning of the usage window."
+        },
+        "end": {
+          "name": "End",
+          "description": "Required. Local date and time for the end of the usage window."
+        },
+        "granularity": {
+          "name": "Granularity",
+          "description": "Required. Day and hour are the currently proven slot-based granularities."
+        },
+        "app_ids": {
+          "name": "App IDs",
+          "description": "Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app buckets."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -567,6 +640,36 @@
         "wan_name": {
           "name": "WAN name (Optional)",
           "description": "Filter results to one WAN display name."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_wan_events": {
+      "name": "Get WAN events",
+      "description": "Return normalized WAN health timeline events from the Firewalla local API.",
+      "fields": {
+        "wan_uuid": {
+          "name": "WAN UUID (Optional)",
+          "description": "Filter events to one WAN UUID when the event applies to that WAN."
+        },
+        "wan_name": {
+          "name": "WAN name (Optional)",
+          "description": "Filter events to one WAN display name."
+        },
+        "limit": {
+          "name": "Event limit",
+          "description": "Optional. Defaults to 100. Firewalla app captures confirmed paged reads through limit_count."
+        },
+        "offset": {
+          "name": "Event offset",
+          "description": "Optional. Defaults to 0 so you can page older events."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

@@ -377,6 +377,149 @@ class FirewallaWanUsageView:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaWanEventFailure:
+    """One normalized WAN-event failure target."""
+
+    type: str
+    target: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanEventStatus:
+    """One normalized WAN interface status nested under a WAN event."""
+
+    interface_key: str
+    wan_uuid: str | None = None
+    wan_name: str | None = None
+    active: bool | None = None
+    ready: bool | None = None
+    ip4_addresses: tuple[str, ...] = ()
+    seq: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanEvent:
+    """One normalized WAN health event from the Firewalla timeline."""
+
+    family: str
+    event_type: str
+    timestamp: float
+    value: int | float | None = None
+    previous_value: int | float | None = None
+    ok_value: int | float | None = None
+    state_key: str | None = None
+    wan_uuid: str | None = None
+    wan_name: str | None = None
+    active: bool | None = None
+    ready: bool | None = None
+    changed_interface: str | None = None
+    primary_interface: str | None = None
+    wan_type: str | None = None
+    wan_switched: bool | None = None
+    target: str | None = None
+    name_server: str | None = None
+    dns_test_domain: str | None = None
+    wan_interface_address: str | None = None
+    measurement_kind: str | None = None
+    measurement_value: float | None = None
+    threshold_value: float | None = None
+    failures: tuple[FirewallaWanEventFailure, ...] = ()
+    wan_statuses: tuple[FirewallaWanEventStatus, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkSegment:
+    """Resolved network-segment selector metadata."""
+
+    uuid: str
+    name: str
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkMetricSample:
+    """One normalized network metric sample."""
+
+    timestamp: int
+    value: int | float
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkMetricSeries:
+    """One named metric series in a network summary window."""
+
+    metric: str
+    samples: tuple[FirewallaNetworkMetricSample, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkHostTotals:
+    """One per-host totals row exposed by a network summary payload."""
+
+    host_id: str
+    host_name: str | None = None
+    ip_address: str | None = None
+    conn: int | None = None
+    dns: int | None = None
+    dns_blocked: int | None = None
+    ip_blocked: int | None = None
+    ip_denied: int | None = None
+    ntp: int | None = None
+    download_bytes: int | None = None
+    upload_bytes: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkHostRanking:
+    """One ranked host summary derived from per-host totals."""
+
+    host_id: str
+    host_name: str | None = None
+    ip_address: str | None = None
+    remote_host: str | None = None
+    remote_ip: str | None = None
+    value: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkSegmentView:
+    """Normalized interface summary for one Firewalla network segment."""
+
+    target: FirewallaNetworkSegment
+    interface_name: str | None = None
+    network_type: str | None = None
+    monitoring: bool | None = None
+    active: bool | None = None
+    ready: bool | None = None
+    pending_test: bool | None = None
+    gateway: str | None = None
+    gateway6: str | None = None
+    route_id: str | None = None
+    dns_servers: tuple[str, ...] = ()
+    dns6_servers: tuple[str, ...] = ()
+    original_dns_servers: tuple[str, ...] = ()
+    original_dns6_servers: tuple[str, ...] = ()
+    ipv4_addresses: tuple[str, ...] = ()
+    ipv4_subnets: tuple[str, ...] = ()
+    ipv6_addresses: tuple[str, ...] = ()
+    ipv6_subnets: tuple[str, ...] = ()
+    route4_subnets: tuple[str, ...] = ()
+    route6_subnets: tuple[str, ...] = ()
+    policy: dict[str, object] | None = None
+    hosts: tuple[FirewallaNetworkHostTotals, ...] = ()
+    top_download_hosts: tuple[FirewallaNetworkHostRanking, ...] = ()
+    top_upload_hosts: tuple[FirewallaNetworkHostRanking, ...] = ()
+    new_last24: tuple[FirewallaNetworkMetricSeries, ...] = ()
+    last60: tuple[FirewallaNetworkMetricSeries, ...] = ()
+    last30: tuple[FirewallaNetworkMetricSeries, ...] = ()
+    last12_months: tuple[FirewallaNetworkMetricSeries, ...] = ()
+
+    @property
+    def host_count(self) -> int:
+        """Return the number of host totals rows exposed for this segment."""
+        return len(self.hosts)
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaHostVpnClient:
     """Minimal VPN client reference carried on one normalized host."""
 
@@ -402,6 +545,14 @@ class FirewallaHostRuntime:
     vpn_client: FirewallaHostVpnClient | None = None
     group_ids: tuple[str, ...] = ()
     user_ids: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaGroupRuntime:
+    """Minimal normalized group inventory used for scoped history queries."""
+
+    group_id: str
+    name: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -440,6 +591,89 @@ class FirewallaWatchedUser:
     associated_host_names: tuple[str, ...]
     associated_host_macs: tuple[str, ...]
     last_active: float | None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUsageHistoryTarget:
+    """Resolved usage-history target metadata for one scoped query."""
+
+    scope_kind: str
+    target_id: str
+    target_name: str | None
+    request_scope_type: str
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUsageHistorySlot:
+    """One normalized slot bucket in a usage-history response."""
+
+    timestamp: int
+    total_minutes: int | None = None
+    unique_minutes: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUsageHistoryInterval:
+    """One normalized interval in a usage-history response."""
+
+    begin_timestamp: int
+    end_timestamp: int
+
+    @property
+    def duration_seconds(self) -> int:
+        """Return the interval span in seconds."""
+        return max(0, self.end_timestamp - self.begin_timestamp)
+
+    @property
+    def duration_minutes(self) -> int:
+        """Return the inclusive interval span in whole minutes."""
+        return (self.duration_seconds // 60) + 1
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUsageHistoryDeviceUsage:
+    """One device-scoped interval breakdown nested under a usage metric."""
+
+    device_id: str
+    device_name: str | None = None
+    total_minutes: int | None = None
+    unique_minutes: int | None = None
+    intervals: tuple[FirewallaUsageHistoryInterval, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUsageHistoryMetric:
+    """One normalized usage-history metric section."""
+
+    category: str | None = None
+    total_minutes: int | None = None
+    unique_minutes: int | None = None
+    slots: tuple[FirewallaUsageHistorySlot, ...] = ()
+    intervals: tuple[FirewallaUsageHistoryInterval, ...] = ()
+    devices: tuple[FirewallaUsageHistoryDeviceUsage, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUsageHistoryEntry:
+    """One named metric entry in a usage-history response."""
+
+    key: str
+    metric: FirewallaUsageHistoryMetric
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaUsageHistoryView:
+    """One normalized usage-history response for a resolved target."""
+
+    target: FirewallaUsageHistoryTarget
+    begin_timestamp: int
+    end_timestamp: int
+    granularity: str
+    app_ids: tuple[str, ...] | None = None
+    internet: FirewallaUsageHistoryMetric | None = None
+    app_totals: FirewallaUsageHistoryMetric | None = None
+    apps: tuple[FirewallaUsageHistoryEntry, ...] = ()
+    categories: tuple[FirewallaUsageHistoryEntry, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -815,6 +1049,7 @@ class FirewallaRuntimeSnapshot:
     policy_rules: tuple[FirewallaPolicyRule, ...]
     exception_rule_count: int
     hosts: tuple[FirewallaHostRuntime, ...] = ()
+    groups: tuple[FirewallaGroupRuntime, ...] = ()
     users: tuple[FirewallaUserRuntime, ...] = ()
     speed_test_results: tuple[FirewallaSpeedTestRecord, ...] = ()
 

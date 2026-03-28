@@ -242,6 +242,28 @@ This is useful when you want to:
 - inspect rule IDs before using pause or resume services
 - compare what is live on the box with what is currently exposed in Home Assistant
 
+### Get network interfaces
+
+Use `firewalla_local.get_network_interfaces` to read normalized network-segment
+interface summaries.
+
+- choose one segment with `network_uuid` for deterministic automations or
+   `network_name` for interactive use
+- leave both network selectors empty to return all currently discovered network
+   segments
+- this is currently a heavy report and can return a large amount of data,
+   especially when you query all segments at once
+- the service resolves network selectors through the current Firewalla runtime
+   inventory before issuing the direct local read
+- results preserve the confirmed `newLast24`, `last60`, `last30`, and
+   `last12Months` windows, along with per-host totals and ranked top upload and
+   download host summaries
+- `refresh` defaults to `true` so selector resolution and returned metadata stay
+   aligned with the latest coordinator refresh
+- this first version is intentionally broad so real-world usage can show which
+   parts are worth promoting; a later revision will likely add narrower or more
+   purpose-built filtering based on how the data is actually used
+
 ### Run internet speed test
 
 Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
@@ -265,6 +287,18 @@ results.
 - the response includes `latest` for the common case and `results` for the full
    returned list
 
+### Get usage history
+
+Use `firewalla_local.get_usage_history` to read scoped historical usage for one
+device, group, or user.
+
+- set `scope_kind` to `device`, `group`, or `user`
+- set `scope_target` to a stable id or the current display label for that scope
+- provide explicit `begin`, `end`, and `granularity` values
+- the current bounded contract supports `day` and `hour` granularities
+- the response includes internet totals, app totals, per-app buckets, category
+   buckets, and any available slot or interval detail in one response shape
+
 ### Get WAN usage
 
 Use `firewalla_local.get_wan_usage` to read the current-month data-usage view
@@ -287,6 +321,19 @@ usage buckets.
    sample series
 - when Firewalla omits explicit month bounds, the integration derives begin and
    end timestamps from the available sample coverage
+
+### Get WAN events
+
+Use `firewalla_local.get_wan_events` to read normalized WAN health timeline
+events.
+
+- by default it returns the most recent events across all WANs
+- use `wan_uuid` or `wan_name` to filter to one WAN when needed
+- use `limit` and `offset` to page through older events
+- the current bounded contract covers `wan_state`, `overall_wan_state`,
+   `dualwan_state`, `dns`, `ping_RTT`, and `ping_lossrate`
+- the response focuses on operational metadata such as failures, thresholds,
+   interface status, and DNS probe information rather than raw Firewalla blobs
 
 ### Pause rule
 

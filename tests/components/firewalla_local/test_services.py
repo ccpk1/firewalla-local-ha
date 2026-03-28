@@ -5,6 +5,7 @@ from __future__ import annotations
 # pylint: disable=too-many-lines
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -25,13 +26,24 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_LIMIT,
+    SERVICE_FIELD_NETWORK_UUID,
+    SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
+    SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
+    SERVICE_FIELD_USAGE_HISTORY_BEGIN,
+    SERVICE_FIELD_USAGE_HISTORY_END,
+    SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
+    SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
+    SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
+    SERVICE_GET_NETWORK_INTERFACES,
     SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_USAGE_HISTORY,
+    SERVICE_GET_WAN_EVENTS,
     SERVICE_GET_WAN_USAGE,
     SERVICE_GET_WAN_USAGE_HISTORY,
     SERVICE_PAUSE_RULE,
@@ -42,9 +54,12 @@ from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
+    FirewallaGroupRuntime,
+    FirewallaHostRuntime,
     FirewallaPolicyRule,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
+    FirewallaUserRuntime,
 )
 from custom_components.firewalla_local.services import _get_loaded_entry
 
@@ -101,6 +116,34 @@ def _runtime_payload() -> dict[str, object]:
     """Return a minimal raw init payload for coordinator setup tests."""
     return {
         "policyRules": [],
+        "networkProfiles": {
+            "5799d896-5e0f-40a5-a776-38a5d7746204": {
+                "intf": "bond0.10",
+                "name": "VLAN10 CORE",
+            },
+            "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                "intf": "br0",
+                "name": "Primary LAN",
+            },
+        },
+        "networkConfig": {
+            "interface": {
+                "bond": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                        }
+                    }
+                },
+                "lan": {
+                    "meta": {
+                        "name": "Primary LAN",
+                        "uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+                    }
+                },
+            }
+        },
         "monthlyDataUsageOnWans": {
             "wan-1": {
                 "download": [
@@ -181,6 +224,81 @@ def _wan_usage_history_payload() -> dict[str, object]:
     }
 
 
+def _wan_events_payload() -> list[dict[str, object]]:
+    """Return representative raw WAN events from the direct events timeline."""
+    return [
+        {
+            "action_type": "ping_RTT",
+            "action_value": 1,
+            "event_type": "action",
+            "labels": {
+                "rtt": 53.2365,
+                "rttLimit": 35.3376,
+                "target": "1.1.1.1",
+                "wan_intf_name": "WAN-ONE",
+                "wan_intf_uuid": "wan-1",
+            },
+            "ts": 1_774_036_038_371,
+        },
+        {
+            "event_type": "state",
+            "labels": {
+                "changedInterface": "eth0",
+                "failures": [
+                    {
+                        "target": "1.1.1.1",
+                        "type": "ping",
+                    }
+                ],
+                "ok_value": 0,
+                "primaryInterface": "eth0",
+                "wanStatus": {
+                    "eth0": {
+                        "active": True,
+                        "ip4s": ["23.245.207.179/23"],
+                        "ready": True,
+                        "seq": 0,
+                        "wan_intf_name": "WAN-ONE",
+                        "wan_intf_uuid": "wan-1",
+                    },
+                    "eth1": {
+                        "active": False,
+                        "ready": False,
+                        "seq": 1,
+                        "wan_intf_name": "WAN-TWO",
+                        "wan_intf_uuid": "wan-2",
+                    },
+                },
+                "wanSwitched": True,
+                "wanType": "primary_standby",
+            },
+            "prev_state_value": 15,
+            "state_key": "primary_standby",
+            "state_type": "dualwan_state",
+            "state_value": 12,
+            "ts": 1_774_383_170_915,
+            "ts0": 1_774_383_170_915,
+        },
+        {
+            "event_type": "state",
+            "labels": {
+                "dns_test_domain": "github.com",
+                "name_server": "172.64.36.2",
+                "ok_value": 0,
+                "wan_intf_address": "23.245.207.179",
+                "wan_intf_name": "WAN-ONE",
+                "wan_intf_uuid": "wan-1",
+            },
+            "prev_state_value": 0,
+            "state_key": "172.64.36.2",
+            "state_type": "dns",
+            "state_value": 1,
+            "ts": 1_774_551_926_895,
+            "ts0": 1_774_551_926_895,
+        },
+    ]
+
+
 def _speed_test_snapshot() -> FirewallaRuntimeSnapshot:
     """Return a runtime snapshot with normalized speed-test records."""
     return FirewallaRuntimeSnapshot(
@@ -195,6 +313,34 @@ def _speed_test_snapshot() -> FirewallaRuntimeSnapshot:
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="0C:85:E1:B0:1D:1C",
+                display_name="Office Phone",
+                fallback_name=None,
+                ip_address="192.168.10.44",
+                group_name=None,
+                network_name="VLAN10 CORE",
+                connection_type=None,
+                last_active=None,
+                download_bytes=620781748,
+                upload_bytes=133546109,
+                stale=False,
+            ),
+            FirewallaHostRuntime(
+                mac="00:AA:BB:CC:DD:26",
+                display_name="Plex Server",
+                fallback_name=None,
+                ip_address="192.168.10.10",
+                group_name=None,
+                network_name="VLAN10 CORE",
+                connection_type=None,
+                last_active=None,
+                download_bytes=1001430063,
+                upload_bytes=3730817840,
+                stale=False,
+            ),
+        ),
         speed_test_results=(
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1_774_519_230.541,
@@ -240,6 +386,185 @@ def _speed_test_snapshot() -> FirewallaRuntimeSnapshot:
             ),
         ),
     )
+
+
+def _network_interface_payload() -> dict[str, object]:
+    """Return one representative raw item=intf payload."""
+    return {
+        "intf": "bond0.10",
+        "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+        "type": "lan",
+        "monitoring": True,
+        "gateway": "192.168.10.1",
+        "dns": ["192.168.10.1", "1.1.1.1"],
+        "origDns": ["1.1.1.1"],
+        "ipv4": "192.168.10.1",
+        "ipv4s": ["192.168.10.1"],
+        "ipv4Subnet": "192.168.10.0/24",
+        "ipv4Subnets": ["192.168.10.0/24"],
+        "hosts": {
+            "00:AA:BB:CC:DD:26": {
+                "conn": 25161,
+                "dns": 2753,
+                "dnsB": 0,
+                "download": 1001430063,
+                "ipB": 1,
+                "ipD": 0,
+                "ntp": 74,
+                "upload": 3730817840,
+            },
+            "0C:85:E1:B0:1D:1C": {
+                "conn": 4730,
+                "dns": 1018,
+                "dnsB": 302,
+                "download": 620781748,
+                "ipB": 3258,
+                "ipD": 0,
+                "ntp": 12,
+                "upload": 133546109,
+            },
+        },
+        "flows": {
+            "download": [
+                {
+                    "device": "00:AA:BB:CC:DD:26",
+                    "host": "pkg-containers.githubusercontent.com",
+                    "ip": "185.199.111.154",
+                    "count": "406504404",
+                }
+            ],
+            "upload": [
+                {
+                    "device": "0C:85:E1:B0:1D:1C",
+                    "host": "upload.example.net",
+                    "ip": "203.0.113.50",
+                    "count": "133546109",
+                }
+            ],
+        },
+        "newLast24": {
+            "conn": [[1_774_558_800, 5696], [1_774_641_600, 650]],
+            "dns": [[1_774_558_800, 1855], [1_774_641_600, 120]],
+        },
+        "last60": {
+            "download": [[1_774_641_200, 362233], [1_774_641_260, 243273]],
+        },
+        "last30": {
+            "upload": [[1_772_409_600, 4096], [1_772_496_000, 8192]],
+        },
+        "last12Months": {
+            "download": [[1_740_960_000, 16384], [1_743_638_400, 32768]],
+        },
+        "policy": {"state": True},
+    }
+
+
+def _usage_history_snapshot() -> FirewallaRuntimeSnapshot:
+    """Return a runtime snapshot with host, group, and user scope targets."""
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="EC:0D:51:CC:BA:BC",
+                display_name="Kaden Phone",
+                fallback_name=None,
+                ip_address="192.168.200.25",
+                group_name="KADEN's Devices (KADEN)",
+                network_name="VLAN10 CORE",
+                connection_type="phone",
+                last_active=1_774_287_984.272,
+                download_bytes=1234,
+                upload_bytes=5678,
+                stale=False,
+                group_ids=("10",),
+                user_ids=("21",),
+            ),
+        ),
+        groups=(FirewallaGroupRuntime(group_id="10", name="KADEN's Devices"),),
+        users=(
+            FirewallaUserRuntime(
+                user_id="21",
+                name="KADEN",
+                affiliated_group_id="10",
+                affiliated_group_name="KADEN's Devices",
+                total_minutes_today=410,
+                unique_minutes_today=381,
+            ),
+        ),
+    )
+
+
+def _usage_history_payload() -> dict[str, object]:
+    """Return one representative raw usage-history payload."""
+    return {
+        "internetTimeUsage": {
+            "category": "none",
+            "totalMins": 596,
+            "uniqueMins": 580,
+            "slots": {
+                "1774065600": {"totalMins": 120, "uniqueMins": 118},
+                "1774152000": {"totalMins": 90, "uniqueMins": 88},
+            },
+            "devices": {
+                "EC:0D:51:CC:BA:BC": {
+                    "totalMins": 30,
+                    "uniqueMins": 30,
+                    "intervals": [
+                        {"begin": 1774065600, "end": 1774065900},
+                        {"begin": 1774066200, "end": 1774066500},
+                    ],
+                }
+            },
+        },
+        "appTimeUsageTotal": {
+            "totalMins": 121,
+            "uniqueMins": 120,
+            "slots": {
+                "1774065600": {"totalMins": 60, "uniqueMins": 60},
+                "1774152000": {"totalMins": 61, "uniqueMins": 60},
+            },
+        },
+        "appTimeUsage": {
+            "facebook": {
+                "category": "social",
+                "totalMins": 121,
+                "uniqueMins": 120,
+                "slots": {
+                    "1774065600": {"totalMins": 60, "uniqueMins": 60},
+                    "1774152000": {"totalMins": 61, "uniqueMins": 60},
+                },
+                "devices": {
+                    "EC:0D:51:CC:BA:BC": {
+                        "totalMins": 15,
+                        "uniqueMins": 15,
+                        "intervals": [
+                            {"begin": 1774065660, "end": 1774065900},
+                        ],
+                    }
+                },
+            }
+        },
+        "categoryTimeUsage": {
+            "social": {
+                "totalMins": 121,
+                "uniqueMins": 120,
+                "slots": {
+                    "1774065600": {"totalMins": 60, "uniqueMins": 60},
+                    "1774152000": {"totalMins": 61, "uniqueMins": 60},
+                },
+            }
+        },
+    }
 
 
 async def test_pause_rule_service_updates_matching_rule_optimistically(
@@ -1369,6 +1694,302 @@ async def test_run_internet_speed_test_service_requires_selector_for_multiple_wa
             )
 
 
+async def test_get_usage_history_service_resolves_device_label_and_serializes_data(
+    hass: HomeAssistant,
+) -> None:
+    """Test the usage history service resolves one device label."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    begin = datetime(2026, 3, 20, 21, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+    end = datetime(2026, 3, 27, 21, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_usage_history_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_usage_history_payload",
+            new=AsyncMock(return_value=_usage_history_payload()),
+        ) as mock_get_usage_history,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_USAGE_HISTORY,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: (
+                    "Kaden Phone (192.168.200.25)"
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_BEGIN: begin,
+                SERVICE_FIELD_USAGE_HISTORY_END: end,
+                SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "day",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_usage_history.await_args is not None
+    assert mock_get_usage_history.await_args.kwargs == {
+        "scope_type": "host",
+        "target": "EC:0D:51:CC:BA:BC",
+        "begin_timestamp": 1_774_065_600,
+        "end_timestamp": 1_774_670_400,
+        "granularity": "day",
+        "app_ids": None,
+    }
+    assert response is not None
+    assert response["scope"] == {
+        "scope_kind": "device",
+        "target_id": "EC:0D:51:CC:BA:BC",
+        "target_name": "Kaden Phone",
+        "request_scope_type": "host",
+    }
+    assert response["query"]["time_zone"] == "America/Los_Angeles"
+    assert response["query"]["begin_local"] == "2026-03-20T21:00:00-07:00"
+    assert response["query"]["end_local"] == "2026-03-27T21:00:00-07:00"
+    assert response["query"]["app_ids"] is None
+    assert response["internet"]["slots"][0] == {
+        "timestamp": 1_774_065_600,
+        "timestamp_iso": "2026-03-21T04:00:00+00:00",
+        "total_minutes": 120,
+        "unique_minutes": 118,
+    }
+    assert response["internet"]["intervals"] == []
+    assert response["apps"][0]["key"] == "facebook"
+    assert response["apps"][0]["metric"]["devices"][0] == {
+        "device_id": "EC:0D:51:CC:BA:BC",
+        "device_name": "Kaden Phone",
+        "total_minutes": 15,
+        "unique_minutes": 15,
+        "intervals": [],
+    }
+
+
+async def test_get_usage_history_service_hour_granularity_keeps_intervals(
+    hass: HomeAssistant,
+) -> None:
+    """Test hour granularity preserves interval detail."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_usage_history_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_usage_history_payload",
+            new=AsyncMock(return_value=_usage_history_payload()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_USAGE_HISTORY,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: (
+                    "Kaden Phone (192.168.200.25)"
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
+                    1_774_065_600,
+                    UTC,
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_END: datetime.fromtimestamp(
+                    1_774_670_400,
+                    UTC,
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "hour",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["internet"]["intervals"] == []
+    assert response["apps"][0]["metric"]["devices"][0]["intervals"] == [
+        {
+            "begin_timestamp": 1_774_065_660,
+            "begin_timestamp_iso": "2026-03-21T04:01:00+00:00",
+            "end_timestamp": 1_774_065_900,
+            "end_timestamp_iso": "2026-03-21T04:05:00+00:00",
+            "duration_seconds": 240,
+            "duration_minutes": 5,
+        }
+    ]
+
+
+async def test_get_usage_history_service_resolves_user_name_to_tag_scope(
+    hass: HomeAssistant,
+) -> None:
+    """Test the usage history service resolves user names through tag scope."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_usage_history_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_usage_history_payload",
+            new=AsyncMock(return_value=_usage_history_payload()),
+        ) as mock_get_usage_history,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_USAGE_HISTORY,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "user",
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "KADEN",
+                SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
+                    1_774_065_600,
+                    UTC,
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_END: datetime.fromtimestamp(
+                    1_774_670_400,
+                    UTC,
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "day",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_usage_history.await_args is not None
+    assert mock_get_usage_history.await_args.kwargs["scope_type"] == "tag"
+    assert mock_get_usage_history.await_args.kwargs["target"] == "21"
+    assert response is not None
+    assert response["scope"]["target_id"] == "21"
+    assert response["scope"]["target_name"] == "KADEN"
+
+
+async def test_get_usage_history_service_preserves_explicit_empty_app_list(
+    hass: HomeAssistant,
+) -> None:
+    """Test the usage history service preserves explicit empty app filters."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_usage_history_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_usage_history_payload",
+            new=AsyncMock(return_value=_usage_history_payload()),
+        ) as mock_get_usage_history,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_USAGE_HISTORY,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "group",
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "KADEN's Devices",
+                SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
+                    1_774_065_600,
+                    UTC,
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_END: datetime.fromtimestamp(
+                    1_774_670_400,
+                    UTC,
+                ),
+                SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "day",
+                SERVICE_FIELD_USAGE_HISTORY_APP_IDS: [],
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_usage_history.await_args is not None
+    assert mock_get_usage_history.await_args.kwargs["scope_type"] == "tag"
+    assert mock_get_usage_history.await_args.kwargs["target"] == "10"
+    assert mock_get_usage_history.await_args.kwargs["app_ids"] == ()
+    assert response is not None
+    assert response["query"]["app_ids"] == []
+
+
 async def test_get_wan_usage_service_returns_current_month_view(
     hass: HomeAssistant,
 ) -> None:
@@ -1428,6 +2049,285 @@ async def test_get_wan_usage_service_returns_current_month_view(
         "timestamp": 1_743_480_000,
         "timestamp_iso": "2025-04-01T04:00:00+00:00",
         "value": 1024,
+    }
+
+
+async def test_get_network_interfaces_service_returns_normalized_segment_view(
+    hass: HomeAssistant,
+) -> None:
+    """Test the network interfaces service returns normalized item=intf data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=_network_interface_payload()),
+        ) as mock_get_network_interface,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_NETWORK_INTERFACES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_network_interface.await_args is not None
+    assert mock_get_network_interface.await_args.kwargs == {
+        "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204"
+    }
+    assert response is not None
+    assert response["config_entry_id"] == entry.entry_id
+    assert response["refreshed"] is False
+    assert response["network"] == {
+        "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+        "name": "VLAN10 CORE",
+    }
+    assert response["count"] == 1
+    first_view = response["results"][0]
+    assert first_view["network"] == {
+        "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+        "name": "VLAN10 CORE",
+    }
+    assert first_view["interface_name"] == "bond0.10"
+    assert first_view["type"] == "lan"
+    assert first_view["monitoring"] is True
+    assert first_view["gateway"] == "192.168.10.1"
+    assert first_view["dns_servers"] == ["192.168.10.1", "1.1.1.1"]
+    assert first_view["host_count"] == 2
+    assert first_view["hosts"][0] == {
+        "host_id": "00:AA:BB:CC:DD:26",
+        "host_name": "Plex Server",
+        "ip_address": "192.168.10.10",
+        "conn": 25161,
+        "dns": 2753,
+        "dns_blocked": 0,
+        "ip_blocked": 1,
+        "ip_denied": 0,
+        "ntp": 74,
+        "download_bytes": 1001430063,
+        "upload_bytes": 3730817840,
+    }
+    assert first_view["top_download_hosts"][0] == {
+        "host_id": "00:AA:BB:CC:DD:26",
+        "host_name": "Plex Server",
+        "ip_address": "192.168.10.10",
+        "remote_host": "pkg-containers.githubusercontent.com",
+        "remote_ip": "185.199.111.154",
+        "value": 406504404,
+    }
+    assert first_view["top_upload_hosts"][0] == {
+        "host_id": "0C:85:E1:B0:1D:1C",
+        "host_name": "Office Phone",
+        "ip_address": "192.168.10.44",
+        "remote_host": "upload.example.net",
+        "remote_ip": "203.0.113.50",
+        "value": 133546109,
+    }
+    assert first_view["newLast24"][0]["metric"] == "conn"
+    assert first_view["newLast24"][0]["samples"][0] == {
+        "timestamp": 1_774_558_800,
+        "timestamp_iso": "2026-03-26T21:00:00+00:00",
+        "value": 5696,
+    }
+    assert first_view["last12Months"][0]["metric"] == "download"
+
+
+async def test_get_network_interfaces_service_accepts_alternate_ranking_keys(
+    hass: HomeAssistant,
+) -> None:
+    """Test network rankings tolerate alternate live payload field names."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    payload = _network_interface_payload()
+    payload["flows"] = {
+        "download": [
+            {
+                "mac": "00:AA:BB:CC:DD:26",
+                "deviceIP": "192.168.10.10",
+                "domain": "pkg-containers.githubusercontent.com",
+                "ip": "185.199.111.154",
+                "download": 406504404,
+            }
+        ]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_NETWORK_INTERFACES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["results"][0]["top_download_hosts"][0] == {
+        "host_id": "00:AA:BB:CC:DD:26",
+        "host_name": "Plex Server",
+        "ip_address": "192.168.10.10",
+        "remote_host": "pkg-containers.githubusercontent.com",
+        "remote_ip": "185.199.111.154",
+        "value": 406504404,
+    }
+
+
+async def test_get_network_interfaces_service_accepts_wrapped_ranking_lists(
+    hass: HomeAssistant,
+) -> None:
+    """Test network rankings tolerate wrapper objects around ranking rows."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    payload = _network_interface_payload()
+    payload["flows"] = {
+        "download": {
+            "count": 1,
+            "flows": [
+                {
+                    "device": "00:AA:BB:CC:DD:26",
+                    "deviceIP": "192.168.10.10",
+                    "host": "pkg-containers.githubusercontent.com",
+                    "ip": "185.199.111.154",
+                    "download": 406504404,
+                    "count": 1,
+                }
+            ],
+            "nextTs": 1_774_641_200,
+        },
+        "upload": {
+            "count": 1,
+            "flows": [
+                {
+                    "device": "0C:85:E1:B0:1D:1C",
+                    "deviceIP": "192.168.10.44",
+                    "host": "upload.example.net",
+                    "ip": "203.0.113.50",
+                    "upload": 133546109,
+                    "count": 1,
+                }
+            ],
+            "nextTs": 1_774_641_200,
+        },
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_NETWORK_INTERFACES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    first_view = response["results"][0]
+    assert first_view["top_download_hosts"][0] == {
+        "host_id": "00:AA:BB:CC:DD:26",
+        "host_name": "Plex Server",
+        "ip_address": "192.168.10.10",
+        "remote_host": "pkg-containers.githubusercontent.com",
+        "remote_ip": "185.199.111.154",
+        "value": 406504404,
+    }
+    assert first_view["top_upload_hosts"][0] == {
+        "host_id": "0C:85:E1:B0:1D:1C",
+        "host_name": "Office Phone",
+        "ip_address": "192.168.10.44",
+        "remote_host": "upload.example.net",
+        "remote_ip": "203.0.113.50",
+        "value": 133546109,
     }
 
 
@@ -1496,3 +2396,117 @@ async def test_get_wan_usage_history_service_filters_one_wan_without_refresh(
         "timestamp_iso": "2025-03-03T10:00:00+00:00",
         "value": 4096,
     }
+
+
+async def test_get_wan_events_service_returns_normalized_timeline(
+    hass: HomeAssistant,
+) -> None:
+    """Test the WAN events service returns normalized state and action records."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_wan_events_payload",
+            new=AsyncMock(return_value=_wan_events_payload()),
+        ) as mock_get_events,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_EVENTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_WAN_UUID: "wan-1",
+                SERVICE_FIELD_LIMIT: 100,
+                SERVICE_FIELD_OFFSET: 10,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_events.await_args is not None
+    assert mock_get_events.await_args.kwargs == {
+        "limit_count": 100,
+        "limit_offset": 10,
+    }
+    assert response is not None
+    assert response["config_entry_id"] == entry.entry_id
+    assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
+    assert response["query"] == {"limit": 100, "offset": 10}
+    assert response["count"] == 3
+    assert response["results"][0] == {
+        "family": "ping_RTT",
+        "event_type": "action",
+        "timestamp": 1_774_036_038.371,
+        "timestamp_iso": "2026-03-20T19:47:18.371000+00:00",
+        "value": 1,
+        "previous_value": None,
+        "ok_value": None,
+        "state_key": None,
+        "wan_uuid": "wan-1",
+        "wan_name": "WAN-ONE",
+        "active": None,
+        "ready": None,
+        "changed_interface": None,
+        "primary_interface": None,
+        "wan_type": None,
+        "wan_switched": None,
+        "target": "1.1.1.1",
+        "name_server": None,
+        "dns_test_domain": None,
+        "wan_interface_address": None,
+        "measurement_kind": "rtt",
+        "measurement_value": 53.2365,
+        "threshold_value": 35.3376,
+        "failures": [],
+        "wan_statuses": [],
+    }
+    assert response["results"][1]["family"] == "dualwan_state"
+    assert response["results"][1]["wan_uuid"] == "wan-1"
+    assert response["results"][1]["changed_interface"] == "eth0"
+    assert response["results"][1]["wan_statuses"] == [
+        {
+            "interface_key": "eth0",
+            "wan_uuid": "wan-1",
+            "wan_name": "WAN-ONE",
+            "active": True,
+            "ready": True,
+            "ip4_addresses": ["23.245.207.179/23"],
+            "seq": 0,
+        },
+        {
+            "interface_key": "eth1",
+            "wan_uuid": "wan-2",
+            "wan_name": "WAN-TWO",
+            "active": False,
+            "ready": False,
+            "ip4_addresses": [],
+            "seq": 1,
+        },
+    ]
+    assert response["results"][2]["family"] == "dns"
+    assert response["results"][2]["name_server"] == "172.64.36.2"
+    assert response["results"][2]["wan_interface_address"] == "23.245.207.179"

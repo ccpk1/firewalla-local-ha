@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
 
@@ -19,12 +20,30 @@ from ..models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
+    FirewallaGroupRuntime,
+    FirewallaHostRuntime,
+    FirewallaNetworkHostRanking,
+    FirewallaNetworkHostTotals,
+    FirewallaNetworkMetricSample,
+    FirewallaNetworkMetricSeries,
+    FirewallaNetworkSegment,
+    FirewallaNetworkSegmentView,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
     FirewallaSpeedTestResult,
     FirewallaSystemInfo,
     FirewallaSystemStatus,
+    FirewallaUsageHistoryDeviceUsage,
+    FirewallaUsageHistoryEntry,
+    FirewallaUsageHistoryInterval,
+    FirewallaUsageHistoryMetric,
+    FirewallaUsageHistorySlot,
+    FirewallaUsageHistoryTarget,
+    FirewallaUsageHistoryView,
+    FirewallaWanEvent,
+    FirewallaWanEventFailure,
+    FirewallaWanEventStatus,
     FirewallaWanInterface,
     FirewallaWanUsagePeriod,
     FirewallaWanUsageSample,
@@ -41,8 +60,20 @@ ORPHAN_POLICY_RETAIN_UNAVAILABLE_UNTIL_DESELECTED: Final = (
 )
 _DEFAULT_BOX_NAME: Final = "Firewalla"
 _RAW_MONTHLY_WAN_USAGE_KEY: Final = "monthlyDataUsageOnWans"
+_RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
+_RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
+_RAW_INTERFACE_KEY: Final = "interface"
+_RAW_META_KEY: Final = "meta"
+_RAW_NAME_KEY: Final = "name"
+_RAW_DESC_KEY: Final = "desc"
+_RAW_INTF_KEY: Final = "intf"
+_RAW_UUID_KEY: Final = "uuid"
 _RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
 _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
+_SUPPORTED_WAN_EVENT_STATE_FAMILIES: Final = frozenset(
+    {"wan_state", "overall_wan_state", "dualwan_state", "dns"}
+)
+_SUPPORTED_WAN_EVENT_ACTION_FAMILIES: Final = frozenset({"ping_RTT", "ping_lossrate"})
 _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS: Final = (
     "/",
     "/boot",
@@ -145,9 +176,57 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             limit=limit,
         )
 
+    def get_groups(self) -> tuple[FirewallaGroupRuntime, ...]:
+        """Return normalized group inventory from the current snapshot."""
+        if self.coordinator.data is None:
+            return ()
+        return self.coordinator.data.groups
+
+    def get_available_networks(self) -> tuple[FirewallaNetworkSegment, ...]:
+        """Return the available network segments discovered in runtime metadata."""
+        network_lookup = self._build_network_lookup(
+            self.coordinator.last_init_payload or {}
+        )
+        return tuple(
+            sorted(
+                (
+                    FirewallaNetworkSegment(uuid=network_id, name=network_name)
+                    for network_id, network_name in network_lookup.items()
+                ),
+                key=lambda network: (network.name.casefold(), network.uuid),
+            )
+        )
+
     async def async_run_internet_speed_test(self, wan_uuid: str) -> dict[str, object]:
         """Start one internet speed test for the requested WAN interface."""
         return await self.client.async_run_internet_speed_test(wan_uuid)
+
+    async def async_get_usage_history(
+        self,
+        *,
+        target: FirewallaUsageHistoryTarget,
+        begin_timestamp: int,
+        end_timestamp: int,
+        granularity: str,
+        app_ids: tuple[str, ...] | None,
+    ) -> FirewallaUsageHistoryView:
+        """Return one normalized usage-history response for the resolved target."""
+        raw_payload = await self.client.async_get_usage_history_payload(
+            scope_type=target.request_scope_type,
+            target=target.target_id,
+            begin_timestamp=begin_timestamp,
+            end_timestamp=end_timestamp,
+            granularity=granularity,
+            app_ids=app_ids,
+        )
+        return self._build_usage_history_view(
+            raw_payload,
+            target=target,
+            begin_timestamp=begin_timestamp,
+            end_timestamp=end_timestamp,
+            granularity=granularity,
+            app_ids=app_ids,
+        )
 
     def get_current_wan_usage(
         self,
@@ -168,6 +247,57 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Return the last-12-month WAN usage view from the local runtime."""
         raw_usage = await self.client.async_get_last12_monthly_wan_usage_payload()
         return self._build_last12_wan_usage_views(raw_usage, wan_uuid=wan_uuid)
+
+    async def async_get_wan_events(
+        self,
+        *,
+        wan_uuid: str | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[FirewallaWanEvent, ...]:
+        """Return normalized WAN health events from the local runtime."""
+        raw_events = await self.client.async_get_wan_events_payload(
+            limit_count=limit,
+            limit_offset=offset,
+        )
+        return self._build_wan_events(raw_events, wan_uuid=wan_uuid)
+
+    async def async_get_network_interfaces(
+        self,
+        *,
+        network_uuid: str | None = None,
+    ) -> tuple[FirewallaNetworkSegmentView, ...]:
+        """Return normalized network-interface summaries from the local runtime."""
+        available_networks = self.get_available_networks()
+        requested_networks = tuple(
+            network
+            for network in available_networks
+            if network_uuid is None or network.uuid == network_uuid
+        )
+        if not requested_networks:
+            return ()
+
+        raw_payloads = await asyncio.gather(
+            *(
+                self.client.async_get_network_interface_payload(
+                    network_uuid=network.uuid,
+                )
+                for network in requested_networks
+            )
+        )
+        host_lookup = self._build_host_lookup()
+        return tuple(
+            self._build_network_segment_view(
+                raw_payload,
+                target=network,
+                host_lookup=host_lookup,
+            )
+            for network, raw_payload in zip(
+                requested_networks,
+                raw_payloads,
+                strict=True,
+            )
+        )
 
     def _build_system_info(
         self, appliance_identity: FirewallaApplianceIdentityInput
@@ -278,6 +408,373 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if not successful_results:
             return None
         return successful_results[0]
+
+    def _build_host_lookup(self) -> dict[str, FirewallaHostRuntime]:
+        """Build a host-id to normalized host lookup from the current snapshot."""
+        if self.coordinator.data is None:
+            return {}
+        return {host.mac: host for host in self.coordinator.data.hosts if host.mac}
+
+    def _build_network_lookup(self, data: dict[str, object]) -> dict[str, str]:
+        """Build a lookup of network UUIDs to readable network names."""
+        raw_network_profiles = data.get(_RAW_NETWORK_PROFILES_KEY)
+        network_lookup: dict[str, str] = {}
+
+        if isinstance(raw_network_profiles, dict):
+            for network_id, raw_profile in raw_network_profiles.items():
+                if not isinstance(network_id, str) or not network_id:
+                    continue
+                if not isinstance(raw_profile, dict):
+                    continue
+
+                if display_name := self._resolve_network_display_name(raw_profile):
+                    network_lookup[network_id] = display_name
+
+        raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
+        if isinstance(raw_network_config, dict):
+            self._merge_network_config_lookup(
+                raw_network_config.get(_RAW_INTERFACE_KEY),
+                network_lookup,
+            )
+
+        return network_lookup
+
+    def _resolve_network_display_name(
+        self, raw_profile: dict[str, object]
+    ) -> str | None:
+        """Resolve the best available display name from one network profile."""
+        for key in (_RAW_DESC_KEY, _RAW_NAME_KEY, _RAW_INTF_KEY):
+            value = raw_profile.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _merge_network_config_lookup(
+        self, raw_interfaces: object, network_lookup: dict[str, str]
+    ) -> None:
+        """Merge readable network names from networkConfig interface metadata."""
+        if isinstance(raw_interfaces, dict):
+            meta = raw_interfaces.get(_RAW_META_KEY)
+            if isinstance(meta, dict):
+                network_id = meta.get(_RAW_UUID_KEY)
+                if isinstance(network_id, str) and network_id:
+                    for candidate in (
+                        meta.get(_RAW_NAME_KEY),
+                        raw_interfaces.get(_RAW_DESC_KEY),
+                        raw_interfaces.get(_RAW_NAME_KEY),
+                    ):
+                        if isinstance(candidate, str) and candidate:
+                            network_lookup[network_id] = candidate
+                            break
+
+            for value in raw_interfaces.values():
+                self._merge_network_config_lookup(value, network_lookup)
+            return
+
+        if isinstance(raw_interfaces, list):
+            for value in raw_interfaces:
+                self._merge_network_config_lookup(value, network_lookup)
+
+    def _build_network_segment_view(
+        self,
+        raw_payload: dict[str, object],
+        *,
+        target: FirewallaNetworkSegment,
+        host_lookup: dict[str, FirewallaHostRuntime],
+    ) -> FirewallaNetworkSegmentView:
+        """Normalize one raw item=intf payload into a bounded segment view."""
+        raw_flows = raw_payload.get("flows")
+        flows = raw_flows if isinstance(raw_flows, Mapping) else {}
+        hosts = self._build_network_hosts(
+            raw_payload.get("hosts"),
+            host_lookup=host_lookup,
+        )
+        return FirewallaNetworkSegmentView(
+            target=FirewallaNetworkSegment(
+                uuid=target.uuid,
+                name=self._optional_string(raw_payload.get("name")) or target.name,
+            ),
+            interface_name=self._optional_string(raw_payload.get("intf")),
+            network_type=self._optional_string(raw_payload.get("type")),
+            monitoring=self._optional_bool(raw_payload.get("monitoring")),
+            active=self._optional_bool(raw_payload.get("active")),
+            ready=self._optional_bool(raw_payload.get("ready")),
+            pending_test=self._optional_bool(raw_payload.get("pendingTest")),
+            gateway=self._optional_string(raw_payload.get("gateway")),
+            gateway6=self._optional_string(raw_payload.get("gateway6")),
+            route_id=self._optional_string(raw_payload.get("rtid")),
+            dns_servers=self._string_tuple(raw_payload.get("dns")),
+            dns6_servers=self._string_tuple(raw_payload.get("dns6")),
+            original_dns_servers=self._string_tuple(raw_payload.get("origDns")),
+            original_dns6_servers=self._string_tuple(raw_payload.get("origDns6")),
+            ipv4_addresses=self._combine_string_values(
+                raw_payload.get("ipv4"),
+                raw_payload.get("ipv4s"),
+            ),
+            ipv4_subnets=self._combine_string_values(
+                raw_payload.get("ipv4Subnet"),
+                raw_payload.get("ipv4Subnets"),
+            ),
+            ipv6_addresses=self._string_tuple(raw_payload.get("ipv6")),
+            ipv6_subnets=self._string_tuple(raw_payload.get("ipv6Subnets")),
+            route4_subnets=self._string_tuple(raw_payload.get("rt4Subnets")),
+            route6_subnets=self._string_tuple(raw_payload.get("rt6Subnets")),
+            policy=self._normalized_dict(raw_payload.get("policy")),
+            hosts=hosts,
+            top_download_hosts=self._build_network_flow_rankings(
+                self._resolve_network_ranking_payload(
+                    flows.get("download") or raw_payload.get("download")
+                ),
+                host_lookup=host_lookup,
+                metric_key="download",
+            ),
+            top_upload_hosts=self._build_network_flow_rankings(
+                self._resolve_network_ranking_payload(
+                    flows.get("upload") or raw_payload.get("upload")
+                ),
+                host_lookup=host_lookup,
+                metric_key="upload",
+            ),
+            new_last24=self._build_network_metric_series(raw_payload.get("newLast24")),
+            last60=self._build_network_metric_series(raw_payload.get("last60")),
+            last30=self._build_network_metric_series(raw_payload.get("last30")),
+            last12_months=self._build_network_metric_series(
+                raw_payload.get("last12Months")
+            ),
+        )
+
+    def _build_network_hosts(
+        self,
+        raw_hosts: object,
+        *,
+        host_lookup: dict[str, FirewallaHostRuntime],
+    ) -> tuple[FirewallaNetworkHostTotals, ...]:
+        """Normalize per-host totals exposed by one item=intf payload."""
+        if not isinstance(raw_hosts, Mapping):
+            return ()
+
+        hosts: list[FirewallaNetworkHostTotals] = []
+        for host_id, raw_totals in raw_hosts.items():
+            if not isinstance(host_id, str) or not host_id:
+                continue
+            if not isinstance(raw_totals, Mapping):
+                continue
+
+            host = host_lookup.get(host_id)
+            hosts.append(
+                FirewallaNetworkHostTotals(
+                    host_id=host_id,
+                    host_name=host.display_name if host is not None else None,
+                    ip_address=host.ip_address if host is not None else None,
+                    conn=self._optional_int(raw_totals.get("conn")),
+                    dns=self._optional_int(raw_totals.get("dns")),
+                    dns_blocked=self._optional_int(raw_totals.get("dnsB")),
+                    ip_blocked=self._optional_int(raw_totals.get("ipB")),
+                    ip_denied=self._optional_int(raw_totals.get("ipD")),
+                    ntp=self._optional_int(raw_totals.get("ntp")),
+                    download_bytes=self._optional_int(raw_totals.get("download")),
+                    upload_bytes=self._optional_int(raw_totals.get("upload")),
+                )
+            )
+
+        return tuple(
+            sorted(
+                hosts,
+                key=lambda host: (
+                    -((host.download_bytes or 0) + (host.upload_bytes or 0)),
+                    host.host_name.casefold() if host.host_name else "",
+                    host.host_id,
+                ),
+            )
+        )
+
+    def _build_network_flow_rankings(
+        self,
+        raw_rankings: object,
+        *,
+        host_lookup: dict[str, FirewallaHostRuntime],
+        metric_key: str,
+    ) -> tuple[FirewallaNetworkHostRanking, ...]:
+        """Build ranked traffic summaries from one raw flows ranking list."""
+        if not isinstance(raw_rankings, list):
+            return ()
+
+        rankings: list[FirewallaNetworkHostRanking] = []
+        for raw_ranking in raw_rankings:
+            if not isinstance(raw_ranking, Mapping):
+                continue
+
+            host_id = (
+                self._optional_string(raw_ranking.get("device"))
+                or self._optional_string(raw_ranking.get("mac"))
+                or self._optional_string(raw_ranking.get("deviceMac"))
+            )
+            if host_id is None:
+                continue
+
+            value = (
+                self._optional_int(raw_ranking.get(metric_key))
+                or self._optional_int(raw_ranking.get("bytes"))
+                or self._optional_int(raw_ranking.get("count"))
+            )
+            if value is None:
+                continue
+
+            host = host_lookup.get(host_id)
+            rankings.append(
+                FirewallaNetworkHostRanking(
+                    host_id=host_id,
+                    host_name=host.display_name if host is not None else None,
+                    ip_address=(
+                        host.ip_address
+                        if host is not None
+                        else self._optional_string(raw_ranking.get("deviceIP"))
+                    ),
+                    remote_host=(
+                        self._optional_string(raw_ranking.get("host"))
+                        or self._optional_string(raw_ranking.get("domain"))
+                    ),
+                    remote_ip=self._optional_string(raw_ranking.get("ip")),
+                    value=value,
+                )
+            )
+
+        return tuple(
+            sorted(
+                rankings,
+                key=lambda ranking: (
+                    -ranking.value,
+                    ranking.host_name or "",
+                    ranking.host_id,
+                ),
+            )
+        )
+
+    def _resolve_network_ranking_payload(self, value: object) -> object:
+        """Resolve one ranking payload to the list of ranking rows when possible."""
+        if isinstance(value, list):
+            return value
+        if not isinstance(value, Mapping):
+            return value
+
+        if isinstance(nested_flows := value.get("flows"), list):
+            return nested_flows
+
+        for key in ("download", "upload", "items", "results"):
+            nested_value = value.get(key)
+            if isinstance(nested_value, list):
+                return nested_value
+
+        return value
+
+    def _build_network_metric_series(
+        self,
+        raw_window: object,
+    ) -> tuple[FirewallaNetworkMetricSeries, ...]:
+        """Normalize one network summary window keyed by metric name."""
+        if not isinstance(raw_window, Mapping):
+            return ()
+
+        series_collection: list[FirewallaNetworkMetricSeries] = []
+        for metric, raw_samples in raw_window.items():
+            if not isinstance(metric, str) or not metric:
+                continue
+            if not isinstance(raw_samples, list):
+                continue
+
+            samples: list[FirewallaNetworkMetricSample] = []
+            for raw_sample in raw_samples:
+                if (
+                    not isinstance(raw_sample, list)
+                    or len(raw_sample) != 2
+                    or (timestamp := self._optional_int(raw_sample[0])) is None
+                ):
+                    continue
+
+                value = raw_sample[1]
+                if not isinstance(value, (int, float)):
+                    continue
+
+                samples.append(
+                    FirewallaNetworkMetricSample(
+                        timestamp=timestamp,
+                        value=value,
+                    )
+                )
+
+            series_collection.append(
+                FirewallaNetworkMetricSeries(
+                    metric=metric,
+                    samples=tuple(samples),
+                )
+            )
+
+        return tuple(sorted(series_collection, key=lambda series: series.metric))
+
+    def _optional_string(self, value: object) -> str | None:
+        """Return a stripped string when one is present."""
+        if not isinstance(value, str):
+            return None
+        stripped_value = value.strip()
+        return stripped_value or None
+
+    def _optional_bool(self, value: object) -> bool | None:
+        """Return a normalized boolean when one is present."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return bool(value)
+        return None
+
+    def _optional_int(self, value: object) -> int | None:
+        """Return an integer when one can be safely derived."""
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str) and value:
+            try:
+                return int(value)
+            except ValueError:
+                return None
+        return None
+
+    def _string_tuple(self, value: object) -> tuple[str, ...]:
+        """Return a stable tuple of non-empty strings."""
+        if isinstance(value, str):
+            return (value,) if value else ()
+        if isinstance(value, list):
+            return tuple(item for item in value if isinstance(item, str) and item)
+        return ()
+
+    def _combine_string_values(self, *values: object) -> tuple[str, ...]:
+        """Combine one or more string or list-like string sources."""
+        combined: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            for item in self._string_tuple(value):
+                if item in seen:
+                    continue
+                seen.add(item)
+                combined.append(item)
+        return tuple(combined)
+
+    def _normalized_dict(self, value: object) -> dict[str, object] | None:
+        """Return a shallow normalized dictionary when one is present."""
+        if not isinstance(value, Mapping):
+            return None
+
+        normalized: dict[str, object] = {}
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                continue
+            if not isinstance(nested_value, (str, bool, int, float, dict, list)):
+                continue
+            normalized[key] = nested_value
+
+        return normalized or None
 
     def _build_speed_test_results(
         self,
@@ -542,6 +1039,407 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         return tuple(samples)
 
+    def _build_wan_events(
+        self,
+        raw_events: object,
+        *,
+        wan_uuid: str | None,
+    ) -> tuple[FirewallaWanEvent, ...]:
+        """Build normalized WAN events from one raw list payload."""
+        if not isinstance(raw_events, list):
+            return ()
+
+        events: list[FirewallaWanEvent] = []
+        for raw_event in raw_events:
+            if not isinstance(raw_event, dict):
+                continue
+            if (event := self._build_wan_event(raw_event)) is None:
+                continue
+            if wan_uuid is not None and not self._wan_event_matches_wan(
+                event,
+                wan_uuid,
+            ):
+                continue
+            events.append(event)
+
+        return tuple(events)
+
+    def _build_wan_event(
+        self,
+        raw_event: dict[str, object],
+    ) -> FirewallaWanEvent | None:
+        """Build one normalized WAN event from one raw record."""
+        event_type = raw_event.get("event_type")
+        if not isinstance(event_type, str) or not event_type:
+            return None
+
+        timestamp_ms = self._normalized_int(raw_event.get("ts"))
+        if timestamp_ms is None:
+            return None
+        timestamp = timestamp_ms / 1000
+
+        raw_labels = raw_event.get("labels")
+        labels = raw_labels if isinstance(raw_labels, dict) else {}
+
+        if event_type == "state":
+            family = raw_event.get("state_type")
+            if not isinstance(family, str) or (
+                family not in _SUPPORTED_WAN_EVENT_STATE_FAMILIES
+            ):
+                return None
+
+            wan_statuses = self._build_wan_event_statuses(labels.get("wanStatus"))
+            changed_interface = self._normalized_string(labels.get("changedInterface"))
+            wan_uuid, wan_name = self._resolve_wan_event_identity(
+                labels=labels,
+                wan_statuses=wan_statuses,
+                interface_key=changed_interface,
+            )
+            return FirewallaWanEvent(
+                family=family,
+                event_type=event_type,
+                timestamp=timestamp,
+                value=self._normalized_number(raw_event.get("state_value")),
+                previous_value=self._normalized_number(
+                    raw_event.get("prev_state_value")
+                ),
+                ok_value=self._normalized_number(labels.get("ok_value")),
+                state_key=self._normalized_string(raw_event.get("state_key")),
+                wan_uuid=wan_uuid,
+                wan_name=wan_name,
+                active=self._normalized_bool(labels.get("active")),
+                ready=self._normalized_bool(labels.get("ready")),
+                changed_interface=changed_interface,
+                primary_interface=self._normalized_string(
+                    labels.get("primaryInterface")
+                ),
+                wan_type=self._normalized_string(labels.get("wanType")),
+                wan_switched=self._normalized_bool(labels.get("wanSwitched")),
+                name_server=self._normalized_string(labels.get("name_server")),
+                dns_test_domain=self._normalized_string(labels.get("dns_test_domain")),
+                wan_interface_address=self._normalized_string(
+                    labels.get("wan_intf_address")
+                ),
+                failures=self._build_wan_event_failures(labels.get("failures")),
+                wan_statuses=wan_statuses,
+            )
+
+        if event_type == "action":
+            family = raw_event.get("action_type")
+            if not isinstance(family, str) or (
+                family not in _SUPPORTED_WAN_EVENT_ACTION_FAMILIES
+            ):
+                return None
+
+            measurement_kind = "rtt" if family == "ping_RTT" else "lossrate"
+            return FirewallaWanEvent(
+                family=family,
+                event_type=event_type,
+                timestamp=timestamp,
+                value=self._normalized_number(raw_event.get("action_value")),
+                wan_uuid=self._normalized_string(
+                    labels.get(_RAW_WAN_INTERFACE_UUID_KEY)
+                ),
+                wan_name=self._normalized_string(
+                    labels.get(_RAW_WAN_INTERFACE_NAME_KEY)
+                ),
+                target=self._normalized_string(labels.get("target")),
+                measurement_kind=measurement_kind,
+                measurement_value=self._normalized_float(labels.get(measurement_kind)),
+                threshold_value=self._normalized_float(
+                    labels.get(f"{measurement_kind}Limit")
+                ),
+            )
+
+        return None
+
+    def _build_wan_event_failures(
+        self,
+        raw_failures: object,
+    ) -> tuple[FirewallaWanEventFailure, ...]:
+        """Build normalized WAN event failures from a raw list payload."""
+        if not isinstance(raw_failures, list):
+            return ()
+
+        failures: list[FirewallaWanEventFailure] = []
+        for raw_failure in raw_failures:
+            if not isinstance(raw_failure, dict):
+                continue
+            failure_type = self._normalized_string(raw_failure.get("type"))
+            if failure_type is None:
+                continue
+            failures.append(
+                FirewallaWanEventFailure(
+                    type=failure_type,
+                    target=self._normalized_string(raw_failure.get("target")),
+                )
+            )
+
+        return tuple(failures)
+
+    def _build_wan_event_statuses(
+        self,
+        raw_statuses: object,
+    ) -> tuple[FirewallaWanEventStatus, ...]:
+        """Build normalized WAN interface statuses from a raw mapping."""
+        if not isinstance(raw_statuses, dict):
+            return ()
+
+        statuses: list[FirewallaWanEventStatus] = []
+        for interface_key, raw_status in raw_statuses.items():
+            if not isinstance(interface_key, str) or not interface_key:
+                continue
+            if not isinstance(raw_status, dict):
+                continue
+            statuses.append(
+                FirewallaWanEventStatus(
+                    interface_key=interface_key,
+                    wan_uuid=self._normalized_string(
+                        raw_status.get(_RAW_WAN_INTERFACE_UUID_KEY)
+                    ),
+                    wan_name=self._normalized_string(
+                        raw_status.get(_RAW_WAN_INTERFACE_NAME_KEY)
+                    ),
+                    active=self._normalized_bool(raw_status.get("active")),
+                    ready=self._normalized_bool(raw_status.get("ready")),
+                    ip4_addresses=self._normalized_string_list(raw_status.get("ip4s")),
+                    seq=self._normalized_int(raw_status.get("seq")),
+                )
+            )
+
+        return tuple(
+            sorted(statuses, key=lambda status: status.interface_key.casefold())
+        )
+
+    def _resolve_wan_event_identity(
+        self,
+        *,
+        labels: dict[str, object],
+        wan_statuses: tuple[FirewallaWanEventStatus, ...],
+        interface_key: str | None,
+    ) -> tuple[str | None, str | None]:
+        """Resolve the primary WAN identity for one event when Firewalla exposes one."""
+        wan_uuid = self._normalized_string(labels.get(_RAW_WAN_INTERFACE_UUID_KEY))
+        wan_name = self._normalized_string(labels.get(_RAW_WAN_INTERFACE_NAME_KEY))
+        if wan_uuid is not None or wan_name is not None:
+            return wan_uuid, wan_name
+
+        if interface_key is not None:
+            matched_status = next(
+                (
+                    status
+                    for status in wan_statuses
+                    if status.interface_key == interface_key
+                ),
+                None,
+            )
+            if matched_status is not None:
+                return matched_status.wan_uuid, matched_status.wan_name
+
+        if len(wan_statuses) == 1:
+            return wan_statuses[0].wan_uuid, wan_statuses[0].wan_name
+
+        return None, None
+
+    def _wan_event_matches_wan(
+        self,
+        event: FirewallaWanEvent,
+        wan_uuid: str,
+    ) -> bool:
+        """Return whether one normalized event applies to the selected WAN."""
+        return event.wan_uuid == wan_uuid or any(
+            status.wan_uuid == wan_uuid for status in event.wan_statuses
+        )
+
+    def _build_usage_history_view(
+        self,
+        raw_payload: object,
+        *,
+        target: FirewallaUsageHistoryTarget,
+        begin_timestamp: int,
+        end_timestamp: int,
+        granularity: str,
+        app_ids: tuple[str, ...] | None,
+    ) -> FirewallaUsageHistoryView:
+        """Build one normalized usage-history response from raw payload data."""
+        payload = raw_payload if isinstance(raw_payload, dict) else {}
+        include_intervals = granularity == "hour"
+        return FirewallaUsageHistoryView(
+            target=target,
+            begin_timestamp=begin_timestamp,
+            end_timestamp=end_timestamp,
+            granularity=granularity,
+            app_ids=app_ids,
+            internet=self._build_usage_history_metric(
+                payload.get("internetTimeUsage"),
+                include_intervals=include_intervals,
+            ),
+            app_totals=self._build_usage_history_metric(
+                payload.get("appTimeUsageTotal"),
+                include_intervals=include_intervals,
+            ),
+            apps=self._build_usage_history_entries(
+                payload.get("appTimeUsage"),
+                include_intervals=include_intervals,
+            ),
+            categories=self._build_usage_history_entries(
+                payload.get("categoryTimeUsage"),
+                include_intervals=include_intervals,
+            ),
+        )
+
+    def _build_usage_history_entries(
+        self,
+        raw_entries: object,
+        *,
+        include_intervals: bool,
+    ) -> tuple[FirewallaUsageHistoryEntry, ...]:
+        """Build normalized usage-history entries from a raw keyed section."""
+        if not isinstance(raw_entries, dict):
+            return ()
+
+        entries: list[FirewallaUsageHistoryEntry] = []
+        for key, raw_entry in raw_entries.items():
+            if not isinstance(key, str) or not key or not isinstance(raw_entry, dict):
+                continue
+            if (
+                metric := self._build_usage_history_metric(
+                    raw_entry,
+                    include_intervals=include_intervals,
+                )
+            ) is None:
+                continue
+            entries.append(
+                FirewallaUsageHistoryEntry(
+                    key=key,
+                    metric=metric,
+                )
+            )
+
+        return tuple(sorted(entries, key=lambda entry: entry.key.casefold()))
+
+    def _build_usage_history_metric(
+        self,
+        raw_metric: object,
+        *,
+        include_intervals: bool,
+    ) -> FirewallaUsageHistoryMetric | None:
+        """Build one normalized usage-history metric from raw payload data."""
+        if not isinstance(raw_metric, dict):
+            return None
+
+        return FirewallaUsageHistoryMetric(
+            category=(
+                category
+                if isinstance((category := raw_metric.get("category")), str)
+                and category
+                else None
+            ),
+            total_minutes=self._normalized_int(raw_metric.get("totalMins")),
+            unique_minutes=self._normalized_int(raw_metric.get("uniqueMins")),
+            slots=self._build_usage_history_slots(raw_metric.get("slots")),
+            intervals=(
+                self._build_usage_history_intervals(raw_metric.get("intervals"))
+                if include_intervals
+                else ()
+            ),
+            devices=self._build_usage_history_devices(
+                raw_metric.get("devices"),
+                include_intervals=include_intervals,
+            ),
+        )
+
+    def _build_usage_history_slots(
+        self, raw_slots: object
+    ) -> tuple[FirewallaUsageHistorySlot, ...]:
+        """Build normalized usage-history slots from a raw slot mapping."""
+        if not isinstance(raw_slots, dict):
+            return ()
+
+        slots: list[FirewallaUsageHistorySlot] = []
+        for raw_timestamp, raw_slot in raw_slots.items():
+            timestamp = self._normalized_int(raw_timestamp)
+            if timestamp is None or not isinstance(raw_slot, dict):
+                continue
+            slots.append(
+                FirewallaUsageHistorySlot(
+                    timestamp=timestamp,
+                    total_minutes=self._normalized_int(raw_slot.get("totalMins")),
+                    unique_minutes=self._normalized_int(raw_slot.get("uniqueMins")),
+                )
+            )
+
+        return tuple(sorted(slots, key=lambda slot: slot.timestamp))
+
+    def _build_usage_history_intervals(
+        self, raw_intervals: object
+    ) -> tuple[FirewallaUsageHistoryInterval, ...]:
+        """Build normalized usage-history intervals from a raw list payload."""
+        if not isinstance(raw_intervals, list):
+            return ()
+
+        intervals: list[FirewallaUsageHistoryInterval] = []
+        for raw_interval in raw_intervals:
+            if not isinstance(raw_interval, dict):
+                continue
+            begin_timestamp = self._normalized_int(raw_interval.get("begin"))
+            end_timestamp = self._normalized_int(raw_interval.get("end"))
+            if begin_timestamp is None or end_timestamp is None:
+                continue
+            intervals.append(
+                FirewallaUsageHistoryInterval(
+                    begin_timestamp=begin_timestamp,
+                    end_timestamp=end_timestamp,
+                )
+            )
+
+        return tuple(
+            sorted(
+                intervals,
+                key=lambda interval: (
+                    interval.begin_timestamp,
+                    interval.end_timestamp,
+                ),
+            )
+        )
+
+    def _build_usage_history_devices(
+        self,
+        raw_devices: object,
+        *,
+        include_intervals: bool,
+    ) -> tuple[FirewallaUsageHistoryDeviceUsage, ...]:
+        """Build normalized device interval breakdowns from a raw mapping."""
+        if not isinstance(raw_devices, dict):
+            return ()
+
+        host_name_by_id = (
+            {host.mac: host.display_name for host in self.coordinator.data.hosts}
+            if self.coordinator.data is not None
+            else {}
+        )
+        devices: list[FirewallaUsageHistoryDeviceUsage] = []
+        for device_id, raw_device in raw_devices.items():
+            if not isinstance(device_id, str) or not device_id:
+                continue
+            if not isinstance(raw_device, dict):
+                continue
+            devices.append(
+                FirewallaUsageHistoryDeviceUsage(
+                    device_id=device_id,
+                    device_name=host_name_by_id.get(device_id),
+                    total_minutes=self._normalized_int(raw_device.get("totalMins")),
+                    unique_minutes=self._normalized_int(raw_device.get("uniqueMins")),
+                    intervals=(
+                        self._build_usage_history_intervals(raw_device.get("intervals"))
+                        if include_intervals
+                        else ()
+                    ),
+                )
+            )
+
+        return tuple(sorted(devices, key=lambda device: device.device_id.casefold()))
+
     def _normalized_int(self, value: object) -> int | None:
         """Return an integer from a Firewalla numeric field when possible."""
         if isinstance(value, bool):
@@ -559,6 +1457,78 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             except ValueError:
                 return None
         return None
+
+    def _normalized_float(self, value: object) -> float | None:
+        """Return a floating-point number from a Firewalla numeric field."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            stripped_value = value.strip()
+            if not stripped_value:
+                return None
+            try:
+                return float(stripped_value)
+            except ValueError:
+                return None
+        return None
+
+    def _normalized_number(self, value: object) -> int | float | None:
+        """Return an integer or float from a Firewalla numeric field."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return value
+        if isinstance(value, str):
+            stripped_value = value.strip()
+            if not stripped_value:
+                return None
+            try:
+                return int(stripped_value)
+            except ValueError:
+                try:
+                    return float(stripped_value)
+                except ValueError:
+                    return None
+        return None
+
+    def _normalized_bool(self, value: object) -> bool | None:
+        """Return a normalized boolean from a Firewalla field when possible."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            stripped_value = value.strip().casefold()
+            if stripped_value == "true":
+                return True
+            if stripped_value == "false":
+                return False
+        return None
+
+    def _normalized_string(self, value: object) -> str | None:
+        """Return a non-empty stripped string when one is present."""
+        if not isinstance(value, str):
+            return None
+        stripped_value = value.strip()
+        return stripped_value or None
+
+    def _normalized_string_list(self, value: object) -> tuple[str, ...]:
+        """Return a stable tuple of non-empty strings from one raw list."""
+        if not isinstance(value, list):
+            return ()
+
+        normalized_values = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            stripped_value = item.strip()
+            if not stripped_value:
+                continue
+            normalized_values.append(stripped_value)
+
+        return tuple(normalized_values)
 
     def build_device_info(self) -> DeviceInfo:
         """Build the license-anchored device entry for this config entry."""

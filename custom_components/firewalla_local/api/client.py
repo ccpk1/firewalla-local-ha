@@ -23,6 +23,7 @@ from ..models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
+    FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaHostVpnClient,
     FirewallaPolicyRule,
@@ -157,6 +158,7 @@ _RAW_SPEED_TEST_SERVER_HOST_KEY: Final = "host"
 _RAW_SPEED_TEST_SERVER_ID_KEY: Final = "id"
 _RAW_SPEED_TEST_SERVER_LOCATION_KEY: Final = "location"
 _RAW_SPEED_TEST_SERVER_SPONSOR_KEY: Final = "sponsor"
+_RAW_APP_TIME_USAGE_KEY: Final = "appTimeUsage"
 _RAW_MONTHLY_WAN_USAGE_KEY: Final = "monthlyDataUsageOnWans"
 _RAW_LAST12_WAN_USAGE_KEY: Final = "last12monthlyDataUsageOnWans"
 
@@ -266,6 +268,26 @@ class FirewallaApiClient:
         data: dict[str, object],
         target: str = DEFAULT_INIT_TARGET,
     ) -> dict[str, object]:
+        """Send a local Encipher message and return one decrypted data object."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=message_type,
+            data=data,
+            target=target,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                "Firewalla local runtime payload did not include a data object"
+            )
+
+        return data_payload
+
+    async def _async_send_local_message_data(
+        self,
+        *,
+        message_type: str,
+        data: dict[str, object],
+        target: str = DEFAULT_INIT_TARGET,
+    ) -> object:
         """Send a local Encipher message and return the decrypted data payload."""
         message = self._build_fwmessage(
             message_type=message_type,
@@ -340,11 +362,6 @@ class FirewallaApiClient:
             )
 
         data_payload = decrypted_payload.get(_RAW_MESSAGE_DATA_KEY)
-        if not isinstance(data_payload, dict):
-            raise FirewallaProtocolError(
-                "Firewalla local runtime payload did not include a data object"
-            )
-
         return data_payload
 
     async def async_get_runtime_init_payload(self) -> dict[str, object]:
@@ -461,6 +478,78 @@ class FirewallaApiClient:
             },
             target=DEFAULT_INIT_TARGET,
         )
+
+    async def async_get_usage_history_payload(
+        self,
+        *,
+        scope_type: str,
+        target: str,
+        begin_timestamp: int,
+        end_timestamp: int,
+        granularity: str,
+        app_ids: tuple[str, ...] | None,
+    ) -> dict[str, object]:
+        """Fetch one scoped usage-history payload from the local runtime."""
+        data: dict[str, object] = {
+            _COMMAND_ITEM_KEY: _RAW_APP_TIME_USAGE_KEY,
+            _RAW_USER_TYPE_KEY: scope_type,
+            "begin": begin_timestamp,
+            "end": end_timestamp,
+            "granularity": granularity,
+        }
+        if app_ids is not None:
+            data["apps"] = list(app_ids)
+
+        return await self._async_send_local_message(
+            message_type=_GET_MESSAGE_TYPE,
+            data=data,
+            target=target,
+        )
+
+    async def async_get_wan_events_payload(
+        self,
+        *,
+        limit_count: int,
+        limit_offset: int,
+    ) -> list[dict[str, object]]:
+        """Fetch the WAN events timeline payload from the local runtime."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: "events",
+                _COMMAND_VALUE_KEY: {
+                    "limit_count": limit_count,
+                    "limit_offset": limit_offset,
+                    "parse_json": True,
+                    "reverse": True,
+                },
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+        if not isinstance(data_payload, list):
+            raise FirewallaProtocolError(
+                "Firewalla local runtime payload did not include an events list"
+            )
+
+        return [item for item in data_payload if isinstance(item, dict)]
+
+    async def async_get_network_interface_payload(
+        self,
+        *,
+        network_uuid: str,
+    ) -> dict[str, object]:
+        """Fetch one network-interface summary payload from the local runtime."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={_COMMAND_ITEM_KEY: "intf"},
+            target=network_uuid,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                "Firewalla local runtime payload did not include an intf object"
+            )
+
+        return data_payload
 
     def _extract_appliance_identity(
         self, data: dict[str, object]
@@ -1197,6 +1286,19 @@ class FirewallaApiClient:
             )
         )
 
+    def _normalize_group_inventory(
+        self, data: dict[str, object]
+    ) -> tuple[FirewallaGroupRuntime, ...]:
+        """Normalize group inventory from the Firewalla tag collection."""
+        group_lookup = self._build_named_lookup(data, "tags")
+        return tuple(
+            FirewallaGroupRuntime(group_id=group_id, name=group_name)
+            for group_id, group_name in sorted(
+                group_lookup.items(),
+                key=lambda item: (item[1].casefold(), item[0]),
+            )
+        )
+
     def _normalize_user_app_usage_today(
         self, raw_app_usage_today: dict[str, object]
     ) -> tuple[FirewallaUserAppUsage, ...]:
@@ -1534,6 +1636,7 @@ class FirewallaApiClient:
     ) -> FirewallaRuntimeSnapshot:
         """Build a coordinator-ready snapshot from one raw init payload."""
         hosts = self._normalize_host_inventory(data)
+        groups = self._normalize_group_inventory(data)
         users = self._normalize_user_inventory(data)
         return FirewallaRuntimeSnapshot(
             appliance_identity=self._extract_appliance_identity(data),
@@ -1544,6 +1647,7 @@ class FirewallaApiClient:
             ),
             exception_rule_count=self._count_exception_rules(data),
             hosts=hosts,
+            groups=groups,
             users=users,
             speed_test_results=self._extract_speed_test_records(data),
         )

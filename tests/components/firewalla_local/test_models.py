@@ -1,6 +1,8 @@
 """Tests for Firewalla Local model helpers."""
 
 from custom_components.firewalla_local.models import (
+    FirewallaNetworkSegment,
+    FirewallaNetworkSegmentView,
     FirewallaPolicyRule,
     format_policy_rule_name,
     supports_rule_switch,
@@ -258,6 +260,18 @@ def test_supports_rule_switch_excludes_unknown_non_null_purposes() -> None:
     )
 
     assert supports_rule_switch(rule) is False
+
+
+def test_network_segment_view_host_count_tracks_normalized_hosts() -> None:
+    """Test network summary views expose a stable derived host count."""
+    view = FirewallaNetworkSegmentView(
+        target=FirewallaNetworkSegment(
+            uuid="5799d896-5e0f-40a5-a776-38a5d7746204",
+            name="VLAN10 CORE",
+        ),
+    )
+
+    assert view.host_count == 0
 
 
 def test_supports_rule_switch_excludes_firewall_rules() -> None:

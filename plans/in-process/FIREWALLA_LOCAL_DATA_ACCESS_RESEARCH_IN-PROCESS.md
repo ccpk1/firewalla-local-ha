@@ -550,29 +550,38 @@ These subtasks turn the newly confirmed local reads into bounded service surface
 
 ### Shared normalization foundation
 
-- [ ] Extend [custom_components/firewalla_local/models.py](custom_components/firewalla_local/models.py) with typed service-response models for:
+- [x] Extend [custom_components/firewalla_local/models.py](custom_components/firewalla_local/models.py) with typed service-response models for:
   - usage-history totals, slots, and intervals
   - speed-test history records
   - WAN event timeline records
   - network interface summary and ranked-flow payloads
-- [ ] Add dedicated client helpers in [custom_components/firewalla_local/api/client.py](custom_components/firewalla_local/api/client.py) for the confirmed read families instead of reusing ad hoc probe logic:
+- [x] Add dedicated client helpers in [custom_components/firewalla_local/api/client.py](custom_components/firewalla_local/api/client.py) for the confirmed read families instead of reusing ad hoc probe logic:
   - `appTimeUsage`
   - `internetSpeedtestResults`
   - `events`
   - `intf`
   - `flows` with `type=intf`
-- [ ] Decide whether the `events` and speed-test methods should use a shared raw-envelope helper or endpoint-specific parsing logic, and document that choice inline in [custom_components/firewalla_local/api/client.py](custom_components/firewalla_local/api/client.py).
+- [x] Decide whether the `events` and speed-test methods should use a shared raw-envelope helper or endpoint-specific parsing logic, and document that choice inline in [custom_components/firewalla_local/api/client.py](custom_components/firewalla_local/api/client.py).
+
+Implementation note:
+
+- The client now uses a shared decrypted-data helper for local Encipher reads and keeps endpoint-specific validation at the call sites so dict-backed and list-backed payload families can share transport logic without weakening payload checks.
 
 ### Usage-history service
 
-- [ ] Extend [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py) and [custom_components/firewalla_local/services.yaml](custom_components/firewalla_local/services.yaml) with one service-first usage-history query surface.
-- [ ] Make the service accept a logical scope selector and resolve it to the proven transport contract:
+- [x] Extend [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py) and [custom_components/firewalla_local/services.yaml](custom_components/firewalla_local/services.yaml) with one service-first usage-history query surface.
+- [x] Make the service accept a logical scope selector and resolve it to the proven transport contract:
   - device name or id -> `type=host`, target = MAC
   - group name or id -> `type=tag`, target = group id
   - user name or id -> `type=tag`, target = user id
-- [ ] Require explicit `begin`, `end`, and `granularity` inputs so the initial contract stays bounded and reproducible.
-- [ ] Return normalized totals, slot buckets, raw intervals, and scope metadata rather than raw Firewalla blobs.
-- [ ] Cover the new service in [tests/components/firewalla_local/test_services.py](tests/components/firewalla_local/test_services.py) and the normalization logic in [tests/components/firewalla_local/test_client.py](tests/components/firewalla_local/test_client.py) and [tests/components/firewalla_local/test_models.py](tests/components/firewalla_local/test_models.py).
+- [x] Require explicit `begin`, `end`, and `granularity` inputs so the initial contract stays bounded and reproducible.
+- [x] Return normalized totals, slot buckets, raw intervals, and scope metadata rather than raw Firewalla blobs.
+- [x] Cover the new service in [tests/components/firewalla_local/test_services.py](tests/components/firewalla_local/test_services.py) and the request-path plus snapshot normalization in [tests/components/firewalla_local/test_client.py](tests/components/firewalla_local/test_client.py).
+
+Implementation note:
+
+- The new `get_usage_history` service now resolves device, group, and user targets against normalized runtime inventory, issues the proven `appTimeUsage` local read with explicit `begin`, `end`, and `granularity`, and returns one bounded response envelope with scope metadata, internet totals, app totals, per-app entries, category entries, slot buckets, and interval detail.
+- The existing watched-user same-day entity path remains separate for now. The new service supports today-style queries through explicit bounds without forcing the entity path to converge prematurely.
 
 ### Speed-test history service
 
@@ -636,34 +645,43 @@ Implementation note:
 
 ### WAN events service
 
-- [ ] Add a WAN-events history service in [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py) for the confirmed `events` timeline rather than trying to turn it into traffic history.
-- [ ] Start with a narrow normalized contract that focuses on the event families already confirmed in capture and raw probes:
+- [x] Add a WAN-events history service in [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py) for the confirmed `events` timeline rather than trying to turn it into traffic history.
+- [x] Start with a narrow normalized contract that focuses on the event families already confirmed in capture and raw probes:
   - `wan_state`
   - `overall_wan_state`
   - `dualwan_state`
   - `dns`
   - action events such as `ping_RTT` and `ping_lossrate`
-- [ ] Normalize threshold and interface metadata so future health sensors or timeline cards can reuse the same output shape.
-- [ ] Add focused parsing and service tests in [tests/components/firewalla_local/test_client.py](tests/components/firewalla_local/test_client.py) and [tests/components/firewalla_local/test_services.py](tests/components/firewalla_local/test_services.py).
+- [x] Normalize threshold and interface metadata so future health sensors or timeline cards can reuse the same output shape.
+- [x] Add focused parsing and service tests in [tests/components/firewalla_local/test_client.py](tests/components/firewalla_local/test_client.py) and [tests/components/firewalla_local/test_services.py](tests/components/firewalla_local/test_services.py).
+
+Implementation note:
+
+- The WAN events service now uses one direct `item=events` paged local read with `limit_count`, `limit_offset`, `parse_json`, and `reverse`, and it normalizes supported state and action families into a shared event shape with threshold data, failure targets, and nested WAN-interface status metadata. The client path was widened just enough to support list-shaped decrypted `data` payloads without disturbing the existing dict-backed reads.
 
 ### Network segment summary services
 
-- [ ] Add one service for normalized network-interface summary reads backed by `item=intf` in [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py).
+- [x] Add one service for normalized network-interface summary reads backed by `item=intf` in [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py).
 - [ ] Add one service for normalized network-segment flow reads backed by `item=flows`, `type=intf` in [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py).
-- [ ] Resolve requested network segments through the runtime network inventory before issuing the local read so callers can use stable names or known ids.
-- [ ] Preserve the useful app-facing structures already confirmed in direct probes without exposing the full raw response:
+- [x] Resolve requested network segments through the runtime network inventory before issuing the local read so callers can use stable names or known ids.
+- [x] Preserve the useful app-facing structures already confirmed in direct probes without exposing the full raw response:
   - `newLast24`
   - `last30`
   - `last60`
   - `last12Months`
   - ranked upload and download summaries
   - per-host totals when present
-- [ ] Cover these paths in [tests/components/firewalla_local/test_services.py](tests/components/firewalla_local/test_services.py), [tests/components/firewalla_local/test_client.py](tests/components/firewalla_local/test_client.py), and [tests/components/firewalla_local/test_models.py](tests/components/firewalla_local/test_models.py).
+- [x] Cover these paths in [tests/components/firewalla_local/test_services.py](tests/components/firewalla_local/test_services.py), [tests/components/firewalla_local/test_client.py](tests/components/firewalla_local/test_client.py), and [tests/components/firewalla_local/test_models.py](tests/components/firewalla_local/test_models.py).
+
+Implementation note:
+
+- `get_network_interfaces` now resolves network selectors from runtime `networkProfiles` and `networkConfig`, issues one direct `item=intf` read per requested network UUID, and returns a bounded normalized view with interface metadata, `newLast24`, `last60`, `last30`, `last12Months`, per-host totals, and derived top upload and download host rankings.
+- The current response is intentionally broad and can be heavy when queried across all segments. Real-world usage should guide a later split into narrower or more filtered network views instead of prematurely guessing the right slicing model.
 
 ### Sequencing recommendation
 
 - [ ] Implement the shared client and model normalization first so the initial services share one parsing path.
-- [ ] Land usage history, internet speed test, and WAN usage before WAN events and network-segment services because they are the clearest quick wins with the lowest ambiguity.
+- [x] Land usage history, internet speed test, and WAN usage before WAN events and network-segment services because they are the clearest quick wins with the lowest ambiguity.
 - [ ] Defer any new entities until service payloads have been validated through the existing service and model test suite and real-world usage has confirmed which views are actually worth promoting.
 
 ## Action-trigger capture follow-ups
@@ -672,20 +690,20 @@ These captures are intended to identify discrete app-originated command shapes f
 
 ### Target action captures
 
-- [ ] Capture the app action for `Test Internet Speed` and confirm whether it is a narrow command, a batch action, or a page-triggered read-plus-command sequence.
-- [ ] Capture `Enable social hour` and identify the exact rule or policy mutation shape behind the toggle.
-- [ ] Capture `Disable social hour` and compare it against the enable path to determine whether the app uses a symmetric command or a different follow-up write.
+- [x] Capture the app action for `Test Internet Speed` and confirm whether it is a narrow command, a batch action, or a page-triggered read-plus-command sequence.
+- [x] Capture `Enable social hour` and identify the exact rule or policy mutation shape behind the toggle.
+- [x] Capture `Disable social hour` and compare it against the enable path to determine whether the app uses a symmetric command or a different follow-up write.
 
 ### Adjacent read-surface follow-up
 
-- [ ] Capture the WAN data-usage page for `WAN One` and `WAN Two` if the UI exposes per-WAN usage views separately from the network-segment detail already confirmed.
-- [ ] Compare that page against the already confirmed `intf`, `flows`, `events`, and `internetSpeedtestResults` families before assuming it needs a new protocol surface.
+- [x] Capture the WAN data-usage page for `WAN One` and `WAN Two` if the UI exposes per-WAN usage views separately from the network-segment detail already confirmed.
+- [x] Compare that page against the already confirmed `intf`, `flows`, `events`, and `internetSpeedtestResults` families before assuming it needs a new protocol surface.
 
 ### Capture output goals
 
-- [ ] Save one decoded artifact that isolates the action-trigger message sequence for speed test and social hour toggles.
-- [ ] Record whether these actions map cleanly onto existing rule or command families already seen in prior captures.
-- [ ] If the WAN data-usage page is captured later, record whether it reuses the same `type=intf` target model or introduces a WAN-specific read family.
+- [x] Save one decoded artifact that isolates the action-trigger message sequence for speed test and social hour toggles.
+- [x] Record whether these actions map cleanly onto existing rule or command families already seen in prior captures.
+- [x] If the WAN data-usage page is captured later, record whether it reuses the same `type=intf` target model or introduces a WAN-specific read family.
 
 ### Confirmed action-trigger findings
 
