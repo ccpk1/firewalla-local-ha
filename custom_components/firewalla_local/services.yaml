@@ -188,9 +188,9 @@ get_usage_history:
       selector:
         text:
 
-get_wan_usage:
-  name: Get WAN usage
-  description: Return normalized current-month WAN usage from the coordinator runtime payload.
+get_wan_data_usage:
+  name: Get WAN data usage
+  description: Return one normalized WAN data-usage report with current and history month, week, and day sections.
   fields:
     wan_uuid:
       required: false
@@ -212,36 +212,59 @@ get_wan_usage:
       selector:
         boolean:
       name: Refresh first
-      description: Optional. Defaults to true. Refresh the Firewalla runtime before reading usage.
-    config_entry_id:
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before reading current WAN data.
+    current_periods:
       required: false
-      example: "0123456789abcdef"
+      example: "month"
       selector:
-        text:
-    config_entry_name:
+        select:
+          multiple: true
+          options:
+            - value: "month"
+              label: Current month
+            - value: "week"
+              label: Current week
+            - value: "day"
+              label: Current day
+      name: Current periods
+      description: Optional. Defaults to current month unless you request only history.
+    history_period:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "month"
       selector:
-        text:
-
-get_wan_usage_history:
-  name: Get WAN usage history
-  description: Return normalized last-12-month WAN usage history from the Firewalla local API.
-  fields:
-    wan_uuid:
+        select:
+          options:
+            - value: "month"
+              label: Months
+            - value: "week"
+              label: Weeks
+            - value: "day"
+              label: Days
+      name: History period
+      description: Optional. Required when history count is greater than zero.
+    history_count:
       required: false
-      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      example: 3
       selector:
-        text:
-      name: WAN UUID
-      description: Optional. Filter results to one WAN UUID.
-    wan_name:
+        number:
+          min: 0
+          max: 366
+      name: History count
+      description: Optional. Number of full history periods to include. Defaults to 0. Historical periods are always full periods.
+    detail:
       required: false
-      example: "WAN-ONE"
+      example: "summary"
       selector:
-        text:
-      name: WAN name
-      description: Optional. Filter results to one WAN display name.
+        select:
+          options:
+            - value: "summary"
+              label: Summary
+            - value: "weekly"
+              label: Weekly
+            - value: "daily"
+              label: Daily
+      name: Detail
+      description: Optional. Defaults to summary. Use weekly or daily to add derived nested breakdown rows where that richer detail is supported.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

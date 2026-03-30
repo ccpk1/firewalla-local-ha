@@ -261,6 +261,7 @@ class FirewallaApplianceRuntimeInput:
     cloud_connected: bool | None = None
     ddns: str | None = None
     firmware_release_type: str | None = None
+    timezone_name: str | None = None
     public_ip: str | None = None
     public_ips: dict[str, str] | None = None
     cpu_usage_1m: float | None = None
@@ -347,33 +348,73 @@ class FirewallaWanInterface:
 
 
 @dataclass(slots=True, frozen=True)
-class FirewallaWanUsageSample:
-    """One normalized WAN usage data point."""
+class FirewallaWanDataUsageSample:
+    """One normalized WAN data-usage sample point."""
 
     timestamp: int
     value: int
 
 
 @dataclass(slots=True, frozen=True)
-class FirewallaWanUsagePeriod:
-    """One normalized WAN usage period."""
+class FirewallaWanDataUsagePeriod:
+    """One normalized WAN data-usage time period."""
 
-    bucket_timestamp: int | None = None
+    kind: str
     begin_timestamp: int | None = None
     end_timestamp: int | None = None
-    total_download_bytes: int | None = None
-    total_upload_bytes: int | None = None
-    download_samples: tuple[FirewallaWanUsageSample, ...] = ()
-    upload_samples: tuple[FirewallaWanUsageSample, ...] = ()
+    anchor_timestamp: int | None = None
+    is_partial: bool = False
+    boundary_source: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
-class FirewallaWanUsageView:
-    """Normalized WAN usage view returned for one WAN interface."""
+class FirewallaWanDataUsage:
+    """Normalized WAN data-usage totals for one time period."""
+
+    download_bytes: int | None = None
+    upload_bytes: int | None = None
+
+    @property
+    def total_bytes(self) -> int | None:
+        """Return the combined transfer total when both directions are known."""
+        if self.download_bytes is None and self.upload_bytes is None:
+            return None
+        return (self.download_bytes or 0) + (self.upload_bytes or 0)
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanDataUsageRow:
+    """One normalized WAN data-usage row."""
+
+    time_period: FirewallaWanDataUsagePeriod
+    usage: FirewallaWanDataUsage
+    detail: str = "summary"
+    weeks: tuple[FirewallaWanDataUsageRow, ...] = ()
+    days: tuple[FirewallaWanDataUsageRow, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanDataUsageReport:
+    """Normalized WAN data-usage report returned for one WAN interface."""
 
     wan_uuid: str
     wan_name: str | None
-    periods: tuple[FirewallaWanUsagePeriod, ...]
+    current_month: FirewallaWanDataUsageRow | None = None
+    current_week: FirewallaWanDataUsageRow | None = None
+    current_day: FirewallaWanDataUsageRow | None = None
+    history_months: tuple[FirewallaWanDataUsageRow, ...] = ()
+    history_weeks: tuple[FirewallaWanDataUsageRow, ...] = ()
+    history_days: tuple[FirewallaWanDataUsageRow, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaWanUsageSummary:
+    """Compact WAN usage summary used by current appliance attributes."""
+
+    wan_uuid: str
+    wan_name: str | None
+    download_bytes: int | None = None
+    upload_bytes: int | None = None
 
 
 @dataclass(slots=True, frozen=True)

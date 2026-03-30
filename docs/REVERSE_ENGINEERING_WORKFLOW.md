@@ -14,6 +14,55 @@ It has two goals:
 
 This document is intentionally operational. It is not vendor documentation.
 
+## Contract-first research method
+
+Reverse engineering should begin with published Firewalla contracts whenever
+they exist.
+
+The goal is not only to discover what the local box sends. The goal is to map
+local runtime behavior onto the most trustworthy Firewalla action, write, and
+read contracts, then record any local-only extensions separately.
+
+Use this order of evidence:
+
+1. published Firewalla action endpoints and required inputs
+2. published Firewalla create or update payloads
+3. published Firewalla read models and query shapes
+4. local runtime steady-state payloads
+5. local runtime mutation captures
+6. Home Assistant-specific derived interpretations
+
+Interpretation rules:
+
+- published contracts define the baseline nouns, object boundaries, and narrow
+  required inputs
+- local captures confirm how the local box expresses or mutates those concepts
+- local-only fields should be tracked as extensions, not as replacements for
+  published Firewalla concepts
+- a single live payload shape is evidence of implementation detail, not proof
+  that the public model is wrong
+
+### Required workflow before new modeling work
+
+Before designing a new service, normalized DTO, or mutation contract:
+
+1. read the relevant Firewalla public docs if they exist
+2. extract the published action, write, and read contracts
+3. list which fields are canonical Firewalla fields versus integration-derived
+   fields
+4. only then inspect local captures to map transport details and missing data
+
+Recommended field-mapping table for substantial work:
+
+- published field or action
+- local raw field or payload location
+- normalized canonical field
+- Home Assistant-derived field, if any
+- confidence and evidence source
+
+This prevents the repository from drifting into a bottom-up model shaped only
+by whichever local fields were easiest to capture first.
+
 ## Scope
 
 This workflow covers:
@@ -305,9 +354,26 @@ Every confirmed capture should update:
 - capture one app action at a time
 - preserve before and after inventory artifacts for every capture
 - prefer the stored Home Assistant config entry over ad hoc credentials
+- prefer published Firewalla contracts over ad hoc interpretation when both are
+  available
 - do not guess mutation semantics from UI labels alone
 - do not assume every switchable rule family uses `create` and `delete`
 - do not assume every disabled rule is deleted when turned off
+
+## Modeling output rule
+
+When reverse engineering produces a new durable understanding, record it in the
+right layer:
+
+- update this workflow document for capture steps, evidence sources, payload
+  findings, and confidence notes
+- update `docs/RULE_MODEL.md` when the durable canonical rule interpretation or
+  extension policy changes
+- update `docs/ARCHITECTURE.md` only when ownership boundaries or repository
+  structure need to change
+
+This separation keeps capture evidence, canonical modeling, and repository
+architecture from drifting into one mixed document.
 
 ## Confirmed protocol baseline
 

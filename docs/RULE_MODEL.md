@@ -16,6 +16,83 @@ This document is the long-term model reference. It is not a capture log.
 Evidence and packet-level workflow remain in
 `docs/REVERSE_ENGINEERING_WORKFLOW.md`.
 
+## Modeling approach
+
+Rule modeling should start from the narrowest trustworthy Firewalla contract,
+not from whichever local fields happen to appear first in captures.
+
+When Firewalla publishes a rule action, write payload, read payload, or data
+model, treat that material as the first-choice contract for outward-facing
+normalization.
+
+This means the rule model should be built in three layers:
+
+- raw local payload: the exact fields observed from the local box transport
+- canonical Firewalla rule: the normalized rule shape that stays as close as
+  practical to Firewalla's published nouns and structure
+- Home Assistant rule view: derived convenience fields used for selection,
+  readability, service UX, and entity behavior
+
+Critical rules:
+
+- do not collapse these layers into one convenience model
+- do not let a single local capture redefine a published Firewalla concept
+- do not expose Home Assistant-derived convenience fields as if they were
+  Firewalla-native fields
+
+### Contract precedence
+
+Use the following precedence order when deciding how a rule field or action
+should be modeled.
+
+1. published Firewalla action contract
+2. published Firewalla write contract
+3. published Firewalla read contract or data model
+4. confirmed local runtime payloads and mutation captures
+5. Home Assistant-specific derived fields
+
+Interpretation rules:
+
+- action surfaces should stay as narrow as the published contract allows
+- create and update surfaces should prefer published first-class inputs over
+  inferred convenience blobs
+- read models should prefer published object families and nesting before adding
+  integration-specific flattening
+- local-only fields may be normalized when they are useful, but they must be
+  marked as integration extensions rather than treated as canonical Firewalla
+  fields
+
+### Extension policy
+
+The integration may add derived rule fields when they improve Home Assistant
+behavior or readability, but those additions must stay explicit.
+
+Examples of acceptable derived fields:
+
+- `is_paused`
+- `pause_until`
+- `schedule_window`
+- `current_state_reason`
+- switch-eligibility and review metadata
+
+Rules for derived fields:
+
+- derive them from canonical fields whenever possible
+- name them as interpretations, not raw Firewalla facts
+- keep them out of mutation payload contracts unless Firewalla publishes the
+  same concept directly
+
+### Practical design consequence
+
+For future rule services, the working default should be:
+
+- start from the published Firewalla contract
+- map local runtime or mutation data into that contract
+- add explicit integration extensions only where Home Assistant needs them
+
+This approach keeps the integration aligned with Firewalla's public direction
+while still allowing local-only runtime evidence to fill gaps.
+
 ## Core model
 
 The integration now treats Firewalla policy rules through two separate lenses:

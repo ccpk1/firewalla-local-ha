@@ -25,6 +25,10 @@ from custom_components.firewalla_local.const import (
     DOMAIN,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
+    SERVICE_FIELD_CURRENT_PERIODS,
+    SERVICE_FIELD_DETAIL,
+    SERVICE_FIELD_HISTORY_COUNT,
+    SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_OFFSET,
@@ -43,9 +47,8 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_NETWORK_INTERFACES,
     SERVICE_GET_SPEED_TEST_RESULTS,
     SERVICE_GET_USAGE_HISTORY,
+    SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
-    SERVICE_GET_WAN_USAGE,
-    SERVICE_GET_WAN_USAGE_HISTORY,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -115,6 +118,7 @@ def _snapshot(
 def _runtime_payload() -> dict[str, object]:
     """Return a minimal raw init payload for coordinator setup tests."""
     return {
+        "timezone": "America/New_York",
         "policyRules": [],
         "networkProfiles": {
             "5799d896-5e0f-40a5-a776-38a5d7746204": {
@@ -192,30 +196,56 @@ def _wan_usage_history_payload() -> dict[str, object]:
     return {
         "wan-1": [
             {
-                "ts": 1_740_996_000,
+                "ts": 1_748_750_400,
                 "stats": {
-                    "download": [[1_740_996_000, 8192]],
-                    "upload": [[1_740_996_000, 4096]],
-                    "totalDownload": 8192,
-                    "totalUpload": 4096,
+                    "download": [
+                        [1_748_750_400, 1000],
+                        [1_748_836_800, 1100],
+                        [1_748_923_200, 1200],
+                        [1_749_009_600, 1300],
+                        [1_749_096_000, 1400],
+                        [1_749_182_400, 1500],
+                        [1_749_268_800, 1600],
+                        [1_749_355_200, 1700],
+                    ],
+                    "upload": [
+                        [1_748_750_400, 500],
+                        [1_748_836_800, 550],
+                        [1_748_923_200, 600],
+                        [1_749_009_600, 650],
+                        [1_749_096_000, 700],
+                        [1_749_182_400, 750],
+                        [1_749_268_800, 800],
+                        [1_749_355_200, 850],
+                    ],
+                    "totalDownload": 10800,
+                    "totalUpload": 5400,
                 },
             },
             {
-                "ts": 1_743_675_200,
+                "ts": 1_746_072_000,
                 "stats": {
-                    "download": [[1_743_675_200, 16384]],
-                    "upload": [[1_743_675_200, 6144]],
-                    "totalDownload": 16384,
-                    "totalUpload": 6144,
+                    "download": [
+                        [1_746_072_000, 2000],
+                        [1_746_158_400, 2100],
+                        [1_746_244_800, 2200],
+                    ],
+                    "upload": [
+                        [1_746_072_000, 900],
+                        [1_746_158_400, 1000],
+                        [1_746_244_800, 1100],
+                    ],
+                    "totalDownload": 6300,
+                    "totalUpload": 3000,
                 },
             },
         ],
         "wan-2": [
             {
-                "ts": 1_743_675_200,
+                "ts": 1_748_750_400,
                 "stats": {
-                    "download": [[1_743_675_200, 2048]],
-                    "upload": [[1_743_675_200, 1024]],
+                    "download": [[1_748_750_400, 2048]],
+                    "upload": [[1_748_750_400, 1024]],
                     "totalDownload": 2048,
                     "totalUpload": 1024,
                 },
@@ -299,7 +329,9 @@ def _wan_events_payload() -> list[dict[str, object]]:
     ]
 
 
-def _speed_test_snapshot() -> FirewallaRuntimeSnapshot:
+def _speed_test_snapshot(
+    *, timezone_name: str | None = None
+) -> FirewallaRuntimeSnapshot:
     """Return a runtime snapshot with normalized speed-test records."""
     return FirewallaRuntimeSnapshot(
         appliance_identity=FirewallaApplianceIdentityInput(
@@ -310,7 +342,9 @@ def _speed_test_snapshot() -> FirewallaRuntimeSnapshot:
             serial_number="serial-123",
             software_version="1.0.0",
         ),
-        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        appliance_runtime=FirewallaApplianceRuntimeInput(
+            timezone_name=timezone_name,
+        ),
         policy_rules=(),
         exception_rule_count=0,
         hosts=(
@@ -1990,10 +2024,12 @@ async def test_get_usage_history_service_preserves_explicit_empty_app_list(
     assert response["query"]["app_ids"] == []
 
 
-async def test_get_wan_usage_service_returns_current_month_view(
+async def test_get_wan_data_usage_service_returns_current_month_summary_by_default(
     hass: HomeAssistant,
 ) -> None:
-    """Test the current WAN usage service returns the coordinator-backed view."""
+    """Test the WAN data usage service returns current-month summary by default."""
+    await hass.config.async_set_time_zone("America/Los_Angeles")
+
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -2016,15 +2052,22 @@ async def test_get_wan_usage_service_returns_current_month_view(
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
-            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+            side_effect=(
+                _speed_test_snapshot(timezone_name="America/New_York"),
+                _speed_test_snapshot(timezone_name="America/New_York"),
+            ),
         ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_monthly_wan_usage_payload",
+            new=AsyncMock(return_value=_runtime_payload()["monthlyDataUsageOnWans"]),
+        ) as mock_get_monthly,
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_USAGE,
+            SERVICE_GET_WAN_DATA_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -2032,24 +2075,159 @@ async def test_get_wan_usage_service_returns_current_month_view(
             return_response=True,
         )
 
+    assert mock_get_monthly.await_count == 1
     assert response is not None
     assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is True
     assert response["wan"] is None
-    assert response["count"] == 2
-    first_view = response["results"][0]
-    assert first_view["wan_uuid"] == "wan-1"
-    assert first_view["wan_name"] == "WAN-ONE"
-    assert first_view["periods"][0]["total_download_bytes"] == 3072
-    assert (
-        first_view["periods"][0]["begin_timestamp_iso"] == "2025-03-30T00:00:00+00:00"
-    )
-    assert first_view["periods"][0]["end_timestamp_iso"] == "2025-04-29T23:59:59+00:00"
-    assert first_view["periods"][0]["download_samples"][0] == {
-        "timestamp": 1_743_480_000,
-        "timestamp_iso": "2025-04-01T04:00:00+00:00",
-        "value": 1024,
+    assert response["query"] == {
+        "current_periods": ["month"],
+        "history_period": None,
+        "history_count": 0,
+        "detail": "summary",
+        "time_zone": "America/New_York",
+        "detail_applied_to": [],
+        "detail_unavailable_for": [],
     }
+    assert response["count"] == 2
+    first_report = response["results"][0]
+    assert first_report["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
+    assert first_report["current_month"]["usage"] == {
+        "download_bytes": 3072,
+        "upload_bytes": 1280,
+        "total_bytes": 4352,
+    }
+    assert first_report["current_month"]["detail"] == "summary"
+    assert first_report["current_month"]["days"] == []
+    assert first_report["history_months"] == []
+
+
+async def test_get_wan_data_usage_service_adds_daily_detail_to_current_month(
+    hass: HomeAssistant,
+) -> None:
+    """Test daily detail is nested under current month when requested."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_monthly_wan_usage_payload",
+            new=AsyncMock(return_value=_runtime_payload()["monthlyDataUsageOnWans"]),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_DATA_USAGE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_DETAIL: "daily",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    first_report = response["results"][0]
+    assert response["query"]["detail_applied_to"] == ["current_month"]
+    assert first_report["current_month"]["detail"] == "daily"
+    assert first_report["current_month"]["days"][0]["usage"] == {
+        "download_bytes": 2048,
+        "upload_bytes": 768,
+        "total_bytes": 2816,
+    }
+    assert first_report["current_month"]["days"][0]["time_period"]["kind"] == "day"
+
+
+async def test_get_wan_data_usage_service_returns_history_months_only(
+    hass: HomeAssistant,
+) -> None:
+    """Test historical monthly usage can be returned without current periods."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_last12_monthly_wan_usage_payload",
+            new=AsyncMock(return_value=_wan_usage_history_payload()),
+        ) as mock_get_history,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_DATA_USAGE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_CURRENT_PERIODS: [],
+                SERVICE_FIELD_HISTORY_PERIOD: "month",
+                SERVICE_FIELD_HISTORY_COUNT: 1,
+                SERVICE_FIELD_WAN_UUID: "wan-1",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_history.await_count == 1
+    assert response is not None
+    assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
+    assert response["refreshed"] is False
+    assert response["query"]["current_periods"] == []
+    assert response["query"]["history_period"] == "month"
+    assert response["query"]["history_count"] == 1
+    first_report = response["results"][0]
+    assert first_report["current_month"] is None
+    assert len(first_report["history_months"]) == 1
+    assert first_report["history_months"][0]["usage"] == {
+        "download_bytes": 10800,
+        "upload_bytes": 5400,
+        "total_bytes": 16200,
+    }
+    assert first_report["history_months"][0]["detail"] == "summary"
 
 
 async def test_get_network_interfaces_service_returns_normalized_segment_view(
@@ -2331,10 +2509,10 @@ async def test_get_network_interfaces_service_accepts_wrapped_ranking_lists(
     }
 
 
-async def test_get_wan_usage_history_service_filters_one_wan_without_refresh(
+async def test_get_wan_data_usage_service_returns_history_days_in_local_time(
     hass: HomeAssistant,
 ) -> None:
-    """Test the WAN history service returns the direct-read view for one WAN."""
+    """Test history-day output uses local-time ISO period boundaries."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -2350,6 +2528,8 @@ async def test_get_wan_usage_history_service_filters_one_wan_without_refresh(
     )
     entry.add_to_hass(hass)
 
+    await hass.config.async_set_time_zone("America/Los_Angeles")
+
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
@@ -2357,45 +2537,156 @@ async def test_get_wan_usage_history_service_filters_one_wan_without_refresh(
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
-            return_value=_speed_test_snapshot(),
+            return_value=_speed_test_snapshot(timezone_name="America/New_York"),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_last12_monthly_wan_usage_payload",
             new=AsyncMock(return_value=_wan_usage_history_payload()),
-        ) as mock_get_history,
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_USAGE_HISTORY,
+            SERVICE_GET_WAN_DATA_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_WAN_UUID: "wan-1",
+                SERVICE_FIELD_CURRENT_PERIODS: [],
+                SERVICE_FIELD_HISTORY_PERIOD: "day",
+                SERVICE_FIELD_HISTORY_COUNT: 2,
+                SERVICE_FIELD_REFRESH: False,
             },
             blocking=True,
             return_response=True,
         )
 
-    assert mock_get_history.await_count == 1
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
-    assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
-    assert response["count"] == 1
-    first_period = response["results"][0]["periods"][0]
-    assert first_period["bucket_timestamp"] == 1_740_996_000
-    assert first_period["bucket_timestamp_iso"] == "2025-03-03T10:00:00+00:00"
-    assert first_period["begin_timestamp"] == 1_740_996_000
-    assert first_period["begin_timestamp_iso"] == "2025-03-03T10:00:00+00:00"
-    assert first_period["end_timestamp"] == 1_740_996_000
-    assert first_period["end_timestamp_iso"] == "2025-03-03T10:00:00+00:00"
-    assert first_period["total_download_bytes"] == 8192
-    assert first_period["upload_samples"][0] == {
-        "timestamp": 1_740_996_000,
-        "timestamp_iso": "2025-03-03T10:00:00+00:00",
-        "value": 4096,
+    assert response["query"]["time_zone"] == "America/New_York"
+    first_history_day = response["results"][0]["history_days"][0]
+    assert first_history_day["time_period"]["begin_timestamp_iso"] == (
+        "2025-06-08T00:00:00-04:00"
+    )
+    assert first_history_day["time_period"]["end_timestamp_iso"] == (
+        "2025-06-09T00:00:00-04:00"
+    )
+
+
+async def test_get_wan_data_usage_service_returns_current_and_history_weeks(
+    hass: HomeAssistant,
+) -> None:
+    """Test derived week rows use Monday-start local calendar windows."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    await hass.config.async_set_time_zone("America/Los_Angeles")
+
+    current_month_payload = {
+        "wan-1": {
+            "download": [
+                [1_748_750_400, 100],
+                [1_748_836_800, 110],
+                [1_748_923_200, 120],
+                [1_749_009_600, 130],
+                [1_749_096_000, 140],
+                [1_749_182_400, 150],
+                [1_749_268_800, 160],
+                [1_749_355_200, 170],
+                [1_749_441_600, 180],
+                [1_749_528_000, 190],
+            ],
+            "upload": [
+                [1_748_750_400, 10],
+                [1_748_836_800, 11],
+                [1_748_923_200, 12],
+                [1_749_009_600, 13],
+                [1_749_096_000, 14],
+                [1_749_182_400, 15],
+                [1_749_268_800, 16],
+                [1_749_355_200, 17],
+                [1_749_441_600, 18],
+                [1_749_528_000, 19],
+            ],
+            "totalDownload": 1450,
+            "totalUpload": 145,
+            "monthlyBeginTs": 1_748_750_400,
+            "monthlyEndTs": 1_751_342_400,
+        }
     }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(timezone_name="America/New_York"),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_monthly_wan_usage_payload",
+            new=AsyncMock(return_value=current_month_payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_last12_monthly_wan_usage_payload",
+            new=AsyncMock(return_value=_wan_usage_history_payload()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_DATA_USAGE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_CURRENT_PERIODS: ["week", "day"],
+                SERVICE_FIELD_HISTORY_PERIOD: "week",
+                SERVICE_FIELD_HISTORY_COUNT: 1,
+                SERVICE_FIELD_DETAIL: "daily",
+                SERVICE_FIELD_WAN_UUID: "wan-1",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["query"]["detail_applied_to"] == ["current_week", "history_weeks"]
+    current_week = response["results"][0]["current_week"]
+    assert current_week["time_period"]["begin_timestamp_iso"] == (
+        "2025-06-09T00:00:00-04:00"
+    )
+    assert current_week["time_period"]["end_timestamp_iso"] == (
+        "2025-06-16T00:00:00-04:00"
+    )
+    assert current_week["detail"] == "daily"
+    assert len(current_week["days"]) == 2
+    current_day = response["results"][0]["current_day"]
+    assert current_day["time_period"]["begin_timestamp_iso"] == (
+        "2025-06-10T00:00:00-04:00"
+    )
+    assert current_day["time_period"]["is_partial"] is True
+    history_week = response["results"][0]["history_weeks"][0]
+    assert history_week["time_period"]["begin_timestamp_iso"] == (
+        "2025-06-02T00:00:00-04:00"
+    )
+    assert history_week["time_period"]["end_timestamp_iso"] == (
+        "2025-06-09T00:00:00-04:00"
+    )
+    assert len(history_week["days"]) == 7
 
 
 async def test_get_wan_events_service_returns_normalized_timeline(

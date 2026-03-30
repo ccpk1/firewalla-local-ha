@@ -321,6 +321,14 @@ Recommendation on next planning step:
 - A separate implementation plan is not warranted yet for production integration changes.
 - A small follow-up protocol-discovery plan is warranted if this research should continue, focused on decoding page-specific read commands adjacent to already-proven narrow mutation commands.
 
+Open follow-up step:
+
+- [ ] Compare the current `get_wan_events` service contract against Firewalla's
+  published MSP Alarm model, especially Alarm type `15` Internet Connectivity
+  Update, and decide whether the service should remain low-level WAN-health
+  telemetry, grow an alarm-aligned projection, or split into separate telemetry
+  and alarm-shaped surfaces.
+
 Additional alarm-action note from the final batched capture:
 
 - A single follow-up capture of multiple alarm actions confirmed that alarm mutations are easy to identify on the existing local Encipher transport.
@@ -639,9 +647,119 @@ Implementation note:
 
 Implementation note:
 
-- The current-month WAN usage path now reuses the coordinator-owned runtime payload for `monthlyDataUsageOnWans`, while the year-history path uses one direct local `get` read for `last12monthlyDataUsageOnWans`. Both service surfaces flow through the same manager-owned WAN usage shaping layer before serialization.
-- The WAN usage service output now also includes human-readable UTC ISO timestamp fields alongside the raw epoch values, and year-history periods derive `begin_timestamp` and `end_timestamp` from sample coverage when the Firewalla payload omits explicit bounds.
-- The system-status binary sensor now also exposes a `current_wan_usage` attribute keyed by resolved WAN name so automations can read current upload and download totals without calling a service.
+- The WAN data-usage surface now uses one user-facing service, `get_wan_data_usage`, and the legacy split services were removed without compatibility aliases.
+- The current-month and history-month paths now use direct local reads for `monthlyDataUsageOnWans` and `last12monthlyDataUsageOnWans`, then flow through one manager-owned WAN data-usage shaping layer before serialization.
+- Current and history month rows now derive local calendar day rows from the proven daily arrays inside those monthly payloads.
+- Week rows are now derived from those day rows using a Monday-start local calendar week, with the implementation structured so another local week-start preference can be added later without reshaping the response model.
+- The WAN data-usage response now uses fixed period sections and a shared row contract, displays local-time ISO timestamp strings alongside raw epoch values, and derives history month bounds from sample coverage when the Firewalla payload omits explicit month timestamps.
+- The system-status binary sensor still exposes a compact `current_wan_usage` attribute keyed by resolved WAN name so automations can read current upload and download totals without calling a service.
+
+Open refinement step:
+
+- [x] Refine the WAN usage surface into one user-facing `get_wan_data_usage`
+  service that returns:
+  - fixed top-level time-period sections centered on user intent rather than
+    transport shape:
+    - `current_month`
+    - `current_week`
+    - `current_day`
+    - `history_months`
+    - `history_weeks`
+    - `history_days`
+  - one shared row contract inside every populated section so month, week, and
+    day rows read the same way to the user
+  - a small period-first service input contract:
+    - `current_periods`
+    - `history_period`
+    - `history_count`
+    - `detail`
+  - grain-based `detail` values instead of a vague `full` or generic richness
+    flag:
+    - `summary`
+    - `weekly`
+    - `daily` if proven available
+  - default `detail=summary` output that is lightweight and omits nested finer
+    period rows unless the caller explicitly requests them
+  - explicit `summary` semantics that mean one aggregate usage roll-up for the
+    exact requested time window represented by that row or section, not a loose
+    label for partially described transport data
+  - an explicit period-boundary policy where only `current_*` sections may
+    represent partial in-progress periods, while history sections must
+    represent full calendar days, full calendar weeks, or full calendar months
+  - explicit timestamp semantics review so the contract states whether daily
+    usage rows represent local midnight-to-midnight days, UTC days, or only raw
+    Firewalla boundaries without stronger interpretation
+  - professional naming that avoids vague transport-shaped terms such as
+    `periods`, `buckets`, and `breakdown`
+
+Delivered constraint note:
+
+- Current and history day rows are derived from the daily arrays present inside the proven monthly WAN payloads.
+- Current and history week rows are derived from those day rows using Monday as the default local week start.
+- The derivation layer was structured so a future local week-start preference can be added without changing the outward response shape.
+
+Recommendation for the end-user contract:
+
+- Present this as one WAN data-usage report, not two separate services.
+- Use fixed top-level period groups such as `current_month`, `current_day`,
+  `history_months`, and `history_days` so users can template against intuitive
+  names instead of learning transport-specific response shapes.
+- Keep every populated row structurally consistent by using the same inner
+  fields for all period types, for example `time_period`, `usage`, and
+  `detail`.
+- Make the default response summary-first: each requested section should return
+  one aggregate usage view for its exact time window, plus any history rows
+  requested by count.
+- Treat `detail` as an explicit finer-grain request, not a generic verbosity
+  switch. The base period summary is always included, and `detail` only adds
+  nested finer-grain rows when supported.
+- Lock in these intended combinations:
+  - `history_period=month` allows `detail=summary`, `weekly`, or `daily`
+  - `history_period=week` allows `detail=summary` or `daily`
+  - `history_period=day` allows `detail=summary` only
+- Weekly support remains an open availability check. If the Firewalla local
+  contract does not support real full-week rows directly or through a clean
+  defensible normalization, remove `current_week`, `history_weeks`, and
+  `detail=weekly` from the final service contract.
+- Only `current_month`, `current_week`, and `current_day` may be partial
+  in-progress periods. History rows must always represent full calendar
+  periods, not arbitrary user-trimmed windows.
+- If future query inputs allow a user to specify dates directly, the service
+  should either:
+  - reject non-aligned history requests with a clear validation error
+  - or normalize them to the containing full calendar period and state that
+    behavior explicitly in the returned `query` metadata
+- Example: a monthly history request that starts on February 28 must not return
+  a silently truncated February row that drops February 29 in a leap year.
+  The service should instead return the full February month or reject the
+  request as not aligned to full-month boundaries.
+- `summary` for history rows should therefore mean the aggregate for the full
+  represented day, week, or month. `summary` for `current_*` rows should mean
+  the aggregate for the in-progress current period up to the time Firewalla
+  measured it.
+- Only include finer-grained row detail when the user explicitly asks for a
+  richer `data_level`, so the default service call stays lightweight and
+  professional rather than returning chart payloads unconditionally.
+- Treat timestamp interpretation conservatively: prefer proving whether
+  Firewalla stores daily windows in local midnight-to-midnight time before
+  presenting that as fact. If the payload does not prove local-day semantics,
+  expose the raw timestamps clearly and avoid adding complex inference logic.
+- Prefer terms such as `report`, `time_period`, `usage`, and `data_level` over
+  generic transport-shaped names like `periods`, `buckets`, and `breakdown`.
+
+Validation and UX guidance:
+
+- History-oriented inputs should be phrased in counts of full periods, such as
+  `history_months=3` or `history_days=7`, rather than ad hoc date slices, when
+  the underlying Firewalla contract only clearly supports calendar-based
+  reporting.
+- If direct date-based filters are later introduced, the request contract must
+  state whether each period type requires calendar alignment.
+- Returned `query` metadata should make the effective behavior obvious by
+  indicating whether the result reflects a current partial period, a full
+  historical period, or a normalized calendar-aligned period.
+- Returned `query` metadata should also state the effective `detail` value and
+  whether any requested weekly detail was unavailable and therefore omitted.
 
 ### WAN events service
 

@@ -91,6 +91,7 @@ _RAW_SYSTEM_BOOTING_COMPLETE_KEY: Final = "bootingComplete"
 _RAW_SYSTEM_CLOUD_CONNECTED_KEY: Final = "cloudConnected"
 _RAW_SYSTEM_DDNS_KEY: Final = "ddns"
 _RAW_SYSTEM_FIRMWARE_RELEASE_TYPE_KEY: Final = "firmwareReleaseType"
+_RAW_SYSTEM_TIMEZONE_KEY: Final = "timezone"
 _RAW_SYSTEM_PUBLIC_IP_KEY: Final = "publicIp"
 _RAW_SYSTEM_PUBLIC_IPS_KEY: Final = "publicIps"
 _RAW_SYSTEM_OS_UPTIME_KEY: Final = "osUptime"
@@ -468,6 +469,16 @@ class FirewallaApiClient:
             target=DEFAULT_INIT_TARGET,
         )
 
+    async def async_get_monthly_wan_usage_payload(self) -> dict[str, object]:
+        """Fetch the current-month WAN usage payload from the local runtime."""
+        return await self._async_send_local_message(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _RAW_MONTHLY_WAN_USAGE_KEY,
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+
     async def async_get_last12_monthly_wan_usage_payload(self) -> dict[str, object]:
         """Fetch the last-12-month WAN usage payload from the local runtime."""
         return await self._async_send_local_message(
@@ -648,6 +659,15 @@ class FirewallaApiClient:
                     str,
                 )
                 and firmware_release_type
+                else None
+            ),
+            timezone_name=(
+                timezone_name
+                if isinstance(
+                    (timezone_name := data.get(_RAW_SYSTEM_TIMEZONE_KEY)),
+                    str,
+                )
+                and timezone_name
                 else None
             ),
             public_ip=(

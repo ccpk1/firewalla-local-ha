@@ -490,6 +490,9 @@
     "speed_test_wan_selector_conflict": {
       "message": "Provide either a WAN UUID or a WAN name, not both."
     },
+    "wan_data_usage_history_period_required": {
+      "message": "History period is required when history count is greater than zero."
+    },
     "wrong_integration_entry": {
       "message": "The requested config entry does not belong to Firewalla Local."
     }
@@ -603,9 +606,9 @@
         }
       }
     },
-    "get_wan_usage": {
-      "name": "Get WAN usage",
-      "description": "Return normalized current-month WAN usage from the coordinator runtime payload.",
+    "get_wan_data_usage": {
+      "name": "Get WAN data usage",
+      "description": "Return one normalized WAN data-usage report with current and history month, week, and day sections.",
       "fields": {
         "wan_uuid": {
           "name": "WAN UUID (Optional)",
@@ -617,29 +620,23 @@
         },
         "refresh": {
           "name": "Refresh first",
-          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading usage."
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading current WAN data."
         },
-        "config_entry_id": {
-          "name": "Config entry ID (Optional)",
-          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        "current_periods": {
+          "name": "Current periods (Optional)",
+          "description": "Defaults to current month unless you request only history. Supported values are month, week, and day."
         },
-        "config_entry_name": {
-          "name": "Config entry name (Optional)",
-          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
-        }
-      }
-    },
-    "get_wan_usage_history": {
-      "name": "Get WAN usage history",
-      "description": "Return normalized last-12-month WAN usage history from the Firewalla local API.",
-      "fields": {
-        "wan_uuid": {
-          "name": "WAN UUID (Optional)",
-          "description": "Filter results to one WAN UUID."
+        "history_period": {
+          "name": "History period (Optional)",
+          "description": "Required when history count is greater than zero. Supported values are month, week, and day."
         },
-        "wan_name": {
-          "name": "WAN name (Optional)",
-          "description": "Filter results to one WAN display name."
+        "history_count": {
+          "name": "History count (Optional)",
+          "description": "Number of full history periods to include. Defaults to 0. Historical periods are always full periods."
+        },
+        "detail": {
+          "name": "Detail (Optional)",
+          "description": "Defaults to summary. Use weekly or daily to add derived nested breakdown rows where that richer detail is supported."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

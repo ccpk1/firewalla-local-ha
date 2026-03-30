@@ -44,7 +44,7 @@ from .const import (
 )
 from .coordinator import FirewallaConfigEntry
 from .entity import FirewallaEntity
-from .models import FirewallaHostRuntime, FirewallaWanUsageView
+from .models import FirewallaHostRuntime, FirewallaWanUsageSummary
 
 PARALLEL_UPDATES = 0
 
@@ -150,29 +150,25 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
         """Return the current WAN usage summary keyed by WAN name."""
         usage_by_wan_name: dict[str, dict[str, int | None]] = {}
 
-        for usage_view in self.integration_manager.get_current_wan_usage():
-            if not usage_view.periods:
-                continue
-
-            wan_name = self._resolve_wan_usage_name(usage_view, usage_by_wan_name)
-            latest_period = usage_view.periods[-1]
+        for usage_summary in self.integration_manager.get_current_wan_usage_summaries():
+            wan_name = self._resolve_wan_usage_name(usage_summary, usage_by_wan_name)
             usage_by_wan_name[wan_name] = {
-                "download_bytes": latest_period.total_download_bytes,
-                "upload_bytes": latest_period.total_upload_bytes,
+                "download_bytes": usage_summary.download_bytes,
+                "upload_bytes": usage_summary.upload_bytes,
             }
 
         return usage_by_wan_name
 
     @staticmethod
     def _resolve_wan_usage_name(
-        usage_view: FirewallaWanUsageView,
+        usage_summary: FirewallaWanUsageSummary,
         usage_by_wan_name: dict[str, dict[str, int | None]],
     ) -> str:
         """Return a stable WAN usage key without clobbering duplicates."""
-        wan_name = usage_view.wan_name or usage_view.wan_uuid
+        wan_name = usage_summary.wan_name or usage_summary.wan_uuid
         if wan_name not in usage_by_wan_name:
             return wan_name
-        return usage_view.wan_uuid
+        return usage_summary.wan_uuid
 
     @staticmethod
     def _format_uptime(uptime_seconds: int | None) -> str | None:

@@ -86,6 +86,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                     "customizedCategories": {
                         "dap_00089bfb01d9": {"name": "DAP - 00:08:9B:FB:01:D9"}
                     },
+                    "timezone": "America/New_York",
                     "hosts": [{"mac": "00:08:9B:FB:01:D9", "name": "Kitchen speaker"}],
                     "networkConfig": {
                         "interface": {
@@ -257,6 +258,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert snapshot.appliance_runtime.cloud_connected is True
     assert snapshot.appliance_runtime.ddns == "box.example.firewalla.org"
     assert snapshot.appliance_runtime.firmware_release_type == "alpha"
+    assert snapshot.appliance_runtime.timezone_name == "America/New_York"
     assert snapshot.appliance_runtime.public_ip == "23.245.207.179"
     assert snapshot.appliance_runtime.public_ips == {"eth0": "23.245.207.179"}
     assert snapshot.appliance_runtime.cpu_usage_1m == 42.1

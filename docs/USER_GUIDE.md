@@ -299,28 +299,24 @@ device, group, or user.
 - the response includes internet totals, app totals, per-app buckets, category
    buckets, and any available slot or interval detail in one response shape
 
-### Get WAN usage
+### Get WAN data usage
 
-Use `firewalla_local.get_wan_usage` to read the current-month data-usage view
-for each WAN.
+Use `firewalla_local.get_wan_data_usage` to read one normalized WAN
+data-usage report for each WAN.
 
-- by default it returns every discovered WAN in one response
+- by default it returns a `current_month` section for every discovered WAN
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
-- each WAN entry includes total upload and download bytes plus the current-month
-   sample series
-- timestamps are returned both as raw epoch values and readable UTC ISO fields
-
-### Get WAN usage history
-
-Use `firewalla_local.get_wan_usage_history` to read the last 12 monthly WAN
-usage buckets.
-
-- by default it returns every discovered WAN in one response
-- use `wan_uuid` or `wan_name` to filter to one WAN when needed
-- each month bucket includes total upload and download bytes plus the normalized
-   sample series
-- when Firewalla omits explicit month bounds, the integration derives begin and
-   end timestamps from the available sample coverage
+- use `current_periods` to request `current_month`, `current_week`, and
+   `current_day`
+- use `history_period` with `history_count` to request `history_months`,
+   `history_weeks`, or `history_days`
+- derived week rows use Monday as the default local week start
+- current periods may be partial, while historical periods are always full
+- use `detail=weekly` or `detail=daily` to add nested breakdown rows where
+   that richer detail is supported
+- each row uses the same structure so template sensors can read a stable shape
+- timestamps are returned both as raw epoch values and ISO strings in the
+   Firewalla appliance timezone when the box reports one
 
 ### Get WAN events
 

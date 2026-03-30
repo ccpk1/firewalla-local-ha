@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from typing import TYPE_CHECKING, Final
 
 from homeassistant.helpers import entity_registry as er
@@ -41,13 +42,16 @@ from ..models import (
     FirewallaUsageHistorySlot,
     FirewallaUsageHistoryTarget,
     FirewallaUsageHistoryView,
+    FirewallaWanDataUsage,
+    FirewallaWanDataUsagePeriod,
+    FirewallaWanDataUsageReport,
+    FirewallaWanDataUsageRow,
+    FirewallaWanDataUsageSample,
     FirewallaWanEvent,
     FirewallaWanEventFailure,
     FirewallaWanEventStatus,
     FirewallaWanInterface,
-    FirewallaWanUsagePeriod,
-    FirewallaWanUsageSample,
-    FirewallaWanUsageView,
+    FirewallaWanUsageSummary,
 )
 from .base_manager import FirewallaBaseManager
 
@@ -70,6 +74,7 @@ _RAW_INTF_KEY: Final = "intf"
 _RAW_UUID_KEY: Final = "uuid"
 _RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
 _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
+_WEEK_START_MONDAY: Final = 0
 _SUPPORTED_WAN_EVENT_STATE_FAMILIES: Final = frozenset(
     {"wan_state", "overall_wan_state", "dualwan_state", "dns"}
 )
@@ -228,25 +233,116 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             app_ids=app_ids,
         )
 
-    def get_current_wan_usage(
+    def get_current_wan_usage_summaries(
         self,
         *,
         wan_uuid: str | None = None,
-    ) -> tuple[FirewallaWanUsageView, ...]:
-        """Return the current-month WAN usage view from the runtime payload."""
+    ) -> tuple[FirewallaWanUsageSummary, ...]:
+        """Return current WAN usage totals from the coordinator payload."""
         raw_usage = (self.coordinator.last_init_payload or {}).get(
             _RAW_MONTHLY_WAN_USAGE_KEY
         )
-        return self._build_current_wan_usage_views(raw_usage, wan_uuid=wan_uuid)
+        return self._build_current_wan_usage_summaries(raw_usage, wan_uuid=wan_uuid)
 
-    async def async_get_wan_usage_history(
+    async def async_get_wan_data_usage_reports(
         self,
         *,
         wan_uuid: str | None = None,
-    ) -> tuple[FirewallaWanUsageView, ...]:
-        """Return the last-12-month WAN usage view from the local runtime."""
-        raw_usage = await self.client.async_get_last12_monthly_wan_usage_payload()
-        return self._build_last12_wan_usage_views(raw_usage, wan_uuid=wan_uuid)
+        current_periods: tuple[str, ...],
+        history_period: str | None,
+        history_count: int,
+        detail: str,
+        time_zone: tzinfo,
+    ) -> tuple[FirewallaWanDataUsageReport, ...]:
+        """Return normalized WAN data-usage reports from direct local reads."""
+        current_requested = any(
+            period in current_periods for period in ("month", "week", "day")
+        )
+        history_requested = history_period is not None and history_count > 0
+
+        current_raw: object = {}
+        history_raw: object = {}
+        if current_requested and history_requested:
+            current_raw, history_raw = await asyncio.gather(
+                self.client.async_get_monthly_wan_usage_payload(),
+                self.client.async_get_last12_monthly_wan_usage_payload(),
+            )
+        elif current_requested:
+            current_raw = await self.client.async_get_monthly_wan_usage_payload()
+        elif history_requested:
+            history_raw = await self.client.async_get_last12_monthly_wan_usage_payload()
+
+        current_rows, current_day_rows = self._build_current_wan_data_usage_rows(
+            current_raw,
+            wan_uuid=wan_uuid,
+            detail=detail,
+            time_zone=time_zone,
+        )
+        history_rows, history_day_rows = self._build_history_wan_data_usage_rows(
+            history_raw,
+            wan_uuid=wan_uuid,
+            history_count=history_count,
+            history_period=history_period,
+            detail=detail,
+            time_zone=time_zone,
+        )
+        wan_name_by_uuid = {wan.uuid: wan.name for wan in self.get_available_wans()}
+        report_wan_ids = tuple(
+            sorted(
+                set(current_rows)
+                | set(current_day_rows)
+                | set(history_rows)
+                | set(history_day_rows),
+                key=lambda candidate: (
+                    (wan_name_by_uuid.get(candidate, candidate) or "").casefold(),
+                    candidate,
+                ),
+            )
+        )
+
+        return tuple(
+            FirewallaWanDataUsageReport(
+                wan_uuid=report_wan_id,
+                wan_name=wan_name_by_uuid.get(report_wan_id, report_wan_id),
+                current_month=(
+                    current_rows.get(report_wan_id)
+                    if "month" in current_periods
+                    else None
+                ),
+                current_week=self._build_current_week_row(
+                    current_day_rows.get(report_wan_id, ()),
+                    detail=detail,
+                    time_zone=time_zone,
+                )
+                if "week" in current_periods
+                else None,
+                current_day=self._build_current_day_row(
+                    current_day_rows.get(report_wan_id, ())
+                )
+                if "day" in current_periods
+                else None,
+                history_months=history_rows.get(report_wan_id, ()),
+                history_weeks=(
+                    self._build_history_week_rows(
+                        history_day_rows.get(report_wan_id, ()),
+                        history_count=history_count,
+                        detail=detail,
+                        time_zone=time_zone,
+                    )
+                    if history_period == "week"
+                    else ()
+                ),
+                history_days=(
+                    self._build_history_day_rows(
+                        history_day_rows.get(report_wan_id, ()),
+                        history_count=history_count,
+                    )
+                    if history_period == "day"
+                    else ()
+                ),
+            )
+            for report_wan_id in report_wan_ids
+        )
 
     async def async_get_wan_events(
         self,
@@ -861,18 +957,18 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             for nested_value in raw_value:
                 self._collect_wan_interfaces(nested_value, wan_by_uuid)
 
-    def _build_current_wan_usage_views(
+    def _build_current_wan_usage_summaries(
         self,
         raw_usage: object,
         *,
         wan_uuid: str | None = None,
-    ) -> tuple[FirewallaWanUsageView, ...]:
-        """Build the current-month WAN usage view from raw payload data."""
+    ) -> tuple[FirewallaWanUsageSummary, ...]:
+        """Build compact current WAN usage summaries from raw payload data."""
         if not isinstance(raw_usage, dict):
             return ()
 
         wan_name_by_uuid = {wan.uuid: wan.name for wan in self.get_available_wans()}
-        views: list[FirewallaWanUsageView] = []
+        summaries: list[FirewallaWanUsageSummary] = []
         for raw_wan_uuid, raw_period in raw_usage.items():
             if not isinstance(raw_wan_uuid, str) or not raw_wan_uuid:
                 continue
@@ -881,42 +977,85 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             if not isinstance(raw_period, dict):
                 continue
 
-            period = self._build_wan_usage_period(
-                raw_period,
-                bucket_timestamp=None,
-                begin_timestamp=self._normalized_int(raw_period.get("monthlyBeginTs")),
-                end_timestamp=self._normalized_int(raw_period.get("monthlyEndTs")),
-            )
-            if period is None:
-                continue
-
-            views.append(
-                FirewallaWanUsageView(
+            summaries.append(
+                FirewallaWanUsageSummary(
                     wan_uuid=raw_wan_uuid,
                     wan_name=wan_name_by_uuid.get(raw_wan_uuid, raw_wan_uuid),
-                    periods=(period,),
+                    download_bytes=self._normalized_int(
+                        raw_period.get("totalDownload")
+                    ),
+                    upload_bytes=self._normalized_int(raw_period.get("totalUpload")),
                 )
             )
 
         return tuple(
             sorted(
-                views,
-                key=lambda view: ((view.wan_name or "").casefold(), view.wan_uuid),
+                summaries,
+                key=lambda summary: (
+                    (summary.wan_name or "").casefold(),
+                    summary.wan_uuid,
+                ),
             )
         )
 
-    def _build_last12_wan_usage_views(
+    def _build_current_wan_data_usage_rows(
         self,
         raw_usage: object,
         *,
-        wan_uuid: str | None = None,
-    ) -> tuple[FirewallaWanUsageView, ...]:
-        """Build the last-12-month WAN usage view from raw payload data."""
+        wan_uuid: str | None,
+        detail: str,
+        time_zone: tzinfo,
+    ) -> tuple[
+        dict[str, FirewallaWanDataUsageRow],
+        dict[str, tuple[FirewallaWanDataUsageRow, ...]],
+    ]:
+        """Build current-month WAN data-usage rows from raw payload data."""
         if not isinstance(raw_usage, dict):
-            return ()
+            return {}, {}
 
-        wan_name_by_uuid = {wan.uuid: wan.name for wan in self.get_available_wans()}
-        views: list[FirewallaWanUsageView] = []
+        rows: dict[str, FirewallaWanDataUsageRow] = {}
+        day_rows_by_wan: dict[str, tuple[FirewallaWanDataUsageRow, ...]] = {}
+        for raw_wan_uuid, raw_period in raw_usage.items():
+            if not isinstance(raw_wan_uuid, str) or not raw_wan_uuid:
+                continue
+            if wan_uuid is not None and raw_wan_uuid != wan_uuid:
+                continue
+            if not isinstance(raw_period, dict):
+                continue
+
+            if (
+                result := self._build_current_month_wan_data_usage_row(
+                    raw_period,
+                    detail=detail,
+                    time_zone=time_zone,
+                )
+            ) is None:
+                continue
+            row, day_rows = result
+            rows[raw_wan_uuid] = row
+            day_rows_by_wan[raw_wan_uuid] = day_rows
+
+        return rows, day_rows_by_wan
+
+    def _build_history_wan_data_usage_rows(
+        self,
+        raw_usage: object,
+        *,
+        wan_uuid: str | None,
+        history_count: int,
+        history_period: str | None,
+        detail: str,
+        time_zone: tzinfo,
+    ) -> tuple[
+        dict[str, tuple[FirewallaWanDataUsageRow, ...]],
+        dict[str, tuple[FirewallaWanDataUsageRow, ...]],
+    ]:
+        """Build trailing monthly WAN data-usage rows from raw payload data."""
+        if not isinstance(raw_usage, dict):
+            return {}, {}
+
+        rows_by_wan: dict[str, tuple[FirewallaWanDataUsageRow, ...]] = {}
+        day_rows_by_wan: dict[str, tuple[FirewallaWanDataUsageRow, ...]] = {}
         for raw_wan_uuid, raw_periods in raw_usage.items():
             if not isinstance(raw_wan_uuid, str) or not raw_wan_uuid:
                 continue
@@ -925,109 +1064,383 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             if not isinstance(raw_periods, list):
                 continue
 
-            periods = tuple(
-                period
+            month_results = [
+                result
                 for raw_period in raw_periods
                 if isinstance(raw_period, dict)
                 and (
-                    period := self._build_wan_usage_period(
-                        raw_period.get("stats"),
-                        bucket_timestamp=self._normalized_int(raw_period.get("ts")),
-                        begin_timestamp=None,
-                        end_timestamp=None,
+                    result := self._build_history_month_wan_data_usage_row(
+                        raw_period,
+                        detail=detail,
+                        time_zone=time_zone,
                     )
                 )
                 is not None
+            ]
+            sorted_results = tuple(
+                sorted(
+                    month_results,
+                    key=lambda result: result[0].time_period.anchor_timestamp or 0,
+                    reverse=True,
+                )
             )
-            if not periods:
+
+            if history_period == "month" and history_count > 0:
+                sorted_results = sorted_results[:history_count]
+
+            rows = tuple(result[0] for result in sorted_results)
+            day_rows = tuple(
+                day_row for result in sorted_results for day_row in result[1]
+            )
+            if rows:
+                rows_by_wan[raw_wan_uuid] = rows
+            if day_rows:
+                day_rows_by_wan[raw_wan_uuid] = day_rows
+
+        return rows_by_wan, day_rows_by_wan
+
+    def _build_current_month_wan_data_usage_row(
+        self,
+        raw_stats: dict[str, object],
+        *,
+        detail: str,
+        time_zone: tzinfo,
+    ) -> tuple[FirewallaWanDataUsageRow, tuple[FirewallaWanDataUsageRow, ...]] | None:
+        """Build one current-month WAN data-usage row."""
+        usage = self._build_wan_data_usage(raw_stats)
+        if usage is None:
+            return None
+
+        month_begin_timestamp = self._normalized_int(raw_stats.get("monthlyBeginTs"))
+        month_end_timestamp = self._normalized_int(raw_stats.get("monthlyEndTs"))
+        all_day_rows = self._build_daily_wan_data_usage_rows(
+            raw_stats,
+            month_begin_timestamp=month_begin_timestamp,
+            is_current=True,
+            time_zone=time_zone,
+        )
+        week_rows = (
+            self._build_week_rows(
+                all_day_rows,
+                detail=detail,
+                is_current=True,
+                time_zone=time_zone,
+            )
+            if detail == "weekly"
+            else ()
+        )
+        day_rows = all_day_rows if detail == "daily" else ()
+
+        return (
+            FirewallaWanDataUsageRow(
+                time_period=FirewallaWanDataUsagePeriod(
+                    kind="month",
+                    begin_timestamp=month_begin_timestamp,
+                    end_timestamp=month_end_timestamp,
+                    anchor_timestamp=month_begin_timestamp,
+                    is_partial=True,
+                    boundary_source="firewalla_explicit_bounds",
+                ),
+                usage=usage,
+                detail=detail if week_rows or day_rows else "summary",
+                weeks=week_rows,
+                days=day_rows,
+            ),
+            all_day_rows,
+        )
+
+    def _build_history_month_wan_data_usage_row(
+        self,
+        raw_period: dict[str, object],
+        *,
+        detail: str,
+        time_zone: tzinfo,
+    ) -> tuple[FirewallaWanDataUsageRow, tuple[FirewallaWanDataUsageRow, ...]] | None:
+        """Build one historical monthly WAN data-usage row."""
+        raw_stats = raw_period.get("stats")
+        if not isinstance(raw_stats, dict):
+            return None
+
+        usage = self._build_wan_data_usage(raw_stats)
+        if usage is None:
+            return None
+
+        month_anchor_timestamp = self._normalized_int(raw_period.get("ts"))
+        all_day_rows = self._build_daily_wan_data_usage_rows(
+            raw_stats,
+            month_begin_timestamp=month_anchor_timestamp,
+            is_current=False,
+            time_zone=time_zone,
+        )
+        week_rows = (
+            self._build_week_rows(
+                all_day_rows,
+                detail=detail,
+                is_current=False,
+                time_zone=time_zone,
+            )
+            if detail == "weekly"
+            else ()
+        )
+        day_rows = all_day_rows if detail == "daily" else ()
+        begin_timestamp, end_timestamp = self._derive_month_bounds(
+            month_anchor_timestamp,
+            time_zone=time_zone,
+        )
+
+        return (
+            FirewallaWanDataUsageRow(
+                time_period=FirewallaWanDataUsagePeriod(
+                    kind="month",
+                    begin_timestamp=begin_timestamp,
+                    end_timestamp=end_timestamp,
+                    anchor_timestamp=month_anchor_timestamp,
+                    is_partial=False,
+                    boundary_source="firewalla_month_bucket",
+                ),
+                usage=usage,
+                detail=detail if week_rows or day_rows else "summary",
+                weeks=week_rows,
+                days=day_rows,
+            ),
+            all_day_rows,
+        )
+
+    def _build_daily_wan_data_usage_rows(
+        self,
+        raw_stats: dict[str, object],
+        *,
+        month_begin_timestamp: int | None,
+        is_current: bool,
+        time_zone: tzinfo,
+    ) -> tuple[FirewallaWanDataUsageRow, ...]:
+        """Build daily WAN data-usage rows from monthly samples."""
+        if month_begin_timestamp is None:
+            return ()
+
+        download_by_timestamp = {
+            sample.timestamp: sample.value
+            for sample in self._build_wan_usage_samples(raw_stats.get("download"))
+        }
+        upload_by_timestamp = {
+            sample.timestamp: sample.value
+            for sample in self._build_wan_usage_samples(raw_stats.get("upload"))
+        }
+        ordered_sample_timestamps = sorted(
+            set(download_by_timestamp) | set(upload_by_timestamp)
+        )
+        if not ordered_sample_timestamps:
+            return ()
+
+        month_start_local = self._local_datetime(month_begin_timestamp, time_zone)
+
+        rows: list[FirewallaWanDataUsageRow] = []
+        for day_index, sample_timestamp in enumerate(ordered_sample_timestamps):
+            day_begin_local = month_start_local + timedelta(days=day_index)
+            day_end_local = day_begin_local + timedelta(days=1)
+            begin_timestamp = int(day_begin_local.astimezone(UTC).timestamp())
+            end_timestamp = int(day_end_local.astimezone(UTC).timestamp())
+            rows.append(
+                FirewallaWanDataUsageRow(
+                    time_period=FirewallaWanDataUsagePeriod(
+                        kind="day",
+                        begin_timestamp=begin_timestamp,
+                        end_timestamp=end_timestamp,
+                        anchor_timestamp=begin_timestamp,
+                        is_partial=(
+                            is_current
+                            and day_index == len(ordered_sample_timestamps) - 1
+                        ),
+                        boundary_source="derived_local_day_from_firewalla_samples",
+                    ),
+                    usage=FirewallaWanDataUsage(
+                        download_bytes=download_by_timestamp.get(sample_timestamp),
+                        upload_bytes=upload_by_timestamp.get(sample_timestamp),
+                    ),
+                )
+            )
+
+        return tuple(reversed(rows))
+
+    def _build_current_day_row(
+        self,
+        day_rows: tuple[FirewallaWanDataUsageRow, ...],
+    ) -> FirewallaWanDataUsageRow | None:
+        """Return the latest current-day row when one is available."""
+        return day_rows[0] if day_rows else None
+
+    def _build_current_week_row(
+        self,
+        day_rows: tuple[FirewallaWanDataUsageRow, ...],
+        *,
+        detail: str,
+        time_zone: tzinfo,
+    ) -> FirewallaWanDataUsageRow | None:
+        """Return the latest current-week row when one is available."""
+        week_rows = self._build_week_rows(
+            day_rows,
+            detail=detail,
+            is_current=True,
+            time_zone=time_zone,
+        )
+        return week_rows[0] if week_rows else None
+
+    def _build_history_day_rows(
+        self,
+        day_rows: tuple[FirewallaWanDataUsageRow, ...],
+        *,
+        history_count: int,
+    ) -> tuple[FirewallaWanDataUsageRow, ...]:
+        """Return the requested trailing historical day rows."""
+        return day_rows[:history_count] if history_count > 0 else ()
+
+    def _build_history_week_rows(
+        self,
+        day_rows: tuple[FirewallaWanDataUsageRow, ...],
+        *,
+        history_count: int,
+        detail: str,
+        time_zone: tzinfo,
+    ) -> tuple[FirewallaWanDataUsageRow, ...]:
+        """Return the requested trailing historical week rows."""
+        week_rows = self._build_week_rows(
+            day_rows,
+            detail=detail,
+            is_current=False,
+            time_zone=time_zone,
+        )
+        return week_rows[:history_count] if history_count > 0 else ()
+
+    def _build_week_rows(
+        self,
+        day_rows: tuple[FirewallaWanDataUsageRow, ...],
+        *,
+        detail: str,
+        is_current: bool,
+        time_zone: tzinfo,
+    ) -> tuple[FirewallaWanDataUsageRow, ...]:
+        """Build week rows from day rows using a configurable local week start."""
+        if not day_rows:
+            return ()
+
+        grouped_days: dict[datetime, list[FirewallaWanDataUsageRow]] = {}
+        for day_row in sorted(
+            day_rows,
+            key=lambda row: row.time_period.begin_timestamp or 0,
+        ):
+            begin_timestamp = day_row.time_period.begin_timestamp
+            if begin_timestamp is None:
+                continue
+            day_begin_local = self._local_datetime(begin_timestamp, time_zone)
+            week_start_date = day_begin_local.date() - timedelta(
+                days=(day_begin_local.weekday() - _WEEK_START_MONDAY) % 7
+            )
+            week_start_local = datetime.combine(
+                week_start_date,
+                time.min,
+                tzinfo=time_zone,
+            )
+            grouped_days.setdefault(week_start_local, []).append(day_row)
+
+        week_rows: list[FirewallaWanDataUsageRow] = []
+        latest_week_start = max(grouped_days) if grouped_days else None
+        for week_start_local, grouped_row_days in grouped_days.items():
+            if not grouped_row_days:
+                continue
+            if not is_current and len(grouped_row_days) < 7:
                 continue
 
-            views.append(
-                FirewallaWanUsageView(
-                    wan_uuid=raw_wan_uuid,
-                    wan_name=wan_name_by_uuid.get(raw_wan_uuid, raw_wan_uuid),
-                    periods=periods,
+            week_end_local = week_start_local + timedelta(days=7)
+            begin_timestamp = int(week_start_local.astimezone(UTC).timestamp())
+            end_timestamp = int(week_end_local.astimezone(UTC).timestamp())
+            week_rows.append(
+                FirewallaWanDataUsageRow(
+                    time_period=FirewallaWanDataUsagePeriod(
+                        kind="week",
+                        begin_timestamp=begin_timestamp,
+                        end_timestamp=end_timestamp,
+                        anchor_timestamp=begin_timestamp,
+                        is_partial=is_current and week_start_local == latest_week_start,
+                        boundary_source="derived_local_week_monday_start",
+                    ),
+                    usage=FirewallaWanDataUsage(
+                        download_bytes=sum(
+                            day_row.usage.download_bytes or 0
+                            for day_row in grouped_row_days
+                        ),
+                        upload_bytes=sum(
+                            day_row.usage.upload_bytes or 0
+                            for day_row in grouped_row_days
+                        ),
+                    ),
+                    detail="daily" if detail == "daily" else "summary",
+                    days=(tuple(grouped_row_days) if detail == "daily" else ()),
                 )
             )
 
         return tuple(
             sorted(
-                views,
-                key=lambda view: ((view.wan_name or "").casefold(), view.wan_uuid),
+                week_rows,
+                key=lambda row: row.time_period.begin_timestamp or 0,
+                reverse=True,
             )
         )
 
-    def _build_wan_usage_period(
+    def _derive_month_bounds(
+        self,
+        month_begin_timestamp: int | None,
+        *,
+        time_zone: tzinfo,
+    ) -> tuple[int | None, int | None]:
+        """Derive one local month window from its local start timestamp."""
+        if month_begin_timestamp is None:
+            return None, None
+
+        month_start_local = self._local_datetime(month_begin_timestamp, time_zone)
+        next_month_local = self._next_month_start(month_start_local)
+        return (
+            int(month_start_local.astimezone(UTC).timestamp()),
+            int(next_month_local.astimezone(UTC).timestamp()),
+        )
+
+    @staticmethod
+    def _next_month_start(current_month_start: datetime) -> datetime:
+        """Return the next local calendar month start."""
+        if current_month_start.month == 12:
+            return current_month_start.replace(
+                year=current_month_start.year + 1,
+                month=1,
+                day=1,
+            )
+        return current_month_start.replace(month=current_month_start.month + 1, day=1)
+
+    @staticmethod
+    def _local_datetime(timestamp: int, time_zone: tzinfo) -> datetime:
+        """Return one timestamp converted into the requested local timezone."""
+        return datetime.fromtimestamp(timestamp, UTC).astimezone(time_zone)
+
+    def _build_wan_data_usage(
         self,
         raw_stats: object,
-        *,
-        bucket_timestamp: int | None,
-        begin_timestamp: int | None,
-        end_timestamp: int | None,
-    ) -> FirewallaWanUsagePeriod | None:
-        """Build one normalized WAN usage period from raw payload data."""
+    ) -> FirewallaWanDataUsage | None:
+        """Build normalized WAN data-usage totals from raw stats."""
         if not isinstance(raw_stats, dict):
             return None
 
-        download_samples = self._build_wan_usage_samples(raw_stats.get("download"))
-        upload_samples = self._build_wan_usage_samples(raw_stats.get("upload"))
-        resolved_begin_timestamp, resolved_end_timestamp = (
-            self._derive_wan_usage_period_bounds(
-                bucket_timestamp=bucket_timestamp,
-                begin_timestamp=begin_timestamp,
-                end_timestamp=end_timestamp,
-                download_samples=download_samples,
-                upload_samples=upload_samples,
-            )
+        return FirewallaWanDataUsage(
+            download_bytes=self._normalized_int(raw_stats.get("totalDownload")),
+            upload_bytes=self._normalized_int(raw_stats.get("totalUpload")),
         )
-
-        return FirewallaWanUsagePeriod(
-            bucket_timestamp=bucket_timestamp,
-            begin_timestamp=resolved_begin_timestamp,
-            end_timestamp=resolved_end_timestamp,
-            total_download_bytes=self._normalized_int(raw_stats.get("totalDownload")),
-            total_upload_bytes=self._normalized_int(raw_stats.get("totalUpload")),
-            download_samples=download_samples,
-            upload_samples=upload_samples,
-        )
-
-    def _derive_wan_usage_period_bounds(
-        self,
-        *,
-        bucket_timestamp: int | None,
-        begin_timestamp: int | None,
-        end_timestamp: int | None,
-        download_samples: tuple[FirewallaWanUsageSample, ...],
-        upload_samples: tuple[FirewallaWanUsageSample, ...],
-    ) -> tuple[int | None, int | None]:
-        """Derive period bounds when the raw payload omits explicit begin and end."""
-        if begin_timestamp is not None and end_timestamp is not None:
-            return begin_timestamp, end_timestamp
-
-        sample_timestamps = sorted(
-            {sample.timestamp for sample in (*download_samples, *upload_samples)}
-        )
-        if sample_timestamps:
-            return (
-                (
-                    begin_timestamp
-                    if begin_timestamp is not None
-                    else sample_timestamps[0]
-                ),
-                (end_timestamp if end_timestamp is not None else sample_timestamps[-1]),
-            )
-
-        return begin_timestamp or bucket_timestamp, end_timestamp or bucket_timestamp
 
     def _build_wan_usage_samples(
         self,
         raw_samples: object,
-    ) -> tuple[FirewallaWanUsageSample, ...]:
-        """Build normalized WAN usage samples from a raw list payload."""
+    ) -> tuple[FirewallaWanDataUsageSample, ...]:
+        """Build normalized WAN data-usage samples from a raw list payload."""
         if not isinstance(raw_samples, list):
             return ()
 
-        samples: list[FirewallaWanUsageSample] = []
+        samples: list[FirewallaWanDataUsageSample] = []
         for raw_sample in raw_samples:
             if not isinstance(raw_sample, list) or len(raw_sample) < 2:
                 continue
@@ -1035,7 +1448,12 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             value = self._normalized_int(raw_sample[1])
             if timestamp is None or value is None:
                 continue
-            samples.append(FirewallaWanUsageSample(timestamp=timestamp, value=value))
+            samples.append(
+                FirewallaWanDataUsageSample(
+                    timestamp=timestamp,
+                    value=value,
+                )
+            )
 
         return tuple(samples)
 

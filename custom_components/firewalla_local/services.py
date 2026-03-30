@@ -18,6 +18,10 @@ from .const import (
     LOGGER,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
+    SERVICE_FIELD_CURRENT_PERIODS,
+    SERVICE_FIELD_DETAIL,
+    SERVICE_FIELD_HISTORY_COUNT,
+    SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
@@ -38,9 +42,8 @@ from .const import (
     SERVICE_GET_RUNTIME_INVENTORY,
     SERVICE_GET_SPEED_TEST_RESULTS,
     SERVICE_GET_USAGE_HISTORY,
+    SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
-    SERVICE_GET_WAN_USAGE,
-    SERVICE_GET_WAN_USAGE_HISTORY,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -60,6 +63,7 @@ from .const import (
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT,
+    TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
     TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY,
     TRANS_PLACEHOLDER_DURATION,
     TRANS_PLACEHOLDER_NETWORK_NAME,
@@ -85,13 +89,14 @@ from .models import (
     FirewallaUsageHistorySlot,
     FirewallaUsageHistoryTarget,
     FirewallaUsageHistoryView,
+    FirewallaWanDataUsage,
+    FirewallaWanDataUsagePeriod,
+    FirewallaWanDataUsageReport,
+    FirewallaWanDataUsageRow,
     FirewallaWanEvent,
     FirewallaWanEventFailure,
     FirewallaWanEventStatus,
     FirewallaWanInterface,
-    FirewallaWanUsagePeriod,
-    FirewallaWanUsageSample,
-    FirewallaWanUsageView,
 )
 from .utils.duration import parse_duration_to_seconds
 
@@ -168,20 +173,23 @@ GET_USAGE_HISTORY_SCHEMA = vol.Schema(
     }
 )
 
-GET_WAN_USAGE_SCHEMA = vol.Schema(
+GET_WAN_DATA_USAGE_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_CURRENT_PERIODS): vol.All(
+            cv.ensure_list_csv,
+            [vol.In(("month", "week", "day"))],
+        ),
+        vol.Optional(SERVICE_FIELD_HISTORY_PERIOD): vol.In(("month", "week", "day")),
+        vol.Optional(
+            SERVICE_FIELD_HISTORY_COUNT,
+            default=0,
+        ): vol.All(vol.Coerce(int), vol.Range(min=0, max=366)),
+        vol.Optional(SERVICE_FIELD_DETAIL, default="summary"): vol.In(
+            ("summary", "weekly", "daily")
+        ),
         vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
-        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
-        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
-    }
-)
-
-GET_WAN_USAGE_HISTORY_SCHEMA = vol.Schema(
-    {
-        vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
-        vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -448,12 +456,130 @@ def _serialize_usage_history_view(
     }
 
 
-def _serialize_wan_usage_sample(sample: FirewallaWanUsageSample) -> JsonObjectType:
-    """Serialize one WAN usage sample for service responses."""
+def _serialize_wan_data_usage_period(
+    period: FirewallaWanDataUsagePeriod,
+    *,
+    time_zone: tzinfo,
+) -> JsonObjectType:
+    """Serialize one WAN data-usage time period."""
     return {
-        "timestamp": sample.timestamp,
-        "timestamp_iso": _serialize_unix_timestamp(sample.timestamp),
-        "value": sample.value,
+        "kind": period.kind,
+        "label": _build_wan_data_usage_label(period, time_zone=time_zone),
+        "is_partial": period.is_partial,
+        "boundary_source": period.boundary_source,
+        "anchor_timestamp": period.anchor_timestamp,
+        "anchor_timestamp_iso": _serialize_local_timestamp(
+            period.anchor_timestamp,
+            time_zone=time_zone,
+        ),
+        "begin_timestamp": period.begin_timestamp,
+        "begin_timestamp_iso": _serialize_local_timestamp(
+            period.begin_timestamp,
+            time_zone=time_zone,
+        ),
+        "end_timestamp": period.end_timestamp,
+        "end_timestamp_iso": _serialize_local_timestamp(
+            period.end_timestamp,
+            time_zone=time_zone,
+        ),
+    }
+
+
+def _build_wan_data_usage_label(
+    period: FirewallaWanDataUsagePeriod,
+    *,
+    time_zone: tzinfo,
+) -> str | None:
+    """Build a stable user-facing label for one WAN data-usage time period."""
+    reference_timestamp = (
+        period.begin_timestamp or period.anchor_timestamp or period.end_timestamp
+    )
+    if reference_timestamp is None:
+        return None
+
+    local_time = datetime.fromtimestamp(reference_timestamp, UTC).astimezone(time_zone)
+    if period.kind == "month":
+        return local_time.strftime("%Y-%m")
+    if period.kind == "week" and period.begin_timestamp is not None:
+        week_begin = datetime.fromtimestamp(period.begin_timestamp, UTC).astimezone(
+            time_zone
+        )
+        return week_begin.strftime("Week of %Y-%m-%d")
+    if period.kind == "day":
+        return local_time.strftime("%Y-%m-%d")
+    return local_time.isoformat()
+
+
+def _serialize_wan_data_usage(
+    usage: FirewallaWanDataUsage,
+) -> JsonObjectType:
+    """Serialize normalized WAN data-usage totals."""
+    return {
+        "download_bytes": usage.download_bytes,
+        "upload_bytes": usage.upload_bytes,
+        "total_bytes": usage.total_bytes,
+    }
+
+
+def _serialize_wan_data_usage_row(
+    row: FirewallaWanDataUsageRow,
+    *,
+    time_zone: tzinfo,
+) -> JsonObjectType:
+    """Serialize one WAN data-usage row."""
+    return {
+        "time_period": _serialize_wan_data_usage_period(
+            row.time_period,
+            time_zone=time_zone,
+        ),
+        "usage": _serialize_wan_data_usage(row.usage),
+        "detail": row.detail,
+        "weeks": [
+            _serialize_wan_data_usage_row(week_row, time_zone=time_zone)
+            for week_row in row.weeks
+        ],
+        "days": [
+            _serialize_wan_data_usage_row(day_row, time_zone=time_zone)
+            for day_row in row.days
+        ],
+    }
+
+
+def _serialize_wan_data_usage_report(
+    report: FirewallaWanDataUsageReport,
+    *,
+    time_zone: tzinfo,
+) -> JsonObjectType:
+    """Serialize one WAN data-usage report."""
+    return {
+        "wan": {"uuid": report.wan_uuid, "name": report.wan_name},
+        "current_month": (
+            _serialize_wan_data_usage_row(report.current_month, time_zone=time_zone)
+            if report.current_month is not None
+            else None
+        ),
+        "current_week": (
+            _serialize_wan_data_usage_row(report.current_week, time_zone=time_zone)
+            if report.current_week is not None
+            else None
+        ),
+        "current_day": (
+            _serialize_wan_data_usage_row(report.current_day, time_zone=time_zone)
+            if report.current_day is not None
+            else None
+        ),
+        "history_months": [
+            _serialize_wan_data_usage_row(row, time_zone=time_zone)
+            for row in report.history_months
+        ],
+        "history_weeks": [
+            _serialize_wan_data_usage_row(row, time_zone=time_zone)
+            for row in report.history_weeks
+        ],
+        "history_days": [
+            _serialize_wan_data_usage_row(row, time_zone=time_zone)
+            for row in report.history_days
+        ],
     }
 
 
@@ -555,35 +681,6 @@ def _serialize_network_segment_view(
         "last12Months": [
             _serialize_network_metric_series(series) for series in view.last12_months
         ],
-    }
-
-
-def _serialize_wan_usage_period(period: FirewallaWanUsagePeriod) -> JsonObjectType:
-    """Serialize one WAN usage period for service responses."""
-    return {
-        "bucket_timestamp": period.bucket_timestamp,
-        "bucket_timestamp_iso": _serialize_unix_timestamp(period.bucket_timestamp),
-        "begin_timestamp": period.begin_timestamp,
-        "begin_timestamp_iso": _serialize_unix_timestamp(period.begin_timestamp),
-        "end_timestamp": period.end_timestamp,
-        "end_timestamp_iso": _serialize_unix_timestamp(period.end_timestamp),
-        "total_download_bytes": period.total_download_bytes,
-        "total_upload_bytes": period.total_upload_bytes,
-        "download_samples": [
-            _serialize_wan_usage_sample(sample) for sample in period.download_samples
-        ],
-        "upload_samples": [
-            _serialize_wan_usage_sample(sample) for sample in period.upload_samples
-        ],
-    }
-
-
-def _serialize_wan_usage_view(view: FirewallaWanUsageView) -> JsonObjectType:
-    """Serialize one WAN usage view for service responses."""
-    return {
-        "wan_uuid": view.wan_uuid,
-        "wan_name": view.wan_name,
-        "periods": [_serialize_wan_usage_period(period) for period in view.periods],
     }
 
 
@@ -1019,8 +1116,54 @@ async def _async_handle_get_usage_history(call: ServiceCall) -> JsonObjectType:
     }
 
 
-async def _async_handle_get_wan_usage(call: ServiceCall) -> JsonObjectType:
-    """Return current-month WAN usage from the coordinator payload."""
+def _resolve_wan_data_usage_inputs(
+    call: ServiceCall,
+) -> tuple[tuple[str, ...], str | None, int, str]:
+    """Resolve and validate WAN data-usage service inputs."""
+    raw_current_periods = call.data.get(SERVICE_FIELD_CURRENT_PERIODS)
+    history_period = cast(str | None, call.data.get(SERVICE_FIELD_HISTORY_PERIOD))
+    history_count = cast(int, call.data[SERVICE_FIELD_HISTORY_COUNT])
+    detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
+
+    current_periods = (
+        tuple(str(period) for period in cast(list[str], raw_current_periods))
+        if raw_current_periods is not None
+        else (() if history_count > 0 else ("month",))
+    )
+
+    if history_count > 0 and history_period is None:
+        raise ServiceValidationError(
+            "history_period is required when history_count is greater than zero",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
+        )
+
+    return current_periods, history_period, history_count, detail
+
+
+def _resolve_wan_data_usage_time_zone(
+    hass: HomeAssistant,
+    entry: FirewallaConfigEntry,
+) -> tuple[tzinfo, str]:
+    """Return the timezone used for WAN period derivation and display."""
+    snapshot = entry.runtime_data.coordinator.data
+    if (
+        snapshot is not None
+        and snapshot.appliance_runtime.timezone_name is not None
+        and (
+            firewalla_time_zone := dt_util.get_time_zone(
+                snapshot.appliance_runtime.timezone_name
+            )
+        )
+    ):
+        return firewalla_time_zone, snapshot.appliance_runtime.timezone_name
+
+    time_zone = dt_util.get_time_zone(hass.config.time_zone) or UTC
+    return time_zone, getattr(time_zone, "key", None) or hass.config.time_zone
+
+
+async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
+    """Return one normalized WAN data-usage report from direct local reads."""
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
@@ -1037,20 +1180,71 @@ async def _async_handle_get_wan_usage(call: ServiceCall) -> JsonObjectType:
         wan_name=call.data.get(SERVICE_FIELD_WAN_NAME),
         required=False,
     )
-
-    usage_views = entry.runtime_data.integration_manager.get_current_wan_usage(
-        wan_uuid=wan.uuid if wan is not None else None
+    current_periods, history_period, history_count, detail = (
+        _resolve_wan_data_usage_inputs(call)
     )
-    serialized_views: list[JsonValueType] = [
-        _serialize_wan_usage_view(view) for view in usage_views
+    time_zone, time_zone_name = _resolve_wan_data_usage_time_zone(call.hass, entry)
+    integration_manager = entry.runtime_data.integration_manager
+
+    try:
+        usage_reports = await integration_manager.async_get_wan_data_usage_reports(
+            wan_uuid=wan.uuid if wan is not None else None,
+            current_periods=current_periods,
+            history_period=history_period,
+            history_count=history_count,
+            detail=detail,
+            time_zone=time_zone,
+        )
+    except FirewallaApiError as err:
+        raise HomeAssistantError(f"Could not read WAN data usage: {err}") from err
+
+    detail_applied_to: list[JsonValueType] = []
+    if detail == "weekly":
+        if "month" in current_periods:
+            detail_applied_to.append("current_month")
+        if history_period == "month" and history_count > 0:
+            detail_applied_to.append("history_months")
+    if detail == "daily":
+        if "month" in current_periods:
+            detail_applied_to.append("current_month")
+        if "week" in current_periods:
+            detail_applied_to.append("current_week")
+        if history_period == "month" and history_count > 0:
+            detail_applied_to.append("history_months")
+        if history_period == "week" and history_count > 0:
+            detail_applied_to.append("history_weeks")
+
+    detail_unavailable_for: list[JsonValueType] = []
+    if detail == "weekly":
+        if "day" in current_periods:
+            detail_unavailable_for.append("current_day")
+        if history_period == "day" and history_count > 0:
+            detail_unavailable_for.append("history_days")
+    if detail == "daily":
+        if "day" in current_periods:
+            detail_unavailable_for.append("current_day")
+        if history_period == "day" and history_count > 0:
+            detail_unavailable_for.append("history_days")
+    serialized_reports: list[JsonValueType] = [
+        _serialize_wan_data_usage_report(report, time_zone=time_zone)
+        for report in usage_reports
     ]
 
     return {
         "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
-        "count": len(serialized_views),
-        "results": serialized_views,
+        "query": {
+            "current_periods": list(current_periods),
+            "history_period": history_period,
+            "history_count": history_count,
+            "detail": detail,
+            "time_zone": time_zone_name,
+            "detail_applied_to": detail_applied_to,
+            "detail_unavailable_for": detail_unavailable_for,
+        },
+        "count": len(serialized_reports),
+        "results": serialized_reports,
     }
 
 
@@ -1089,42 +1283,6 @@ async def _async_handle_get_network_interfaces(call: ServiceCall) -> JsonObjectT
         "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "network": _serialize_network_segment(network) if network is not None else None,
-        "count": len(serialized_views),
-        "results": serialized_views,
-    }
-
-
-async def _async_handle_get_wan_usage_history(call: ServiceCall) -> JsonObjectType:
-    """Return the last-12-month WAN usage view from the local runtime."""
-    entry = _get_loaded_entry(
-        call.hass,
-        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
-        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
-    )
-
-    wan = _resolve_requested_wan(
-        entry,
-        wan_uuid=call.data.get(SERVICE_FIELD_WAN_UUID),
-        wan_name=call.data.get(SERVICE_FIELD_WAN_NAME),
-        required=False,
-    )
-
-    try:
-        usage_views = (
-            await entry.runtime_data.integration_manager.async_get_wan_usage_history(
-                wan_uuid=wan.uuid if wan is not None else None
-            )
-        )
-    except FirewallaApiError as err:
-        raise HomeAssistantError(f"Could not read WAN usage history: {err}") from err
-
-    serialized_views: list[JsonValueType] = [
-        _serialize_wan_usage_view(view) for view in usage_views
-    ]
-
-    return {
-        "config_entry_id": entry.entry_id,
-        "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "count": len(serialized_views),
         "results": serialized_views,
     }
@@ -1300,21 +1458,12 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_WAN_USAGE):
+    if not hass.services.has_service(DOMAIN, SERVICE_GET_WAN_DATA_USAGE):
         hass.services.async_register(
             DOMAIN,
-            SERVICE_GET_WAN_USAGE,
-            _async_handle_get_wan_usage,
-            schema=GET_WAN_USAGE_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_WAN_USAGE_HISTORY):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_WAN_USAGE_HISTORY,
-            _async_handle_get_wan_usage_history,
-            schema=GET_WAN_USAGE_HISTORY_SCHEMA,
+            SERVICE_GET_WAN_DATA_USAGE,
+            _async_handle_get_wan_data_usage,
+            schema=GET_WAN_DATA_USAGE_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
 
@@ -1356,10 +1505,8 @@ def async_remove_services(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS)
     if hass.services.has_service(DOMAIN, SERVICE_GET_USAGE_HISTORY):
         hass.services.async_remove(DOMAIN, SERVICE_GET_USAGE_HISTORY)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_USAGE):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_USAGE)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_USAGE_HISTORY):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_USAGE_HISTORY)
+    if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_DATA_USAGE):
+        hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_DATA_USAGE)
     if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_EVENTS):
         hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_EVENTS)
     if hass.services.has_service(DOMAIN, SERVICE_PAUSE_RULE):

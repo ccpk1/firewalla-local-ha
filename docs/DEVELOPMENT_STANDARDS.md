@@ -192,6 +192,14 @@ Rules:
 - CPU-bound cryptographic work must be offloaded with `hass.async_add_executor_job()` when called from async Home Assistant code
 - keep executor usage tightly scoped to the actual blocking work
 
+## Time and timezone standards
+
+- time-bucketed Firewalla data such as day, week, and month reports must use the Firewalla appliance timezone as the canonical timezone when the box exposes a valid timezone name
+- Home Assistant timezone is a fallback only when the Firewalla runtime does not expose a usable timezone
+- do not derive canonical period boundaries from Home Assistant timezone when Firewalla has already provided its own timezone context
+- if a feature separates canonical bucket timezone from display timezone, that distinction must be explicit in the code and surfaced clearly in the response contract
+- time-bucketed service responses should identify the timezone used for period derivation when that context materially affects interpretation
+
 ## Identity and device registry rules
 
 - the Home Assistant device registry identity must use the immutable `license` value from the QR payload
