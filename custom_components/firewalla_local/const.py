@@ -188,7 +188,7 @@ CONFIG_ERROR_WRONG_ACCOUNT: Final = "wrong_account"
 SERVICE_GET_RUNTIME_INVENTORY: Final = "get_runtime_inventory"
 SERVICE_GET_NETWORK_INTERFACES: Final = "get_network_interfaces"
 SERVICE_GET_SPEED_TEST_RESULTS: Final = "get_speed_test_results"
-SERVICE_GET_USAGE_HISTORY: Final = "get_usage_history"
+SERVICE_GET_TIME_USAGE_REPORT: Final = "get_time_usage_report"
 SERVICE_GET_WAN_DATA_USAGE: Final = "get_wan_data_usage"
 SERVICE_GET_WAN_EVENTS: Final = "get_wan_events"
 SERVICE_PAUSE_RULE: Final = "pause_rule"
@@ -214,6 +214,15 @@ TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED: Final = "speed_test_wan_required"
 TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT: Final = (
     "speed_test_wan_selector_conflict"
 )
+TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN: Final = (
+    "time_usage_report_end_before_begin"
+)
+TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS: Final = (
+    "time_usage_report_scope_ambiguous"
+)
+TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND: Final = (
+    "time_usage_report_scope_not_found"
+)
 TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
     "wan_data_usage_history_period_required"
 )
@@ -236,5 +245,7 @@ TRANS_PLACEHOLDER_NETWORK_NAME: Final = "network_name"
 TRANS_PLACEHOLDER_NETWORK_UUID: Final = "network_uuid"
 TRANS_PLACEHOLDER_RULE_NAME: Final = "rule_name"
 TRANS_PLACEHOLDER_RULE_TARGET: Final = "rule_target"
+TRANS_PLACEHOLDER_SCOPE_KIND: Final = "scope_kind"
+TRANS_PLACEHOLDER_SCOPE_TARGET: Final = "scope_target"
 TRANS_PLACEHOLDER_WAN_NAME: Final = "wan_name"
 TRANS_PLACEHOLDER_WAN_UUID: Final = "wan_uuid"

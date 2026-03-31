@@ -287,17 +287,20 @@ results.
 - the response includes `latest` for the common case and `results` for the full
    returned list
 
-### Get usage history
+### Get time usage report
 
-Use `firewalla_local.get_usage_history` to read scoped historical usage for one
-device, group, or user.
+Use `firewalla_local.get_time_usage_report` to read scoped historical usage for
+one device, group, or user.
 
 - set `scope_kind` to `device`, `group`, or `user`
 - set `scope_target` to a stable id or the current display label for that scope
 - provide explicit `begin`, `end`, and `granularity` values
-- the current bounded contract supports `day` and `hour` granularities
-- the response includes internet totals, app totals, per-app buckets, category
-   buckets, and any available slot or interval detail in one response shape
+- use `detail=intervals` only when you want optional per-device interval detail
+- the current bounded contract supports `day` and `hour` report periods
+- the response centers on `summary` totals for the requested window and
+   `periods` for the requested day or hour breakdown
+- timestamps are returned as raw epoch values plus ISO strings in the Firewalla
+   appliance timezone when the box reports one
 
 ### Get WAN data usage
 

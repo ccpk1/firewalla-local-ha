@@ -124,9 +124,9 @@ get_speed_test_results:
       selector:
         text:
 
-get_usage_history:
-  name: Get usage history
-  description: Return normalized scoped usage history from the Firewalla local API.
+get_time_usage_report:
+  name: Get time usage report
+  description: Return one normalized scoped time-usage report from the Firewalla local API.
   fields:
     scope_kind:
       required: true
@@ -169,14 +169,26 @@ get_usage_history:
             - "day"
             - "hour"
       name: Granularity
-      description: Required. Day and hour are the currently proven slot-based granularities.
+      description: Required. Choose whether the primary report periods should be daily or hourly.
+    detail:
+      required: false
+      example: "summary"
+      selector:
+        select:
+          options:
+            - value: "summary"
+              label: Summary only
+            - value: "intervals"
+              label: Include interval detail
+      name: Detail
+      description: Optional. Defaults to summary. Use intervals to include available per-device interval detail.
     app_ids:
       required: false
       example: "internet,facebook"
       selector:
         text:
       name: App IDs
-      description: Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app buckets.
+      description: Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app sections.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

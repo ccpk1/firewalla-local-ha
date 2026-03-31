@@ -490,6 +490,15 @@
     "speed_test_wan_selector_conflict": {
       "message": "Provide either a WAN UUID or a WAN name, not both."
     },
+    "time_usage_report_end_before_begin": {
+      "message": "The end time must be after the begin time."
+    },
+    "time_usage_report_scope_ambiguous": {
+      "message": "More than one {scope_kind} matched \"{scope_target}\". Use a stable ID for that scope instead."
+    },
+    "time_usage_report_scope_not_found": {
+      "message": "No {scope_kind} matched \"{scope_target}\". Check the selector and try again."
+    },
     "wan_data_usage_history_period_required": {
       "message": "History period is required when history count is greater than zero."
     },
@@ -568,9 +577,9 @@
         }
       }
     },
-    "get_usage_history": {
-      "name": "Get usage history",
-      "description": "Return normalized scoped usage history from the Firewalla local API.",
+    "get_time_usage_report": {
+      "name": "Get time usage report",
+      "description": "Return one normalized scoped time-usage report from the Firewalla local API.",
       "fields": {
         "scope_kind": {
           "name": "Scope kind",
@@ -590,11 +599,15 @@
         },
         "granularity": {
           "name": "Granularity",
-          "description": "Required. Day and hour are the currently proven slot-based granularities."
+          "description": "Required. Choose whether the primary report periods should be daily or hourly."
+        },
+        "detail": {
+          "name": "Detail (Optional)",
+          "description": "Defaults to summary. Use intervals to include available per-device interval detail."
         },
         "app_ids": {
           "name": "App IDs",
-          "description": "Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app buckets."
+          "description": "Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app sections."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

@@ -41,7 +41,7 @@ from .const import (
     SERVICE_GET_NETWORK_INTERFACES,
     SERVICE_GET_RUNTIME_INVENTORY,
     SERVICE_GET_SPEED_TEST_RESULTS,
-    SERVICE_GET_USAGE_HISTORY,
+    SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
     SERVICE_PAUSE_RULE,
@@ -63,12 +63,17 @@ from .const import (
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
     TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY,
     TRANS_PLACEHOLDER_DURATION,
     TRANS_PLACEHOLDER_NETWORK_NAME,
     TRANS_PLACEHOLDER_NETWORK_UUID,
     TRANS_PLACEHOLDER_RULE_TARGET,
+    TRANS_PLACEHOLDER_SCOPE_KIND,
+    TRANS_PLACEHOLDER_SCOPE_TARGET,
     TRANS_PLACEHOLDER_WAN_NAME,
     TRANS_PLACEHOLDER_WAN_UUID,
 )
@@ -155,7 +160,7 @@ GET_SPEED_TEST_RESULTS_SCHEMA = vol.Schema(
     }
 )
 
-GET_USAGE_HISTORY_SCHEMA = vol.Schema(
+GET_TIME_USAGE_REPORT_SCHEMA = vol.Schema(
     {
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND): vol.In(
             ("device", "group", "user")
@@ -164,6 +169,9 @@ GET_USAGE_HISTORY_SCHEMA = vol.Schema(
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_BEGIN): cv.datetime,
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_END): cv.datetime,
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_GRANULARITY): vol.In(("day", "hour")),
+        vol.Optional(SERVICE_FIELD_DETAIL, default="summary"): vol.In(
+            ("summary", "intervals")
+        ),
         vol.Optional(SERVICE_FIELD_USAGE_HISTORY_APP_IDS): vol.All(
             cv.ensure_list_csv,
             [cv.string],
@@ -342,70 +350,184 @@ def _serialize_local_timestamp(
 
 def _serialize_usage_history_interval(
     interval: FirewallaUsageHistoryInterval,
+    *,
+    time_zone: tzinfo,
 ) -> JsonObjectType:
     """Serialize one usage-history interval for service responses."""
     return {
-        "begin_timestamp": interval.begin_timestamp,
-        "begin_timestamp_iso": _serialize_unix_timestamp(interval.begin_timestamp),
-        "end_timestamp": interval.end_timestamp,
-        "end_timestamp_iso": _serialize_unix_timestamp(interval.end_timestamp),
+        "time_period": {
+            "kind": "interval",
+            "start_timestamp": interval.begin_timestamp,
+            "start": _serialize_local_timestamp(
+                interval.begin_timestamp,
+                time_zone=time_zone,
+            ),
+            "end_timestamp": interval.end_timestamp,
+            "end": _serialize_local_timestamp(
+                interval.end_timestamp,
+                time_zone=time_zone,
+            ),
+        },
         "duration_seconds": interval.duration_seconds,
         "duration_minutes": interval.duration_minutes,
     }
 
 
-def _serialize_usage_history_slot(slot: FirewallaUsageHistorySlot) -> JsonObjectType:
-    """Serialize one usage-history slot for service responses."""
+def _serialize_usage_history_summary(
+    *,
+    total_minutes: int | None,
+    unique_minutes: int | None,
+) -> JsonObjectType:
+    """Serialize one usage summary section."""
     return {
-        "timestamp": slot.timestamp,
-        "timestamp_iso": _serialize_unix_timestamp(slot.timestamp),
-        "total_minutes": slot.total_minutes,
-        "unique_minutes": slot.unique_minutes,
+        "total_minutes": total_minutes,
+        "unique_minutes": unique_minutes,
     }
 
 
 def _serialize_usage_history_device_usage(
     device_usage: FirewallaUsageHistoryDeviceUsage,
+    *,
+    time_zone: tzinfo,
 ) -> JsonObjectType:
     """Serialize one device-level usage-history breakdown."""
-    return {
+    payload: JsonObjectType = {
         "device_id": device_usage.device_id,
         "device_name": device_usage.device_name,
-        "total_minutes": device_usage.total_minutes,
-        "unique_minutes": device_usage.unique_minutes,
-        "intervals": [
-            _serialize_usage_history_interval(interval)
+        "summary": _serialize_usage_history_summary(
+            total_minutes=device_usage.total_minutes,
+            unique_minutes=device_usage.unique_minutes,
+        ),
+    }
+    if device_usage.intervals:
+        payload["intervals"] = [
+            _serialize_usage_history_interval(interval, time_zone=time_zone)
             for interval in device_usage.intervals
-        ],
+        ]
+    return payload
+
+
+def _build_time_usage_period_label(
+    begin_timestamp: int,
+    *,
+    granularity: str,
+    time_zone: tzinfo,
+) -> str:
+    """Return a concise local label for one usage-report period."""
+    local_begin = datetime.fromtimestamp(begin_timestamp, UTC).astimezone(time_zone)
+    if granularity == "day":
+        return local_begin.strftime("%Y-%m-%d")
+    return local_begin.strftime("%Y-%m-%d %H:00")
+
+
+def _serialize_usage_history_period(
+    slot: FirewallaUsageHistorySlot,
+    *,
+    query_begin_timestamp: int,
+    query_end_timestamp: int,
+    granularity: str,
+    time_zone: tzinfo,
+) -> JsonObjectType:
+    """Serialize one primary report period derived from a Firewalla slot."""
+    slot_begin_timestamp = slot.timestamp
+    slot_end_timestamp = slot.timestamp + (86_400 if granularity == "day" else 3_600)
+    begin_timestamp = max(query_begin_timestamp, slot_begin_timestamp)
+    end_timestamp = min(query_end_timestamp, slot_end_timestamp)
+    return {
+        "time_period": {
+            "kind": granularity,
+            "label": _build_time_usage_period_label(
+                slot_begin_timestamp,
+                granularity=granularity,
+                time_zone=time_zone,
+            ),
+            "start_timestamp": begin_timestamp,
+            "start": _serialize_local_timestamp(
+                begin_timestamp,
+                time_zone=time_zone,
+            ),
+            "end_timestamp": end_timestamp,
+            "end": _serialize_local_timestamp(
+                end_timestamp,
+                time_zone=time_zone,
+            ),
+            "is_partial": (
+                begin_timestamp != slot_begin_timestamp
+                or end_timestamp != slot_end_timestamp
+            ),
+            "boundary_source": (
+                "query_window"
+                if begin_timestamp != slot_begin_timestamp
+                or end_timestamp != slot_end_timestamp
+                else "firewalla_slot"
+            ),
+        },
+        "usage": _serialize_usage_history_summary(
+            total_minutes=slot.total_minutes,
+            unique_minutes=slot.unique_minutes,
+        ),
     }
 
 
 def _serialize_usage_history_metric(
     metric: FirewallaUsageHistoryMetric | None,
+    *,
+    query_begin_timestamp: int,
+    query_end_timestamp: int,
+    granularity: str,
+    time_zone: tzinfo,
 ) -> JsonObjectType | None:
     """Serialize one usage-history metric section."""
     if metric is None:
         return None
 
-    return {
+    payload: JsonObjectType = {
         "category": metric.category,
-        "total_minutes": metric.total_minutes,
-        "unique_minutes": metric.unique_minutes,
-        "slots": [_serialize_usage_history_slot(slot) for slot in metric.slots],
-        "intervals": [
-            _serialize_usage_history_interval(interval) for interval in metric.intervals
+        "summary": _serialize_usage_history_summary(
+            total_minutes=metric.total_minutes,
+            unique_minutes=metric.unique_minutes,
+        ),
+        "periods": [
+            _serialize_usage_history_period(
+                slot,
+                query_begin_timestamp=query_begin_timestamp,
+                query_end_timestamp=query_end_timestamp,
+                granularity=granularity,
+                time_zone=time_zone,
+            )
+            for slot in metric.slots
         ],
         "devices": [
-            _serialize_usage_history_device_usage(device) for device in metric.devices
+            _serialize_usage_history_device_usage(device, time_zone=time_zone)
+            for device in metric.devices
         ],
     }
+    if not payload["devices"]:
+        payload.pop("devices")
+    return payload
 
 
-def _serialize_usage_history_entry(entry: FirewallaUsageHistoryEntry) -> JsonObjectType:
+def _serialize_usage_history_entry(
+    entry: FirewallaUsageHistoryEntry,
+    *,
+    query_begin_timestamp: int,
+    query_end_timestamp: int,
+    granularity: str,
+    time_zone: tzinfo,
+) -> JsonObjectType:
     """Serialize one named usage-history entry."""
     return {
         "key": entry.key,
-        "metric": _serialize_usage_history_metric(entry.metric),
+        **cast(
+            JsonObjectType,
+            _serialize_usage_history_metric(
+                entry.metric,
+                query_begin_timestamp=query_begin_timestamp,
+                query_end_timestamp=query_end_timestamp,
+                granularity=granularity,
+                time_zone=time_zone,
+            ),
+        ),
     }
 
 
@@ -426,32 +548,60 @@ def _serialize_usage_history_view(
     *,
     time_zone: tzinfo,
     time_zone_name: str,
+    detail: str,
 ) -> JsonObjectType:
     """Serialize one normalized usage-history response."""
     return {
         "scope": _serialize_usage_history_target(view.target),
         "query": {
             "begin_timestamp": view.begin_timestamp,
-            "begin_timestamp_iso": _serialize_unix_timestamp(view.begin_timestamp),
-            "begin_local": _serialize_local_timestamp(
+            "begin": _serialize_local_timestamp(
                 view.begin_timestamp,
                 time_zone=time_zone,
             ),
             "end_timestamp": view.end_timestamp,
-            "end_timestamp_iso": _serialize_unix_timestamp(view.end_timestamp),
-            "end_local": _serialize_local_timestamp(
+            "end": _serialize_local_timestamp(
                 view.end_timestamp,
                 time_zone=time_zone,
             ),
             "time_zone": time_zone_name,
             "granularity": view.granularity,
+            "detail": detail,
             "app_ids": list(view.app_ids) if view.app_ids is not None else None,
         },
-        "internet": _serialize_usage_history_metric(view.internet),
-        "app_totals": _serialize_usage_history_metric(view.app_totals),
-        "apps": [_serialize_usage_history_entry(entry) for entry in view.apps],
+        "internet": _serialize_usage_history_metric(
+            view.internet,
+            query_begin_timestamp=view.begin_timestamp,
+            query_end_timestamp=view.end_timestamp,
+            granularity=view.granularity,
+            time_zone=time_zone,
+        ),
+        "app_totals": _serialize_usage_history_metric(
+            view.app_totals,
+            query_begin_timestamp=view.begin_timestamp,
+            query_end_timestamp=view.end_timestamp,
+            granularity=view.granularity,
+            time_zone=time_zone,
+        ),
+        "apps": [
+            _serialize_usage_history_entry(
+                entry,
+                query_begin_timestamp=view.begin_timestamp,
+                query_end_timestamp=view.end_timestamp,
+                granularity=view.granularity,
+                time_zone=time_zone,
+            )
+            for entry in view.apps
+        ],
         "categories": [
-            _serialize_usage_history_entry(entry) for entry in view.categories
+            _serialize_usage_history_entry(
+                entry,
+                query_begin_timestamp=view.begin_timestamp,
+                query_end_timestamp=view.end_timestamp,
+                granularity=view.granularity,
+                time_zone=time_zone,
+            )
+            for entry in view.categories
         ],
     }
 
@@ -893,9 +1043,23 @@ def _resolve_usage_history_target(
             )
         if len(matches) > 1:
             raise ServiceValidationError(
-                f"More than one device matched {scope_target}; use the device MAC"
+                f"More than one {scope_kind} matched {scope_target}",
+                translation_domain=DOMAIN,
+                translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
+                    TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+                },
             )
-        raise ServiceValidationError(f"No device matched {scope_target}")
+        raise ServiceValidationError(
+            f"No {scope_kind} matched {scope_target}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
+            translation_placeholders={
+                TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
+                TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+            },
+        )
 
     if scope_kind == "user":
         user_manager = entry.runtime_data.user_manager
@@ -926,9 +1090,23 @@ def _resolve_usage_history_target(
             )
         if len(matches) > 1:
             raise ServiceValidationError(
-                f"More than one user matched {scope_target}; use the user ID"
+                f"More than one {scope_kind} matched {scope_target}",
+                translation_domain=DOMAIN,
+                translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
+                    TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+                },
             )
-        raise ServiceValidationError(f"No user matched {scope_target}")
+        raise ServiceValidationError(
+            f"No {scope_kind} matched {scope_target}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
+            translation_placeholders={
+                TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
+                TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+            },
+        )
 
     groups = entry.runtime_data.integration_manager.get_groups()
     exact_match = next(
@@ -955,9 +1133,23 @@ def _resolve_usage_history_target(
         )
     if len(group_matches) > 1:
         raise ServiceValidationError(
-            f"More than one group matched {scope_target}; use the group ID"
+            f"More than one {scope_kind} matched {scope_target}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
+            translation_placeholders={
+                TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
+                TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+            },
         )
-    raise ServiceValidationError(f"No group matched {scope_target}")
+    raise ServiceValidationError(
+        f"No {scope_kind} matched {scope_target}",
+        translation_domain=DOMAIN,
+        translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
+        translation_placeholders={
+            TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
+            TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+        },
+    )
 
 
 async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectType:
@@ -1054,8 +1246,29 @@ async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectT
     }
 
 
-async def _async_handle_get_usage_history(call: ServiceCall) -> JsonObjectType:
-    """Return one normalized usage-history response from the local runtime."""
+def _resolve_time_usage_report_time_zone(
+    hass: HomeAssistant,
+    entry: FirewallaConfigEntry,
+) -> tuple[tzinfo, str]:
+    """Return the timezone used for time-usage reports."""
+    snapshot = entry.runtime_data.coordinator.data
+    if (
+        snapshot is not None
+        and snapshot.appliance_runtime.timezone_name is not None
+        and (
+            firewalla_time_zone := dt_util.get_time_zone(
+                snapshot.appliance_runtime.timezone_name
+            )
+        )
+    ):
+        return firewalla_time_zone, snapshot.appliance_runtime.timezone_name
+
+    time_zone = dt_util.get_time_zone(hass.config.time_zone) or UTC
+    return time_zone, getattr(time_zone, "key", None) or hass.config.time_zone
+
+
+async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectType:
+    """Return one normalized time-usage report from the local runtime."""
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
@@ -1066,16 +1279,13 @@ async def _async_handle_get_usage_history(call: ServiceCall) -> JsonObjectType:
     end_input = cast(datetime, call.data[SERVICE_FIELD_USAGE_HISTORY_END])
     begin_utc = dt_util.as_utc(begin_input)
     end_utc = dt_util.as_utc(end_input)
-    time_zone = (
-        begin_input.tzinfo or dt_util.get_time_zone(call.hass.config.time_zone) or UTC
-    )
-    time_zone_name = (
-        getattr(time_zone, "key", None)
-        or time_zone.tzname(begin_utc)
-        or call.hass.config.time_zone
-    )
+    time_zone, time_zone_name = _resolve_time_usage_report_time_zone(call.hass, entry)
     if end_utc <= begin_utc:
-        raise ServiceValidationError("end must be after begin")
+        raise ServiceValidationError(
+            "end must be after begin",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN,
+        )
 
     target = _resolve_usage_history_target(
         entry,
@@ -1089,6 +1299,7 @@ async def _async_handle_get_usage_history(call: ServiceCall) -> JsonObjectType:
         if raw_app_ids is not None
         else None
     )
+    detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
 
     try:
         usage_history = (
@@ -1100,11 +1311,12 @@ async def _async_handle_get_usage_history(call: ServiceCall) -> JsonObjectType:
                     str,
                     call.data[SERVICE_FIELD_USAGE_HISTORY_GRANULARITY],
                 ),
+                include_intervals=detail == "intervals",
                 app_ids=app_ids,
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(f"Could not read usage history: {err}") from err
+        raise HomeAssistantError(f"Could not read time usage report: {err}") from err
 
     return {
         "config_entry_id": entry.entry_id,
@@ -1112,6 +1324,7 @@ async def _async_handle_get_usage_history(call: ServiceCall) -> JsonObjectType:
             usage_history,
             time_zone=time_zone,
             time_zone_name=time_zone_name,
+            detail=detail,
         ),
     }
 
@@ -1449,12 +1662,12 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_USAGE_HISTORY):
+    if not hass.services.has_service(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT):
         hass.services.async_register(
             DOMAIN,
-            SERVICE_GET_USAGE_HISTORY,
-            _async_handle_get_usage_history,
-            schema=GET_USAGE_HISTORY_SCHEMA,
+            SERVICE_GET_TIME_USAGE_REPORT,
+            _async_handle_get_time_usage_report,
+            schema=GET_TIME_USAGE_REPORT_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
 
@@ -1503,8 +1716,8 @@ def async_remove_services(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST)
     if hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
         hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_USAGE_HISTORY):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_USAGE_HISTORY)
+    if hass.services.has_service(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT):
+        hass.services.async_remove(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT)
     if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_DATA_USAGE):
         hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_DATA_USAGE)
     if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_EVENTS):

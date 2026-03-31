@@ -591,6 +591,100 @@ Implementation note:
 - The new `get_usage_history` service now resolves device, group, and user targets against normalized runtime inventory, issues the proven `appTimeUsage` local read with explicit `begin`, `end`, and `granularity`, and returns one bounded response envelope with scope metadata, internet totals, app totals, per-app entries, category entries, slot buckets, and interval detail.
 - The existing watched-user same-day entity path remains separate for now. The new service supports today-style queries through explicit bounds without forcing the entity path to converge prematurely.
 
+Open refinement step:
+
+- [x] Review the current `get_usage_history` service contract with the same rigor used for `get_wan_data_usage`, and decide whether the current base service name is the most user-intuitive contract or whether it should be renamed before the surface hardens.
+- [x] Rework the usage-history response toward a more user-shaped report contract if the current output is still too transport-shaped, with emphasis on:
+  - proper top-level naming
+  - proper row and field naming
+  - clearer query metadata
+  - stable, template-friendly response structure
+  - quality reporting that makes the effective scope, bounds, granularity, and any derived behavior obvious
+- [x] Apply the new Firewalla-first timezone and period-semantics standards where they materially affect usage-history interpretation instead of implicitly inheriting Home Assistant-side assumptions.
+- [x] Determine the best base user-facing service name for this surface using the naming discipline established during the WAN data-usage work: prefer an intuitive report name over a vague transport-shaped label, and avoid locking in a low-quality name just because it shipped first.
+- [x] Define the platinum-worthy target for this service before implementation changes, including:
+  - user-intuitive naming
+  - translation-ready and professional field language
+  - explicit scope and time-boundary semantics
+  - response metadata that explains what was requested versus what was actually returned
+  - a clean distinction between canonical Firewalla data, normalized integration fields, and any convenience projections
+
+Locked refinement decisions:
+
+- The service should be renamed to `get_time_usage_report`.
+- Keep the top-level term `scope` in the outward contract.
+- Keep `apps` and `app_totals` in the outward contract.
+- Use `periods` as the user-facing term for the primary time-series breakdown instead of `slots`.
+- Treat Firewalla `slots` as an internal transport detail that maps to outward `periods` rows.
+- Keep `intervals` as interval detail, not as a second primary time-series concept.
+- Exclude `intervals` by default and include them only when explicitly requested through `detail`.
+- `granularity` controls the size of the returned `periods` rows, not whether interval detail is returned.
+- `summary` should always mean the aggregate for the exact requested query window.
+- `periods` should mean the granularity-based breakdown of that same query window.
+- Returned period rows should support explicit partial-period semantics at clipped query boundaries rather than implying all periods are full calendar windows.
+
+Locked response-shape contract:
+
+- Keep the top-level envelope compact:
+  - `config_entry_id`
+  - `scope`
+  - `query`
+  - `internet`
+  - `app_totals`
+  - `apps`
+  - `categories`
+- `query` should include:
+  - `begin_timestamp`
+  - `begin`
+  - `end_timestamp`
+  - `end`
+  - `time_zone`
+  - `granularity`
+  - `detail`
+  - `app_ids`
+- All user-facing time strings in the report should be ISO strings in the Firewalla local timezone.
+- Keep epoch timestamps alongside those ISO strings for parity with WAN data usage.
+- Do not include duplicate UTC ISO timestamp fields in the outward report contract.
+- Each major section should use `summary` plus `periods` as the primary structure.
+- `summary` means the aggregate for the exact represented window.
+- `periods` rows should use a `time_period` object with:
+  - `kind`
+  - `start_timestamp`
+  - `start`
+  - `end_timestamp`
+  - `end`
+  - `label`
+  - `is_partial`
+  - `boundary_source`
+- `intervals` should appear only when `detail=intervals` and only in the sections where Firewalla actually returns interval detail.
+- No extra query booleans such as `intervals_included` or `intervals_returned` should be added; `detail` plus the returned structure is sufficient.
+- Keep app and category rows compact and user-facing:
+  - `key`
+  - optional `category` where applicable
+  - `summary`
+  - `periods`
+  - optional `devices`
+- Nested device rows should use:
+  - `device_id`
+  - `device_name`
+  - `summary`
+  - optional `intervals`
+
+Implementation note:
+
+- The service now ships as `get_time_usage_report` without a compatibility alias, resolves Firewalla appliance timezone first for report rendering, returns summary-first `periods` rows instead of outward `slots`, and includes interval detail only when `detail=intervals` is requested.
+
+Recommendation for the next refinement pass:
+
+- Treat this as an add-on to the original usage-history work, not a separate initiative.
+- Start by auditing the current service against the standards and patterns just established for WAN data usage.
+- Use `get_time_usage_report` as the working base name for the redesign.
+- Reuse the WAN data-usage lessons where they improve clarity:
+  - period- and query-first metadata
+  - stable report structure
+  - explicit time semantics
+  - professional, user-facing names instead of raw transport nouns
+
 ### Speed-test history service
 
 - [x] Add a dedicated speed-test results service in [custom_components/firewalla_local/services.py](custom_components/firewalla_local/services.py) backed by the normalized coordinator snapshot path for `internetSpeedtestResults`.

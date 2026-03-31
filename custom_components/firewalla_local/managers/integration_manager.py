@@ -213,6 +213,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         begin_timestamp: int,
         end_timestamp: int,
         granularity: str,
+        include_intervals: bool,
         app_ids: tuple[str, ...] | None,
     ) -> FirewallaUsageHistoryView:
         """Return one normalized usage-history response for the resolved target."""
@@ -230,6 +231,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             begin_timestamp=begin_timestamp,
             end_timestamp=end_timestamp,
             granularity=granularity,
+            include_intervals=include_intervals,
             app_ids=app_ids,
         )
 
@@ -1677,11 +1679,11 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         begin_timestamp: int,
         end_timestamp: int,
         granularity: str,
+        include_intervals: bool,
         app_ids: tuple[str, ...] | None,
     ) -> FirewallaUsageHistoryView:
         """Build one normalized usage-history response from raw payload data."""
         payload = raw_payload if isinstance(raw_payload, dict) else {}
-        include_intervals = granularity == "hour"
         return FirewallaUsageHistoryView(
             target=target,
             begin_timestamp=begin_timestamp,

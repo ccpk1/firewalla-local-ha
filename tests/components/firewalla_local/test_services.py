@@ -46,7 +46,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_UUID,
     SERVICE_GET_NETWORK_INTERFACES,
     SERVICE_GET_SPEED_TEST_RESULTS,
-    SERVICE_GET_USAGE_HISTORY,
+    SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
     SERVICE_PAUSE_RULE,
@@ -85,7 +85,9 @@ def _snapshot(
             serial_number="serial-123",
             software_version="1.0.0",
         ),
-        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        appliance_runtime=FirewallaApplianceRuntimeInput(
+            timezone_name="America/New_York"
+        ),
         policy_rules=(
             FirewallaPolicyRule(
                 rule_id=rule_id,
@@ -504,7 +506,9 @@ def _usage_history_snapshot() -> FirewallaRuntimeSnapshot:
             serial_number="serial-123",
             software_version="1.0.0",
         ),
-        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        appliance_runtime=FirewallaApplianceRuntimeInput(
+            timezone_name="America/New_York"
+        ),
         policy_rules=(),
         exception_rule_count=0,
         hosts=(
@@ -1728,10 +1732,10 @@ async def test_run_internet_speed_test_service_requires_selector_for_multiple_wa
             )
 
 
-async def test_get_usage_history_service_resolves_device_label_and_serializes_data(
+async def test_get_time_usage_report_service_resolves_device_label_and_serializes_data(
     hass: HomeAssistant,
 ) -> None:
-    """Test the usage history service resolves one device label."""
+    """Test the time usage report service resolves one device label."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -1768,7 +1772,7 @@ async def test_get_usage_history_service_resolves_device_label_and_serializes_da
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_USAGE_HISTORY,
+            SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
@@ -1799,31 +1803,50 @@ async def test_get_usage_history_service_resolves_device_label_and_serializes_da
         "target_name": "Kaden Phone",
         "request_scope_type": "host",
     }
-    assert response["query"]["time_zone"] == "America/Los_Angeles"
-    assert response["query"]["begin_local"] == "2026-03-20T21:00:00-07:00"
-    assert response["query"]["end_local"] == "2026-03-27T21:00:00-07:00"
+    assert response["query"]["time_zone"] == "America/New_York"
+    assert response["query"]["begin"] == "2026-03-21T00:00:00-04:00"
+    assert response["query"]["end"] == "2026-03-28T00:00:00-04:00"
+    assert response["query"]["detail"] == "summary"
     assert response["query"]["app_ids"] is None
-    assert response["internet"]["slots"][0] == {
-        "timestamp": 1_774_065_600,
-        "timestamp_iso": "2026-03-21T04:00:00+00:00",
-        "total_minutes": 120,
-        "unique_minutes": 118,
+    assert response["internet"]["summary"] == {
+        "total_minutes": 596,
+        "unique_minutes": 580,
     }
-    assert response["internet"]["intervals"] == []
+    assert response["internet"]["periods"][0] == {
+        "time_period": {
+            "kind": "day",
+            "label": "2026-03-21",
+            "start_timestamp": 1_774_065_600,
+            "start": "2026-03-21T00:00:00-04:00",
+            "end_timestamp": 1_774_152_000,
+            "end": "2026-03-22T00:00:00-04:00",
+            "is_partial": False,
+            "boundary_source": "firewalla_slot",
+        },
+        "usage": {
+            "total_minutes": 120,
+            "unique_minutes": 118,
+        },
+    }
     assert response["apps"][0]["key"] == "facebook"
-    assert response["apps"][0]["metric"]["devices"][0] == {
-        "device_id": "EC:0D:51:CC:BA:BC",
-        "device_name": "Kaden Phone",
+    assert response["apps"][0]["summary"] == {
         "total_minutes": 15,
         "unique_minutes": 15,
-        "intervals": [],
+    }
+    assert response["apps"][0]["devices"][0] == {
+        "device_id": "EC:0D:51:CC:BA:BC",
+        "device_name": "Kaden Phone",
+        "summary": {
+            "total_minutes": 15,
+            "unique_minutes": 15,
+        },
     }
 
 
-async def test_get_usage_history_service_hour_granularity_keeps_intervals(
+async def test_get_time_usage_report_service_detail_intervals_keeps_intervals(
     hass: HomeAssistant,
 ) -> None:
-    """Test hour granularity preserves interval detail."""
+    """Test interval detail preserves per-device interval detail."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -1858,7 +1881,7 @@ async def test_get_usage_history_service_hour_granularity_keeps_intervals(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_USAGE_HISTORY,
+            SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
@@ -1874,29 +1897,33 @@ async def test_get_usage_history_service_hour_granularity_keeps_intervals(
                     UTC,
                 ),
                 SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "hour",
+                SERVICE_FIELD_DETAIL: "intervals",
             },
             blocking=True,
             return_response=True,
         )
 
     assert response is not None
-    assert response["internet"]["intervals"] == []
-    assert response["apps"][0]["metric"]["devices"][0]["intervals"] == [
+    assert response["query"]["detail"] == "intervals"
+    assert response["apps"][0]["devices"][0]["intervals"] == [
         {
-            "begin_timestamp": 1_774_065_660,
-            "begin_timestamp_iso": "2026-03-21T04:01:00+00:00",
-            "end_timestamp": 1_774_065_900,
-            "end_timestamp_iso": "2026-03-21T04:05:00+00:00",
+            "time_period": {
+                "kind": "interval",
+                "start_timestamp": 1_774_065_660,
+                "start": "2026-03-21T00:01:00-04:00",
+                "end_timestamp": 1_774_065_900,
+                "end": "2026-03-21T00:05:00-04:00",
+            },
             "duration_seconds": 240,
             "duration_minutes": 5,
         }
     ]
 
 
-async def test_get_usage_history_service_resolves_user_name_to_tag_scope(
+async def test_get_time_usage_report_service_resolves_user_name_to_tag_scope(
     hass: HomeAssistant,
 ) -> None:
-    """Test the usage history service resolves user names through tag scope."""
+    """Test the time usage report service resolves user names through tag scope."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -1931,7 +1958,7 @@ async def test_get_usage_history_service_resolves_user_name_to_tag_scope(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_USAGE_HISTORY,
+            SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "user",
@@ -1958,10 +1985,10 @@ async def test_get_usage_history_service_resolves_user_name_to_tag_scope(
     assert response["scope"]["target_name"] == "KADEN"
 
 
-async def test_get_usage_history_service_preserves_explicit_empty_app_list(
+async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(
     hass: HomeAssistant,
 ) -> None:
-    """Test the usage history service preserves explicit empty app filters."""
+    """Test the time usage report service preserves explicit empty app filters."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -1996,7 +2023,7 @@ async def test_get_usage_history_service_preserves_explicit_empty_app_list(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_USAGE_HISTORY,
+            SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "group",
