@@ -13,9 +13,9 @@ get_runtime_inventory:
       selector:
         text:
 
-get_network_interfaces:
-  name: Get network interfaces
-  description: Return normalized network-segment interface summaries from the Firewalla local API.
+get_network_segment_report:
+  name: Get network segment report
+  description: Return one configuration-oriented network segment report in the shared report envelope from the Firewalla local API.
   fields:
     network_uuid:
       required: false
@@ -23,21 +23,94 @@ get_network_interfaces:
       selector:
         text:
       name: Network UUID
-      description: Optional. Filter results to one network UUID for deterministic automations.
+      description: Required unless you provide network name. Use the Firewalla network UUID for deterministic automations.
     network_name:
       required: false
       example: "VLAN10 CORE"
       selector:
         text:
       name: Network name
-      description: Optional. Filter results to one Firewalla network display name.
+      description: Required unless you provide network UUID. Use the current Firewalla network display name for interactive use.
     refresh:
       required: false
       example: true
       selector:
         boolean:
       name: Refresh first
-      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving network selectors.
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the network selector and building the report.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+get_network_segment_usage:
+  name: Get network segment usage
+  description: Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API.
+  fields:
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Required unless you provide network name. Use the Firewalla network UUID for deterministic automations.
+    network_name:
+      required: false
+      example: "VLAN10 CORE"
+      selector:
+        text:
+      name: Network name
+      description: Required unless you provide network UUID. Use the current Firewalla network display name for interactive use.
+    window:
+      required: true
+      example: "last_24_hours"
+      selector:
+        select:
+          options:
+            - value: "last_60_minutes"
+              label: Last 60 minutes
+            - value: "last_24_hours"
+              label: Last 24 hours
+            - value: "last_30_days"
+              label: Last 30 days
+            - value: "last_12_months"
+              label: Last 12 months
+      name: Window
+      description: Required. Choose the primary activity window to report.
+    top_n:
+      required: false
+      example: 5
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+      name: Top N rankings
+      description: Optional. Defaults to 5. Limit how many top device, app, category, upload, and download ranking rows the report returns.
+    include:
+      required: false
+      example: "series"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "series"
+              label: Raw metric samples
+      name: Include sections
+      description: Optional. Add raw metric sample sections for the selected window. The default report already includes selected-window summaries plus activity-derived devices, apps, and categories when Firewalla exposes them.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the network selector and building the report.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -170,25 +243,53 @@ get_time_usage_report:
             - "hour"
       name: Granularity
       description: Required. Choose whether the primary report periods should be daily or hourly.
+    sections:
+      required: false
+      example: "apps,categories"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "internet"
+              label: Internet usage
+            - value: "app_totals"
+              label: App totals
+            - value: "apps"
+              label: Apps
+            - value: "categories"
+              label: Categories
+      name: Sections
+      description: Optional. Limit the report to the named major sections. When omitted, standard returns all major sections and summary returns internet plus app totals. A non-empty app filter also keeps the apps section visible.
+    include:
+      required: false
+      example: "intervals"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "intervals"
+              label: Device interval detail
+      name: Include detail
+      description: Optional. Add per-device interval detail when Firewalla returns it for the selected scope and apps.
     detail:
       required: false
-      example: "summary"
+      example: "standard"
       selector:
         select:
           options:
             - value: "summary"
-              label: Summary only
-            - value: "intervals"
-              label: Include interval detail
+              label: Summary
+            - value: "standard"
+              label: Standard
       name: Detail
-      description: Optional. Defaults to summary. Use intervals to include available per-device interval detail.
+      description: Optional. Defaults to standard. Summary returns the smallest default section set, while standard returns the normal report depth.
     app_ids:
       required: false
       example: "internet,facebook"
       selector:
         text:
       name: App IDs
-      description: Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app sections.
+      description: Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app sections. A non-empty list also keeps the apps section in the response.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -263,6 +364,19 @@ get_wan_data_usage:
           max: 366
       name: History count
       description: Optional. Number of full history periods to include. Defaults to 0. Historical periods are always full periods.
+    include:
+      required: false
+      example: "subperiods"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "history"
+              label: History rows
+            - value: "subperiods"
+              label: Nested subperiod breakdowns
+      name: Include sections
+      description: Optional. Add history rows or nested subperiod breakdowns where the selected periods support them.
     detail:
       required: false
       example: "summary"
@@ -271,12 +385,10 @@ get_wan_data_usage:
           options:
             - value: "summary"
               label: Summary
-            - value: "weekly"
-              label: Weekly
-            - value: "daily"
-              label: Daily
+            - value: "full"
+              label: Full
       name: Detail
-      description: Optional. Defaults to summary. Use weekly or daily to add derived nested breakdown rows where that richer detail is supported.
+      description: Optional. Defaults to summary. Use full only when you want nested subperiod breakdowns where the selected periods support them.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

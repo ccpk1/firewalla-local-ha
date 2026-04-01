@@ -466,6 +466,12 @@
     "network_not_found": {
       "message": "No Firewalla network matched the requested selector. Check the network name or UUID and try again."
     },
+    "network_required": {
+      "message": "Provide a network UUID or network name for this service call."
+    },
+    "network_usage_window_required": {
+      "message": "Provide a window for this network segment usage service call."
+    },
     "network_selector_conflict": {
       "message": "Provide either a network UUID or a network name, not both."
     },
@@ -521,21 +527,59 @@
         }
       }
     },
-    "get_network_interfaces": {
-      "name": "Get network interfaces",
-      "description": "Return normalized network-segment interface summaries from the Firewalla local API.",
+    "get_network_segment_report": {
+      "name": "Get network segment report",
+      "description": "Return one configuration-oriented network segment report in the shared report envelope from the Firewalla local API.",
       "fields": {
         "network_uuid": {
           "name": "Network UUID (Optional)",
-          "description": "Filter results to one network UUID for deterministic automations."
+          "description": "Required unless you provide network name. Use the Firewalla network UUID for deterministic automations."
         },
         "network_name": {
           "name": "Network name (Optional)",
-          "description": "Filter results to one Firewalla network display name."
+          "description": "Required unless you provide network UUID. Use the current Firewalla network display name for interactive use."
         },
         "refresh": {
           "name": "Refresh first",
-          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving network selectors."
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the network selector and building the report."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_network_segment_usage": {
+      "name": "Get network segment usage",
+      "description": "Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API.",
+      "fields": {
+        "network_uuid": {
+          "name": "Network UUID (Optional)",
+          "description": "Required unless you provide network name. Use the Firewalla network UUID for deterministic automations."
+        },
+        "network_name": {
+          "name": "Network name (Optional)",
+          "description": "Required unless you provide network UUID. Use the current Firewalla network display name for interactive use."
+        },
+        "window": {
+          "name": "Window",
+          "description": "Required. Choose the primary activity window to report."
+        },
+        "top_n": {
+          "name": "Top N rankings",
+          "description": "Optional. Defaults to 5. Limit how many top device, app, category, upload, and download ranking rows the report returns."
+        },
+        "include": {
+          "name": "Include sections",
+          "description": "Optional. Add raw metric sample sections for the selected window. The default report already includes selected-window summaries plus activity-derived devices, apps, and categories when Firewalla exposes them."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the network selector and building the report."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -601,13 +645,21 @@
           "name": "Granularity",
           "description": "Required. Choose whether the primary report periods should be daily or hourly."
         },
+        "sections": {
+          "name": "Sections (Optional)",
+          "description": "Limit the report to the named major sections. When omitted, standard returns all major sections and summary returns internet plus app totals. A non-empty app filter also keeps the apps section visible."
+        },
+        "include": {
+          "name": "Include detail (Optional)",
+          "description": "Add per-device interval detail when Firewalla returns it for the selected scope and apps."
+        },
         "detail": {
           "name": "Detail (Optional)",
-          "description": "Defaults to summary. Use intervals to include available per-device interval detail."
+          "description": "Defaults to standard. Summary returns the smallest default section set, while standard returns the normal report depth."
         },
         "app_ids": {
           "name": "App IDs",
-          "description": "Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app sections."
+          "description": "Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app sections. A non-empty list also keeps the apps section in the response."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -647,9 +699,13 @@
           "name": "History count (Optional)",
           "description": "Number of full history periods to include. Defaults to 0. Historical periods are always full periods."
         },
+        "include": {
+          "name": "Include sections (Optional)",
+          "description": "Add history rows or nested subperiod breakdowns where the selected periods support them."
+        },
         "detail": {
           "name": "Detail (Optional)",
-          "description": "Defaults to summary. Use weekly or daily to add derived nested breakdown rows where that richer detail is supported."
+          "description": "Defaults to summary. Use full only when you want nested subperiod breakdowns where the selected periods support them."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

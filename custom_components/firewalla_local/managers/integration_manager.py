@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime, time, timedelta, tzinfo
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -29,6 +29,7 @@ from ..models import (
     FirewallaNetworkMetricSeries,
     FirewallaNetworkSegment,
     FirewallaNetworkSegmentView,
+    FirewallaNetworkUsageBucket,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
@@ -587,6 +588,10 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             raw_payload.get("hosts"),
             host_lookup=host_lookup,
         )
+        activity_hosts = self._build_network_activity_hosts(
+            flows,
+            host_lookup=host_lookup,
+        )
         return FirewallaNetworkSegmentView(
             target=FirewallaNetworkSegment(
                 uuid=target.uuid,
@@ -632,6 +637,11 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 ),
                 host_lookup=host_lookup,
                 metric_key="upload",
+            ),
+            activity_hosts=activity_hosts,
+            top_apps=self._build_network_usage_buckets(flows.get("appDetails")),
+            top_categories=self._build_network_usage_buckets(
+                flows.get("categoryDetails")
             ),
             new_last24=self._build_network_metric_series(raw_payload.get("newLast24")),
             last60=self._build_network_metric_series(raw_payload.get("last60")),
@@ -682,6 +692,202 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                     -((host.download_bytes or 0) + (host.upload_bytes or 0)),
                     host.host_name.casefold() if host.host_name else "",
                     host.host_id,
+                ),
+            )
+        )
+
+    def _build_network_activity_hosts(
+        self,
+        raw_flows: Mapping[str, object],
+        *,
+        host_lookup: dict[str, FirewallaHostRuntime],
+    ) -> tuple[FirewallaNetworkHostTotals, ...]:
+        """Build per-device activity rows from richer flow families."""
+        activity_by_host: dict[str, dict[str, object]] = {}
+
+        def ensure_activity_host(
+            host_id: str,
+            *,
+            ip_address: str | None = None,
+        ) -> dict[str, object]:
+            host = host_lookup.get(host_id)
+            activity = activity_by_host.setdefault(
+                host_id,
+                {
+                    "host_name": host.display_name if host is not None else None,
+                    "ip_address": host.ip_address if host is not None else ip_address,
+                    "conn": 0,
+                    "download_bytes": 0,
+                    "upload_bytes": 0,
+                },
+            )
+            if activity["ip_address"] is None and ip_address is not None:
+                activity["ip_address"] = ip_address
+            return activity
+
+        raw_app_details = raw_flows.get("appDetails")
+        if isinstance(raw_app_details, Mapping):
+            for raw_rows in raw_app_details.values():
+                if not isinstance(raw_rows, list):
+                    continue
+                for raw_row in raw_rows:
+                    if not isinstance(raw_row, Mapping):
+                        continue
+                    host_id = (
+                        self._optional_string(raw_row.get("device"))
+                        or self._optional_string(raw_row.get("mac"))
+                        or self._optional_string(raw_row.get("deviceMac"))
+                    )
+                    if host_id is None:
+                        continue
+                    activity = ensure_activity_host(host_id)
+                    activity["download_bytes"] = cast(
+                        int, activity["download_bytes"]
+                    ) + (self._optional_int(raw_row.get("download")) or 0)
+                    activity["upload_bytes"] = cast(int, activity["upload_bytes"]) + (
+                        self._optional_int(raw_row.get("upload")) or 0
+                    )
+
+        raw_recent = raw_flows.get("recent")
+        if isinstance(raw_recent, list):
+            for raw_row in raw_recent:
+                if not isinstance(raw_row, Mapping):
+                    continue
+                host_id = (
+                    self._optional_string(raw_row.get("device"))
+                    or self._optional_string(raw_row.get("mac"))
+                    or self._optional_string(raw_row.get("deviceMac"))
+                )
+                if host_id is None:
+                    continue
+                activity = ensure_activity_host(
+                    host_id,
+                    ip_address=self._optional_string(raw_row.get("deviceIP")),
+                )
+                activity["conn"] = cast(int, activity["conn"]) + (
+                    self._optional_int(raw_row.get("count")) or 0
+                )
+
+        for metric_key in ("download", "upload"):
+            raw_rankings = self._resolve_network_ranking_payload(
+                raw_flows.get(metric_key)
+            )
+            if not isinstance(raw_rankings, list):
+                continue
+            for raw_row in raw_rankings:
+                if not isinstance(raw_row, Mapping):
+                    continue
+                host_id = (
+                    self._optional_string(raw_row.get("device"))
+                    or self._optional_string(raw_row.get("mac"))
+                    or self._optional_string(raw_row.get("deviceMac"))
+                )
+                if host_id is None:
+                    continue
+                activity = ensure_activity_host(
+                    host_id,
+                    ip_address=self._optional_string(raw_row.get("deviceIP")),
+                )
+                ranking_value = (
+                    self._optional_int(raw_row.get(metric_key))
+                    or self._optional_int(raw_row.get("bytes"))
+                    or self._optional_int(raw_row.get("count"))
+                    or 0
+                )
+                current_value = cast(int, activity[f"{metric_key}_bytes"])
+                if ranking_value > current_value:
+                    activity[f"{metric_key}_bytes"] = ranking_value
+
+        hosts = [
+            FirewallaNetworkHostTotals(
+                host_id=host_id,
+                host_name=cast(str | None, values["host_name"]),
+                ip_address=cast(str | None, values["ip_address"]),
+                conn=cast(int, values["conn"]),
+                download_bytes=cast(int, values["download_bytes"]),
+                upload_bytes=cast(int, values["upload_bytes"]),
+            )
+            for host_id, values in activity_by_host.items()
+            if cast(int, values["conn"]) > 0
+            or cast(int, values["download_bytes"]) > 0
+            or cast(int, values["upload_bytes"]) > 0
+        ]
+
+        return tuple(
+            sorted(
+                hosts,
+                key=lambda host: (
+                    -((host.download_bytes or 0) + (host.upload_bytes or 0)),
+                    -(host.conn or 0),
+                    host.host_name.casefold() if host.host_name else "",
+                    host.host_id,
+                ),
+            )
+        )
+
+    def _build_network_usage_buckets(
+        self,
+        raw_buckets: object,
+    ) -> tuple[FirewallaNetworkUsageBucket, ...]:
+        """Build aggregated app or category activity buckets."""
+        if not isinstance(raw_buckets, Mapping):
+            return ()
+
+        buckets: list[FirewallaNetworkUsageBucket] = []
+        for key, raw_rows in raw_buckets.items():
+            if not isinstance(key, str) or not key or not isinstance(raw_rows, list):
+                continue
+
+            download_bytes = 0
+            upload_bytes = 0
+            duration_seconds = 0.0
+            session_count = 0
+            latest_timestamp: int | None = None
+            active_devices: set[str] = set()
+
+            for raw_row in raw_rows:
+                if not isinstance(raw_row, Mapping):
+                    continue
+                session_count += 1
+                download_bytes += self._optional_int(raw_row.get("download")) or 0
+                upload_bytes += self._optional_int(raw_row.get("upload")) or 0
+                duration_value = raw_row.get("duration")
+                if isinstance(duration_value, (int, float)):
+                    duration_seconds += float(duration_value)
+                if device_id := (
+                    self._optional_string(raw_row.get("device"))
+                    or self._optional_string(raw_row.get("mac"))
+                    or self._optional_string(raw_row.get("deviceMac"))
+                ):
+                    active_devices.add(device_id)
+                timestamp = self._optional_int(raw_row.get("ts"))
+                if timestamp is not None and (
+                    latest_timestamp is None or timestamp > latest_timestamp
+                ):
+                    latest_timestamp = timestamp
+
+            if session_count == 0:
+                continue
+
+            buckets.append(
+                FirewallaNetworkUsageBucket(
+                    key=key,
+                    download_bytes=download_bytes,
+                    upload_bytes=upload_bytes,
+                    duration_seconds=duration_seconds,
+                    session_count=session_count,
+                    active_device_count=len(active_devices),
+                    latest_timestamp=latest_timestamp,
+                )
+            )
+
+        return tuple(
+            sorted(
+                buckets,
+                key=lambda bucket: (
+                    -(bucket.download_bytes + bucket.upload_bytes),
+                    -bucket.session_count,
+                    bucket.key,
                 ),
             )
         )

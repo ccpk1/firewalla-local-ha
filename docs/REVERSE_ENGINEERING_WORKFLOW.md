@@ -1262,6 +1262,116 @@ These items remain unconfirmed and should stay visible.
 - whether re-enabling a timed-paused direct DNS rule uses the same payload shape
   as internet-block re-enable, in addition to clearing `idleTs`
 
+## Additional host-settings findings
+
+### Finding 15: DHCP reservations, notification toggles, device type feedback, and Wake-on-LAN are host-scoped actions
+
+Scenario:
+
+- one mixed app session on a single host performed these actions in sequence:
+  - changed IP assignment from dynamic to reserved
+  - changed the reserved IPv4 address
+  - changed the device type from phone to tablet
+  - toggled notify when next online and notify when next offline
+  - sent Wake-on-LAN
+
+Artifacts:
+
+- `.tmp/firewalla_dhcp_mixed_actions_capture.pcap`
+- `.tmp/firewalla_dhcp_mixed_actions_capture.decoded.txt`
+- pre-capture runtime pull: `.artifacts/runtime-pull/20260331-022009/`
+- post-capture runtime pull: `.artifacts/runtime-pull/20260331-022718/`
+
+Observed DHCP configuration read model:
+
+- steady-state DHCP configuration is readable from `networkConfig.dhcp`
+- per-interface entries currently expose:
+  - `gateway`
+  - `subnetMask`
+  - `lease`
+  - `range.from`
+  - `range.to`
+  - `nameservers`
+  - `searchDomain`
+  - optional `extraOptions`
+
+Observed reservation mutation:
+
+```json
+{
+  "item": "policy",
+  "target": "74:42:18:08:D2:8D",
+  "value": {
+    "ipAllocation": {
+      "allocations": {
+        "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+          "ipv4": "192.168.202.102",
+          "type": "static"
+        }
+      }
+    }
+  }
+}
+```
+
+Observed reservation storage model:
+
+- reserved-IP state did not move `networkConfig.dhcp`
+- reserved-IP ownership is stored per host under:
+  - `host.policy.ipAllocation.allocations[<network_or_interface_uuid>]`
+- allocation entries currently carry:
+  - `type`, such as `static` or `dynamic`
+  - `ipv4` when the allocation is static
+
+Observed device-type feedback mutation:
+
+```json
+{
+  "item": "feedback",
+  "value": {
+    "key": "device.detect",
+    "target": "74:42:18:08:D2:8D",
+    "value": {
+      "type": "tablet"
+    }
+  }
+}
+```
+
+Observed notification mutations:
+
+- notify when next online is carried by host policy boolean `devicePresence`
+- notify when next offline is carried by host policy boolean `deviceOffline`
+
+Observed Wake-on-LAN mutation:
+
+```json
+{
+  "item": "wol:wake"
+}
+```
+
+Result:
+
+- DHCP range details are segment-scoped configuration data from `networkConfig.dhcp`
+- reserved-IP state, notification toggles, and Wake-on-LAN are host-scoped surfaces
+- device-type changes are written through the feedback path rather than the host
+  policy path
+
+Implementation impact:
+
+- a future network-segment report can safely expose DHCP ranges from
+  `networkConfig.dhcp`
+- host detail inside that report can safely expose:
+  - IP assignment mode derived from host policy allocations
+  - reserved IPv4 when present
+  - device-type feedback when present
+  - notification toggle state from host policy
+  - Wake-on-LAN capability or support as a host-facing action affordance
+- future services for reservation updates, notification toggles, and
+  Wake-on-LAN should be modeled as host-targeted actions, not segment-targeted
+  DHCP mutations
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two

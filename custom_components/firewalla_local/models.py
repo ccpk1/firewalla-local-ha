@@ -348,6 +348,47 @@ class FirewallaWanInterface:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaReportTarget:
+    """One normalized report target identity."""
+
+    kind: str
+    id: str | None = None
+    name: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaReportTimeBasis:
+    """One normalized time-basis object used by report services."""
+
+    kind: str
+    label: str | None = None
+    begin_timestamp: int | None = None
+    end_timestamp: int | None = None
+    anchor_timestamp: int | None = None
+    is_partial: bool | None = None
+    boundary_source: str | None = None
+    time_zone: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaReportProvenance:
+    """One provenance entry describing how a report section was produced."""
+
+    section: str
+    source: str
+    source_field: str | None = None
+    note: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaReportWarning:
+    """One report warning exposed in response metadata."""
+
+    code: str
+    message: str
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaWanDataUsageSample:
     """One normalized WAN data-usage sample point."""
 
@@ -510,6 +551,19 @@ class FirewallaNetworkHostTotals:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaNetworkUsageBucket:
+    """One aggregated activity bucket for apps or categories."""
+
+    key: str
+    download_bytes: int = 0
+    upload_bytes: int = 0
+    duration_seconds: float = 0.0
+    session_count: int = 0
+    active_device_count: int = 0
+    latest_timestamp: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaNetworkHostRanking:
     """One ranked host summary derived from per-host totals."""
 
@@ -519,6 +573,58 @@ class FirewallaNetworkHostRanking:
     remote_host: str | None = None
     remote_ip: str | None = None
     value: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkHostIpAssignment:
+    """One normalized host IP assignment for a network segment report."""
+
+    mode: str | None = None
+    network_uuid: str | None = None
+    reserved_ipv4: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkHostNotifications:
+    """One normalized host notification settings view."""
+
+    notify_when_next_online: bool = False
+    notify_when_next_offline: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkHostActions:
+    """One normalized host action-affordance view."""
+
+    wake_on_lan_supported: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkHostDetail:
+    """One configuration-oriented host detail row for a segment report."""
+
+    host_id: str
+    host_name: str | None = None
+    ip_address: str | None = None
+    dhcp_name: str | None = None
+    device_type: str | None = None
+    ip_assignment: FirewallaNetworkHostIpAssignment | None = None
+    notifications: FirewallaNetworkHostNotifications | None = None
+    actions: FirewallaNetworkHostActions | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkDhcpConfig:
+    """One normalized DHCP configuration section for a segment report."""
+
+    gateway: str | None = None
+    subnet_mask: str | None = None
+    lease_seconds: int | None = None
+    range_start: str | None = None
+    range_end: str | None = None
+    name_servers: tuple[str, ...] = ()
+    search_domains: tuple[str, ...] = ()
+    extra_options: dict[str, object] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -549,6 +655,9 @@ class FirewallaNetworkSegmentView:
     hosts: tuple[FirewallaNetworkHostTotals, ...] = ()
     top_download_hosts: tuple[FirewallaNetworkHostRanking, ...] = ()
     top_upload_hosts: tuple[FirewallaNetworkHostRanking, ...] = ()
+    activity_hosts: tuple[FirewallaNetworkHostTotals, ...] = ()
+    top_apps: tuple[FirewallaNetworkUsageBucket, ...] = ()
+    top_categories: tuple[FirewallaNetworkUsageBucket, ...] = ()
     new_last24: tuple[FirewallaNetworkMetricSeries, ...] = ()
     last60: tuple[FirewallaNetworkMetricSeries, ...] = ()
     last30: tuple[FirewallaNetworkMetricSeries, ...] = ()

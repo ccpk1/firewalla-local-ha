@@ -890,6 +890,1011 @@ Implementation note:
 - `get_network_interfaces` now resolves network selectors from runtime `networkProfiles` and `networkConfig`, issues one direct `item=intf` read per requested network UUID, and returns a bounded normalized view with interface metadata, `newLast24`, `last60`, `last30`, `last12Months`, per-host totals, and derived top upload and download host rankings.
 - The current response is intentionally broad and can be heavy when queried across all segments. Real-world usage should guide a later split into narrower or more filtered network views instead of prematurely guessing the right slicing model.
 
+Open refinement step:
+
+- [ ] Review the current `get_network_interfaces` service contract with the same rigor used for `get_wan_data_usage` and `get_time_usage_report`, and decide whether the current base service name is the most user-intuitive contract or whether it should be renamed before the surface hardens.
+- [ ] Rework the network-interface response toward a more user-shaped report contract if the current output is still too transport-shaped, with emphasis on:
+  - proper top-level naming
+  - proper row and field naming
+  - clearer query metadata
+  - stable, template-friendly response structure
+  - quality reporting that makes the effective scope, bounds, refresh behavior, and any derived behavior obvious
+- [ ] Apply the Firewalla-first timezone and period-semantics standards where they materially affect network time-series interpretation instead of implicitly inheriting UTC-only defaults.
+- [ ] Define the platinum-worthy target for this service before implementation changes, including:
+  - user-intuitive naming
+  - translation-ready and professional field language
+  - explicit network selector semantics
+  - response metadata that explains what was requested versus what was actually returned
+  - a clean distinction between canonical Firewalla data, normalized integration fields, and any convenience projections
+
+Initial audit findings:
+
+- The current name `get_network_interfaces` understates the actual surface. The response is not only interface metadata; it is a broad network-segment report that also includes per-host totals, ranked remote-host traffic summaries, and multiple time-series windows.
+- The current top-level response shape is still service-generic rather than report-oriented:
+  - `network`
+  - `count`
+  - `results`
+  This is functional, but it does not yet communicate whether the service is intended as a single-network report, a collection read, or the base for future narrower network views.
+- The current nested field names still expose transport-shaped or Firewalla-app-shaped terms such as `newLast24` and `last12Months`. These are proven raw families, but they are not yet the clearest user-facing report language.
+- The current time-series sample rows expose UTC ISO strings only through `timestamp_iso` and do not currently report the Firewalla appliance timezone or any derived local-time semantics for network windows.
+- The current query metadata is minimal. It exposes `refreshed` and the resolved selector, but it does not yet make the effective scope, time semantics, or heavy-report tradeoffs obvious to callers.
+- The current docs already acknowledge that the response is intentionally broad and likely to evolve into narrower or more purpose-built views. That is a strong signal that the current contract should be audited before more users build automations around it.
+
+Deeper audit findings:
+
+- The current service is conflating two distinct user jobs:
+  - understanding the network segment configuration and membership
+  - understanding traffic and activity history for that segment
+  Those are related, but they are not the same report surface and they do not evolve at the same cadence.
+- The current normalized `FirewallaNetworkSegmentView` already covers part of the configuration story:
+  - interface id
+  - network type
+  - gateway
+  - DNS servers
+  - IPv4 and IPv6 addresses
+  - IPv4 and IPv6 subnets
+  - per-host membership summaries through normalized host totals
+  This means a strong configuration overview surface can be built without inventing a new protocol read.
+- The current service already covers part of the activity story:
+  - `newLast24`
+  - `last60`
+  - `last30`
+  - `last12Months`
+  - ranked download and upload hosts
+  This means a strong activity-report surface can also be built from the proven `item=intf` path.
+- DHCP host naming is proven at the host level through `dhcpName`, but DHCP pool boundaries and reservation metadata are not currently promoted into normalized models or service responses.
+- The checked-in init payload fixtures prove `networkProfiles` and `networkConfig.interface...meta` naming, but they do not currently prove a stable normalized contract for:
+  - DHCP start and end ranges
+  - explicit reservation lists
+  - reserved-IP ownership mapping
+  - segment-local DHCP server enable or disable metadata
+- Because those DHCP and reservation details are not yet part of the durable normalized surface, they should be treated as a follow-up evidence and modeling task rather than promised in the next public contract revision without verification.
+
+Best-in-class recommendation:
+
+- The likely platinum path is to split the current broad surface into two user-intuitive report families instead of making `get_network_interfaces` increasingly heavier.
+- Recommended report family 1: network configuration overview
+  - working names to evaluate:
+    - `get_network_segment_overview`
+    - `get_network_segment_configuration`
+    - `get_network_segment_report`
+  - primary user value:
+    - understand what this segment is
+    - see addressing and routing details
+    - see the current members on that segment
+  - likely outward sections:
+    - `network`
+    - `configuration`
+    - `addressing`
+    - `hosts`
+    - optional `dhcp` once the contract is proven
+- Recommended report family 2: network activity and history
+  - working names to evaluate:
+    - `get_network_activity_report`
+    - `get_network_segment_activity`
+    - `get_network_segment_usage`
+  - primary user value:
+    - understand what happened on this segment over time
+    - see totals, rankings, and time-series windows
+  - likely outward sections:
+    - `network`
+    - `query`
+    - `host_totals`
+    - `top_download_hosts`
+    - `top_upload_hosts`
+    - normalized time-window sections with clearer names than raw `newLast24` and `last12Months`
+- If the repository keeps a single service in the near term, the best-in-class fallback is not the current generic wrapper. It should become an explicit report surface with clear query metadata and a deliberate split between configuration and activity sections.
+
+Working product recommendation:
+
+- Start the refinement assuming the current name `get_network_interfaces` may not survive.
+- Treat the current response as the prototype for two future bounded surfaces:
+  - a configuration overview report for segment settings and membership
+  - an activity report for traffic windows and rankings
+- Treat DHCP pool and reservation exposure as conditional follow-on scope pending confirmed raw contract evidence and a clean normalization story.
+
+Locked naming direction:
+
+- Use `get_network_segment_report` for the configuration-oriented surface.
+- Use `get_network_segment_usage` for the traffic and activity-oriented surface.
+
+Naming boundary note:
+
+- `get_network_segment_report` is a strong fit for the broad configuration and membership overview because it leaves room for addressing, routing, host membership, and later DHCP details without overcommitting to one narrow concept.
+- `get_network_segment_usage` is the better fit for the second surface because it can naturally cover both traffic-oriented usage and broader network activity such as:
+  - time-series windows
+  - upload and download rankings
+  - host usage totals
+  - connection counts
+  - DNS counts
+  - blocked-request counters
+  - other segment-level activity that users still reasonably interpret as usage
+- This keeps the naming honest while avoiding an overly narrow `data_usage` contract that would have pushed non-byte metrics into an awkward bucket.
+
+Locked response contract: `get_network_segment_report`
+
+- Service intent:
+  return one configuration-oriented report for one resolved network segment
+- Request contract:
+  - require exactly one segment selector:
+    - `network_uuid` for deterministic automations, or
+    - `network_name` for interactive use
+  - reject empty selectors instead of silently returning all segments because the new surface is singular and report-oriented
+  - keep `refresh` with default `true`
+  - keep optional `config_entry_id` and `config_entry_name` selectors for multi-box installs
+- Response shape:
+
+```json
+{
+  "config_entry_id": "abc123",
+  "refreshed": true,
+  "network": {
+    "uuid": "11111111-2222-3333-4444-555555555555",
+    "name": "Main LAN"
+  },
+  "query": {
+    "refresh": true
+  },
+  "configuration": {
+    "interface_name": "br0",
+    "type": "lan",
+    "monitoring": true,
+    "active": true,
+    "ready": true,
+    "pending_test": false,
+    "policy": {
+      "acl": true
+    }
+  },
+  "addressing": {
+    "gateway": "192.168.200.1",
+    "gateway6": null,
+    "route_id": "10",
+    "ipv4_addresses": ["192.168.200.1"],
+    "ipv4_subnets": ["192.168.200.0/24"],
+    "ipv6_addresses": [],
+    "ipv6_subnets": [],
+    "route4_subnets": ["192.168.200.0/24"],
+    "route6_subnets": []
+  },
+  "dns": {
+    "servers": ["1.1.1.1", "8.8.8.8"],
+    "servers6": [],
+    "original_servers": ["1.1.1.1"],
+    "original_servers6": []
+  },
+  "dhcp": {
+    "gateway": "192.168.200.1",
+    "subnet_mask": "255.255.255.0",
+    "lease_seconds": 86400,
+    "range": {
+      "start": "192.168.200.240",
+      "end": "192.168.200.254"
+    },
+    "name_servers": ["192.168.200.1"],
+    "search_domains": ["int.ccpk.us"],
+    "extra_options": {}
+  },
+  "hosts": {
+    "count": 2,
+    "items": [
+      {
+        "host_id": "AA:BB:CC:DD:EE:FF",
+        "host_name": "Kitchen iPad",
+        "ip_address": "192.168.200.25",
+        "device_type": "tablet",
+        "ip_assignment": {
+          "mode": "static",
+          "network_uuid": "11111111-2222-3333-4444-555555555555",
+          "reserved_ipv4": "192.168.200.25"
+        },
+        "notifications": {
+          "notify_when_next_online": true,
+          "notify_when_next_offline": false
+        },
+        "actions": {
+          "wake_on_lan_supported": true
+        }
+      },
+      {
+        "host_id": "11:22:33:44:55:66",
+        "host_name": "Printer",
+        "ip_address": "192.168.200.40",
+        "device_type": null,
+        "ip_assignment": {
+          "mode": "dynamic",
+          "network_uuid": "11111111-2222-3333-4444-555555555555",
+          "reserved_ipv4": null
+        },
+        "notifications": {
+          "notify_when_next_online": false,
+          "notify_when_next_offline": false
+        },
+        "actions": {
+          "wake_on_lan_supported": false
+        }
+      }
+    ]
+  }
+}
+```
+
+- Contract notes:
+  - `hosts.items` should now be treated as host-detail rows for segment configuration, not identity-only membership rows.
+  - host detail can safely include configuration-oriented values proven by capture or steady-state runtime, including:
+    - device type
+    - IP assignment mode and reserved IPv4 when present
+    - notification toggle state
+    - Wake-on-LAN support
+  - per-host traffic and activity counters still move to `get_network_segment_usage`.
+  - `policy` remains an optional normalized object because the raw payload already exposes it and it is configuration-shaped.
+  - `dhcp` is now safe to expose in the report because the steady-state runtime model is confirmed for range, lease, and name-server details.
+  - DHCP enable or disable should remain omitted until its mutation and durable read semantics are isolated cleanly.
+
+Locked response contract: `get_network_segment_usage`
+
+Implementation note:
+
+- Implemented in the standalone integration as a singular service in `custom_components/firewalla_local/services.py`.
+- The current implementation reuses the proven `item=intf` local read and exposes a bounded usage surface with:
+  - `host_totals`
+  - `rankings.top_download_hosts`
+  - `rankings.top_upload_hosts`
+  - normalized `time_windows` sections
+- `detail=summary` returns per-metric summaries only, while `detail=series` adds the time-series samples.
+
+- Service intent:
+  return one usage-oriented report for one resolved network segment
+- Request contract:
+  - require exactly one segment selector:
+    - `network_uuid` or `network_name`
+  - keep `refresh` with default `true`
+  - add `detail` with:
+    - `summary` as the default
+    - `series` when callers want full time-series samples
+  - keep optional `config_entry_id` and `config_entry_name`
+- Response shape:
+
+```json
+{
+  "config_entry_id": "abc123",
+  "refreshed": true,
+  "network": {
+    "uuid": "11111111-2222-3333-4444-555555555555",
+    "name": "Main LAN"
+  },
+  "query": {
+    "refresh": true,
+    "detail": "summary",
+    "time_zone": "America/New_York"
+  },
+  "host_totals": {
+    "count": 2,
+    "items": [
+      {
+        "host_id": "AA:BB:CC:DD:EE:FF",
+        "host_name": "Kitchen iPad",
+        "ip_address": "192.168.200.25",
+        "conn": 12,
+        "dns": 21,
+        "dns_blocked": 0,
+        "ip_blocked": 0,
+        "ip_denied": 0,
+        "ntp": 1,
+        "download_bytes": 123456789,
+        "upload_bytes": 9876543
+      }
+    ]
+  },
+  "rankings": {
+    "top_download_hosts": [
+      {
+        "host_id": "AA:BB:CC:DD:EE:FF",
+        "host_name": "Kitchen iPad",
+        "ip_address": "192.168.200.25",
+        "remote_host": "cdn.example.com",
+        "remote_ip": "203.0.113.10",
+        "value": 123456789
+      }
+    ],
+    "top_upload_hosts": [
+      {
+        "host_id": "11:22:33:44:55:66",
+        "host_name": "Printer",
+        "ip_address": "192.168.200.40",
+        "remote_host": "backup.example.com",
+        "remote_ip": "198.51.100.20",
+        "value": 4567890
+      }
+    ]
+  },
+  "time_windows": {
+    "last_24_hours": {
+      "source": "newLast24",
+      "label": "Last 24 hours",
+      "metrics": [
+        {
+          "metric": "download",
+          "summary": {
+            "sample_count": 24,
+            "latest_timestamp": 1774670400,
+            "latest": "2026-03-27T00:00:00-04:00"
+          }
+        }
+      ]
+    },
+    "last_60_minutes": {
+      "source": "last60",
+      "label": "Last 60 minutes",
+      "metrics": []
+    },
+    "last_30_days": {
+      "source": "last30",
+      "label": "Last 30 days",
+      "metrics": []
+    },
+    "last_12_months": {
+      "source": "last12Months",
+      "label": "Last 12 months",
+      "metrics": []
+    }
+  }
+}
+```
+
+- `detail=series` extends each `time_windows.*.metrics[*]` object with:
+
+```json
+{
+  "samples": [
+    {
+      "timestamp": 1774670400,
+      "timestamp_iso": "2026-03-27T04:00:00+00:00",
+      "value": 12345
+    }
+  ]
+}
+```
+
+- Contract notes:
+  - public window names use `last_24_hours`, `last_60_minutes`, `last_30_days`, and `last_12_months` instead of raw transport keys.
+  - `query.time_zone` should use Firewalla-first timezone resolution, with Home Assistant timezone only as fallback, because the window labels are user-facing time semantics.
+  - `host_totals` keeps the per-host activity counters because those are usage-shaped and already proven in the current `item=intf` payload.
+  - ranking sections remain top-level and bounded so template users do not have to inspect raw flow payloads.
+
+Post-implementation review findings:
+
+- The current first implementation of `get_network_segment_usage` is functionally valid but not yet the intended platinum-grade contract.
+- Live VLAN review against `.tmp/vlan60_get_network_interfaces.json`, `.tmp/vlan60_get_network_segment_report.json`, and `.tmp/vlan60_raw_item_intf.json` changed the confidence model for the service:
+  - the raw `hosts` object for VLAN60 is a dictionary keyed by host ID, not a list of rich host rows
+  - every host metric under raw `hosts` was zero for the live VLAN60 sample
+  - raw `flows.download`, `flows.upload`, `flows.recent`, `flows.appDetails`, and `flows.categoryDetails` were populated and contained the strongest current evidence of real segment activity
+  - normalized time-window families remained strongly populated and are currently the most reliable segment-wide usage surface
+- This means the current outward emphasis is wrong for a user-facing usage report:
+  - host totals are not currently a trustworthy default activity surface
+  - the report should be centered on bounded window activity, derived flow rankings, and explicit activity provenance
+  - inventory or membership-shaped host detail belongs in `get_network_segment_report`, not in the default usage output
+
+Captured redesign work for `get_network_segment_usage`:
+
+- [ ] Rework the service contract to be usage-first instead of transport-first, with the time basis as a required first-class query concept rather than an implicit bundle of all windows.
+- [ ] Replace the current default emphasis on `host_totals` with a summary that leads with:
+  - selected time window
+  - aggregate traffic and activity metrics
+  - active device count
+  - top active devices, apps, categories, and destinations when supported by the selected window
+- [ ] Derive ranked device activity from raw flow families instead of from the zero-heavy raw `hosts` map.
+- [ ] Split "segment membership" from "segment activity" cleanly:
+  - membership and host configuration stay in `get_network_segment_report`
+  - activity and traffic stay in `get_network_segment_usage`
+- [ ] Demote or omit zero-heavy upstream host counter sections from the default report contract unless a future evidence pass proves they are stable and meaningful.
+- [ ] Add explicit provenance metadata for every major usage section so callers can distinguish:
+  - direct aggregate series from raw window families
+  - derived rankings from flow records
+  - unsupported or unavailable sections
+- [ ] Make the query and response explain the effective window and bounds clearly, including:
+  - requested window
+  - applied timezone
+  - active versus known device counts when both are returned
+  - detail and include choices that were actually honored
+- [ ] Revisit the outward request fields before more implementation work and prefer:
+  - a single named `window` selector such as `last_60_minutes`, `last_24_hours`, `last_30_days`, or `last_12_months`
+  - a shared `detail` depth concept
+  - a bounded `top_n`
+  - optional `include` sections rather than one-off booleans
+- [ ] Preserve a debug or evidence mode only if needed for parity validation, but keep it out of the default report path.
+
+Implementation pause note:
+
+- Pause further `get_network_segment_usage` product-shaping changes until the repository defines one unified report contract pattern shared across report-oriented services.
+- Bug fixes needed to keep the current surface working are still allowed, but no further contract hardening should happen in isolation.
+
+Next step to start before resuming segment-usage work: unified report contract pattern
+
+- [ ] Define a shared report-contract pattern for report-oriented services, starting with:
+  - `get_wan_data_usage`
+  - `get_time_usage_report`
+  - `get_network_segment_report`
+  - `get_network_segment_usage`
+- [ ] Lock the shared contract goals before editing code:
+  - make the four report services feel related without pretending they share the same raw source
+  - standardize query and response language first
+  - only share derivation logic where the underlying record family is genuinely the same
+  - keep the outward contract template-friendly and export-friendly
+- [ ] Standardize the common outward response envelope so these services use familiar top-level sections where the semantics genuinely overlap, with candidate shared sections:
+  - `query`
+  - `target`
+  - `time_basis`
+  - `summary`
+  - `sections` or `results`
+  - `metadata` or `provenance`
+- [ ] Lock the common outward response envelope as:
+
+```json
+{
+  "config_entry_id": "abc123",
+  "refreshed": true,
+  "target": {
+    "kind": "network_segment",
+    "id": "11111111-2222-3333-4444-555555555555",
+    "name": "Main LAN"
+  },
+  "query": {
+    "detail": "summary",
+    "include": [],
+    "time_zone": "America/New_York"
+  },
+  "time_basis": {
+    "kind": "named_window",
+    "label": "Last 24 hours",
+    "begin_timestamp": 1774893600,
+    "end_timestamp": 1774979999,
+    "anchor_timestamp": 1774976400,
+    "is_partial": false,
+    "boundary_source": "firewalla_window",
+    "time_zone": "America/New_York"
+  },
+  "summary": {},
+  "sections": {},
+  "metadata": {
+    "provenance": {},
+    "warnings": []
+  }
+}
+```
+
+- [ ] Keep this envelope intentionally stable across the four report services:
+  - `target` identifies what the report is about
+  - `query` explains what the caller asked for and what options were applied
+  - `time_basis` explains the report window or period semantics when time is involved
+  - `summary` holds the default human-meaningful headline values
+  - `sections` holds richer structured subsections
+  - `metadata.provenance` explains direct versus derived sections and any unavailable data
+- [ ] Standardize a shared time-basis object that can cover:
+  - named windows for segment usage
+  - explicit begin and end ranges for time usage
+  - current and historical periods for WAN data usage
+  and that consistently carries:
+  - `kind`
+  - `label`
+  - `begin_timestamp`
+  - `end_timestamp`
+  - `anchor_timestamp`
+  - `is_partial`
+  - `boundary_source`
+  - `time_zone`
+- [ ] Lock the time-basis variants that each report family may use:
+  - `named_window`
+    - for `get_network_segment_usage`
+    - examples: `last_60_minutes`, `last_24_hours`, `last_30_days`, `last_12_months`
+  - `custom_range`
+    - for `get_time_usage_report`
+    - explicit caller-provided `begin` and `end`
+  - `period_row`
+    - for one WAN row such as current month or one historical week
+  - `period_bundle`
+    - for a WAN report that mixes current and history rows in one response
+- [ ] Reuse the existing WAN-style period semantics as the base model instead of inventing a second incompatible window model.
+- [ ] Standardize target identity language across report families so resolved targets feel familiar even when the data source differs:
+  - `kind`
+  - `id`
+  - `name`
+- [ ] Lock target identity mappings by service:
+  - `get_wan_data_usage`
+    - `kind=wan`
+    - `id=<wan_uuid>`
+    - `name=<wan_name>`
+  - `get_time_usage_report`
+    - `kind=device|group|user`
+    - `id=<stable scope target id>`
+    - `name=<resolved display name when available>`
+  - `get_network_segment_report`
+    - `kind=network_segment`
+    - `id=<network_uuid>`
+    - `name=<network_name>`
+  - `get_network_segment_usage`
+    - `kind=network_segment`
+    - `id=<network_uuid>`
+    - `name=<network_name>`
+- [ ] Standardize query-depth language across report families by separating:
+  - `detail` for output depth
+  - `include` for optional sections
+  instead of overloading `detail` with report-specific meanings such as `series`, `intervals`, `weekly`, or `daily`
+- [ ] Lock shared query-depth language as:
+  - `detail`
+    - allowed shared values: `summary`, `standard`, `full`
+    - intent:
+      - `summary`: smallest useful report
+      - `standard`: default user-facing report with key sections
+      - `full`: include all supported structured sections except raw debug evidence
+  - `include`
+    - optional additive sections chosen per service
+    - examples by family:
+      - WAN data usage: `history`, `subperiods`
+      - time usage: `intervals`, `apps`, `categories`, `devices`
+      - network segment report: `hosts`, `dhcp`, `dns`, `addressing`
+      - network segment usage: `series`, `devices`, `apps`, `categories`, `destinations`
+- [ ] Map existing report-specific `detail` concepts into the new pattern during implementation:
+  - WAN `weekly` and `daily` become `include=subperiods` with row detail expressed in the section content
+  - time usage `intervals` becomes `include=intervals`
+  - network usage `series` becomes `include=series`
+- [ ] Identify which selector and filtering concepts are truly shared and which should remain report-specific:
+  - likely shared: target selectors, refresh behavior, detail depth, include sections, timezone reporting
+  - likely report-specific: app IDs for time usage, history period controls for WAN usage, activity rankings for segment usage
+- [ ] Lock the shared request language that callers should learn once:
+  - target selectors
+    - exact selector fields remain service-specific because the targets differ, but every service must resolve to the common `target` object in the response
+  - `refresh`
+    - keep on all report services with default `true`
+  - `detail`
+    - shared depth semantics as above
+  - `include`
+    - shared additive section semantics as above
+  - `time_zone`
+    - outward response reporting should be standard even when the caller cannot override it
+- [ ] Lock which query concepts remain service-specific:
+  - `get_wan_data_usage`
+    - `current_periods`
+    - `history_period`
+    - `history_count`
+  - `get_time_usage_report`
+    - `begin`
+    - `end`
+    - `granularity`
+    - `app_ids`
+  - `get_network_segment_report`
+    - no extra query concepts beyond selectors unless later evidence justifies optional section filters
+  - `get_network_segment_usage`
+    - `window`
+    - `top_n`
+    - later optional filters only if they prove materially useful after the unified contract lands
+- [ ] Extract or plan shared helper logic only where the overlap is real, especially for:
+  - query normalization
+  - timezone resolution
+  - time-basis serialization
+  - common totals serialization
+  - response metadata and provenance shaping
+- [ ] Lock the initial shared-helper scope for implementation:
+  - one target serializer helper
+  - one time-basis serializer helper with named-window and period variants
+  - one query serializer helper that emits `detail`, `include`, and effective timezone consistently
+  - one metadata builder for warnings, unavailable sections, and provenance
+  - one totals serializer for byte totals and directional usage where the metric semantics match
+- [ ] Keep the following out of the initial shared-helper scope because forced reuse would distort semantics:
+  - WAN row derivation logic
+  - time-usage interval derivation logic
+  - network-flow aggregation logic
+- [ ] Avoid forcing false uniformity at the data-source layer. Shared contract language is the primary goal; shared aggregation logic should only be introduced where the underlying record families are actually the same.
+- [ ] Produce a locked mapping that shows, for each report service:
+  - which fields stay service-specific
+  - which fields are renamed to match the shared pattern
+  - which top-level response sections align to the common envelope
+  - which internal helpers can be safely shared without distorting semantics
+- [ ] Lock the service-by-service mapping before code changes:
+
+| Service | Shared top-level envelope | Shared query concepts | Service-specific query concepts | Default summary focus | Primary sections |
+| --- | --- | --- | --- | --- | --- |
+| `get_wan_data_usage` | `target`, `query`, `time_basis`, `summary`, `sections`, `metadata` | `refresh`, `detail`, `include` | `wan_uuid`, `wan_name`, `current_periods`, `history_period`, `history_count` | current usage totals and requested history coverage | `current`, `history` |
+| `get_time_usage_report` | `target`, `query`, `time_basis`, `summary`, `sections`, `metadata` | `detail`, `include` | `scope_kind`, `scope_target`, `begin`, `end`, `granularity`, `app_ids` | total and unique minutes for the resolved scope | `internet`, `apps`, `categories`, `intervals` |
+| `get_network_segment_report` | `target`, `query`, `summary`, `sections`, `metadata` | `refresh`, `detail`, `include` | `network_uuid`, `network_name` | segment identity, addressing, DHCP, and host counts | `configuration`, `addressing`, `dns`, `dhcp`, `hosts` |
+| `get_network_segment_usage` | `target`, `query`, `time_basis`, `summary`, `sections`, `metadata` | `refresh`, `detail`, `include` | `network_uuid`, `network_name`, `window`, `top_n` | selected-window traffic and activity summary | `devices`, `apps`, `categories`, `destinations`, `series` |
+
+- [ ] Lock the first implementation sequence for the unified contract pattern:
+  - phase 1: define shared response-language helpers and adapter shapes without changing report derivation
+    - completed in `services.py`, `models.py`, and `const.py` with shared target, query, time-basis, and metadata helpers
+  - phase 2: migrate `get_wan_data_usage` because it already has the strongest period and query semantics
+    - completed with the shared top-level envelope, shared metadata vocabulary, updated docs/translations, and focused passing tests
+  - phase 3: migrate `get_time_usage_report` to the shared envelope while preserving its scoped-history semantics
+    - completed with `target`, `query`, `time_basis`, `summary`, `sections`, and `metadata`
+    - this migration now requires follow-up cleanup on the request side because the earlier shared-query abstraction did not survive UX review
+    - focused validation passes for both unified services together
+  - phase 3a: cleanup pass after the UX contract reset
+    - completed by removing the orphaned shared-query helper, keeping only durable shared response infrastructure, and updating the plan to make the next implementation phase unambiguous
+  - phase 4: migrate `get_network_segment_report` to the shared envelope
+    - completed with a shared `target`, snapshot-style `time_basis`,
+      configuration summary, sectioned response body, and aligned focused docs
+      and tests
+  - phase 5: redesign `get_network_segment_usage` on top of the shared envelope and the already captured live-data findings
+    - completed with a required `window`, optional `top_n`, additive `include=series`, a shared report envelope, and focused tests/docs aligned to the window-first contract
+- [ ] Lock the implementation work by file so execution can start without another planning pass:
+  - [custom_components/firewalla_local/const.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/const.py)
+    - add shared service field constants needed by the unified contract
+    - expected additions:
+      - `SERVICE_FIELD_INCLUDE`
+      - `SERVICE_FIELD_TIME_ZONE`
+      - `SERVICE_FIELD_WINDOW`
+      - `SERVICE_FIELD_TOP_N`
+    - defer any new filter fields until a later evidence-backed pass
+  - [custom_components/firewalla_local/models.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/models.py)
+    - add shared outward-report model types for:
+      - target identity
+      - time basis
+      - metadata and provenance
+      - warnings or unavailable sections
+    - keep them outward-contract focused rather than transport focused
+  - [custom_components/firewalla_local/services.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/services.py)
+    - add shared serializer helpers for the response envelope
+    - keep query payload assembly service-owned unless a helper stays honest across report families
+    - migrate report handlers one at a time to emit the new envelope
+    - do not rewrite raw derivation logic unless required by the contract migration itself
+  - [custom_components/firewalla_local/services.yaml](/workspaces/firewalla-local-ha/custom_components/firewalla_local/services.yaml)
+    - update field descriptions so each service uses task-native query language while the response remains consistent
+  - [custom_components/firewalla_local/translations/en.json](/workspaces/firewalla-local-ha/custom_components/firewalla_local/translations/en.json)
+    - add or revise service-field names and descriptions so the final per-service query contract is translation-ready
+  - [tests/components/firewalla_local/test_services.py](/workspaces/firewalla-local-ha/tests/components/firewalla_local/test_services.py)
+    - migrate and extend service response tests for the shared envelope
+  - [tests/components/firewalla_local/test_init.py](/workspaces/firewalla-local-ha/tests/components/firewalla_local/test_init.py)
+    - confirm service registration remains stable after schema updates
+  - [docs/USER_GUIDE.md](/workspaces/firewalla-local-ha/docs/USER_GUIDE.md)
+    - update examples and service descriptions to the unified report language
+- [ ] Lock the initial shared outward request fields and their implementation status:
+
+Contract reset note after UX review:
+
+- The strongest uniformity should remain on the response side, not the full query side.
+- Forcing one shared request-shape vocabulary such as `detail` across all report services is creating user confusion, especially where one service has a real primary timeline-bucket axis and another does not.
+- Revised direction:
+  - keep the shared response envelope:
+    - `target`
+    - `query`
+    - `time_basis`
+    - `summary`
+    - `sections`
+    - `metadata`
+  - keep shared response metadata vocabulary:
+    - `metadata.applied`
+    - `metadata.warnings`
+    - `metadata.unavailable_sections`
+    - `metadata.provenance`
+  - reduce shared query vocabulary to only fields that stay intuitive across report families:
+    - `refresh` where the service supports it
+    - `include` only when the service truly has optional secondary branches
+  - stop forcing one shared `detail` or `view` field across all report services until a cross-service user-facing meaning survives UX review
+  - prefer one dominant task-native mode selector per service when needed
+
+Revised query recommendation by service:
+
+| Service | Required task-native fields | Optional task-native fields | Shared optional fields | Notes |
+| --- | --- | --- | --- | --- |
+| `get_time_usage_report` | `scope_kind`, `scope_target`, `begin`, `end` | `granularity`, `app_ids`, one service-native mode selector | `include` only if intervals remain optional | Time usage has a real timeline-bucket axis, so forcing it into a shared `detail` field is misleading |
+| `get_wan_data_usage` | none beyond WAN selector and current/history selectors | `current_periods`, `history_period`, `history_count` | `refresh`, `include` | WAN periods are already the primary structure; keep the query language period-native |
+| `get_network_segment_report` | one network selector | none unless later evidence justifies host-section filtering | `refresh` only | This is primarily a configuration read and does not need borrowed time-report vocabulary |
+| `get_network_segment_usage` | one network selector, `window` | `top_n` and later evidence-backed filters | `refresh`, `include` | Named windows should remain the primary structure for segment activity |
+
+Primary UX rule to preserve in later implementation:
+
+- `summary` must never return the same large repeated arrays as the normal report path.
+- If a field only affects the repeated timeline or series path, it should not be presented as a co-equal main control for the summary path unless the UI can express that dependency clearly.
+- When a report has a first-class primary bucket choice, that choice is task-native to that service and should not be forced into a shared `detail` abstraction.
+
+Builder handoff: superseding decisions for request semantics and cleanup
+
+- This section supersedes earlier planning language that assumed one shared `detail` or `view` query axis across all report services.
+- Builders should treat the shared response envelope as durable and the shared request vocabulary as intentionally reduced.
+- Builders should remove any code, tests, docs, or translations that only exist to support the abandoned shared-query abstraction.
+
+Final contract split
+
+- Shared across report services:
+  - response envelope
+  - response metadata vocabulary
+  - config-entry selection behavior
+  - timezone reporting in the response
+  - optional `refresh` only where a service materially supports refresh-before-read
+  - optional `include` only where a service truly has additive secondary branches
+- Service-native by default:
+  - primary mode selectors
+  - bucket or period controls
+  - filtering controls
+  - any field whose meaning changes materially from one report family to another
+
+Final builder recommendation for query fields
+
+| Service | Required user inputs | Optional user inputs | Shared optional inputs to keep | Explicit non-goals |
+| --- | --- | --- | --- | --- |
+| `get_time_usage_report` | `scope_kind`, `scope_target`, `begin`, `end` | `granularity`, `app_ids`, one service-native mode selector if needed | `include=intervals` only if intervals remain additive | Do not force a shared `detail` field here unless it has a stable user-facing meaning after UX review |
+| `get_wan_data_usage` | WAN selector when needed, `current_periods` or history selectors | `history_period`, `history_count` | `refresh`, `include=history|subperiods` | Do not rename period-family controls into generic time-usage vocabulary |
+| `get_network_segment_report` | one network selector | none by default | `refresh` only | Do not add borrowed time-report fields such as `detail` unless the service later gains a clearly separate summary-vs-standard mode |
+| `get_network_segment_usage` | one network selector, `window` | `top_n`, later evidence-backed filters | `refresh`, `include` only for genuine additive sections such as `series` | Do not wrap the current broad surface in generic query language without redesigning the outward report shape |
+
+Uniform response contract that remains in force
+
+- Every report-oriented service should continue to converge on:
+  - `config_entry_id`
+  - `refreshed` when applicable
+  - `target`
+  - `query`
+  - `time_basis` when time semantics materially exist
+  - `summary`
+  - `sections`
+  - `metadata`
+- `query` remains service-specific in contents, but the envelope position stays uniform.
+- `metadata.applied` should describe the effective service-specific choices actually used, not force all services to emit the same keys.
+
+Builder cleanup inventory
+
+Keep as durable shared infrastructure:
+
+- [custom_components/firewalla_local/services.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/services.py)
+  - `_get_loaded_entry(...)`
+  - `_resolve_requested_wan(...)`
+  - `_resolve_requested_network(...)`
+  - `_resolve_usage_history_target(...)`
+  - `_serialize_report_target(...)`
+  - `_serialize_report_time_basis(...)`
+  - `_serialize_report_metadata(...)`
+  - `_normalize_report_include(...)` only for services that truly support additive sections
+- [custom_components/firewalla_local/models.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/models.py)
+  - `FirewallaReportTarget`
+  - `FirewallaReportTimeBasis`
+  - `FirewallaReportProvenance`
+  - `FirewallaReportWarning`
+- [custom_components/firewalla_local/const.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/const.py)
+  - `SERVICE_FIELD_INCLUDE` only if at least one retained service still uses additive sections
+  - keep service-specific selector constants and report service names
+
+Refactor before further implementation:
+
+- [custom_components/firewalla_local/services.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/services.py)
+  - `_serialize_report_query(...)`
+    - keep only if it becomes a thin envelope helper that accepts fully service-specific payload content
+    - remove any implied shared `detail/include/time_zone` assumptions from its contract language
+  - `_resolve_time_usage_report_inputs(...)`
+    - rewrite or remove based on the final time-usage query contract
+  - `_resolve_wan_data_usage_inputs(...)`
+    - keep only the logic that is genuinely WAN-specific and no longer describe it as part of a shared request model
+
+Delete or rewrite when builders touch the next slices:
+
+- any service schema, translation text, docs, or tests that still present `detail` as a shared cross-report concept
+- any helper whose only remaining purpose is translating one abandoned shared-query abstraction into service-native behavior
+- any plan language that still instructs builders to force `summary|standard|full` across all reports
+
+Builder implementation order from this point
+
+1. Cleanup pass
+   - remove contradictory request-contract wording from docs, translations, tests, and plan sections
+   - remove or narrow helpers that only support the abandoned shared-query abstraction
+2. Stabilize already-migrated services
+   - keep the shared response envelope for WAN and time usage
+   - revise their query contracts only if needed to align with the final per-service field decisions
+3. Migrate `get_network_segment_report`
+   - use the shared response envelope
+   - keep the request side minimal and task-native: network selector plus `refresh`
+   - add a real `summary` section if the outward report benefits from it
+4. Redesign `get_network_segment_usage`
+   - use a named `window` as the primary structure selector
+   - reserve `include` for true additive sections such as series or other secondary branches
+   - do not inherit abandoned `detail` semantics from time or WAN usage
+
+Builder acceptance criteria for cleanup
+
+- No helper remains whose only justification is future hypothetical reuse.
+- No docs or translations tell users that all reports share the same request semantics when they do not.
+- No service exposes `summary` while still returning the same large repeated arrays as the normal report path.
+- Shared code only remains where the abstraction is still true after the UX reset.
+- The plan, code, docs, and tests all describe the same contract model.
+
+| Field | Shared across report services | Initial implementation decision | Notes |
+| --- | --- | --- | --- |
+| `refresh` | yes | keep | already present and should remain stable |
+| `detail` | no longer assumed shared | remove as a universal planning requirement | keep only where one service still has a clear service-native meaning for it |
+| `include` | partially shared | keep only on services with genuine additive branches | do not add to services that do not have a true secondary section concept |
+| `time_zone` | response-standardized first | response only for now | report effective timezone consistently before adding request override support |
+| `window` | no | add only to `get_network_segment_usage` | named windows only |
+| `top_n` | no | add only to `get_network_segment_usage` | bounded ranking control |
+| `current_periods` | no | keep in WAN usage | service-specific |
+| `history_period` | no | keep in WAN usage | service-specific |
+| `history_count` | no | keep in WAN usage | service-specific |
+| `begin` | no | keep in time usage | service-specific |
+| `end` | no | keep in time usage | service-specific |
+| `granularity` | no | keep in time usage | service-specific |
+| `app_ids` | no | keep in time usage | service-specific |
+- [ ] Lock the initial top-level response-field mapping by service:
+
+| Service | Current target field | Unified target field | Current main body | Unified main body |
+| --- | --- | --- | --- | --- |
+| `get_wan_data_usage` | `wan` | `target` | `results` plus WAN query block | `summary` and `sections.current` / `sections.history` |
+| `get_time_usage_report` | `target` nested inside usage-history view | `target` | mixed top-level usage-history sections | `summary` and `sections.internet` / `sections.apps` / `sections.categories` |
+| `get_network_segment_report` | `network` | `target` | `configuration`, `addressing`, `dns`, `dhcp`, `hosts` | same section names under `sections` |
+| `get_network_segment_usage` | `network` | `target` | `host_totals`, `rankings`, `time_windows` | `summary` plus `sections.devices` / `sections.rankings` / `sections.activity` / `sections.series` |
+- [ ] Lock the backward-compatibility strategy before implementation:
+  - no hidden breaking rename should ship without explicit service-contract intent
+  - migrate one report service at a time with tests and docs updated in the same change
+  - if one migration is too disruptive for downstream automation examples, consider a temporary compatibility alias inside the response only when the additional payload cost is low and the deprecation path is clear
+  - do not keep both old and new field vocabularies indefinitely
+- [ ] Lock the concrete helper list to implement first in [custom_components/firewalla_local/services.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/services.py):
+  - `_serialize_report_target(...)`
+  - `_serialize_report_time_basis(...)`
+  - `_serialize_report_metadata(...)`
+  - `_normalize_report_include(...)`
+- [ ] Lock the shared metadata and provenance vocabulary:
+  - `metadata.provenance`
+    - use for `direct`, `derived`, and `source_field` explanations
+  - `metadata.warnings`
+    - use for partial data, unsupported include values, unavailable sections, or other request adjustments that materially affect the output
+  - `metadata.unavailable_sections`
+    - include explicit section names when a caller requested something not supported by the current source
+  - `metadata.applied`
+    - include service-specific effective choices and any bounds the service actually used
+- [ ] Lock the concrete migration work for each service:
+  - `get_wan_data_usage`
+    - move existing query block into the shared `query` plus `time_basis`
+    - move current and history rows into `sections.current` and `sections.history`
+    - preserve existing row semantics while changing only the outward envelope first
+  - `get_time_usage_report`
+    - preserve current scope-resolution logic
+    - move target identity to the shared `target`
+    - move begin/end/granularity semantics into `time_basis` and `query`
+    - move app and category material into `sections`
+  - `get_network_segment_report`
+    - rename outward `network` to the shared `target`
+    - keep existing configuration-oriented sections with minimal internal derivation change
+    - add explicit `summary` counts for hosts and key addressing facts
+  - `get_network_segment_usage`
+    - do not just wrap the current response in the new envelope
+    - redesign the outward body around the new shared contract and the captured usage-review findings
+    - make `window` required for the redesigned contract unless a clearly documented default survives review
+- [ ] Lock the implementation-ready acceptance tests that must exist before the migration is considered complete:
+  - one test per migrated service that asserts the shared envelope exists:
+    - `config_entry_id`
+    - `refreshed` when applicable
+    - `target`
+    - `query`
+    - `summary`
+    - `sections`
+    - `metadata`
+  - one test per migrated service that validates the service-specific query fields still work
+  - one test per migrated service that validates effective detail and include behavior
+  - one test per migrated service that validates timezone reporting in the unified contract
+  - one test per migrated service that validates warnings or unavailable sections when the request cannot be fulfilled exactly
+- [ ] Lock the documentation work required alongside implementation:
+  - update [custom_components/firewalla_local/services.yaml](/workspaces/firewalla-local-ha/custom_components/firewalla_local/services.yaml) for every migrated service in the same change
+  - update [custom_components/firewalla_local/translations/en.json](/workspaces/firewalla-local-ha/custom_components/firewalla_local/translations/en.json) for every migrated field label and description in the same change
+  - update [docs/USER_GUIDE.md](/workspaces/firewalla-local-ha/docs/USER_GUIDE.md) examples so the four report services look visibly related after migration
+  - add one short design note in the plan after each service migration confirming what changed and what compatibility choices were made
+- [ ] Lock acceptance criteria for the unified contract pattern:
+  - a user who understands one report can predict the top-level shape of the others
+  - time semantics are explicit and not inferred from raw Firewalla field names
+  - the response always distinguishes requested behavior from applied behavior
+  - provenance and unavailable sections are visible instead of implicit
+  - the shared pattern does not force WAN, time-usage, and network-usage derivation code into one artificial parser
+- [ ] Use the unified report contract pattern to revise `get_network_segment_usage` next, rather than redesigning that service in isolation.
+
+DHCP capture and modeling follow-up:
+
+- The app surface appears to allow DHCP viewing and mutation, so DHCP should now be treated as an explicit evidence track rather than a vague future possibility.
+- Before exposing DHCP enable or disable state, reservation-delete semantics, or DHCP-write services, capture and confirm:
+  - DHCP enable or disable state for one segment
+  - DHCP range start and end fields
+  - reservation list shape
+  - reservation-to-host linkage identifiers
+  - write-path commands for creating, editing, and deleting one reservation
+- Capture plan for DHCP:
+  - open the per-segment DHCP page and capture the steady-state read path
+  - capture one reservation create flow
+  - capture one reservation edit flow
+  - capture one reservation delete flow
+  - capture one DHCP range change if the app permits it safely
+- The report contract can now safely include the proven read-only DHCP section:
+  - `gateway`
+  - `subnet_mask`
+  - `lease_seconds`
+  - `range.start`
+  - `range.end`
+  - `name_servers`
+  - `search_domains`
+  - `extra_options`
+- After the remaining capture work, the report or adjacent host-detail surface may also grow:
+  - `enabled`
+  - reservation counts and reservation items
+
+DHCP capture findings from mixed action session:
+
+- A mixed app session was captured that included:
+  - changing one host from dynamic to reserved IP
+  - changing the reserved IP address
+  - changing the device type from phone to tablet
+  - toggling notify-when-next-online and notify-when-next-offline
+  - sending Wake-on-LAN
+- Capture artifacts:
+  - `.tmp/firewalla_dhcp_mixed_actions_capture.pcap`
+  - `.tmp/firewalla_dhcp_mixed_actions_capture.decoded.txt`
+  - pre-capture runtime pull: `.artifacts/runtime-pull/20260331-022009/`
+  - post-capture runtime pull: `.artifacts/runtime-pull/20260331-022718/`
+- Confirmed DHCP configuration read model from steady-state runtime:
+  - `networkConfig.dhcp.<interface>.gateway`
+  - `networkConfig.dhcp.<interface>.subnetMask`
+  - `networkConfig.dhcp.<interface>.lease`
+  - `networkConfig.dhcp.<interface>.range.from`
+  - `networkConfig.dhcp.<interface>.range.to`
+  - `networkConfig.dhcp.<interface>.nameservers`
+  - `networkConfig.dhcp.<interface>.searchDomain`
+  - optional `networkConfig.dhcp.<interface>.extraOptions`
+- Confirmed reservation storage model:
+  - reserved-IP state does not appear to be written into `networkConfig.dhcp`
+  - the mixed capture and runtime diff show reserved-IP state is stored per host under `host.policy.ipAllocation.allocations`
+  - allocation entries are keyed by network or interface UUID and currently carry:
+    - `type`, for example `static` or `dynamic`
+    - `ipv4` when the allocation is static
+- Confirmed reservation mutation shape:
+  - the app writes reservation changes as `mtype=set` or batched set actions with:
+    - `item=policy`
+    - `target=<host_mac>`
+    - `value.ipAllocation.allocations[...]`
+  - the captured host-specific example was:
+    - target `74:42:18:08:D2:8D`
+    - allocation key `d7e5a5c4-0b28-4010-b3c6-dad1a868693f`
+    - payload `{"ipv4": "192.168.202.102", "type": "static"}`
+- Adjacent host-action findings from the same session:
+  - device type feedback is written as:
+    - `mtype=set`
+    - `item=feedback`
+    - `value.key=device.detect`
+    - `value.target=<host_mac>`
+    - `value.value.type=<type>`
+  - notify toggles are written as host policy booleans:
+    - `devicePresence`
+    - `deviceOffline`
+  - Wake-on-LAN is written as:
+    - `mtype=cmd`
+    - `item=wol:wake`
+- Current confidence after this session:
+  - proven for report use now:
+    - DHCP range and lease details from `networkConfig.dhcp`
+    - reserved-IP ownership mapping from host policy allocations
+    - host detail values for device type, notification toggles, and Wake-on-LAN support path
+  - still not yet isolated cleanly:
+    - a dedicated DHCP-page read request distinct from broad init refreshes
+    - reservation delete mutation in isolation
+    - segment-level DHCP enable or disable mutation shape
+
+Service follow-on scope from host-settings capture:
+
+- Add a host-targeted DHCP reservation mutation service family after the report surfaces land.
+  - working scope:
+    - set host allocation mode to dynamic or static
+    - set reserved IPv4 for one host on one network segment
+- Add a host-targeted notification settings service family after the report surfaces land.
+  - working scope:
+    - set notify when next online
+    - set notify when next offline
+- Add a host-targeted Wake-on-LAN service after the report surfaces land.
+  - working scope:
+    - send `wol:wake` for one selected host
+- Add a host-targeted device rename service after the report surfaces land. Will require capture command.
+- Keep these as separate host-action services rather than folding them into the segment report contract.
+
+Working recommendation for the next refinement pass:
+
+- Treat the current service as a first proven broad read, not necessarily the final public contract.
+- Start by deciding whether the broad surface should keep a collection-style name or move to a clearer report-style name such as a network-segment summary or network-segment report surface.
+- Reuse the WAN data-usage and time-usage lessons where they improve clarity:
+  - query-first metadata
+  - Firewalla-local time semantics when time-series data is returned
+  - professional field names instead of raw transport nouns
+  - stable report sections that remain easy to template
+
 ### Sequencing recommendation
 
 - [x] Implement the shared client and model normalization first so the initial services share one parsing path.

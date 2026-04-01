@@ -242,27 +242,48 @@ This is useful when you want to:
 - inspect rule IDs before using pause or resume services
 - compare what is live on the box with what is currently exposed in Home Assistant
 
-### Get network interfaces
+### Get network segment report
 
-Use `firewalla_local.get_network_interfaces` to read normalized network-segment
-interface summaries.
+Use `firewalla_local.get_network_segment_report` to read one configuration-
+oriented report for a single network segment.
 
-- choose one segment with `network_uuid` for deterministic automations or
-   `network_name` for interactive use
-- leave both network selectors empty to return all currently discovered network
-   segments
-- this is currently a heavy report and can return a large amount of data,
-   especially when you query all segments at once
-- the service resolves network selectors through the current Firewalla runtime
-   inventory before issuing the direct local read
-- results preserve the confirmed `newLast24`, `last60`, `last30`, and
-   `last12Months` windows, along with per-host totals and ranked top upload and
-   download host summaries
+- provide exactly one selector with `network_uuid` for deterministic
+   automations or `network_name` for interactive use
+- this is the preferred read when you want DHCP and per-host configuration
+   state
+- the response uses the shared report envelope with `target`, `query`,
+   `time_basis`, `summary`, `sections`, and `metadata`
+- the report sections include interface configuration, addressing, DNS, the
+   currently reported DHCP settings for that segment when Firewalla exposes
+   them, and per-host configuration state
+- host rows include device type, DHCP name, IP assignment mode, reserved IPv4
+   address when present, notification toggles, and Wake-on-LAN support status
 - `refresh` defaults to `true` so selector resolution and returned metadata stay
    aligned with the latest coordinator refresh
-- this first version is intentionally broad so real-world usage can show which
-   parts are worth promoting; a later revision will likely add narrower or more
-   purpose-built filtering based on how the data is actually used
+
+### Get network segment usage
+
+Use `firewalla_local.get_network_segment_usage` to read one usage-oriented
+report for a single network segment.
+
+- provide exactly one selector with `network_uuid` for deterministic
+   automations or `network_name` for interactive use
+- choose one required `window` so the report focuses on a single activity
+   window instead of returning every window at once
+- the response uses the shared report envelope with `target`, `query`,
+   `time_basis`, `summary`, `sections`, and `metadata`
+- the base report returns selected-window metric summaries plus bounded
+   activity-derived devices, top upload and download destinations, and app and
+   category activity when Firewalla exposes those richer flow families
+- when the raw host counters are sparse, the device section is derived from the
+   richer flow families instead of returning long zero-heavy host lists
+- use `top_n` to limit the device, app, category, upload, and download ranking
+   rows, and use `include=series` only when you need the raw metric samples for
+   the selected window
+- public window names are `last_60_minutes`, `last_24_hours`, `last_30_days`,
+   and `last_12_months`
+- `refresh` defaults to `true` so selector resolution and returned metadata stay
+   aligned with the latest coordinator refresh
 
 ### Run internet speed test
 
@@ -292,13 +313,31 @@ results.
 Use `firewalla_local.get_time_usage_report` to read scoped historical usage for
 one device, group, or user.
 
+- the response now uses the shared report envelope:
+  - `target`
+  - `query`
+  - `time_basis`
+  - `summary`
+  - `sections`
+  - `metadata`
 - set `scope_kind` to `device`, `group`, or `user`
 - set `scope_target` to a stable id or the current display label for that scope
 - provide explicit `begin`, `end`, and `granularity` values
-- use `detail=intervals` only when you want optional per-device interval detail
+- use `sections` when you want to limit the response to `internet`,
+  `app_totals`, `apps`, or `categories`
+- use `detail=summary` or `detail=standard` to choose the default section set
+- use `include=intervals` when you want optional per-device interval detail
 - the current bounded contract supports `day` and `hour` report periods
-- the response centers on `summary` totals for the requested window and
-   `periods` for the requested day or hour breakdown
+- the top-level `summary` centers on total and unique minutes for the resolved
+   target and requested window
+- the detailed content now appears under `sections.internet`,
+   `sections.app_totals`, `sections.apps`, and `sections.categories`
+- a non-empty `app_ids` filter keeps `sections.apps` visible even when you use
+  `detail=summary`, so filtered app usage is not hidden behind the compact mode
+- app and category rows are ranked by returned usage totals, and zero-only rows
+  are dropped from the default response when Firewalla returns sparse buckets
+- `metadata` reports the applied request scope type, applied sections,
+  requested include detail, and source provenance for the major report sections
 - timestamps are returned as raw epoch values plus ISO strings in the Firewalla
    appliance timezone when the box reports one
 
@@ -307,18 +346,29 @@ one device, group, or user.
 Use `firewalla_local.get_wan_data_usage` to read one normalized WAN
 data-usage report for each WAN.
 
-- by default it returns a `current_month` section for every discovered WAN
+- the response now uses the shared report envelope:
+  - `target`
+  - `query`
+  - `time_basis`
+  - `summary`
+  - `sections`
+  - `metadata`
+- by default it returns one current-month report row for every discovered WAN
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
-- use `current_periods` to request `current_month`, `current_week`, and
-   `current_day`
-- use `history_period` with `history_count` to request `history_months`,
-   `history_weeks`, or `history_days`
+- use `current_periods` to request current `month`, `week`, and `day` rows
+- use `history_period` with `history_count` to request historical `months`,
+   `weeks`, or `days`
 - derived week rows use Monday as the default local week start
 - current periods may be partial, while historical periods are always full
-- use `detail=weekly` or `detail=daily` to add nested breakdown rows where
+- use `detail=full` only when you want nested subperiod breakdowns for month or
+   week rows; otherwise the default `detail=summary` is the normal report shape
+- use `include=subperiods` to request nested week or day breakdown rows where
    that richer detail is supported
-- each row uses the same structure so template sensors can read a stable shape
-- timestamps are returned both as raw epoch values and ISO strings in the
+- each WAN report now appears under `sections.reports`, with per-WAN
+   `current` and `history` sections plus a resolved WAN `target`
+- `metadata` reports applied detail, applied include sections, provenance, and
+   any unavailable sections instead of leaving those decisions implicit
+- timestamps are returned as raw epoch values and local ISO strings in the
    Firewalla appliance timezone when the box reports one
 
 ### Get WAN events

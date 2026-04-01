@@ -33,7 +33,8 @@ from custom_components.firewalla_local.const import (
     DOMAIN,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
-    SERVICE_GET_NETWORK_INTERFACES,
+    SERVICE_GET_NETWORK_SEGMENT_REPORT,
+    SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_RUNTIME_INVENTORY,
     SERVICE_GET_SPEED_TEST_RESULTS,
     SERVICE_GET_TIME_USAGE_REPORT,
@@ -501,7 +502,8 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         (event[ATTR_DOMAIN], event[ATTR_SERVICE]) for event in registered_events
     ) == sorted(
         [
-            (DOMAIN, SERVICE_GET_NETWORK_INTERFACES),
+            (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT),
+            (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE),
             (DOMAIN, SERVICE_GET_RUNTIME_INVENTORY),
             (DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS),
             (DOMAIN, SERVICE_GET_TIME_USAGE_REPORT),
@@ -513,7 +515,8 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         ]
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
-        SERVICE_GET_NETWORK_INTERFACES,
+        SERVICE_GET_NETWORK_SEGMENT_REPORT,
+        SERVICE_GET_NETWORK_SEGMENT_USAGE,
         SERVICE_GET_RUNTIME_INVENTORY,
         SERVICE_GET_SPEED_TEST_RESULTS,
         SERVICE_GET_TIME_USAGE_REPORT,
