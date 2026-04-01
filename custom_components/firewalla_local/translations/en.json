@@ -460,6 +460,21 @@
     "multiple_entries_loaded": {
       "message": "Multiple Firewalla entries are loaded. Use config_entry_id or config_entry_name."
     },
+    "host_name_ambiguous": {
+      "message": "More than one Firewalla host matches the name \"{host_name}\". Matching hosts: {host_matches}. Use the full label shown by Firewalla, the host MAC, or the host ID instead."
+    },
+    "host_not_found": {
+      "message": "No Firewalla host matched the requested selector. Check the host ID, MAC, or name and try again."
+    },
+    "host_required": {
+      "message": "Provide a host ID, host MAC, or host name for this service call."
+    },
+    "host_selector_conflict": {
+      "message": "Provide only one of host_id, host_mac, or host_name."
+    },
+    "host_wake_not_supported": {
+      "message": "The selected host does not appear to support Wake-on-LAN."
+    },
     "network_name_ambiguous": {
       "message": "More than one Firewalla network matches the name \"{network_name}\". Use the network UUID instead."
     },
@@ -514,8 +529,8 @@
   },
   "services": {
     "get_runtime_inventory": {
-      "name": "Get runtime inventory",
-      "description": "Return the current Firewalla runtime objects as markdown and structured data.",
+      "name": "Get rule and runtime inventory",
+      "description": "Return the current Firewalla rule, group, user, and related runtime inventory as structured data plus a markdown summary.",
       "fields": {
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -610,6 +625,36 @@
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading results."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "wake_host": {
+      "name": "Wake host",
+      "description": "Send a Wake-on-LAN command to one Firewalla host.",
+      "fields": {
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Use the Firewalla host MAC for deterministic automations."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Use the current Firewalla host display name for interactive use."
+        },
+        "host_id": {
+          "name": "Host ID (Optional)",
+          "description": "Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the Wake-on-LAN command."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

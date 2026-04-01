@@ -207,6 +207,10 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Start one internet speed test for the requested WAN interface."""
         return await self.client.async_run_internet_speed_test(wan_uuid)
 
+    async def async_wake_host(self, host_mac: str) -> dict[str, object]:
+        """Send one Wake-on-LAN command to the requested host."""
+        return await self.client.async_wake_host(host_mac)
+
     async def async_get_usage_history(
         self,
         *,

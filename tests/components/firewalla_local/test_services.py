@@ -31,6 +31,9 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
+    SERVICE_FIELD_HOST_ID,
+    SERVICE_FIELD_HOST_MAC,
+    SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_NETWORK_UUID,
@@ -59,6 +62,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_WAKE_HOST,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
 from custom_components.firewalla_local.models import (
@@ -495,6 +499,54 @@ def _speed_test_snapshot(
                 success=True,
                 vendor="ookla",
                 wan_uuid="wan-2",
+            ),
+        ),
+    )
+
+
+def _wake_host_snapshot(*, duplicate_name: bool = False) -> FirewallaRuntimeSnapshot:
+    """Return a runtime snapshot with Wake-on-LAN-capable and unsupported hosts."""
+    second_name = "Plex Server" if duplicate_name else "WireGuard Kaden"
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(
+            timezone_name="America/New_York",
+        ),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="00:AA:BB:CC:DD:26",
+                display_name="Plex Server",
+                fallback_name=None,
+                ip_address="192.168.10.10",
+                group_name=None,
+                network_name="VLAN10 CORE",
+                connection_type=None,
+                last_active=None,
+                download_bytes=100,
+                upload_bytes=50,
+                stale=False,
+            ),
+            FirewallaHostRuntime(
+                mac="wg_peer:test-peer",
+                display_name=second_name,
+                fallback_name=None,
+                ip_address="10.42.0.2",
+                group_name=None,
+                network_name="VLAN10 CORE",
+                connection_type=None,
+                last_active=None,
+                download_bytes=1,
+                upload_bytes=1,
+                stale=False,
             ),
         ),
     )
@@ -1960,6 +2012,285 @@ async def test_run_internet_speed_test_service_requires_selector_for_multiple_wa
                 blocking=True,
                 return_response=True,
             )
+
+
+async def test_wake_host_service_returns_acknowledgement_for_host_mac(
+    hass: HomeAssistant,
+) -> None:
+    """Test the Wake-on-LAN service returns an acknowledgement for one host."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_wake_host",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_wake_host,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_WAKE_HOST,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_wake_host.await_args is not None
+    assert mock_wake_host.await_args.args == ("00:AA:BB:CC:DD:26",)
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "target": {
+            "kind": "host",
+            "id": "00:AA:BB:CC:DD:26",
+            "name": "Plex Server",
+        },
+        "query": {
+            "host_id": None,
+            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_name": None,
+            "refresh": False,
+        },
+        "command": {
+            "item": "wol:wake",
+            "target": "00:AA:BB:CC:DD:26",
+        },
+        "command_response": {"ok": True},
+    }
+
+
+async def test_wake_host_service_resolves_unique_host_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test the Wake-on-LAN service can resolve one host by display name."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_wake_host",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_wake_host,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_WAKE_HOST,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_NAME: "Plex Server",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_wake_host.await_args is not None
+    assert mock_wake_host.await_args.args == ("00:AA:BB:CC:DD:26",)
+
+
+async def test_wake_host_service_resolves_full_host_label(
+    hass: HomeAssistant,
+) -> None:
+    """Test the Wake-on-LAN service can resolve one host by full label."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(duplicate_name=True),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_wake_host",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_wake_host,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_WAKE_HOST,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_NAME: "Plex Server (192.168.10.10)",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_wake_host.await_args is not None
+    assert mock_wake_host.await_args.args == ("00:AA:BB:CC:DD:26",)
+
+
+async def test_wake_host_service_rejects_ambiguous_host_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test the Wake-on-LAN service rejects ambiguous host names."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(duplicate_name=True),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with pytest.raises(
+        ServiceValidationError,
+        match=(
+            r"More than one host matched name Plex Server: "
+            r"Plex Server \(10\.42\.0\.2\) \[wg_peer:test-peer\], "
+            r"Plex Server \(192\.168\.10\.10\) \[00:AA:BB:CC:DD:26\]"
+        ),
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_WAKE_HOST,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_NAME: "Plex Server",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_wake_host_service_rejects_non_wol_host(
+    hass: HomeAssistant,
+) -> None:
+    """Test the Wake-on-LAN service rejects non-MAC pseudo-hosts."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with pytest.raises(
+        ServiceValidationError,
+        match="does not appear to support Wake-on-LAN",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_WAKE_HOST,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_ID: "wg_peer:test-peer",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
 
 
 async def test_get_time_usage_report_service_resolves_device_label_and_serializes_data(

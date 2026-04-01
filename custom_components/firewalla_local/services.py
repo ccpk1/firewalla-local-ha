@@ -23,6 +23,9 @@ from .const import (
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
+    SERVICE_FIELD_HOST_ID,
+    SERVICE_FIELD_HOST_MAC,
+    SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_NETWORK_NAME,
@@ -53,10 +56,16 @@ from .const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_LOADED,
+    TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_HOST_REQUIRED,
+    TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT,
+    TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED,
     TRANS_KEY_EXCEPTION_INVALID_DURATION,
     TRANS_KEY_EXCEPTION_MULTIPLE_ENTRIES_LOADED,
     TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS,
@@ -77,6 +86,8 @@ from .const import (
     TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
     TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY,
     TRANS_PLACEHOLDER_DURATION,
+    TRANS_PLACEHOLDER_HOST_MATCHES,
+    TRANS_PLACEHOLDER_HOST_NAME,
     TRANS_PLACEHOLDER_NETWORK_NAME,
     TRANS_PLACEHOLDER_NETWORK_UUID,
     TRANS_PLACEHOLDER_RULE_TARGET,
@@ -88,6 +99,7 @@ from .const import (
 from .coordinator import FirewallaConfigEntry
 from .models import (
     FirewallaGroupRuntime,
+    FirewallaHostRuntime,
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkHostActions,
     FirewallaNetworkHostDetail,
@@ -196,6 +208,17 @@ RUN_INTERNET_SPEED_TEST_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+WAKE_HOST_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_HOST_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -1515,6 +1538,98 @@ def _resolve_requested_network_required(
     )
 
 
+def _resolve_requested_host(
+    entry: FirewallaConfigEntry,
+    *,
+    host_id: str | None,
+    host_mac: str | None,
+    host_name: str | None,
+    required: bool,
+) -> FirewallaHostRuntime | None:
+    """Resolve one requested host selector against normalized runtime metadata."""
+    selector_values = [
+        value
+        for value in (host_id, host_mac, host_name)
+        if isinstance(value, str) and value.strip()
+    ]
+    if len(selector_values) > 1:
+        raise ServiceValidationError(
+            "Provide only one of host_id, host_mac, or host_name",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT,
+        )
+
+    host_manager = entry.runtime_data.host_manager
+
+    if host_mac is not None:
+        if host := host_manager.get_host(host_mac):
+            return host
+        raise ServiceValidationError(
+            f"No host matched selector {host_mac}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
+        )
+
+    if host_id is not None:
+        if host := host_manager.get_host(host_id):
+            return host
+        raise ServiceValidationError(
+            f"No host matched selector {host_id}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
+        )
+
+    if host_name is not None:
+        choices = host_manager.get_watched_device_choices()
+        host_name_folded = host_name.casefold()
+        matches = [
+            host.mac
+            for host in host_manager.get_hosts()
+            if host.display_name.casefold() == host_name_folded
+            or (
+                host.fallback_name is not None
+                and host.fallback_name.casefold() == host_name_folded
+            )
+            or choices.get(host.mac, "").casefold() == host_name_folded
+        ]
+        if (
+            len(matches) == 1
+            and (host := host_manager.get_host(matches[0])) is not None
+        ):
+            return host
+        if len(matches) > 1:
+            matching_labels = ", ".join(
+                f"{choices.get(mac) or mac} [{mac}]"
+                for mac in sorted(
+                    matches,
+                    key=lambda mac: ((choices.get(mac) or mac).casefold(), mac),
+                )
+            )
+            raise ServiceValidationError(
+                f"More than one host matched name {host_name}: {matching_labels}",
+                translation_domain=DOMAIN,
+                translation_key=TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS,
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_HOST_MATCHES: matching_labels,
+                    TRANS_PLACEHOLDER_HOST_NAME: host_name,
+                },
+            )
+        raise ServiceValidationError(
+            f"No host matched selector {host_name}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
+        )
+
+    if required:
+        raise ServiceValidationError(
+            "Provide host_id, host_mac, or host_name",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_REQUIRED,
+        )
+
+    return None
+
+
 def _build_raw_host_lookup(entry: FirewallaConfigEntry) -> dict[str, dict[str, object]]:
     """Build a raw runtime host lookup keyed by MAC address."""
     raw_hosts = (entry.runtime_data.coordinator.last_init_payload or {}).get("hosts")
@@ -2420,6 +2535,65 @@ async def _async_handle_run_internet_speed_test(call: ServiceCall) -> JsonObject
     }
 
 
+async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
+    """Send one Wake-on-LAN command to the resolved host."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    host = _resolve_requested_host(
+        entry,
+        host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
+        host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
+        host_name=cast(str | None, call.data.get(SERVICE_FIELD_HOST_NAME)),
+        required=True,
+    )
+    assert host is not None
+
+    if not _supports_wake_on_lan(host.mac):
+        raise ServiceValidationError(
+            f"Host does not appear to support Wake-on-LAN: {host.mac}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED,
+        )
+
+    try:
+        command_response = await entry.runtime_data.integration_manager.async_wake_host(
+            host.mac
+        )
+    except FirewallaApiError as err:
+        raise HomeAssistantError(f"Could not wake host: {err}") from err
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "target": _serialize_report_target(
+            FirewallaReportTarget(
+                kind="host",
+                id=host.mac,
+                name=host.display_name,
+            )
+        ),
+        "query": {
+            "host_id": call.data.get(SERVICE_FIELD_HOST_ID),
+            "host_mac": call.data.get(SERVICE_FIELD_HOST_MAC),
+            "host_name": call.data.get(SERVICE_FIELD_HOST_NAME),
+            "refresh": refresh_requested,
+        },
+        "command": {
+            "item": "wol:wake",
+            "target": host.mac,
+        },
+        "command_response": cast(JsonObjectType, command_response),
+    }
+
+
 async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectType:
     """Return shaped speed-test results from the coordinator snapshot path."""
     entry = _get_loaded_entry(
@@ -3075,6 +3249,15 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_WAKE_HOST):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_WAKE_HOST,
+            _async_handle_wake_host,
+            schema=WAKE_HOST_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
         hass.services.async_register(
             DOMAIN,
@@ -3138,6 +3321,8 @@ def async_remove_services(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE)
     if hass.services.has_service(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST):
         hass.services.async_remove(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST)
+    if hass.services.has_service(DOMAIN, SERVICE_WAKE_HOST):
+        hass.services.async_remove(DOMAIN, SERVICE_WAKE_HOST)
     if hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
         hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS)
     if hass.services.has_service(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT):

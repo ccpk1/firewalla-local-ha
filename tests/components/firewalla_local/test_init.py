@@ -43,6 +43,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_WAKE_HOST,
 )
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
@@ -512,6 +513,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_PAUSE_RULE),
             (DOMAIN, SERVICE_RESUME_RULE),
             (DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST),
+            (DOMAIN, SERVICE_WAKE_HOST),
         ]
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
@@ -525,6 +527,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_PAUSE_RULE,
         SERVICE_RESUME_RULE,
         SERVICE_RUN_INTERNET_SPEED_TEST,
+        SERVICE_WAKE_HOST,
     }
 
 

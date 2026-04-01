@@ -232,7 +232,19 @@ from the Firewalla app. After the rule is removed on the box:
 
 ## Services
 
-### Get runtime inventory
+The report-style services in this section were built primarily to help model,
+correlate, and validate Firewalla data during reverse engineering.
+
+- treat them as draft operator tools first, not as a fully refined long-term
+   public reporting API
+- they should be directionally correct and useful for automations, debugging,
+   and ongoing protocol work
+- they were a large lift because the underlying data had to be correlated from
+   multiple raw families, so some sections are still more proven than polished
+- expect the shared report envelope and the major section names to be more
+   stable than the fine-grained field selection and presentation details
+
+### Get rule and runtime inventory
 
 Use `firewalla_local.get_runtime_inventory` to inspect the current runtime data.
 
@@ -241,6 +253,16 @@ This is useful when you want to:
 - see the current normalized runtime objects
 - inspect rule IDs before using pause or resume services
 - compare what is live on the box with what is currently exposed in Home Assistant
+
+This was the first report-style service added during reverse engineering and it
+still behaves a little differently from the newer report surfaces.
+
+- it currently returns `inventory` plus a rendered `markdown` view instead of
+   the newer shared report envelope
+- its strongest use cases are rule discovery, group and user correlation, and
+   comparing the current Firewalla runtime against the normalized rule model
+- treat it as a draft mapping and inspection tool that helped bootstrap later
+   services such as rule controls and the newer report family
 
 ### Get network segment report
 
@@ -296,6 +318,24 @@ Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
    payload
 - the service does not wait for the completed measurement because the test may
    take around 30 seconds
+
+### Wake host
+
+Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
+
+- choose one host with `host_mac` for deterministic automations
+- use `host_name` for interactive use when the current Firewalla host name is
+   clear and unique, or use the full host label with IP when you need to
+   disambiguate duplicate names
+- `host_id` is also accepted as an alternate selector and currently resolves to
+   the same normalized host identity as the MAC-backed host key
+- provide exactly one host selector per call
+- `refresh` defaults to `true` so the service resolves the latest host metadata
+   before sending the command
+- the service returns an acknowledgement with the resolved host and the command
+   details that were sent
+- the current implementation rejects targets that do not look Wake-on-LAN-
+   capable, such as non-MAC pseudo-hosts
 
 ### Get speed test results
 

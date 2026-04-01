@@ -62,6 +62,7 @@ _COMMAND_POLICY_CREATE: Final = "policy:create"
 _COMMAND_POLICY_DELETE: Final = "policy:delete"
 _COMMAND_POLICY_UPDATE: Final = "policy:update"
 _COMMAND_RUN_INTERNET_SPEED_TEST: Final = "runInternetSpeedtest"
+_COMMAND_WAKE_HOST: Final = "wol:wake"
 _COMMAND_POLICY_ID_KEY: Final = "policyID"
 
 _RAW_RULE_ID_KEY: Final = "pid"
@@ -467,6 +468,16 @@ class FirewallaApiClient:
                 _COMMAND_VALUE_KEY: {_RAW_SPEED_TEST_WAN_UUID_KEY: wan_uuid},
             },
             target=DEFAULT_INIT_TARGET,
+        )
+
+    async def async_wake_host(self, host_mac: str) -> dict[str, object]:
+        """Send one Wake-on-LAN command to the requested host."""
+        return await self._async_send_local_message(
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_WAKE_HOST,
+            },
+            target=host_mac,
         )
 
     async def async_get_monthly_wan_usage_payload(self) -> dict[str, object]:

@@ -709,6 +709,34 @@ async def test_get_runtime_snapshot_omits_latest_speed_test_without_success() ->
 
 
 @pytest.mark.asyncio
+async def test_async_wake_host_sends_host_targeted_command() -> None:
+    """Test Wake-on-LAN sends the captured host-targeted command shape."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"ok": True}),
+        ) as mock_send:
+            response = await client.async_wake_host("00:AA:BB:CC:DD:26")
+
+    assert response == {"ok": True}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "cmd",
+        "data": {"item": "wol:wake"},
+        "target": "00:AA:BB:CC:DD:26",
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_rule_sends_confirmed_persistent_payload() -> None:
     """Test rule creation uses the confirmed persistent mutation shape."""
     async with ClientSession() as session:
