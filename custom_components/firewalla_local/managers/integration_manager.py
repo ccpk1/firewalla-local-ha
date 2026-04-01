@@ -211,6 +211,12 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Send one Wake-on-LAN command to the requested host."""
         return await self.client.async_wake_host(host_mac)
 
+    async def async_set_host_policy(
+        self, host_mac: str, policy_value: dict[str, object]
+    ) -> dict[str, object]:
+        """Write one host-scoped policy payload to the requested host."""
+        return await self.client.async_set_host_policy(host_mac, policy_value)
+
     async def async_get_usage_history(
         self,
         *,

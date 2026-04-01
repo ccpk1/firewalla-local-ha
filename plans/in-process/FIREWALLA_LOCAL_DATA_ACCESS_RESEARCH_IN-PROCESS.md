@@ -1565,7 +1565,7 @@ Remaining enhancement items after the report-service milestone:
   - likely first scope:
     - set host allocation mode to `dynamic` or `static`
     - set reserved IPv4 for one host on one segment
-- [ ] Build the host-targeted notification settings service family.
+- [x] Build the host-targeted notification settings service family.
   - likely first scope:
     - set notify when next online
     - set notify when next offline
@@ -1588,13 +1588,12 @@ Recommended next phase:
   - review release-checklist impact
   - record the milestone as complete in this plan
 - Start the next implementation phase with host-targeted action services rather than more report reshaping.
-- Recommended first enhancement: notification toggle services.
+- Recommended first enhancement: DHCP reservation mutation services.
   - reason:
-    - the command shape is already captured cleanly as host-policy boolean writes
-    - the selector model can reuse the new Wake-on-LAN host targeting path directly
-    - the scope is still narrow and avoids the remaining DHCP write-path uncertainty
-- Recommended second enhancement: DHCP reservation mutation services after the remaining write-path evidence is confirmed tightly enough to keep the contract clean.
-- Recommended third enhancement: host rename after the command path is captured cleanly enough to keep the service contract stable.
+    - the underlying host policy allocation model is already partially proven
+    - it is the next highest-value host-scoped write surface after notifications
+    - the remaining work is constrained to reservation semantics rather than a brand-new selector model
+- Recommended second enhancement: host rename after the command path is captured cleanly enough to keep the service contract stable.
 
 DHCP capture and modeling follow-up:
 

@@ -55,9 +55,11 @@ _RAW_MESSAGE_TIMESTAMP_KEY: Final = "timestamp"
 _COMMAND_MESSAGE_TYPE: Final = "cmd"
 _GET_MESSAGE_TYPE: Final = "get"
 _INIT_MESSAGE_TYPE: Final = "init"
+_SET_MESSAGE_TYPE: Final = "set"
 _COMMAND_ITEM_KEY: Final = "item"
 _COMMAND_VALUE_KEY: Final = "value"
 _COMMAND_GET_KEY: Final = "get"
+_COMMAND_SET_POLICY: Final = "policy"
 _COMMAND_POLICY_CREATE: Final = "policy:create"
 _COMMAND_POLICY_DELETE: Final = "policy:delete"
 _COMMAND_POLICY_UPDATE: Final = "policy:update"
@@ -476,6 +478,19 @@ class FirewallaApiClient:
             message_type=_COMMAND_MESSAGE_TYPE,
             data={
                 _COMMAND_ITEM_KEY: _COMMAND_WAKE_HOST,
+            },
+            target=host_mac,
+        )
+
+    async def async_set_host_policy(
+        self, host_mac: str, policy_value: dict[str, object]
+    ) -> dict[str, object]:
+        """Write one host-scoped policy payload to the requested host."""
+        return await self._async_send_local_message(
+            message_type=_SET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_SET_POLICY,
+                _COMMAND_VALUE_KEY: policy_value,
             },
             target=host_mac,
         )

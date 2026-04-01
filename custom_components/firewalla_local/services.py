@@ -21,6 +21,7 @@ from .const import (
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
+    SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_HOST_ID,
@@ -56,6 +57,8 @@ from .const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
+    SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
@@ -213,14 +216,28 @@ RUN_INTERNET_SPEED_TEST_SCHEMA = vol.Schema(
     }
 )
 
-WAKE_HOST_SCHEMA = vol.Schema(
+_HOST_TARGET_SCHEMA_FIELDS: dict[object, object] = {
+    vol.Optional(SERVICE_FIELD_HOST_ID): cv.string,
+    vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+    vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
+    vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+    vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+    vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+}
+
+WAKE_HOST_SCHEMA = vol.Schema(_HOST_TARGET_SCHEMA_FIELDS)
+
+SET_HOST_NOTIFY_WHEN_NEXT_ONLINE_SCHEMA = vol.Schema(
     {
-        vol.Optional(SERVICE_FIELD_HOST_ID): cv.string,
-        vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
-        vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
-        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
-        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Required(SERVICE_FIELD_ENABLED): cv.boolean,
+    }
+)
+
+SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA = vol.Schema(
+    {
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Required(SERVICE_FIELD_ENABLED): cv.boolean,
     }
 )
 
@@ -2594,6 +2611,100 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
     }
 
 
+async def _async_handle_set_host_notification(
+    call: ServiceCall,
+    *,
+    policy_key: str,
+    setting_name: str,
+) -> JsonObjectType:
+    """Set one host notification policy value on the resolved host."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    host = _resolve_requested_host(
+        entry,
+        host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
+        host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
+        host_name=cast(str | None, call.data.get(SERVICE_FIELD_HOST_NAME)),
+        required=True,
+    )
+    assert host is not None
+
+    enabled = cast(bool, call.data[SERVICE_FIELD_ENABLED])
+    policy_value = {policy_key: enabled}
+
+    try:
+        command_response = (
+            await entry.runtime_data.integration_manager.async_set_host_policy(
+                host.mac,
+                cast(dict[str, object], policy_value),
+            )
+        )
+    except FirewallaApiError as err:
+        raise HomeAssistantError(
+            f"Could not update host notification setting: {err}"
+        ) from err
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "target": _serialize_report_target(
+            FirewallaReportTarget(
+                kind="host",
+                id=host.mac,
+                name=host.display_name,
+            )
+        ),
+        "query": {
+            "enabled": enabled,
+            "host_id": call.data.get(SERVICE_FIELD_HOST_ID),
+            "host_mac": call.data.get(SERVICE_FIELD_HOST_MAC),
+            "host_name": call.data.get(SERVICE_FIELD_HOST_NAME),
+            "refresh": refresh_requested,
+        },
+        "notification": {
+            "enabled": enabled,
+            "name": setting_name,
+            "policy_key": policy_key,
+        },
+        "command": {
+            "item": "policy",
+            "target": host.mac,
+            "value": cast(JsonObjectType, policy_value),
+        },
+        "command_response": cast(JsonObjectType, command_response),
+    }
+
+
+async def _async_handle_set_host_notify_when_next_online(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Set the notify-when-next-online host notification policy."""
+    return await _async_handle_set_host_notification(
+        call,
+        policy_key="devicePresence",
+        setting_name="notify_when_next_online",
+    )
+
+
+async def _async_handle_set_host_notify_when_next_offline(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Set the notify-when-next-offline host notification policy."""
+    return await _async_handle_set_host_notification(
+        call,
+        policy_key="deviceOffline",
+        setting_name="notify_when_next_offline",
+    )
+
+
 async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectType:
     """Return shaped speed-test results from the coordinator snapshot path."""
     entry = _get_loaded_entry(
@@ -3258,6 +3369,28 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
+    if not hass.services.has_service(
+        DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE
+    ):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+            _async_handle_set_host_notify_when_next_online,
+            schema=SET_HOST_NOTIFY_WHEN_NEXT_ONLINE_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
+    if not hass.services.has_service(
+        DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE
+    ):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
+            _async_handle_set_host_notify_when_next_offline,
+            schema=SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
         hass.services.async_register(
             DOMAIN,
@@ -3323,6 +3456,10 @@ def async_remove_services(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST)
     if hass.services.has_service(DOMAIN, SERVICE_WAKE_HOST):
         hass.services.async_remove(DOMAIN, SERVICE_WAKE_HOST)
+    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE):
+        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE)
+    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE):
+        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE)
     if hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
         hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS)
     if hass.services.has_service(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT):

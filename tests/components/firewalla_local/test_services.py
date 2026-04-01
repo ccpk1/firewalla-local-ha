@@ -29,6 +29,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
+    SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_HOST_ID,
@@ -62,6 +63,8 @@ from custom_components.firewalla_local.const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
+    SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
@@ -2291,6 +2294,152 @@ async def test_wake_host_service_rejects_non_wol_host(
             blocking=True,
             return_response=True,
         )
+
+
+async def test_set_host_notify_when_next_online_returns_acknowledgement(
+    hass: HomeAssistant,
+) -> None:
+    """Test the online notification toggle returns an acknowledgement."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_policy",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_set_host_policy,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_ENABLED: True,
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_policy.await_args is not None
+    assert mock_set_host_policy.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        {"devicePresence": True},
+    )
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "target": {
+            "kind": "host",
+            "id": "00:AA:BB:CC:DD:26",
+            "name": "Plex Server",
+        },
+        "query": {
+            "enabled": True,
+            "host_id": None,
+            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_name": None,
+            "refresh": False,
+        },
+        "notification": {
+            "enabled": True,
+            "name": "notify_when_next_online",
+            "policy_key": "devicePresence",
+        },
+        "command": {
+            "item": "policy",
+            "target": "00:AA:BB:CC:DD:26",
+            "value": {"devicePresence": True},
+        },
+        "command_response": {"ok": True},
+    }
+
+
+async def test_set_host_notify_when_next_offline_resolves_host_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test the offline notification toggle resolves one host by name."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_policy",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_set_host_policy,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_ENABLED: False,
+                SERVICE_FIELD_HOST_NAME: "Plex Server",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_policy.await_args is not None
+    assert mock_set_host_policy.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        {"deviceOffline": False},
+    )
+    assert response is not None
+    assert response["notification"] == {
+        "enabled": False,
+        "name": "notify_when_next_offline",
+        "policy_key": "deviceOffline",
+    }
 
 
 async def test_get_time_usage_report_service_resolves_device_label_and_serializes_data(

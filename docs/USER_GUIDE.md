@@ -337,6 +337,25 @@ Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
 - the current implementation rejects targets that do not look Wake-on-LAN-
    capable, such as non-MAC pseudo-hosts
 
+### Host notification toggles
+
+Use `firewalla_local.set_host_notify_when_next_online` and
+`firewalla_local.set_host_notify_when_next_offline` to control host-scoped
+notification toggles.
+
+- both services reuse the same host selectors as `wake_host`
+- set `enabled` to `true` or `false` to apply the requested toggle
+- choose `host_mac` for deterministic automations
+- use `host_name` for interactive use when the current Firewalla host name is
+   clear and unique, or use the full host label with IP when you need to
+   disambiguate duplicate names
+- `host_id` is also accepted as an alternate selector and currently resolves to
+   the same normalized host identity as the MAC-backed host key
+- `refresh` defaults to `true` so the service resolves the latest host metadata
+   before sending the policy write
+- the response returns the resolved host plus the policy key and boolean value
+   that were sent
+
 ### Get speed test results
 
 Use `firewalla_local.get_speed_test_results` to read normalized speed test
