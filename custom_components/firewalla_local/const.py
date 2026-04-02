@@ -107,6 +107,7 @@ SERVICE_FIELD_HISTORY_PERIOD: Final = "history_period"
 SERVICE_FIELD_HOST_ID: Final = "host_id"
 SERVICE_FIELD_HOST_MAC: Final = "host_mac"
 SERVICE_FIELD_HOST_NAME: Final = "host_name"
+SERVICE_FIELD_MODE: Final = "mode"
 SERVICE_FIELD_USAGE_HISTORY_APP_IDS: Final = "app_ids"
 SERVICE_FIELD_USAGE_HISTORY_BEGIN: Final = "begin"
 SERVICE_FIELD_USAGE_HISTORY_END: Final = "end"
@@ -118,6 +119,7 @@ SERVICE_FIELD_NETWORK_NAME: Final = "network_name"
 SERVICE_FIELD_NETWORK_UUID: Final = "network_uuid"
 SERVICE_FIELD_OFFSET: Final = "offset"
 SERVICE_FIELD_REFRESH: Final = "refresh"
+SERVICE_FIELD_RESERVED_IPV4: Final = "reserved_ipv4"
 SERVICE_FIELD_SECTIONS: Final = "sections"
 SERVICE_FIELD_RULE_DURATION: Final = "duration"
 SERVICE_FIELD_RULE_RESUME_AT: Final = "resume_at"
@@ -200,9 +202,8 @@ SERVICE_GET_SPEED_TEST_RESULTS: Final = "get_speed_test_results"
 SERVICE_GET_TIME_USAGE_REPORT: Final = "get_time_usage_report"
 SERVICE_GET_WAN_DATA_USAGE: Final = "get_wan_data_usage"
 SERVICE_GET_WAN_EVENTS: Final = "get_wan_events"
-SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE: Final = (
-    "set_host_notify_when_next_offline"
-)
+SERVICE_SET_HOST_DHCP_RESERVATION: Final = "set_host_dhcp_reservation"
+SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE: Final = "set_host_notify_when_next_offline"
 SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE: Final = "set_host_notify_when_next_online"
 SERVICE_WAKE_HOST: Final = "wake_host"
 SERVICE_PAUSE_RULE: Final = "pause_rule"
@@ -216,6 +217,25 @@ TRANS_KEY_EXCEPTION_INVALID_DURATION: Final = "invalid_duration"
 TRANS_KEY_EXCEPTION_MULTIPLE_ENTRIES_LOADED: Final = "multiple_entries_loaded"
 TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS: Final = "host_name_ambiguous"
 TRANS_KEY_EXCEPTION_HOST_NOT_FOUND: Final = "host_not_found"
+TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_CONFLICT: Final = (
+    "host_reservation_ipv4_conflict"
+)
+TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_IN_USE: Final = "host_reservation_ipv4_in_use"
+TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_INVALID: Final = (
+    "host_reservation_ipv4_invalid"
+)
+TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_AMBIGUOUS: Final = (
+    "host_reservation_ipv4_network_ambiguous"
+)
+TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_NOT_FOUND: Final = (
+    "host_reservation_ipv4_network_not_found"
+)
+TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_OUT_OF_RANGE: Final = (
+    "host_reservation_ipv4_out_of_range"
+)
+TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_REQUIRED: Final = (
+    "host_reservation_ipv4_required"
+)
 TRANS_KEY_EXCEPTION_HOST_REQUIRED: Final = "host_required"
 TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT: Final = "host_selector_conflict"
 TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED: Final = "host_wake_not_supported"
@@ -268,6 +288,7 @@ TRANS_PLACEHOLDER_HOST_MATCHES: Final = "host_matches"
 TRANS_PLACEHOLDER_HOST_NAME: Final = "host_name"
 TRANS_PLACEHOLDER_NETWORK_NAME: Final = "network_name"
 TRANS_PLACEHOLDER_NETWORK_UUID: Final = "network_uuid"
+TRANS_PLACEHOLDER_RESERVED_IPV4: Final = "reserved_ipv4"
 TRANS_PLACEHOLDER_RULE_NAME: Final = "rule_name"
 TRANS_PLACEHOLDER_RULE_TARGET: Final = "rule_target"
 TRANS_PLACEHOLDER_SCOPE_KIND: Final = "scope_kind"

@@ -466,6 +466,27 @@
     "host_not_found": {
       "message": "No Firewalla host matched the requested selector. Check the host ID, MAC, or name and try again."
     },
+    "host_reservation_ipv4_conflict": {
+      "message": "Provide reserved IPv4 only when the reservation mode is static."
+    },
+    "host_reservation_ipv4_in_use": {
+      "message": "The reserved IPv4 address {reserved_ipv4} is already assigned to another host: {host_name}."
+    },
+    "host_reservation_ipv4_invalid": {
+      "message": "The reserved IPv4 value is invalid. Enter a valid IPv4 address."
+    },
+    "host_reservation_ipv4_network_ambiguous": {
+      "message": "More than one Firewalla network matches the reserved IPv4 address {reserved_ipv4}. Provide network_uuid or network_name explicitly."
+    },
+    "host_reservation_ipv4_network_not_found": {
+      "message": "No Firewalla network matched the reserved IPv4 address {reserved_ipv4}. Provide a valid reservation address or choose the network explicitly."
+    },
+    "host_reservation_ipv4_out_of_range": {
+      "message": "The reserved IPv4 address {reserved_ipv4} is outside the DHCP range for the selected network: {network_name}."
+    },
+    "host_reservation_ipv4_required": {
+      "message": "Provide reserved IPv4 when the reservation mode is static."
+    },
     "host_required": {
       "message": "Provide a host ID, host MAC, or host name for this service call."
     },
@@ -723,6 +744,52 @@
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the notification-setting change."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "set_host_dhcp_reservation": {
+      "name": "Set host DHCP reservation",
+      "description": "Set or clear one host-scoped DHCP reservation on one Firewalla network.",
+      "fields": {
+        "mode": {
+          "name": "Reservation mode",
+          "description": "Required. Choose static to reserve an IPv4 address for the selected host on the selected network, or dynamic to clear the reservation."
+        },
+        "reserved_ipv4": {
+          "name": "Reserved IPv4 (Optional)",
+          "description": "Required when the reservation mode is static. Omit it when the reservation mode is dynamic."
+        },
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Use the Firewalla host MAC for deterministic automations."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Use the current Firewalla host display name or full host label for interactive use."
+        },
+        "host_id": {
+          "name": "Host ID (Optional)",
+          "description": "Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC."
+        },
+        "network_uuid": {
+          "name": "Network UUID (Optional)",
+          "description": "Use the Firewalla network UUID for deterministic automations. If you omit it for a static reservation, the integration will try to infer the network from the reserved IPv4 address."
+        },
+        "network_name": {
+          "name": "Network name (Optional)",
+          "description": "Use the current Firewalla network display name for interactive use. If you omit it for a static reservation, the integration will try to infer the network from the reserved IPv4 address."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and network selectors, validating the requested reservation, and sending the reservation change."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

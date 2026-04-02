@@ -356,6 +356,31 @@ notification toggles.
 - the response returns the resolved host plus the policy key and boolean value
    that were sent
 
+### Host DHCP reservation
+
+Use `firewalla_local.set_host_dhcp_reservation` to set or clear one
+host-scoped DHCP reservation on one Firewalla network.
+
+- choose one host with `host_mac`, `host_name`, or `host_id`
+- choose one network with `network_uuid` for deterministic automations or
+   `network_name` for interactive use
+- for `mode=static`, you can omit the network selector when the
+   `reserved_ipv4` address falls into exactly one known Firewalla DHCP range
+- set `mode=static` and provide `reserved_ipv4` to reserve an address for the
+   selected host on the selected network
+- set `mode=dynamic` and omit `reserved_ipv4` to clear the reservation for the
+   selected host on the selected network
+- static reservations are rejected when the address is outside the resolved
+   network DHCP range
+- static reservations are rejected when another host already owns the same
+   reserved IPv4 on the same network
+- `refresh` defaults to `true` so the service resolves the latest host and
+   network metadata before sending the policy write
+- the service preserves the host's other known network allocation entries and
+   updates only the selected network key in `host.policy.ipAllocation.allocations`
+- the response returns the resolved host, resolved network, the normalized IP
+   assignment that was requested, and the policy payload that was sent
+
 ### Get speed test results
 
 Use `firewalla_local.get_speed_test_results` to read normalized speed test

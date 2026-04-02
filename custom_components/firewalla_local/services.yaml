@@ -59,14 +59,14 @@ get_network_segment_usage:
       selector:
         text:
       name: Network UUID
-      description: Required unless you provide network name. Use the Firewalla network UUID for deterministic automations.
+      description: Optional. Use the Firewalla network UUID for deterministic automations. If omitted for a static reservation, the integration will try to infer the network from the reserved IPv4 address.
     network_name:
       required: false
       example: "VLAN10 CORE"
       selector:
         text:
       name: Network name
-      description: Required unless you provide network UUID. Use the current Firewalla network display name for interactive use.
+      description: Optional. Use the current Firewalla network display name for interactive use. If omitted for a static reservation, the integration will try to infer the network from the reserved IPv4 address.
     window:
       required: true
       example: "last_24_hours"
@@ -283,6 +283,82 @@ set_host_notify_when_next_offline:
         boolean:
       name: Refresh first
       description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the notification-setting change.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+set_host_dhcp_reservation:
+  name: Set host DHCP reservation
+  description: Set or clear one host-scoped DHCP reservation on one Firewalla network.
+  fields:
+    mode:
+      required: true
+      example: "static"
+      selector:
+        select:
+          options:
+            - value: "dynamic"
+              label: Dynamic
+            - value: "static"
+              label: Static
+      name: Reservation mode
+      description: Required. Choose static to reserve an IPv4 address for the selected host on the selected network, or dynamic to clear the reservation.
+    reserved_ipv4:
+      required: false
+      example: "192.168.10.50"
+      selector:
+        text:
+      name: Reserved IPv4
+      description: Optional. Required when mode is static. Omit it when mode is dynamic.
+    host_mac:
+      required: false
+      example: "00:AA:BB:CC:DD:26"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Use the Firewalla host MAC for deterministic automations.
+    host_name:
+      required: false
+      example: "Plex Server"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+    host_id:
+      required: false
+      example: "00:AA:BB:CC:DD:26"
+      selector:
+        text:
+      name: Host ID
+      description: Optional. Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC.
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Required unless you provide network name. Use the Firewalla network UUID for deterministic automations.
+    network_name:
+      required: false
+      example: "VLAN10 CORE"
+      selector:
+        text:
+      name: Network name
+      description: Required unless you provide network UUID. Use the current Firewalla network display name for interactive use.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and network selectors, validating the requested reservation, and sending the reservation change.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

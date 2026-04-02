@@ -37,9 +37,12 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_LIMIT,
+    SERVICE_FIELD_MODE,
+    SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_REFRESH,
+    SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
@@ -63,6 +66,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_SET_HOST_DHCP_RESERVATION,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
@@ -224,7 +228,19 @@ def _network_segment_report_runtime_payload() -> dict[str, object]:
                 "nameservers": ["192.168.10.1"],
                 "searchDomain": ["int.ccpk.us"],
                 "extraOptions": {},
-            }
+            },
+            "br0": {
+                "gateway": "192.168.200.1",
+                "subnetMask": "255.255.255.0",
+                "lease": 86400,
+                "range": {
+                    "from": "192.168.200.100",
+                    "to": "192.168.200.199",
+                },
+                "nameservers": ["192.168.200.1"],
+                "searchDomain": ["lan.example"],
+                "extraOptions": {},
+            },
         },
     }
     payload["deviceTags"] = {
@@ -2440,6 +2456,475 @@ async def test_set_host_notify_when_next_offline_resolves_host_name(
         "name": "notify_when_next_offline",
         "policy_key": "deviceOffline",
     }
+
+
+async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Test the DHCP reservation service returns an acknowledgement."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    runtime_payload = _network_segment_report_runtime_payload()
+    cast(list[dict[str, object]], runtime_payload["hosts"])[0]["policy"] = {
+        "ipAllocation": {
+            "allocations": {
+                "5799d896-5e0f-40a5-a776-38a5d7746204": {
+                    "ipv4": "192.168.10.10",
+                    "type": "static",
+                },
+                "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                    "ipv4": "192.168.200.25",
+                    "type": "static",
+                },
+            }
+        }
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=runtime_payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_policy",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_set_host_policy,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_MODE: "static",
+                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.150",
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_NETWORK_UUID: "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_policy.await_args is not None
+    assert mock_set_host_policy.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        {
+            "ipAllocation": {
+                "allocations": {
+                    "5799d896-5e0f-40a5-a776-38a5d7746204": {
+                        "ipv4": "192.168.10.10",
+                        "type": "static",
+                    },
+                    "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                        "ipv4": "192.168.200.150",
+                        "type": "static",
+                    },
+                }
+            }
+        },
+    )
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "target": {
+            "kind": "host",
+            "id": "00:AA:BB:CC:DD:26",
+            "name": "Plex Server",
+        },
+        "network": {
+            "uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+            "name": "Primary LAN",
+        },
+        "query": {
+            "mode": "static",
+            "reserved_ipv4": "192.168.200.150",
+            "host_id": None,
+            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_name": None,
+            "network_uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+            "network_name": None,
+            "refresh": False,
+        },
+        "ip_assignment": {
+            "mode": "static",
+            "network_uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+            "reserved_ipv4": "192.168.200.150",
+        },
+        "command": {
+            "item": "policy",
+            "target": "00:AA:BB:CC:DD:26",
+            "value": {
+                "ipAllocation": {
+                    "allocations": {
+                        "5799d896-5e0f-40a5-a776-38a5d7746204": {
+                            "ipv4": "192.168.10.10",
+                            "type": "static",
+                        },
+                        "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                            "ipv4": "192.168.200.150",
+                            "type": "static",
+                        },
+                    }
+                }
+            },
+        },
+        "command_response": {"ok": True},
+    }
+
+
+async def test_set_host_dhcp_reservation_resolves_names_for_dynamic_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Test the DHCP reservation service resolves host and network by name."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    runtime_payload = _network_segment_report_runtime_payload()
+    cast(list[dict[str, object]], runtime_payload["hosts"])[0]["policy"] = {
+        "ipAllocation": {
+            "allocations": {
+                "5799d896-5e0f-40a5-a776-38a5d7746204": {
+                    "ipv4": "192.168.10.10",
+                    "type": "static",
+                },
+                "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                    "ipv4": "192.168.200.25",
+                    "type": "static",
+                },
+            }
+        }
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=runtime_payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_policy",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_set_host_policy,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_MODE: "dynamic",
+                SERVICE_FIELD_HOST_NAME: "Plex Server",
+                SERVICE_FIELD_NETWORK_NAME: "Primary LAN",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_policy.await_args is not None
+    assert mock_set_host_policy.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        {
+            "ipAllocation": {
+                "allocations": {
+                    "5799d896-5e0f-40a5-a776-38a5d7746204": {
+                        "ipv4": "192.168.10.10",
+                        "type": "static",
+                    },
+                    "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                        "type": "dynamic",
+                    },
+                }
+            }
+        },
+    )
+    assert response is not None
+    assert response["network"] == {
+        "uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+        "name": "Primary LAN",
+    }
+    assert response["ip_assignment"] == {
+        "mode": "dynamic",
+        "network_uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+        "reserved_ipv4": None,
+    }
+
+
+async def test_set_host_dhcp_reservation_requires_ipv4_for_static_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Test static DHCP reservations require one IPv4 address."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with pytest.raises(
+        ServiceValidationError,
+        match="reserved_ipv4 is required when mode is static",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_MODE: "static",
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_set_host_dhcp_reservation_infers_network_from_ipv4(
+    hass: HomeAssistant,
+) -> None:
+    """Test static reservations can infer the target network from IPv4."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_policy",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_set_host_policy,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_MODE: "static",
+                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.150",
+                SERVICE_FIELD_HOST_NAME: "Plex Server",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_policy.await_args is not None
+    assert mock_set_host_policy.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        {
+            "ipAllocation": {
+                "allocations": {
+                    "5799d896-5e0f-40a5-a776-38a5d7746204": {
+                        "ipv4": "192.168.10.10",
+                        "type": "static",
+                    },
+                    "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                        "ipv4": "192.168.200.150",
+                        "type": "static",
+                    },
+                }
+            }
+        },
+    )
+    assert response is not None
+    assert response["network"] == {
+        "uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+        "name": "Primary LAN",
+    }
+
+
+async def test_set_host_dhcp_reservation_rejects_ipv4_outside_network_range(
+    hass: HomeAssistant,
+) -> None:
+    """Test static reservations reject IPv4 values outside the network range."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with pytest.raises(
+        ServiceValidationError,
+        match="outside the DHCP range",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_MODE: "static",
+                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.150",
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+
+async def test_set_host_dhcp_reservation_rejects_duplicate_ipv4_on_same_network(
+    hass: HomeAssistant,
+) -> None:
+    """Test static reservations reject duplicate IPv4 ownership on one network."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    runtime_payload = _network_segment_report_runtime_payload()
+    cast(list[dict[str, object]], runtime_payload["hosts"])[1]["policy"] = {
+        "ipAllocation": {
+            "allocations": {
+                "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
+                    "ipv4": "192.168.200.150",
+                    "type": "static",
+                }
+            }
+        }
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=runtime_payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with pytest.raises(
+        ServiceValidationError,
+        match="already assigned to",
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_MODE: "static",
+                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.150",
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_NETWORK_UUID: "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
 
 
 async def test_get_time_usage_report_service_resolves_device_label_and_serializes_data(

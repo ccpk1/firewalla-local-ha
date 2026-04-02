@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, tzinfo
+from ipaddress import AddressValueError, IPv4Address, IPv4Network
 from typing import cast
 
 import voluptuous as vol
@@ -29,10 +30,12 @@ from .const import (
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_LIMIT,
+    SERVICE_FIELD_MODE,
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_REFRESH,
+    SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
@@ -57,6 +60,7 @@ from .const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_SET_HOST_DHCP_RESERVATION,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
@@ -67,6 +71,13 @@ from .const import (
     TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
     TRANS_KEY_EXCEPTION_HOST_REQUIRED,
+    TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_CONFLICT,
+    TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_IN_USE,
+    TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_INVALID,
+    TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_OUT_OF_RANGE,
+    TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_REQUIRED,
     TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED,
     TRANS_KEY_EXCEPTION_INVALID_DURATION,
@@ -93,6 +104,7 @@ from .const import (
     TRANS_PLACEHOLDER_HOST_NAME,
     TRANS_PLACEHOLDER_NETWORK_NAME,
     TRANS_PLACEHOLDER_NETWORK_UUID,
+    TRANS_PLACEHOLDER_RESERVED_IPV4,
     TRANS_PLACEHOLDER_RULE_TARGET,
     TRANS_PLACEHOLDER_SCOPE_KIND,
     TRANS_PLACEHOLDER_SCOPE_TARGET,
@@ -238,6 +250,16 @@ SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA = vol.Schema(
     {
         **_HOST_TARGET_SCHEMA_FIELDS,
         vol.Required(SERVICE_FIELD_ENABLED): cv.boolean,
+    }
+)
+
+SET_HOST_DHCP_RESERVATION_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_MODE): vol.In(("dynamic", "static")),
+        vol.Optional(SERVICE_FIELD_RESERVED_IPV4): cv.string,
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
+        vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
     }
 )
 
@@ -1765,6 +1787,227 @@ def _resolve_host_notifications(
     )
 
 
+def _build_host_ip_allocation_policy_value(
+    raw_host: dict[str, object] | None,
+    *,
+    network_uuid: str,
+    mode: str,
+    reserved_ipv4: str | None,
+) -> dict[str, object]:
+    """Build one host policy payload for a DHCP reservation change."""
+    allocations: dict[str, dict[str, object]] = {}
+
+    raw_policy = raw_host.get("policy") if isinstance(raw_host, dict) else None
+    raw_ip_allocation = (
+        raw_policy.get("ipAllocation") if isinstance(raw_policy, dict) else None
+    )
+    raw_allocations = (
+        raw_ip_allocation.get("allocations")
+        if isinstance(raw_ip_allocation, dict)
+        else None
+    )
+    if isinstance(raw_allocations, dict):
+        for allocation_network_uuid, raw_allocation in raw_allocations.items():
+            if not isinstance(allocation_network_uuid, str):
+                continue
+            if normalized_allocation := _normalized_dict(raw_allocation):
+                allocations[allocation_network_uuid] = normalized_allocation
+
+    updated_allocation: dict[str, object] = {"type": mode}
+    if reserved_ipv4 is not None:
+        updated_allocation["ipv4"] = reserved_ipv4
+    allocations[network_uuid] = updated_allocation
+
+    return {
+        "ipAllocation": {
+            "allocations": allocations,
+        }
+    }
+
+
+def _resolve_network_interface_name(
+    entry: FirewallaConfigEntry,
+    *,
+    network_uuid: str,
+) -> str | None:
+    """Resolve the runtime interface name for one network UUID."""
+    raw_network_profiles = (entry.runtime_data.coordinator.last_init_payload or {}).get(
+        "networkProfiles"
+    )
+    if not isinstance(raw_network_profiles, dict):
+        return None
+
+    raw_profile = raw_network_profiles.get(network_uuid)
+    if not isinstance(raw_profile, dict):
+        return None
+
+    return _optional_string(raw_profile.get("intf"))
+
+
+def _resolve_network_dhcp_config(
+    entry: FirewallaConfigEntry,
+    *,
+    network_uuid: str,
+) -> FirewallaNetworkDhcpConfig | None:
+    """Resolve the DHCP config for one network UUID from runtime metadata."""
+    return _build_network_dhcp_config(
+        entry,
+        interface_name=_resolve_network_interface_name(
+            entry,
+            network_uuid=network_uuid,
+        ),
+    )
+
+
+def _ipv4_in_dhcp_range(
+    address: IPv4Address,
+    dhcp_config: FirewallaNetworkDhcpConfig,
+) -> bool | None:
+    """Return whether one IPv4 address falls inside the known DHCP range."""
+    if dhcp_config.range_start is not None and dhcp_config.range_end is not None:
+        try:
+            range_start = IPv4Address(dhcp_config.range_start)
+            range_end = IPv4Address(dhcp_config.range_end)
+        except AddressValueError:
+            return None
+        return range_start <= address <= range_end
+
+    if dhcp_config.gateway is not None and dhcp_config.subnet_mask is not None:
+        try:
+            network = IPv4Network(
+                f"{dhcp_config.gateway}/{dhcp_config.subnet_mask}",
+                strict=False,
+            )
+        except AddressValueError:
+            return None
+        return address in network
+
+    return None
+
+
+def _resolve_dhcp_reservation_network(
+    entry: FirewallaConfigEntry,
+    *,
+    network_uuid: str | None,
+    network_name: str | None,
+    reserved_ipv4: IPv4Address | None,
+) -> FirewallaNetworkSegment:
+    """Resolve one DHCP reservation target network."""
+    if network_uuid is not None or network_name is not None:
+        return _resolve_requested_network_required(
+            entry,
+            network_uuid=network_uuid,
+            network_name=network_name,
+        )
+
+    if reserved_ipv4 is None:
+        raise ServiceValidationError(
+            "Provide network_uuid or network_name",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_REQUIRED,
+        )
+
+    matching_networks = [
+        network
+        for network in entry.runtime_data.integration_manager.get_available_networks()
+        if (
+            dhcp_config := _resolve_network_dhcp_config(
+                entry,
+                network_uuid=network.uuid,
+            )
+        )
+        is not None
+        and _ipv4_in_dhcp_range(reserved_ipv4, dhcp_config) is True
+    ]
+
+    if len(matching_networks) == 1:
+        return matching_networks[0]
+
+    if not matching_networks:
+        raise ServiceValidationError(
+            f"No network matched reserved IPv4 {reserved_ipv4}",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_NOT_FOUND,
+            translation_placeholders={
+                TRANS_PLACEHOLDER_RESERVED_IPV4: str(reserved_ipv4),
+            },
+        )
+
+    raise ServiceValidationError(
+        f"More than one network matched reserved IPv4 {reserved_ipv4}",
+        translation_domain=DOMAIN,
+        translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_AMBIGUOUS,
+        translation_placeholders={
+            TRANS_PLACEHOLDER_RESERVED_IPV4: str(reserved_ipv4),
+        },
+    )
+
+
+def _validate_dhcp_reservation_request(
+    entry: FirewallaConfigEntry,
+    *,
+    host: FirewallaHostRuntime,
+    network: FirewallaNetworkSegment,
+    reserved_ipv4: IPv4Address | None,
+    raw_host_lookup: dict[str, dict[str, object]],
+) -> None:
+    """Validate one static DHCP reservation request against runtime metadata."""
+    if reserved_ipv4 is None:
+        return
+
+    dhcp_config = _resolve_network_dhcp_config(
+        entry,
+        network_uuid=network.uuid,
+    )
+    if (
+        dhcp_config is not None
+        and _ipv4_in_dhcp_range(reserved_ipv4, dhcp_config) is False
+    ):
+        raise ServiceValidationError(
+            (
+                f"Reserved IPv4 {reserved_ipv4} is outside the DHCP "
+                f"range for {network.name}"
+            ),
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_OUT_OF_RANGE,
+            translation_placeholders={
+                TRANS_PLACEHOLDER_NETWORK_NAME: network.name,
+                TRANS_PLACEHOLDER_RESERVED_IPV4: str(reserved_ipv4),
+            },
+        )
+
+    for raw_host_mac, raw_host in raw_host_lookup.items():
+        if raw_host_mac == host.mac:
+            continue
+        existing_assignment = _resolve_host_ip_assignment(
+            raw_host,
+            network_uuid=network.uuid,
+        )
+        if (
+            existing_assignment is not None
+            and existing_assignment.mode == "static"
+            and existing_assignment.reserved_ipv4 == str(reserved_ipv4)
+        ):
+            duplicate_host = entry.runtime_data.host_manager.get_host(raw_host_mac)
+            duplicate_host_name = (
+                duplicate_host.display_name
+                if duplicate_host is not None
+                else raw_host_mac
+            )
+            raise ServiceValidationError(
+                (
+                    f"Reserved IPv4 {reserved_ipv4} is already assigned "
+                    f"to {duplicate_host_name}"
+                ),
+                translation_domain=DOMAIN,
+                translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_IN_USE,
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_HOST_NAME: duplicate_host_name,
+                    TRANS_PLACEHOLDER_RESERVED_IPV4: str(reserved_ipv4),
+                },
+            )
+
+
 def _supports_wake_on_lan(host_id: str) -> bool:
     """Return whether one host ID looks like a WOL-targetable MAC address."""
     parts = host_id.split(":")
@@ -2705,6 +2948,134 @@ async def _async_handle_set_host_notify_when_next_offline(
     )
 
 
+async def _async_handle_set_host_dhcp_reservation(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Set one host DHCP reservation mode for the selected network."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    host = _resolve_requested_host(
+        entry,
+        host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
+        host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
+        host_name=cast(str | None, call.data.get(SERVICE_FIELD_HOST_NAME)),
+        required=True,
+    )
+    assert host is not None
+
+    network_uuid = cast(str | None, call.data.get(SERVICE_FIELD_NETWORK_UUID))
+    network_name = cast(str | None, call.data.get(SERVICE_FIELD_NETWORK_NAME))
+    mode = cast(str, call.data[SERVICE_FIELD_MODE])
+    reserved_ipv4_input = cast(
+        str | None,
+        call.data.get(SERVICE_FIELD_RESERVED_IPV4),
+    )
+
+    if mode == "static" and reserved_ipv4_input is None:
+        raise ServiceValidationError(
+            "reserved_ipv4 is required when mode is static",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_REQUIRED,
+        )
+
+    if mode == "dynamic" and reserved_ipv4_input is not None:
+        raise ServiceValidationError(
+            "reserved_ipv4 is only allowed when mode is static",
+            translation_domain=DOMAIN,
+            translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_CONFLICT,
+        )
+
+    reserved_ipv4: IPv4Address | None = None
+    if reserved_ipv4_input is not None:
+        try:
+            reserved_ipv4 = IPv4Address(reserved_ipv4_input)
+        except AddressValueError as err:
+            raise ServiceValidationError(
+                f"Invalid IPv4 address: {reserved_ipv4_input}",
+                translation_domain=DOMAIN,
+                translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_INVALID,
+            ) from err
+
+    network = _resolve_dhcp_reservation_network(
+        entry,
+        network_uuid=network_uuid,
+        network_name=network_name,
+        reserved_ipv4=reserved_ipv4,
+    )
+
+    raw_host_lookup = _build_raw_host_lookup(entry)
+    _validate_dhcp_reservation_request(
+        entry,
+        host=host,
+        network=network,
+        reserved_ipv4=reserved_ipv4,
+        raw_host_lookup=raw_host_lookup,
+    )
+    policy_value = _build_host_ip_allocation_policy_value(
+        raw_host_lookup.get(host.mac),
+        network_uuid=network.uuid,
+        mode=mode,
+        reserved_ipv4=str(reserved_ipv4) if reserved_ipv4 is not None else None,
+    )
+    assignment = FirewallaNetworkHostIpAssignment(
+        mode=mode,
+        network_uuid=network.uuid,
+        reserved_ipv4=str(reserved_ipv4) if reserved_ipv4 is not None else None,
+    )
+
+    try:
+        command_response = (
+            await entry.runtime_data.integration_manager.async_set_host_policy(
+                host.mac,
+                policy_value,
+            )
+        )
+    except FirewallaApiError as err:
+        raise HomeAssistantError(
+            f"Could not update host DHCP reservation: {err}"
+        ) from err
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "target": _serialize_report_target(
+            FirewallaReportTarget(
+                kind="host",
+                id=host.mac,
+                name=host.display_name,
+            )
+        ),
+        "network": _serialize_network_segment(network),
+        "query": {
+            "mode": mode,
+            "reserved_ipv4": (
+                str(reserved_ipv4) if reserved_ipv4 is not None else None
+            ),
+            "host_id": call.data.get(SERVICE_FIELD_HOST_ID),
+            "host_mac": call.data.get(SERVICE_FIELD_HOST_MAC),
+            "host_name": call.data.get(SERVICE_FIELD_HOST_NAME),
+            "network_uuid": call.data.get(SERVICE_FIELD_NETWORK_UUID),
+            "network_name": call.data.get(SERVICE_FIELD_NETWORK_NAME),
+            "refresh": refresh_requested,
+        },
+        "ip_assignment": _serialize_network_host_ip_assignment(assignment),
+        "command": {
+            "item": "policy",
+            "target": host.mac,
+            "value": cast(JsonObjectType, policy_value),
+        },
+        "command_response": cast(JsonObjectType, command_response),
+    }
+
+
 async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectType:
     """Return shaped speed-test results from the coordinator snapshot path."""
     entry = _get_loaded_entry(
@@ -3369,9 +3740,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
-    if not hass.services.has_service(
-        DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE
-    ):
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE):
         hass.services.async_register(
             DOMAIN,
             SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
@@ -3380,14 +3749,21 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
-    if not hass.services.has_service(
-        DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE
-    ):
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE):
         hass.services.async_register(
             DOMAIN,
             SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
             _async_handle_set_host_notify_when_next_offline,
             schema=SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            _async_handle_set_host_dhcp_reservation,
+            schema=SET_HOST_DHCP_RESERVATION_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
 
@@ -3460,6 +3836,8 @@ def async_remove_services(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE)
     if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE):
         hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE)
+    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION):
+        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION)
     if hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
         hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS)
     if hass.services.has_service(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT):

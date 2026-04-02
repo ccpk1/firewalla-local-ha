@@ -1547,24 +1547,25 @@ Files materially completed for this milestone:
 
 Remaining code-change items after the report-service milestone:
 
-- [ ] Re-run and record the local quality gates on the final commit candidate.
+- [x] Re-run and record the local quality gates on the final commit candidate.
   - expected commands:
     - `python -m ruff check .`
     - `python -m mypy custom_components/firewalla_local`
     - `python -m pytest tests/ -v`
--  - current status:
+  - current status:
     - `python -m ruff check .` passes
     - `python -m mypy custom_components/firewalla_local` passes
-    - focused Wake-on-LAN service tests pass
+    - `python -m pytest tests/ -v` passes
 - [ ] Review release-checklist impact for the service build-out and capture any packaging or documentation follow-up still needed before release.
 - [ ] Keep an eye on service-layer complexity in [custom_components/firewalla_local/services.py](/workspaces/firewalla-local-ha/custom_components/firewalla_local/services.py); further refactor is optional now, not a blocker, and should only happen when it materially helps the next feature slice.
 
 Remaining enhancement items after the report-service milestone:
 
-- [ ] Build the host-targeted DHCP reservation service family.
-  - likely first scope:
+- [x] Build the host-targeted DHCP reservation service family.
+  - implemented first scope:
     - set host allocation mode to `dynamic` or `static`
     - set reserved IPv4 for one host on one segment
+    - preserve the host's other known allocation entries when updating one network key
 - [x] Build the host-targeted notification settings service family.
   - likely first scope:
     - set notify when next online
@@ -1574,6 +1575,7 @@ Remaining enhancement items after the report-service milestone:
   - ambiguity handling now returns the matching host labels and MAC-backed identifiers
   - the interactive selector also accepts the full host label when duplicate names exist
 - [ ] Capture and confirm the device-rename command path before adding a host rename service.
+  - implementation-prep plan now lives in [plans/in-process/FIREWALLA_LOCAL_HOST_RENAME_SERVICE_IN-PROCESS.md](/workspaces/firewalla-local-ha/plans/in-process/FIREWALLA_LOCAL_HOST_RENAME_SERVICE_IN-PROCESS.md)
 - [ ] Continue DHCP evidence capture only where needed for write surfaces that are not yet fully proven.
   - still open:
     - reservation delete mutation in isolation
@@ -1584,16 +1586,11 @@ Remaining enhancement items after the report-service milestone:
 Recommended next phase:
 
 - Close the current service-build milestone first.
-  - run the quality gates
-  - review release-checklist impact
-  - record the milestone as complete in this plan
-- Start the next implementation phase with host-targeted action services rather than more report reshaping.
-- Recommended first enhancement: DHCP reservation mutation services.
-  - reason:
-    - the underlying host policy allocation model is already partially proven
-    - it is the next highest-value host-scoped write surface after notifications
-    - the remaining work is constrained to reservation semantics rather than a brand-new selector model
-- Recommended second enhancement: host rename after the command path is captured cleanly enough to keep the service contract stable.
+  - quality gates are complete
+  - next remaining close-out item is the release-checklist impact review
+- Recommended first enhancement: host rename after the command path is captured cleanly enough to keep the service contract stable.
+  - prep plan created: [plans/in-process/FIREWALLA_LOCAL_HOST_RENAME_SERVICE_IN-PROCESS.md](/workspaces/firewalla-local-ha/plans/in-process/FIREWALLA_LOCAL_HOST_RENAME_SERVICE_IN-PROCESS.md)
+- Recommended second enhancement: continue DHCP evidence capture only for the still-unproven write surfaces, not for the now-implemented host reservation path.
 
 DHCP capture and modeling follow-up:
 
@@ -1685,8 +1682,8 @@ DHCP capture findings from mixed action session:
 
 Service follow-on scope from host-settings capture:
 
-- Add a host-targeted DHCP reservation mutation service family after the report surfaces land.
-  - working scope:
+- [x] Add a host-targeted DHCP reservation mutation service family after the report surfaces land.
+  - implemented scope:
     - set host allocation mode to dynamic or static
     - set reserved IPv4 for one host on one network segment
 - Add a host-targeted notification settings service family after the report surfaces land.
