@@ -65,6 +65,7 @@ _COMMAND_POLICY_DELETE: Final = "policy:delete"
 _COMMAND_POLICY_UPDATE: Final = "policy:update"
 _COMMAND_RUN_INTERNET_SPEED_TEST: Final = "runInternetSpeedtest"
 _COMMAND_WAKE_HOST: Final = "wol:wake"
+_COMMAND_SET_HOST: Final = "host"
 _COMMAND_POLICY_ID_KEY: Final = "policyID"
 
 _RAW_RULE_ID_KEY: Final = "pid"
@@ -493,6 +494,29 @@ class FirewallaApiClient:
                 _COMMAND_VALUE_KEY: policy_value,
             },
             target=host_mac,
+        )
+
+    async def async_set_host_name(
+        self,
+        host_mac: str,
+        host_name: str,
+    ) -> dict[str, object]:
+        """Write one host-scoped custom name to the requested host."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=_SET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_SET_HOST,
+                _COMMAND_VALUE_KEY: {_RAW_NAME_KEY: host_name},
+            },
+            target=host_mac,
+        )
+        if data_payload is None:
+            return {}
+        if isinstance(data_payload, dict):
+            return data_payload
+        raise FirewallaProtocolError(
+            "Firewalla host rename response did not include "
+            "a JSON object or null data payload"
         )
 
     async def async_get_monthly_wan_usage_payload(self) -> dict[str, object]:

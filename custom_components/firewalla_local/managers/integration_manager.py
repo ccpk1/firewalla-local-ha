@@ -217,6 +217,14 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Write one host-scoped policy payload to the requested host."""
         return await self.client.async_set_host_policy(host_mac, policy_value)
 
+    async def async_set_host_name(
+        self,
+        host_mac: str,
+        host_name: str,
+    ) -> dict[str, object]:
+        """Write one host-scoped custom name to the requested host."""
+        return await self.client.async_set_host_name(host_mac, host_name)
+
     async def async_get_usage_history(
         self,
         *,

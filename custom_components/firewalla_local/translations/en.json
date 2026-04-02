@@ -687,6 +687,40 @@
         }
       }
     },
+    "set_host_name": {
+      "name": "Set host name",
+      "description": "Set one Firewalla host custom name through the captured host-scoped rename path.",
+      "fields": {
+        "new_name": {
+          "name": "New name",
+          "description": "Required. Send this exact host name to Firewalla without additional normalization."
+        },
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Use the Firewalla host MAC for deterministic automations."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Use the current Firewalla host display name or full host label for interactive use."
+        },
+        "host_id": {
+          "name": "Host ID (Optional)",
+          "description": "Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the rename command."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "set_host_notify_when_next_online": {
       "name": "Set host notify when next online",
       "description": "Turn the selected host's notify-when-next-online setting on or off.",

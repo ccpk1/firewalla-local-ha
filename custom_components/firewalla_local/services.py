@@ -33,6 +33,7 @@ from .const import (
     SERVICE_FIELD_MODE,
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
+    SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
@@ -61,6 +62,7 @@ from .const import (
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
     SERVICE_SET_HOST_DHCP_RESERVATION,
+    SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
@@ -250,6 +252,13 @@ SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA = vol.Schema(
     {
         **_HOST_TARGET_SCHEMA_FIELDS,
         vol.Required(SERVICE_FIELD_ENABLED): cv.boolean,
+    }
+)
+
+SET_HOST_NAME_SCHEMA = vol.Schema(
+    {
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Required(SERVICE_FIELD_NEW_NAME): cv.string,
     }
 )
 
@@ -2948,6 +2957,70 @@ async def _async_handle_set_host_notify_when_next_offline(
     )
 
 
+async def _async_handle_set_host_name(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Set one custom host name on the resolved host."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    host = _resolve_requested_host(
+        entry,
+        host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
+        host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
+        host_name=cast(str | None, call.data.get(SERVICE_FIELD_HOST_NAME)),
+        required=True,
+    )
+    assert host is not None
+
+    new_name = cast(str, call.data[SERVICE_FIELD_NEW_NAME])
+
+    try:
+        command_response = (
+            await entry.runtime_data.integration_manager.async_set_host_name(
+                host.mac,
+                new_name,
+            )
+        )
+    except FirewallaApiError as err:
+        raise HomeAssistantError(f"Could not rename host: {err}") from err
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "target": _serialize_report_target(
+            FirewallaReportTarget(
+                kind="host",
+                id=host.mac,
+                name=host.display_name,
+            )
+        ),
+        "query": {
+            "new_name": new_name,
+            "host_id": call.data.get(SERVICE_FIELD_HOST_ID),
+            "host_mac": call.data.get(SERVICE_FIELD_HOST_MAC),
+            "host_name": call.data.get(SERVICE_FIELD_HOST_NAME),
+            "refresh": refresh_requested,
+        },
+        "host_name": {
+            "new_name": new_name,
+        },
+        "command": {
+            "item": "host",
+            "target": host.mac,
+            "value": {"name": new_name},
+        },
+        "command_response": cast(JsonObjectType, command_response),
+    }
+
+
 async def _async_handle_set_host_dhcp_reservation(
     call: ServiceCall,
 ) -> JsonObjectType:
@@ -3740,6 +3813,15 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NAME):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SET_HOST_NAME,
+            _async_handle_set_host_name,
+            schema=SET_HOST_NAME_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE):
         hass.services.async_register(
             DOMAIN,
@@ -3832,6 +3914,8 @@ def async_remove_services(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST)
     if hass.services.has_service(DOMAIN, SERVICE_WAKE_HOST):
         hass.services.async_remove(DOMAIN, SERVICE_WAKE_HOST)
+    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NAME):
+        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NAME)
     if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE):
         hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE)
     if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE):

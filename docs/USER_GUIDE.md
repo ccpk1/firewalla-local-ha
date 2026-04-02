@@ -337,6 +337,23 @@ Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
 - the current implementation rejects targets that do not look Wake-on-LAN-
    capable, such as non-MAC pseudo-hosts
 
+### Host rename
+
+Use `firewalla_local.set_host_name` to send one host-scoped rename command.
+
+- choose one host with `host_mac` for deterministic automations
+- use `host_name` for interactive use when the current Firewalla host name is
+   clear and unique, or use the full host label with IP when you need to
+   disambiguate duplicate names
+- `host_id` is also accepted as an alternate selector and currently resolves to
+   the same normalized host identity as the MAC-backed host key
+- provide the exact `new_name` string you want Firewalla to store; the service
+   does not trim, rewrite, or otherwise normalize the payload before sending it
+- `refresh` defaults to `true` so the service resolves the latest host metadata
+   before sending the rename command
+- the response returns an acknowledgement with the resolved host and the
+   host-targeted command payload that was sent
+
 ### Host notification toggles
 
 Use `firewalla_local.set_host_notify_when_next_online` and

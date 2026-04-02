@@ -1372,6 +1372,54 @@ Implementation impact:
   Wake-on-LAN should be modeled as host-targeted actions, not segment-targeted
   DHCP mutations
 
+### Finding 16: Host rename uses a host-scoped `item=host` write with a null acknowledgement
+
+Scenario:
+
+- renamed host `74:42:18:08:D2:8D` from the official Firewalla app
+
+Artifacts:
+
+- `.tmp/firewalla_host_rename_capture.pcap`
+- `.tmp/firewalla_host_rename_capture.decoded.txt`
+- pre-action inventory: `.tmp/capture_host_rename_before.json`
+- post-action inventory: `.tmp/capture_host_rename_after.json`
+
+Observed rename mutation:
+
+```json
+{
+  "item": "host",
+  "target": "74:42:18:08:D2:8D",
+  "value": {
+    "name": "Carens Phone 1"
+  }
+}
+```
+
+Transport details:
+
+- outer message type: `set`
+- target identifier: host MAC address
+- response shape for the captured write: decrypted `code=200` with `data=null`
+
+Observed follow-up read behavior:
+
+- a nearby app read used `mtype=get`, `target=74:42:18:08:D2:8D`, and
+  `data={"item":"host",...}`
+- the standard runtime init payload consumed by the current integration did not
+  immediately expose the renamed value in the fields currently used for host
+  display-name normalization at capture time
+
+Conclusion:
+
+- host rename is a host-scoped write distinct from the host policy path
+- the mutation contract is low-ambiguity enough to implement a dedicated host
+  rename service
+- the write acknowledgement path must tolerate `null` response data
+- the read model still needs separate confirmation before the integration can
+  promise immediate renamed-state readback after the write
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two

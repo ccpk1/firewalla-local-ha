@@ -40,6 +40,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_MODE,
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
+    SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
@@ -67,6 +68,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
     SERVICE_SET_HOST_DHCP_RESERVATION,
+    SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
@@ -2456,6 +2458,144 @@ async def test_set_host_notify_when_next_offline_resolves_host_name(
         "name": "notify_when_next_offline",
         "policy_key": "deviceOffline",
     }
+
+
+async def test_set_host_name_returns_acknowledgement_for_host_mac(
+    hass: HomeAssistant,
+) -> None:
+    """Test the host rename service returns an acknowledgement."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_name",
+            new=AsyncMock(return_value={}),
+        ) as mock_set_host_name,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_NAME,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_NEW_NAME: "Plex Server Renamed",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_name.await_args is not None
+    assert mock_set_host_name.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        "Plex Server Renamed",
+    )
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "target": {
+            "kind": "host",
+            "id": "00:AA:BB:CC:DD:26",
+            "name": "Plex Server",
+        },
+        "query": {
+            "new_name": "Plex Server Renamed",
+            "host_id": None,
+            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_name": None,
+            "refresh": False,
+        },
+        "host_name": {
+            "new_name": "Plex Server Renamed",
+        },
+        "command": {
+            "item": "host",
+            "target": "00:AA:BB:CC:DD:26",
+            "value": {"name": "Plex Server Renamed"},
+        },
+        "command_response": {},
+    }
+
+
+async def test_set_host_name_resolves_unique_host_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test the host rename service can resolve one host by display name."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_name",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_set_host_name,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_NAME,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_NAME: "Plex Server",
+                SERVICE_FIELD_NEW_NAME: "Plex Server Name 2",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_name.await_args is not None
+    assert mock_set_host_name.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        "Plex Server Name 2",
+    )
 
 
 async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode(

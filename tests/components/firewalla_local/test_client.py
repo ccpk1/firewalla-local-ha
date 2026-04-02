@@ -771,6 +771,42 @@ async def test_async_set_host_policy_sends_host_targeted_policy_write() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_host_name_sends_host_targeted_write_and_accepts_null_ack() -> (
+    None
+):
+    """Test host rename uses the captured host-targeted item=host write."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value=None),
+        ) as mock_send:
+            response = await client.async_set_host_name(
+                "00:AA:BB:CC:DD:26",
+                "Plex Server Renamed",
+            )
+
+    assert response == {}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "set",
+        "data": {
+            "item": "host",
+            "value": {"name": "Plex Server Renamed"},
+        },
+        "target": "00:AA:BB:CC:DD:26",
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_rule_sends_confirmed_persistent_payload() -> None:
     """Test rule creation uses the confirmed persistent mutation shape."""
     async with ClientSession() as session:
