@@ -42,7 +42,8 @@ If your change only affects a narrow area, you may run a targeted test suite, bu
 Use a pull request to `main` so the repository validation workflow can run before merge.
 
 - Include a closing keyword in the PR body when applicable (`Closes #...`)
-- Use a clear PR title because release notes may reuse it later
+- Use a clear, user-facing PR title because generated release notes may reuse it later
+- Prefer titles like `Add host rename service` or `Expand WAN usage reporting` over internal-only titles like `Refactor manager plumbing`
 - Include the validation commands you ran in the PR body
 - Add a short user-facing release summary in the PR body when behavior changes
 - Keep the release summary concise; this repository uses a simple release summary model rather than a separate changelog pipeline

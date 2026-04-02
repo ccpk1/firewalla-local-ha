@@ -58,6 +58,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_SPEED_TEST_RESULTS,
@@ -2596,6 +2597,70 @@ async def test_set_host_name_resolves_unique_host_name(
         "00:AA:BB:CC:DD:26",
         "Plex Server Name 2",
     )
+
+
+async def test_get_host_name_mapping_returns_host_identity_records(
+    hass: HomeAssistant,
+) -> None:
+    """Test the host-name mapping service returns MAC and pseudo-host records."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOST_NAME_MAPPING,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response == {
+        "hosts": [
+            {
+                "host_id": "00:AA:BB:CC:DD:26",
+                "mac": "00:AA:BB:CC:DD:26",
+                "ip": "192.168.10.10",
+                "name": "Plex Server",
+                "kind": "mac_host",
+            },
+            {
+                "host_id": "wg_peer:test-peer",
+                "mac": None,
+                "ip": "10.42.0.2",
+                "name": "WireGuard Kaden",
+                "kind": "pseudo_host",
+            },
+        ],
+    }
 
 
 async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode(

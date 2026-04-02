@@ -40,6 +40,7 @@
       "init": {
         "description": "Choose which Firewalla options you want to manage.",
         "menu_options": {
+          "edit_device_trackers": "Manage device trackers",
           "edit_watched_devices": "Manage watched devices",
           "edit_watched_users": "Manage watched users",
           "general_options": "General options",
@@ -51,7 +52,7 @@
         "description": "Choose a general Firewalla runtime setting to manage.",
         "menu_options": {
           "init": "Back to main menu",
-          "system_settings": "Update interval"
+          "system_settings": "System settings"
         },
         "title": "General options"
       },
@@ -71,6 +72,14 @@
         "description": "Select which discovered Firewalla category rules should be exposed as rule-backed switches.",
         "title": "Edit rule selection"
       },
+      "edit_device_trackers": {
+        "data": {
+          "device_trackers": "Devices to expose as device trackers",
+          "return_to_main_menu": "Back to main menu without saving"
+        },
+        "description": "Select which discovered Firewalla devices should be exposed as Home Assistant device trackers.",
+        "title": "Edit device trackers"
+      },
       "edit_watched_devices": {
         "data": {
           "return_to_main_menu": "Back to main menu without saving",
@@ -89,10 +98,12 @@
       },
       "system_settings": {
         "data": {
+          "device_tracker_away_window": "Device-tracker away window (minutes)",
           "return_to_main_menu": "Back to main menu without saving",
-          "update_interval": "Update interval (minutes)"
+          "update_interval": "Update interval (minutes)",
+          "watched_device_online_window": "Watched-device online window (minutes)"
         },
-        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API.",
+        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more.",
         "title": "System settings"
       }
     }
@@ -137,6 +148,9 @@
           },
           "memory_usage_percent": {
             "name": "Memory usage (%)"
+          },
+          "runtime_data_updated_at": {
+            "name": "Runtime data updated at"
           },
           "uptime": {
             "name": "Uptime"
@@ -187,6 +201,39 @@
           },
           "upload_usage": {
             "name": "Data uploaded"
+          }
+        }
+      }
+    },
+    "button": {
+      "sync_runtime": {
+        "name": "Sync runtime"
+      }
+    },
+    "device_tracker": {
+      "presence": {
+        "name": "Presence",
+        "state_attributes": {
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_device_tracker_presence": "Shows whether the selected device tracker is currently home or away based on Firewalla router presence"
+            }
+          },
+          "connection_type": {
+            "name": "Connection type"
+          },
+          "device_group": {
+            "name": "Device group"
+          },
+          "ip_address": {
+            "name": "IP address"
+          },
+          "last_active": {
+            "name": "Last active"
+          },
+          "network_name": {
+            "name": "Network name"
           }
         }
       }
@@ -549,6 +596,24 @@
     }
   },
   "services": {
+    "get_host_name_mapping": {
+      "name": "Get host name mapping",
+      "description": "Return current Firewalla host identity records with host ID, MAC when available, IP, name, and kind.",
+      "fields": {
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before building the host records."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "get_runtime_inventory": {
       "name": "Get rule and runtime inventory",
       "description": "Return the current Firewalla rule, group, user, and related runtime inventory as structured data plus a markdown summary.",
@@ -679,21 +744,21 @@
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
-          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+          "description": "Use this when you have more than one Firewalla setup."
         },
         "config_entry_name": {
           "name": "Config entry name (Optional)",
-          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
         }
       }
     },
     "set_host_name": {
       "name": "Set host name",
-      "description": "Set one Firewalla host custom name through the captured host-scoped rename path.",
+      "description": "Set one Firewalla host custom name through the host-scoped rename path.",
       "fields": {
         "new_name": {
           "name": "New name",
-          "description": "Required. Send this exact host name to Firewalla without additional normalization."
+          "description": "Required. Send this exact host name to Firewalla without changes."
         },
         "host_mac": {
           "name": "Host MAC (Optional)",
@@ -701,23 +766,23 @@
         },
         "host_name": {
           "name": "Host name (Optional)",
-          "description": "Use the current Firewalla host display name or full host label for interactive use."
+          "description": "Use the current Firewalla host display name or full host label."
         },
         "host_id": {
           "name": "Host ID (Optional)",
-          "description": "Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC."
+          "description": "Alternate host selector. It currently resolves to the same host as the MAC selector."
         },
         "refresh": {
           "name": "Refresh first",
-          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the rename command."
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and sending the rename command."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
-          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+          "description": "Use this when you have more than one Firewalla setup."
         },
         "config_entry_name": {
           "name": "Config entry name (Optional)",
-          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
         }
       }
     },

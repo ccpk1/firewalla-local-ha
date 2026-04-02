@@ -48,16 +48,25 @@ This isn't just a wrapper for a few scripts. It was built from the ground up to 
 *   **Manager-Based Architecture:** Thin, efficient, and typed. Designed for stability and low CPU impact on your Home Assistant instance.
 
 ## ✨ **What it Enables**
-*   **Rule-Backed Switches:** Select your most-used rules (Internet Block, Social, Gaming, etc.) and expose them as simple switches for use in Dashboards or Automations.
-*   **Appliance Monitoring:** Track Firewalla system status, WAN IP details, device counts, uptime, memory usage, disk usage, and the latest successful Speed Test result natively in Home Assistant.
-*   **Watched-Device Monitoring:** Select important endpoints in the options flow and expose one connectivity-style binary sensor per watched device with stable activity and usage attributes.
-*   **Watched-User Monitoring:** Select household users in the options flow and expose one daily-usage sensor per watched user with total internet usage, unique-usage, associated-device, positive-only per-app usage, and last-active attributes backed by the proven local payload plus explicit host-association joins.
-*   **Timed Pauses:** Use the `pause_rule` and `resume_rule` services to enable / disable a firewall rule (e.g., "Give the kids 30 more minutes of gaming") directly from a voice assistant or button.
+Firewalla Local has evolved beyond simple monitoring into a comprehensive **local operator toolkit**.
 
-## 💻 **Supported Hardware & Prerequisites**
+### **Dynamic Network Control**
+* **Rule-Backed Switches & Timed Pauses:** Toggle your most-used rules (Internet Block, Social, Gaming) instantly. Use the `pause_rule` and `resume_rule` services to grant duration-based access (e.g., "Give the kids 30 more minutes of gaming") via any HA automation or voice assistant.
+* **Host Operator Actions:** Act as the network admin directly from Home Assistant. Wake devices (WOL), rename hosts, set/clear DHCP reservations, and toggle "notify when online/offline" settings seamlessly via actions (services).
+
+### **Presence & Usage Tracking**
+* **Router-Based Device Trackers:** Expose highly reliable Home Assistant `device_tracker` entities for your MAC-backed LAN clients for rock-solid "Home/Away" presence automations.
+* **Watched-User Monitoring:** Select household members to track their daily total internet usage, unique-usage, associated devices, and positive-only per-app usage based on real-time host joins.
+* **Watched-Device Monitoring:** Expose critical endpoints as connectivity sensors with stable activity attributes to ensure your vital hardware stays online.
+
+### **Appliance & Data Visibility**
+* **Appliance Monitoring:** Track Firewalla system status, WAN IP details, uptime, memory/disk usage, and the latest successful Speed Test natively. Includes a diagnostic `Sync runtime` button to force an immediate local data refresh.
+* **Rich Local Reporting:** Leverage over a dozen native Home Assistant services to query host identity records, network segment usage, time usage history, WAN data, and WAN event timelines—all pulled directly from the local data plane without touching the cloud.
+
+## **Supported Hardware & Prerequisites**
 * **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. It should be compatible with the Purple, Gold Pro, and any other series running the Firewalla Box software that supports the local API.
     * 🗣️ Community Feedback Needed: If you successfully run this on a non-Gold model, please drop a note in the Discussions tab so I can officially update this supported list!
-* **Home Assistant:** Requires Home Assistant Core version 2025.3.0 or newer.
+* **Home Assistant:** Requires Home Assistant Core version 2026.3.0 or newer.
 * **Network:** Your Home Assistant instance must be able to reach the Firewalla's local LAN IP.
 
 ## 🛡️ **A Note on Security & Privacy**
@@ -112,10 +121,12 @@ It covers:
 
 - installation and removal
 - pairing expectations
-- options-flow management for rule switches, watched devices, watched users, and polling
+- options-flow management for rule switches, watched devices, device trackers, watched users, and polling
 - refresh behavior
-- appliance monitoring, watched-device monitoring, and watched-user monitoring
-- runtime inventory, pause, and resume services
+- appliance monitoring, watched-device monitoring, device-tracker monitoring, and watched-user monitoring
+- runtime inventory, network, time-usage, speed-test, and WAN report services
+- host operator actions including Wake-on-LAN, rename, notification toggles, and DHCP reservations
+- pause and resume services
 
 ## 🏗️ **Development & Architecture Docs**
 

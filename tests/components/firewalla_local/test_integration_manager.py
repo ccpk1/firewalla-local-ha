@@ -186,6 +186,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
     assert manager.latest_speed_test.success is True
     assert manager.latest_speed_test.wan_uuid == "wan-1"
     assert manager.latest_speed_test.wan_name == "WAN-ONE"
+    assert manager.system_info.model == "Gold"
 
 
 def test_build_device_info_uses_default_name_and_entry_unique_id() -> None:
@@ -209,7 +210,7 @@ def test_build_device_info_uses_default_name_and_entry_unique_id() -> None:
     device_info = manager.build_device_info()
 
     assert device_info["name"] == "Firewalla"
-    assert device_info["model"] == "purple"
+    assert device_info["model"] == "Purple"
     assert device_info["serial_number"] == "serial-999"
     assert device_info["sw_version"] == "2.0.0"
     assert device_info["identifiers"] == {(DOMAIN, "entry-123")}

@@ -58,19 +58,18 @@ Checklist:
 
 ## 7) Release publication
 
-- [ ] Use a plain SemVer Git tag matching `manifest.json`, such as `1.0.0`.
+- [ ] Use a plain SemVer Git tag matching `manifest.json`, such as `1.1.0`.
 - [ ] Publish a short release summary in the GitHub release body.
-- [ ] Do not rely on a separate generated changelog system for the first release line.
+- [ ] Do not rely on a separate generated changelog system; use a concise manual summary and release-note-friendly PR titles.
 
 ## 8) Rollback readiness
 
-- [ ] Known risks and any deferred issues are documented before publishing.
 - [x] Known risks and any deferred issues are documented before publishing.
 - [ ] If the release exposes a blocking setup or packaging failure, prepare a patch release instead of silently rewriting the tag.
 
 ## 9) Launch blockers and defers
 
-Treat these as launch blockers for `1.0.0` unless the release decision is reopened
+Treat these as launch blockers for `1.1.0` unless the release decision is reopened
 explicitly:
 
 - [x] The worktree is clean and free of generated artifacts.
@@ -89,14 +88,17 @@ the shipped behavior:
 
 ## Draft release summary
 
-- Added the `set_host_dhcp_reservation` service for host-scoped Firewalla DHCP reservation changes.
-- Static reservations now validate the requested IPv4 address against the resolved DHCP range and reject duplicates already assigned to another host on the same network.
-- The reservation service can infer the target network from `reserved_ipv4` when the address maps to exactly one known DHCP range.
+- Expanded local host controls with `wake_host`, `set_host_name`, `set_host_notify_when_next_online`, `set_host_notify_when_next_offline`, and `set_host_dhcp_reservation`.
+- Added broader local report surfaces for host identity records, network segment configuration, network segment usage, scoped time usage, WAN data usage, WAN events, and speed test history.
+- Unified newer report services around a more consistent response envelope so automations and debugging workflows can reason about targets, queries, time basis, summaries, sections, and metadata more predictably.
+- Added host DHCP reservation management with network-aware validation for the selected network range and duplicate reservation conflicts.
+- Added watched-user monitoring, router-based device trackers for selected MAC-backed LAN clients, and a manual `Sync runtime` button with a runtime refresh timestamp on the main Firewalla device.
 
 ## Known risks and defers
 
-- Host rename remains deferred until the app-originated rename mutation is captured and confirmed twice.
-- Broader DHCP admin surfaces remain deferred pending protocol evidence for reservation delete semantics and segment-level DHCP enable or disable changes.
+- `get_wan_events` remains a low-level WAN health timeline surface and is not yet aligned to Firewalla's MSP alarm model.
+- Broader DHCP admin surfaces remain deferred pending protocol evidence for segment-level DHCP enable or disable changes and any future delete semantics beyond the current host reservation path.
+- Discovery support remains deferred until Firewalla exposes a durable local contract.
 - HACS structure posture beyond the intentional `brands` bypass still depends on the repository validation workflow at release time.
 
 ## Execution snapshot (2026-04-02)
@@ -105,7 +107,7 @@ Local release-candidate checks completed in this repository:
 
 - `bash ./utils/quick_lint.sh` passed
 - `python -m mypy custom_components/firewalla_local` passed
-- `python -m pytest tests/ -v` passed (`172 passed`)
+- `python -m pytest tests/ -v` passed (`189 passed`)
 - metadata alignment confirmed for `manifest.json`, `pyproject.toml`, and `hacs.json`
 - workflow contract confirmed in `.github/workflows/lint-validation.yaml` and `.github/workflows/validate.yaml`
 

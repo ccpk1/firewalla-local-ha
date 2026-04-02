@@ -29,12 +29,14 @@ Use repository terminology consistently.
 - use `rule`, `rule template`, `runtime snapshot`, and `registry` for Firewalla data concepts
 - use `item type` or `record type` for Firewalla-specific categories such as `rule`
 - use `entity` only for Home Assistant platform objects
+- use `device tracker` only for Home Assistant `device_tracker` entities and never as shorthand for generic host inventory or the Firewalla box device
 - use `unique ID` for the stable registry identifier and `entity_id` for the Home Assistant registry string
 - use `scope metadata` for applicability data such as networks, devices, tags, and targets
 
 Critical rule:
 
 - never call a Firewalla rule or normalized runtime record an entity
+- never use `tracked device` as a synonym for the Home Assistant `device_tracker` surface
 - never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
 
 ## Constants taxonomy
@@ -144,7 +146,11 @@ Rules:
 - entities, flows, and services must not duplicate command logic or payload construction once manager methods exist
 - the minimum manager set should include `integration_manager.py`, `host_manager.py`, and `rule_manager.py`
 - `IntegrationManager` owns shared lifecycle concerns such as Firewalla appliance device lifecycle and entity lifecycle
-- `HostManager` owns endpoint-host inventory, watched-device orchestration, and host-derived appliance summary lookups
+- `HostManager` owns endpoint-host inventory, watched-device orchestration, device-tracker eligibility, device-tracker selection lookups, and host-derived appliance summary lookups
+- watched-device online evaluation and device-tracker away evaluation must remain separate manager-owned contracts, each backed by its own general-options setting
+- tracked-client device-registry lifecycle for selected device trackers must be
+	explicitly owned by integration code, including create, refresh, deselect,
+	config-entry unload, and stale-device removal behavior
 - `RuleManager` owns rule-specific orchestration, indexed lookup state, runtime inventory inputs, and rule-command behavior
 - `UserManager` is the owner for watched-user joins, usage shaping, and fallback handling over the proven local user payload
 - direct cross-manager writes are forbidden
@@ -183,6 +189,13 @@ Rules:
 - watched-user entity attributes must distinguish raw payload facts from
 	integration-derived joins, especially for totals, per-app usage, and
 	host-derived `last_active` metadata
+- `device_tracker` is reserved for MAC-backed LAN hosts only; VPN, tunnel,
+	overlay, and pseudo-host identities such as `wg_peer:*` are excluded by
+	design and must not be surfaced as presence trackers
+- selected device trackers must attach to a distinct tracked-client device
+	record keyed by the client's MAC address, and that device must use
+	`via_device` to point at the primary Firewalla router device for the config
+	entry
 
 ## Async and event loop rules
 

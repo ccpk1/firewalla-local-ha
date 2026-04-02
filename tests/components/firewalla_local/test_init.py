@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +12,7 @@ from homeassistant.const import ATTR_DOMAIN, ATTR_SERVICE, EVENT_SERVICE_REGISTE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.api.exceptions import (
@@ -20,6 +21,8 @@ from custom_components.firewalla_local.api.exceptions import (
 )
 from custom_components.firewalla_local.const import (
     CONF_AID,
+    CONF_DEVICE_TRACKER_AWAY_WINDOW,
+    CONF_DEVICE_TRACKERS,
     CONF_EID,
     CONF_GID,
     CONF_HOST,
@@ -29,10 +32,14 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     CONF_UPDATE_INTERVAL,
+    CONF_WATCHED_DEVICE_ONLINE_WINDOW,
     CONF_WATCHED_DEVICES,
+    DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
+    DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
+    SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_RUNTIME_INVENTORY,
@@ -171,6 +178,183 @@ async def test_setup_entry(hass: HomeAssistant) -> None:
     assert watched_user.associated_host_names == ("WireGuard Kaden",)
 
 
+async def test_setup_entry_creates_runtime_sync_button(hass: HomeAssistant) -> None:
+    """Test setup adds a runtime sync button on the main Firewalla device."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    entity_registry = er.async_get(hass)
+    button_entity_id = entity_registry.async_get_entity_id(
+        "button",
+        DOMAIN,
+        f"{entry.entry_id}_sync_runtime_button",
+    )
+
+    assert button_entity_id == "button.firewalla_sync_runtime"
+
+    button_entry = entity_registry.async_get(button_entity_id)
+    assert button_entry is not None
+
+    device_registry = dr.async_get(hass)
+    router_device = device_registry.async_get_device(
+        identifiers={(DOMAIN, "license-123")}
+    )
+    assert router_device is not None
+    assert button_entry.device_id == router_device.id
+
+
+async def test_runtime_sync_button_requests_refresh(hass: HomeAssistant) -> None:
+    """Test pressing the runtime sync button requests a coordinator refresh."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    entity_registry = er.async_get(hass)
+    button_entity_id = entity_registry.async_get_entity_id(
+        "button",
+        DOMAIN,
+        f"{entry.entry_id}_sync_runtime_button",
+    )
+    assert button_entity_id is not None
+
+    with patch.object(
+        entry.runtime_data.coordinator,
+        "async_request_refresh",
+        new=AsyncMock(),
+    ) as mock_refresh:
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": button_entity_id},
+            blocking=True,
+        )
+
+    mock_refresh.assert_awaited_once()
+
+
+async def test_runtime_sync_button_logs_manual_refresh(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test pressing the runtime sync button logs the manual sync result."""
+    refresh_timestamp = datetime(2026, 4, 2, 12, 1, tzinfo=UTC)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        entity_registry = er.async_get(hass)
+        button_entity_id = entity_registry.async_get_entity_id(
+            "button",
+            DOMAIN,
+            f"{entry.entry_id}_sync_runtime_button",
+        )
+        assert button_entity_id is not None
+
+        caplog.set_level(logging.INFO, logger="custom_components.firewalla_local.const")
+
+        async def _mock_request_refresh() -> None:
+            entry.runtime_data.coordinator.last_runtime_data_updated_at = (
+                refresh_timestamp
+            )
+
+        with patch.object(
+            entry.runtime_data.coordinator,
+            "async_request_refresh",
+            side_effect=_mock_request_refresh,
+        ):
+            await hass.services.async_call(
+                "button",
+                "press",
+                {"entity_id": button_entity_id},
+                blocking=True,
+            )
+
+    assert any(
+        record.message == "Manual runtime sync requested for Firewalla (192.168.200.1)"
+        for record in caplog.records
+    )
+    assert any(
+        record.message
+        == (
+            "Manual runtime sync completed for Firewalla (192.168.200.1) at "
+            f"{refresh_timestamp.isoformat()}"
+        )
+        for record in caplog.records
+    )
+
+
 async def test_setup_uses_entry_scoped_update_interval_options(
     hass: HomeAssistant,
 ) -> None:
@@ -242,7 +426,7 @@ async def test_setup_uses_entry_scoped_update_interval_options(
 async def test_options_update_changes_coordinator_interval_without_reload(
     hass: HomeAssistant,
 ) -> None:
-    """Test update_interval-only option changes update the live coordinator in place."""
+    """Test live system-setting option changes update runtime state in place."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -257,8 +441,15 @@ async def test_options_update_changes_coordinator_interval_without_reload(
         },
         options={
             CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: (
+                DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES
+            ),
             CONF_UPDATE_INTERVAL: 3,
             CONF_WATCHED_DEVICES: [],
+            CONF_WATCHED_DEVICE_ONLINE_WINDOW: (
+                DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES
+            ),
         },
     )
     entry.add_to_hass(hass)
@@ -284,8 +475,11 @@ async def test_options_update_changes_coordinator_interval_without_reload(
         options={
             CONF_SELECTED_RULE_IDS: [],
             CONF_SELECTED_RULE_TEMPLATES: [],
+            CONF_DEVICE_TRACKERS: [],
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: 21,
             CONF_UPDATE_INTERVAL: 6,
             CONF_WATCHED_DEVICES: [],
+            CONF_WATCHED_DEVICE_ONLINE_WINDOW: 7,
         },
     )
     await hass.async_block_till_done()
@@ -293,6 +487,8 @@ async def test_options_update_changes_coordinator_interval_without_reload(
     assert entry.runtime_data is original_runtime_data
     assert entry.runtime_data.coordinator is original_coordinator
     assert entry.runtime_data.coordinator.update_interval == timedelta(minutes=6)
+    assert entry.runtime_data.host_manager.watched_device_online_window_seconds == 420
+    assert entry.runtime_data.host_manager.device_tracker_away_window_seconds == 1260
 
 
 async def test_options_update_reloads_entry_when_watched_devices_change(
@@ -313,6 +509,7 @@ async def test_options_update_reloads_entry_when_watched_devices_change(
         },
         options={
             CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
             CONF_UPDATE_INTERVAL: 3,
             CONF_WATCHED_DEVICES: [],
         },
@@ -342,8 +539,67 @@ async def test_options_update_reloads_entry_when_watched_devices_change(
             options={
                 CONF_SELECTED_RULE_IDS: [],
                 CONF_SELECTED_RULE_TEMPLATES: [],
+                CONF_DEVICE_TRACKERS: [],
                 CONF_UPDATE_INTERVAL: 3,
                 CONF_WATCHED_DEVICES: ["wg_peer:test-peer"],
+            },
+        )
+        await hass.async_block_till_done()
+
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_options_update_reloads_entry_when_device_trackers_change(
+    hass: HomeAssistant,
+) -> None:
+    """Test device-tracker selection changes trigger a config-entry reload."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
+            CONF_UPDATE_INTERVAL: 3,
+            CONF_WATCHED_DEVICES: [],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        new=AsyncMock(),
+    ) as mock_reload:
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                CONF_SELECTED_RULE_IDS: [],
+                CONF_SELECTED_RULE_TEMPLATES: [],
+                CONF_DEVICE_TRACKERS: ["00:AA:BB:CC:DD:26"],
+                CONF_UPDATE_INTERVAL: 3,
+                CONF_WATCHED_DEVICES: [],
             },
         )
         await hass.async_block_till_done()
@@ -424,6 +680,8 @@ async def test_setup_multiple_entries_create_distinct_license_devices(
     assert first_device is not None
     assert second_device is not None
     assert first_device.id != second_device.id
+    assert first_device.model == "Gold"
+    assert second_device.model == "Gold"
     assert (
         len(dr.async_entries_for_config_entry(device_registry, first_entry.entry_id))
         == 1
@@ -432,6 +690,237 @@ async def test_setup_multiple_entries_create_distinct_license_devices(
         len(dr.async_entries_for_config_entry(device_registry, second_entry.entry_id))
         == 1
     )
+
+
+async def test_deselecting_device_tracker_removes_client_device_and_entity(
+    hass: HomeAssistant,
+) -> None:
+    """Test deselecting a tracked client removes its device and entity entries."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_DEVICE_TRACKERS: ["AA:BB:CC:DD:EE:FF"],
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: 15,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="AA:BB:CC:DD:EE:FF",
+                display_name="Kaden Phone",
+                fallback_name=None,
+                ip_address="192.168.200.25",
+                group_name=None,
+                network_name=None,
+                connection_type=None,
+                last_active=None,
+                download_bytes=None,
+                upload_bytes=None,
+                stale=False,
+            ),
+        ),
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    tracker_unique_id = entry.runtime_data.integration_manager.build_entity_unique_id(
+        object_id="AA:BB:CC:DD:EE:FF",
+        suffix="device_tracker",
+    )
+    client_identifier = (
+        entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
+            "AA:BB:CC:DD:EE:FF"
+        )
+    )
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+
+    assert entity_registry.async_get_entity_id(
+        "device_tracker", DOMAIN, tracker_unique_id
+    )
+    assert device_registry.async_get_device(identifiers={client_identifier}) is not None
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                CONF_DEVICE_TRACKERS: [],
+                CONF_DEVICE_TRACKER_AWAY_WINDOW: 15,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert (
+        entity_registry.async_get_entity_id("device_tracker", DOMAIN, tracker_unique_id)
+        is None
+    )
+    assert device_registry.async_get_device(identifiers={client_identifier}) is None
+
+
+async def test_unloading_device_tracker_entry_preserves_registry_for_reload(
+    hass: HomeAssistant,
+) -> None:
+    """Test unload removes live tracker state but preserves registry identity."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_DEVICE_TRACKERS: ["AA:BB:CC:DD:EE:FF"],
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: 15,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="AA:BB:CC:DD:EE:FF",
+                display_name="Kaden Phone",
+                fallback_name=None,
+                ip_address="192.168.200.25",
+                group_name=None,
+                network_name=None,
+                connection_type=None,
+                last_active=None,
+                download_bytes=None,
+                upload_bytes=None,
+                stale=False,
+            ),
+        ),
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    tracker_unique_id = entry.runtime_data.integration_manager.build_entity_unique_id(
+        object_id="AA:BB:CC:DD:EE:FF",
+        suffix="device_tracker",
+    )
+    client_identifier = (
+        entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
+            "AA:BB:CC:DD:EE:FF"
+        )
+    )
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    entity_id = entity_registry.async_get_entity_id(
+        "device_tracker", DOMAIN, tracker_unique_id
+    )
+    assert entity_id is not None
+    entity_entry = entity_registry.async_get(entity_id)
+    assert entity_entry is not None
+    client_device = device_registry.async_get_device(identifiers={client_identifier})
+    assert client_device is not None
+    assert entity_entry.device_id == client_device.id
+    assert hass.states.get(entity_id) is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    unloaded_state = hass.states.get(entity_id)
+    assert unloaded_state is not None
+    assert unloaded_state.state == "unavailable"
+    assert unloaded_state.attributes["restored"] is True
+
+    unloaded_entry = entity_registry.async_get(entity_id)
+    assert unloaded_entry is not None
+    assert unloaded_entry.device_id == client_device.id
+
+    unloaded_device = device_registry.async_get_device(identifiers={client_identifier})
+    assert unloaded_device is not None
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    reloaded_entity_id = entity_registry.async_get_entity_id(
+        "device_tracker", DOMAIN, tracker_unique_id
+    )
+    assert reloaded_entity_id == entity_id
+    assert hass.states.get(reloaded_entity_id) is not None
 
 
 async def test_setup_multiple_entries_registers_domain_services_once(
@@ -507,6 +996,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         (event[ATTR_DOMAIN], event[ATTR_SERVICE]) for event in registered_events
     ) == sorted(
         [
+            (DOMAIN, SERVICE_GET_HOST_NAME_MAPPING),
             (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT),
             (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE),
             (DOMAIN, SERVICE_GET_RUNTIME_INVENTORY),
@@ -525,6 +1015,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         ]
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
+        SERVICE_GET_HOST_NAME_MAPPING,
         SERVICE_GET_NETWORK_SEGMENT_REPORT,
         SERVICE_GET_NETWORK_SEGMENT_USAGE,
         SERVICE_GET_RUNTIME_INVENTORY,

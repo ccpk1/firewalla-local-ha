@@ -20,6 +20,8 @@ from custom_components.firewalla_local.api.models import (
 from custom_components.firewalla_local.config_flow import FirewallaOptionsFlow
 from custom_components.firewalla_local.const import (
     CONF_AID,
+    CONF_DEVICE_TRACKER_AWAY_WINDOW,
+    CONF_DEVICE_TRACKERS,
     CONF_EID,
     CONF_GID,
     CONF_HOST,
@@ -29,13 +31,18 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     CONF_UPDATE_INTERVAL,
+    CONF_WATCHED_DEVICE_ONLINE_WINDOW,
     CONF_WATCHED_DEVICES,
     CONF_WATCHED_USERS,
+    DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
     MAX_UPDATE_INTERVAL_MINUTES,
+    MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     MIN_UPDATE_INTERVAL_MINUTES,
+    MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
 )
 from custom_components.firewalla_local.helpers.runtime_inventory import (
     build_runtime_inventory_report,
@@ -59,6 +66,25 @@ TEST_ALT_QR_JSON = (
     '{"ek":"test-ek","seed":"test-seed","license":"license-999",'
     '"gid":"gid-999","ipaddress":"192.168.200.9"}'
 )
+
+
+def _expected_options(overrides: dict[str, object] | None = None) -> dict[str, object]:
+    """Return the full expected options payload with configurable defaults."""
+    payload: dict[str, object] = {
+        CONF_SELECTED_RULE_IDS: [],
+        CONF_SELECTED_RULE_TEMPLATES: [],
+        CONF_DEVICE_TRACKERS: [],
+        CONF_DEVICE_TRACKER_AWAY_WINDOW: DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
+        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+        CONF_WATCHED_DEVICES: [],
+        CONF_WATCHED_DEVICE_ONLINE_WINDOW: (
+            DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES
+        ),
+        CONF_WATCHED_USERS: [],
+    }
+    if overrides:
+        payload.update(overrides)
+    return payload
 
 
 def _mock_keys() -> GeneratedKeys:
@@ -576,13 +602,7 @@ async def test_options_flow_handles_missing_runtime_data(hass) -> None:
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert entry.options == {
-        CONF_SELECTED_RULE_IDS: [],
-        CONF_SELECTED_RULE_TEMPLATES: [],
-        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
-        CONF_WATCHED_DEVICES: [],
-        CONF_WATCHED_USERS: [],
-    }
+    assert entry.options == _expected_options()
 
 
 async def test_options_flow_updates_selected_rule_ids(hass) -> None:
@@ -799,25 +819,24 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert entry.options == {
-        CONF_SELECTED_RULE_IDS: ["736"],
-        CONF_SELECTED_RULE_TEMPLATES: [
-            {
-                "source_rule_id": "736",
-                "name": "block internet for KADEN's Devices (KADEN)",
-                "action": "block",
-                "target": "TAG",
-                "target_type": "mac",
-                "scope": [],
-                "tag_refs": ["tag:10"],
-                "dnsmasq_only": None,
-                "use_bf": True,
-            }
-        ],
-        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
-        CONF_WATCHED_DEVICES: [],
-        CONF_WATCHED_USERS: [],
-    }
+    assert entry.options == _expected_options(
+        {
+            CONF_SELECTED_RULE_IDS: ["736"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "736",
+                    "name": "block internet for KADEN's Devices (KADEN)",
+                    "action": "block",
+                    "target": "TAG",
+                    "target_type": "mac",
+                    "scope": [],
+                    "tag_refs": ["tag:10"],
+                    "dnsmasq_only": None,
+                    "use_bf": True,
+                }
+            ],
+        }
+    )
 
 
 async def test_options_flow_updates_watched_devices(hass) -> None:
@@ -836,6 +855,7 @@ async def test_options_flow_updates_watched_devices(hass) -> None:
         },
         options={
             CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
             CONF_UPDATE_INTERVAL: 5,
             CONF_WATCHED_DEVICES: [],
             CONF_WATCHED_USERS: [],
@@ -906,13 +926,109 @@ async def test_options_flow_updates_watched_devices(hass) -> None:
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert entry.options == {
-        CONF_SELECTED_RULE_IDS: [],
-        CONF_SELECTED_RULE_TEMPLATES: [],
-        CONF_UPDATE_INTERVAL: 5,
-        CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"],
-        CONF_WATCHED_USERS: [],
-    }
+    assert entry.options == _expected_options(
+        {
+            CONF_UPDATE_INTERVAL: 5,
+            CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"],
+        }
+    )
+
+
+async def test_options_flow_updates_device_trackers(hass) -> None:
+    """Test the options flow persists device-tracker MAC selections."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
+            CONF_UPDATE_INTERVAL: 5,
+            CONF_WATCHED_DEVICES: [],
+            CONF_WATCHED_USERS: [],
+        },
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            data=FirewallaRuntimeSnapshot(
+                appliance_identity=FirewallaApplianceIdentityInput(
+                    host="fire.walla",
+                    group_name="Firewalla",
+                    device_name=None,
+                    model="gold",
+                    serial_number="serial-123",
+                    software_version="1.0.0",
+                ),
+                appliance_runtime=FirewallaApplianceRuntimeInput(),
+                policy_rules=(),
+                exception_rule_count=0,
+                hosts=(
+                    FirewallaHostRuntime(
+                        mac="AA:BB:CC:DD:EE:FF",
+                        display_name="Kaden Phone",
+                        fallback_name=None,
+                        ip_address="192.168.200.25",
+                        group_name=None,
+                        network_name=None,
+                        connection_type=None,
+                        last_active=None,
+                        download_bytes=None,
+                        upload_bytes=None,
+                        stale=False,
+                    ),
+                    FirewallaHostRuntime(
+                        mac="wg_peer:test-peer",
+                        display_name="WireGuard Kaden",
+                        fallback_name=None,
+                        ip_address="10.42.0.2",
+                        group_name=None,
+                        network_name=None,
+                        connection_type=None,
+                        last_active=None,
+                        download_bytes=None,
+                        upload_bytes=None,
+                        stale=False,
+                    ),
+                ),
+            ),
+            async_request_refresh=AsyncMock(),
+        ),
+        rule_manager=None,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_device_trackers"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "edit_device_trackers"
+    field = result["data_schema"].schema[CONF_DEVICE_TRACKERS]
+    assert field.options == {"AA:BB:CC:DD:EE:FF": "Kaden Phone (192.168.200.25)"}
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_DEVICE_TRACKERS: ["AA:BB:CC:DD:EE:FF"]},
+    )
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "init"
+    assert entry.options == _expected_options(
+        {
+            CONF_DEVICE_TRACKERS: ["AA:BB:CC:DD:EE:FF"],
+            CONF_UPDATE_INTERVAL: 5,
+        }
+    )
 
 
 async def test_options_flow_preserves_missing_selected_watched_device(hass) -> None:
@@ -931,6 +1047,7 @@ async def test_options_flow_preserves_missing_selected_watched_device(hass) -> N
         },
         options={
             CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
             CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
             CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"],
             CONF_WATCHED_USERS: [],
@@ -955,6 +1072,47 @@ async def test_options_flow_preserves_missing_selected_watched_device(hass) -> N
     }
 
 
+async def test_options_flow_preserves_missing_selected_device_tracker(hass) -> None:
+    """Test missing device trackers remain selectable long enough to stay managed."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: ["AA:BB:CC:DD:EE:FF"],
+            CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+            CONF_WATCHED_DEVICES: [],
+            CONF_WATCHED_USERS: [],
+        },
+    )
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(data=None, async_request_refresh=AsyncMock()),
+        host_manager=SimpleNamespace(get_device_tracker_choices=lambda: {}),
+        rule_manager=None,
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={"next_step_id": "edit_device_trackers"},
+    )
+
+    field = result["data_schema"].schema[CONF_DEVICE_TRACKERS]
+    assert field.options == {
+        "AA:BB:CC:DD:EE:FF": "[AA:BB:CC:DD:EE:FF] Unavailable device tracker"
+    }
+
+
 async def test_options_flow_updates_watched_users(hass) -> None:
     """Test the options flow persists watched-user selections."""
     entry = MockConfigEntry(
@@ -971,6 +1129,7 @@ async def test_options_flow_updates_watched_users(hass) -> None:
         },
         options={
             CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
             CONF_UPDATE_INTERVAL: 5,
             CONF_WATCHED_DEVICES: [],
             CONF_WATCHED_USERS: [],
@@ -1048,13 +1207,12 @@ async def test_options_flow_updates_watched_users(hass) -> None:
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert entry.options == {
-        CONF_SELECTED_RULE_IDS: [],
-        CONF_SELECTED_RULE_TEMPLATES: [],
-        CONF_UPDATE_INTERVAL: 5,
-        CONF_WATCHED_DEVICES: [],
-        CONF_WATCHED_USERS: ["21"],
-    }
+    assert entry.options == _expected_options(
+        {
+            CONF_UPDATE_INTERVAL: 5,
+            CONF_WATCHED_USERS: ["21"],
+        }
+    )
 
 
 async def test_options_flow_preserves_missing_selected_watched_user(hass) -> None:
@@ -1073,6 +1231,7 @@ async def test_options_flow_preserves_missing_selected_watched_user(hass) -> Non
         },
         options={
             CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
             CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
             CONF_WATCHED_DEVICES: [],
             CONF_WATCHED_USERS: ["21"],
@@ -1120,22 +1279,82 @@ async def test_options_flow_system_settings_enforces_update_interval_bounds(
     await options_flow.async_step_init()
     result = await options_flow.async_step_system_settings()
 
+    watched_device_marker = next(
+        marker
+        for marker in result["data_schema"].schema
+        if marker == CONF_WATCHED_DEVICE_ONLINE_WINDOW
+    )
+    device_tracker_marker = next(
+        marker
+        for marker in result["data_schema"].schema
+        if marker == CONF_DEVICE_TRACKER_AWAY_WINDOW
+    )
     update_interval_marker = next(
         marker
         for marker in result["data_schema"].schema
         if marker == CONF_UPDATE_INTERVAL
     )
+    assert (
+        watched_device_marker.default() == DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES
+    )
+    assert device_tracker_marker.default() == DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES
     assert update_interval_marker.default() == 5
 
     with pytest.raises(vol.Invalid):
-        result["data_schema"]({CONF_UPDATE_INTERVAL: MIN_UPDATE_INTERVAL_MINUTES - 1})
+        result["data_schema"](
+            {
+                CONF_WATCHED_DEVICE_ONLINE_WINDOW: (
+                    DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES
+                ),
+                CONF_DEVICE_TRACKER_AWAY_WINDOW: (
+                    DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES
+                ),
+                CONF_UPDATE_INTERVAL: MIN_UPDATE_INTERVAL_MINUTES - 1,
+            }
+        )
 
     with pytest.raises(vol.Invalid):
-        result["data_schema"]({CONF_UPDATE_INTERVAL: MAX_UPDATE_INTERVAL_MINUTES + 1})
+        result["data_schema"](
+            {
+                CONF_WATCHED_DEVICE_ONLINE_WINDOW: (
+                    DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES
+                ),
+                CONF_DEVICE_TRACKER_AWAY_WINDOW: (
+                    DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES
+                ),
+                CONF_UPDATE_INTERVAL: MAX_UPDATE_INTERVAL_MINUTES + 1,
+            }
+        )
+
+    with pytest.raises(vol.Invalid):
+        result["data_schema"](
+            {
+                CONF_WATCHED_DEVICE_ONLINE_WINDOW: (
+                    MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES - 1
+                ),
+                CONF_DEVICE_TRACKER_AWAY_WINDOW: (
+                    DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES
+                ),
+                CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+            }
+        )
+
+    with pytest.raises(vol.Invalid):
+        result["data_schema"](
+            {
+                CONF_WATCHED_DEVICE_ONLINE_WINDOW: (
+                    DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES
+                ),
+                CONF_DEVICE_TRACKER_AWAY_WINDOW: (
+                    MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES - 1
+                ),
+                CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
+            }
+        )
 
 
-async def test_options_flow_refreshes_runtime_on_main_menu_only(hass) -> None:
-    """Test opening the options flow refreshes once on the main menu only."""
+async def test_options_flow_does_not_refresh_runtime_on_main_menu(hass) -> None:
+    """Test opening the options flow does not trigger a runtime refresh."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -1164,32 +1383,10 @@ async def test_options_flow_refreshes_runtime_on_main_menu_only(hass) -> None:
         policy_rules=(),
         exception_rule_count=0,
     )
-    refreshed_snapshot = FirewallaRuntimeSnapshot(
-        appliance_identity=initial_snapshot.appliance_identity,
-        appliance_runtime=initial_snapshot.appliance_runtime,
-        policy_rules=(
-            FirewallaPolicyRule(
-                rule_id="737",
-                action="allow",
-                target="spotify.com",
-                target_type="dns",
-                direction="outbound",
-                enabled=True,
-                purpose=None,
-                scope=(),
-                tag_refs=("tag:10",),
-                applies_to=("KADEN's Devices (KADEN)",),
-            ),
-        ),
-        exception_rule_count=0,
+    coordinator = SimpleNamespace(
+        data=initial_snapshot,
+        async_request_refresh=AsyncMock(),
     )
-
-    coordinator = SimpleNamespace(data=initial_snapshot)
-
-    async def _async_request_refresh() -> None:
-        coordinator.data = refreshed_snapshot
-
-    coordinator.async_request_refresh = AsyncMock(side_effect=_async_request_refresh)
     entry.runtime_data = SimpleNamespace(coordinator=coordinator)
     entry.add_to_hass(hass)
 
@@ -1198,28 +1395,26 @@ async def test_options_flow_refreshes_runtime_on_main_menu_only(hass) -> None:
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert coordinator.async_request_refresh.await_count == 1
+    assert coordinator.async_request_refresh.await_count == 0
 
     result = await options_flow.async_step_rule_selection()
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "rule_selection"
-    assert coordinator.async_request_refresh.await_count == 1
+    assert coordinator.async_request_refresh.await_count == 0
 
     result = await options_flow.async_step_init()
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert coordinator.async_request_refresh.await_count == 1
+    assert coordinator.async_request_refresh.await_count == 0
 
     await options_flow.async_step_rule_selection()
     result = await options_flow.async_step_edit_rule_selection()
 
     field = result["data_schema"].schema[CONF_SELECTED_RULE_IDS]
-    assert coordinator.async_request_refresh.await_count == 1
-    assert field.options == {
-        "737": "[737] allow dns spotify.com for KADEN's Devices (KADEN) (enabled)"
-    }
+    assert coordinator.async_request_refresh.await_count == 0
+    assert field.options == {}
 
 
 async def test_options_flow_fallback_excludes_system_managed_rules(hass) -> None:
@@ -1534,25 +1729,24 @@ async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert entry.options == {
-        CONF_SELECTED_RULE_IDS: ["736"],
-        CONF_SELECTED_RULE_TEMPLATES: [
-            {
-                "source_rule_id": "736",
-                "name": "block internet for KADEN's Devices (KADEN)",
-                "action": "block",
-                "target": "TAG",
-                "target_type": "mac",
-                "scope": [],
-                "tag_refs": ["tag:10"],
-                "dnsmasq_only": None,
-                "use_bf": True,
-            }
-        ],
-        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL_MINUTES,
-        CONF_WATCHED_DEVICES: [],
-        CONF_WATCHED_USERS: [],
-    }
+    assert entry.options == _expected_options(
+        {
+            CONF_SELECTED_RULE_IDS: ["736"],
+            CONF_SELECTED_RULE_TEMPLATES: [
+                {
+                    "source_rule_id": "736",
+                    "name": "block internet for KADEN's Devices (KADEN)",
+                    "action": "block",
+                    "target": "TAG",
+                    "target_type": "mac",
+                    "scope": [],
+                    "tag_refs": ["tag:10"],
+                    "dnsmasq_only": None,
+                    "use_bf": True,
+                }
+            ],
+        }
+    )
 
 
 async def test_edit_rule_selection_can_return_to_main_menu_without_saving(hass) -> None:
@@ -1638,18 +1832,22 @@ async def test_system_settings_returns_to_main_menu_after_save(hass) -> None:
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={CONF_UPDATE_INTERVAL: 4},
+        user_input={
+            CONF_WATCHED_DEVICE_ONLINE_WINDOW: 6,
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: 20,
+            CONF_UPDATE_INTERVAL: 4,
+        },
     )
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert entry.options == {
-        CONF_SELECTED_RULE_IDS: [],
-        CONF_SELECTED_RULE_TEMPLATES: [],
-        CONF_UPDATE_INTERVAL: 4,
-        CONF_WATCHED_DEVICES: [],
-        CONF_WATCHED_USERS: [],
-    }
+    assert entry.options == _expected_options(
+        {
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: 20,
+            CONF_UPDATE_INTERVAL: 4,
+            CONF_WATCHED_DEVICE_ONLINE_WINDOW: 6,
+        }
+    )
 
 
 async def test_system_settings_can_return_to_main_menu_without_saving(hass) -> None:
@@ -1687,6 +1885,8 @@ async def test_system_settings_can_return_to_main_menu_without_saving(hass) -> N
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
+            CONF_WATCHED_DEVICE_ONLINE_WINDOW: 6,
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: 20,
             CONF_UPDATE_INTERVAL: 4,
             "return_to_main_menu": True,
         },

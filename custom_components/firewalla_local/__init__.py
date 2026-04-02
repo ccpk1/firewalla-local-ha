@@ -31,7 +31,13 @@ from .managers import (
 )
 from .services import async_remove_services, async_setup_services
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.DEVICE_TRACKER,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -70,6 +76,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     await coordinator.async_config_entry_first_refresh()
     await integration_manager.async_reconcile_rule_switch_entities(
         rule_manager.selected_templates
+    )
+    await integration_manager.async_reconcile_device_tracker_entities(
+        host_manager.configured_device_tracker_macs
+    )
+    integration_manager.async_reconcile_tracked_client_devices(
+        host_manager.configured_device_tracker_macs,
+        host_manager.get_hosts(),
     )
 
     entry.runtime_data = FirewallaRuntimeData(

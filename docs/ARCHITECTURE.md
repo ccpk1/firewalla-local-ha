@@ -23,9 +23,19 @@ The architecture supports:
 - signed local REST communication over port `8833`
 - coordinator-backed runtime polling
 - rule-backed switches, appliance-monitoring entities, watched-device monitoring, watched-user daily-usage monitoring, and supporting services
+- a future opt-in `device_tracker` surface for MAC-backed LAN hosts only
 - diagnostics, reauthentication, and repair-ready user flows
 
 The architecture does not support speculative fallback paths, duplicate runtime layers, or convenience abstractions that blur ownership boundaries.
+
+It also does not support VPN, pseudo-host, or tunnel-only presence tracking for
+Home Assistant `device_tracker` entities. Those records do not map cleanly to
+Home Assistant home or away semantics and must not be forced into that model.
+
+Watched-device binary sensors and `device_tracker` entities also use separate
+configurable activity windows. Watched-device connectivity uses a shorter
+online window, while `device_tracker` presence uses a separate away window in
+general options.
 
 ## Quality references
 
@@ -53,6 +63,7 @@ Use terms consistently across code, documentation, diagnostics, and review.
 | Registry | The manager-owned indexed runtime structure derived from the raw Firewalla payload |
 | Scope metadata | Networks, devices, tags, targets, and related applicability data that describe a rule but are not standalone entities |
 | Entity | A Home Assistant platform object only |
+| Device tracker | A Home Assistant `device_tracker` entity surface for one selected MAC-backed LAN host; never shorthand for the Firewalla box device or generic host inventory |
 | Unique ID | The stable Home Assistant registry identifier supplied by the integration |
 | Entity ID | The Home Assistant registry string generated and owned by Home Assistant |
 | Identity anchor | The immutable value used to tie the config entry and device to the physical box |
@@ -146,7 +157,7 @@ The runtime should converge on named directories with clear ownership:
 - `managers/` is the single source of truth for rule resolution and command orchestration
 - at minimum the runtime should have:
 	- `IntegrationManager` for config-entry-scoped lifecycle, Firewalla appliance device lifecycle, entity lifecycle, and shared orchestration concerns
-	- `HostManager` for normalized endpoint-host inventory and watched-device orchestration
+	- `HostManager` for normalized endpoint-host inventory plus watched-device and MAC-backed device-tracker orchestration
 	- `RuleManager` for rule resolution, registry indexing, command handling, optimistic updates, and read-model generation for rule-backed surfaces
 	- `UserManager` for watched-user identity, usage shaping, total and unique fallback handling, and host-association joins
 - `helpers/` contains Home Assistant-aware shared helper code only and must not become a second manager layer
@@ -211,7 +222,7 @@ Manager modules under `custom_components/firewalla_local/managers/` own:
 At minimum:
 
 - `IntegrationManager` owns shared integration concerns that cut across platforms or rule actions, including Firewalla appliance device lifecycle, entity lifecycle, startup or reload coordination, and other entry-scoped orchestration that should not live in the coordinator
-- `HostManager` owns normalized endpoint-host inventory, watched-device lookup state, and host-scoped orchestration for watched-device and host-derived summary surfaces
+- `HostManager` owns normalized endpoint-host inventory, watched-device lookup state, device-tracker lookup state, and host-scoped orchestration for watched-device, device-tracker, and host-derived summary surfaces
 - `RuleManager` owns rule-specific behavior, including registry indexing, rule-template matching, runtime inventory inputs, and rule-command orchestration
 - `UserManager` owns watched-user identity, usage shaping, selection lookups, host association joins, total and unique fallback handling, and user-scoped orchestration for the proven user-usage surface
 
@@ -255,6 +266,58 @@ Entities and services own:
 - attaching all surfaces to the correct device and config-entry scope
 
 They do not own command construction, direct protocol calls, or duplicated rule-resolution logic.
+
+## Presence and device-tracker contract
+
+Device-tracker presence is a separate surface from watched-device monitoring.
+
+Rules:
+
+- watched-device connectivity remains a `binary_sensor` concern and continues to
+	model bounded online or offline monitoring for selected hosts
+- device-tracker presence must use a separate opt-in `device_tracker` platform
+	rather than overloading watched-device binary sensors
+- device-tracker selection must be stored independently from watched-device
+	selection in config-entry options
+- device-tracker entities must be limited to MAC-backed LAN hosts only
+- pseudo-hosts such as `wg_peer:*` and VPN-related identities must never become
+	`device_tracker` entities
+- this exclusion is intentional design policy, not a deferred implementation
+	phase, because those identities do not map honestly to Home Assistant home or
+	away state
+- device-tracker state should resolve to `home`, `not_home`, or unavailable
+	only
+- device-tracker entities must reuse the existing manager-owned host inventory
+	and online-state contract rather than introducing a new polling path or a new
+	transport read
+- device-tracker entities must remain entry-scoped, opt-in, and stable under
+	multi-instance loading just like watched-device entities
+- each selected tracked client must create its own Home Assistant device
+	record keyed to the tracked client's MAC address
+- each tracked-client device must set `via_device` to the primary Firewalla
+	router device for the owning config entry so the Home Assistant UI keeps the
+	client devices grouped under the Firewalla integration
+- the `device_tracker` entity must attach to the tracked-client device rather
+	than remaining standalone or attempting to attach directly to the router
+	device
+- tracked-client device lifecycle must be manager-owned and explicit: create on
+	selection, preserve while selected but temporarily missing, and remove device
+	registry linkage when the client is no longer managed by the config entry
+
+Implementation guidance:
+
+- the first device-tracker slice should use `DeviceTrackerEntity` with
+	`source_type=router`
+- selection UX should mirror the watched-device options-flow pattern while
+	remaining a separate options bucket
+- missing device trackers should remain selectable as unavailable placeholders
+	rather than being silently dropped from saved options
+- client-device registry creation should be driven from one integration-owned
+	helper or manager path so `identifiers`, `connections`, `via_device`, and
+	removal behavior stay consistent across setup, reload, and deselection
+- tracker metadata may expose bounded host facts such as IP, network name,
+	connection type, and last active time, but must not invent zone or GPS-like
+	semantics
 
 ## Storage and state contract
 

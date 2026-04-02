@@ -5,14 +5,50 @@
 Firewalla Local is a Home Assistant custom integration for connecting to one
 Firewalla box over the verified local protocol.
 
-- pairing and reauthentication
-- runtime polling
-- appliance monitoring
-- watched-device monitoring
-- watched-user monitoring
-- selected rule-backed switches
-- runtime inventory reporting
-- pause and resume services
+This guide is organized around the main jobs you can do with the integration:
+
+- install and pair the box
+- choose which monitoring surfaces you want exposed
+- understand the main Firewalla device entities and refresh behavior
+- monitor watched devices, watched users, and device trackers
+- operate hosts and rules from Home Assistant
+- call the local report services added after 1.0.0
+
+## What the integration provides
+
+Firewalla Local can expose these main surface areas:
+
+- Firewalla appliance monitoring on the main router device
+- a diagnostic `Sync runtime` button on the main router device
+- watched-device binary sensors for selected endpoints
+- watched-user usage sensors for selected Firewalla users
+- router-based `device_tracker` entities for selected MAC-backed LAN clients
+- rule-backed switches for supported persistent Firewalla rules
+- operator services for hosts, networks, WANs, and reports
+
+## Service catalog at a glance
+
+Services that already existed in 1.0.0:
+
+- `firewalla_local.pause_rule`
+- `firewalla_local.resume_rule`
+- `firewalla_local.get_runtime_inventory`
+
+Services added after 1.0.0:
+
+- `firewalla_local.get_host_name_mapping`
+- `firewalla_local.get_network_segment_report`
+- `firewalla_local.get_network_segment_usage`
+- `firewalla_local.run_internet_speed_test`
+- `firewalla_local.wake_host`
+- `firewalla_local.set_host_name`
+- `firewalla_local.set_host_notify_when_next_online`
+- `firewalla_local.set_host_notify_when_next_offline`
+- `firewalla_local.set_host_dhcp_reservation`
+- `firewalla_local.get_speed_test_results`
+- `firewalla_local.get_time_usage_report`
+- `firewalla_local.get_wan_data_usage`
+- `firewalla_local.get_wan_events`
 
 ## Installation
 
@@ -29,35 +65,39 @@ Firewalla box over the verified local protocol.
 
 ### Add the integration and pair your device
 
-Because this integration communicates entirely locally, it uses the exact same secure pairing process as adding a secondary phone to your Firewalla.
+Because this integration communicates entirely locally, it uses the same secure
+pairing process as adding a secondary phone to your Firewalla.
 
 **Step 1: Start the Home Assistant setup**
+
 1. Open **Settings -> Devices & Services -> Add Integration**.
 2. Search for and select **Firewalla Local**.
-3. **Local hostname or IP address:** Leave this as the default `fire.walla` (this works for 99% of setups where Firewalla is handling your DNS). If you have a custom DNS routing setup, replace this with your Firewalla's local IP address (e.g., `192.168.1.1`).
+3. **Local hostname or IP address:** Leave this as the default `fire.walla`
+   for most setups. If you have custom DNS routing, replace it with the
+   Firewalla's local IP address such as `192.168.1.1`.
 
-**Step 2: Generate the pairing code (Firewalla App)**
+**Step 2: Generate the pairing code in the Firewalla app**
+
 1. Open the Firewalla app on your phone.
-2. Tap the gear icon to open **Settings -> Advanced**, then find and tap **Allow Additional Pairing**.
-3. Toggle the switch to **On**. A QR code will appear on your screen.
+2. Open **Settings -> Advanced -> Allow Additional Pairing**.
+3. Turn it on. A QR code appears on screen.
 
 **Step 3: Extract the raw QR JSON**
-Because Home Assistant cannot scan the screen directly, you need to copy the raw text hidden inside that QR code.
-1. **Take a screenshot** of the QR code in the Firewalla app.
-2. Open your phone's default **Photos** app (Apple Photos or Google Photos).
-3. Open the screenshot you just took. Modern smartphones can read QR codes directly from photos.
-   * **iOS:** Tap the "Live Text" icon in the bottom right, or simply press and hold directly on the QR code until a menu pops up.
-   * **Android:** Tap "Google Lens" or press and hold the QR code.
-4. Select **Copy Link** or **Copy Text**. You should now have a long string of JSON text saved to your clipboard.
+
+1. Take a screenshot of the QR code in the Firewalla app.
+2. Open the screenshot in your phone's photo app.
+3. Use your phone's QR or text recognition tools to copy the raw QR content.
+4. Copy the full JSON payload.
 
 **Step 4: Complete the connection**
-1. Send that copied text to the device where you have Home Assistant open (via text, email, Apple Notes, etc., or just paste it directly if you are setting this up on your phone).
-2. Paste the exact string into the **Raw QR JSON** field in Home Assistant.
-3. Click **Submit**.
 
-Let the integration validate the local runtime. Once successful, your Firewalla Local entities will be created!
+1. Paste the exact raw JSON into the **Raw QR JSON** field in Home Assistant.
+2. Submit the form.
+3. Let the integration validate the local runtime and create the entities.
 
-> **🛡️ A note on pairing security:** Treating QR codes and authentication strings with caution is always good practice. However, copying this raw JSON does not expose a permanent "master key" to your network. This payload is protected by Firewalla's modern security techniques: it is strictly time-bound (valid for only 10 minutes), requires local network access to execute, and uses an encrypted token exchange.
+> **A note on pairing security:** The QR JSON is not a permanent master key.
+> It is time-limited, requires local network access, and is used in an
+> encrypted token exchange.
 
 ## Removal
 
@@ -67,14 +107,16 @@ Let the integration validate the local runtime. Once successful, your Firewalla 
 2. Open the **Firewalla Local** integration.
 3. Choose **Delete** to remove the config entry.
 
-This removes the integration-managed entities for that entry from Home Assistant.
+This removes the integration-managed entities for that entry from Home
+Assistant.
 
 ### Remove the custom repository
 
 If you installed through HACS and no longer want the integration available:
 
 1. Remove the Firewalla Local integration entry from Home Assistant.
-2. Remove the repository from HACS custom repositories if you added it manually.
+2. Remove the repository from HACS custom repositories if you added it
+   manually.
 3. Remove the installed integration from HACS.
 4. Restart Home Assistant.
 
@@ -82,36 +124,52 @@ If you installed through HACS and no longer want the integration available:
 
 Firewalla Local uses local polling.
 
-- the integration refreshes the runtime snapshot every 3 minutes
-- you can change the polling interval in the options flow between 1 and 10 minutes
+- the integration refreshes the runtime snapshot every 3 minutes by default
+- you can change the polling interval in the options flow between 1 and 10
+  minutes
 - Home Assistant entities reflect the latest successful refresh
-- successful rule actions may update the in-memory state immediately for responsive UI behavior
+- the main Firewalla device also exposes a `Sync runtime` button so you can
+  request an immediate refresh on demand
+- successful rule actions may update the in-memory state immediately for a more
+  responsive UI
 - later coordinator refreshes remain the source of truth
-- the integration does not create its own custom persistent cache of live Firewalla runtime state between restarts
+- the integration does not create its own custom persistent cache of live
+  Firewalla runtime state between restarts
 
 If the Firewalla box is temporarily unavailable, the integration marks data as
 unavailable and resumes normal state updates after a successful refresh.
 
+If you want to confirm how fresh the current runtime is, check the
+system-status attribute `runtime_data_updated_at` on the main Firewalla device.
+
 ## Options flow
 
-Use the integration options flow to manage the runtime surfaces you want in Home
-Assistant.
+Use the integration options flow to manage which runtime surfaces you want in
+Home Assistant.
 
 - **Manage rule selection:** Choose which supported Firewalla rules should be
-   exposed as Home Assistant switches.
+  exposed as Home Assistant switches.
 - **Manage watched devices:** Choose which endpoints should appear as
-   watched-device connectivity binary sensors.
+  watched-device connectivity binary sensors.
 - **Manage watched users:** Choose which Firewalla users should appear as
   watched-user daily-usage sensors.
-- **General options:** Adjust the local polling interval without re-pairing the
-   box.
+- **Manage device trackers:** Choose which MAC-backed LAN clients should appear
+  as Home Assistant router-based device trackers.
+- **General options:** Adjust the local polling interval and timing settings
+  without re-pairing the box.
 
-## Appliance monitoring
+## Main Firewalla device
 
-Firewalla Local exposes the box itself through always-on monitoring entities.
+The main Firewalla router device is the anchor device for appliance monitoring
+and management surfaces.
 
-- a system-status binary sensor attached to the Firewalla device
-- a latest-speed-test sensor attached to the same device
+It currently exposes:
+
+- a system-status binary sensor
+- a latest-speed-test sensor
+- a diagnostic `Sync runtime` button
+
+### System-status binary sensor
 
 The system-status entity exposes stable attributes such as:
 
@@ -119,12 +177,28 @@ The system-status entity exposes stable attributes such as:
 - boot-complete and cloud-connected state
 - firmware release type and DDNS
 - WAN IP summary
+- current WAN usage summary
 - total, online, and offline device counts
 - CPU, memory, and disk summary values
+- `runtime_data_updated_at` showing when the current runtime snapshot was last
+  refreshed successfully
 
-The latest-speed-test entity exposes the latest successful result from the
-local payload, including download speed as the primary state and the remaining
-test details as attributes.
+Use this entity when you want a quick appliance-health view plus a stable set
+of status attributes for automations or dashboards.
+
+### Latest speed-test sensor
+
+The latest-speed-test sensor exposes the latest successful speed test result
+from the local payload, including download speed as the primary state and the
+remaining test details as attributes.
+
+### Sync runtime button
+
+The main Firewalla device also includes a diagnostic `Sync runtime` button.
+Use it when you want to trigger an immediate refresh instead of waiting for the
+next polling interval. After a successful refresh, the system-status entity's
+`runtime_data_updated_at` attribute updates to the latest runtime snapshot
+time.
 
 ## Watched-device monitoring
 
@@ -145,27 +219,60 @@ Watched users are opt-in. After selecting users in the options flow, the
 integration creates one watched-user sensor per selected Firewalla user.
 
 - each watched-user entity exposes today's total usage minutes as the primary
-   state
+  state
 - today's primary total prefers the proven
-   `internetTimeUsageToday.totalMins` field when the local payload exposes it
+  `internetTimeUsageToday.totalMins` field when the local payload exposes it
 - if the payload omits a total counter, the integration falls back to the
-   available per-app totals instead of inventing a separate value
+  available per-app totals instead of inventing a separate value
 - attributes include associated device group when present, associated device
-   names, associated device count, unique usage minutes today, per-app usage
-   totals, and a manager-derived last-active value based on associated hosts
-- `unique_usage_today` is kept as a separate attribute because Firewalla
-   exposes it as a distinct raw field and it is not guaranteed to always equal
-   the primary total
+  names, associated device count, unique usage minutes today, per-app usage
+  totals, and a manager-derived `last_active` value based on associated hosts
+- `unique_usage_today` remains separate because Firewalla exposes it as a
+  distinct raw field and it is not guaranteed to equal the primary total
 - `app_usage_by_app` is sourced from the proven `appTimeUsageToday` payload and
-   only includes apps with positive usage to keep the attribute surface compact
-- `last_active` is an integration-derived join over associated hosts rather
-   than a direct user field from the local payload
+  only includes apps with positive usage
 - if a selected user disappears from the current Firewalla payload, the entity
-   remains in Home Assistant and becomes unavailable instead of being silently
-   removed
-- the current watched-user slice only exposes values that are explicitly proven
-   in the local payload or are clearly integration-derived joins over that
-   payload
+  remains in Home Assistant and becomes unavailable instead of being silently
+  removed
+
+## Device-tracker monitoring
+
+Device trackers are opt-in. After selecting eligible devices in the options
+flow, the integration creates one Home Assistant `device_tracker` entity per
+selected MAC-backed LAN client.
+
+- each selected device tracker creates a distinct tracked-client device in Home
+  Assistant and links it back to the primary Firewalla router device
+- the tracker entity is attached to that tracked-client device and uses the
+  standard router-tracker states `home`, `not_home`, or unavailable
+- the tracker friendly name follows Home Assistant's translated sub-entity
+  pattern as `<device name> Presence`
+- auto-generated entity IDs follow Home Assistant's normal slugging rules from
+  that composed name, for example `device_tracker.chads_phone_presence`
+- attributes include IP address, device group, network name, connection type,
+  and last-active time when those values are available in the current runtime
+  snapshot
+- only MAC-backed LAN clients are eligible for device trackers
+- pseudo-hosts and non-LAN identities such as `wg_peer:*`, VPN, tunnel, and
+  overlay-style records are intentionally excluded
+- if a selected tracked client disappears from the current Firewalla payload,
+  the tracker remains in Home Assistant and becomes unavailable instead of
+  being silently removed
+
+### Device-tracker timing behavior
+
+- device trackers use their own away window setting in the options flow
+- this away window is separate from the watched-device online window
+- the integration does not invent richer presence states beyond `home`,
+  `not_home`, and unavailable
+
+### Device-tracker lifecycle behavior
+
+- deselecting a device tracker removes the integration-managed tracker entity
+  and tracked-client device for that config entry
+- reloading or temporarily unloading the config entry preserves the registry
+  identity so the tracker and tracked-client device come back with the same
+  entity and device identity on setup
 
 ## Rule-backed switches
 
@@ -173,186 +280,153 @@ Only a supported subset of Firewalla rules can be exposed as Home Assistant
 switches.
 
 At a high level, the integration only exposes rules that fit the proven
-persistent user-managed switch model. That means the integration does not try to
-turn every Firewalla rule into a switch.
+persistent user-managed switch model. It does not try to turn every Firewalla
+rule into a switch.
 
 In practice:
 
-- user-managed persistent rules from the supported rule families may appear in the options flow
+- user-managed persistent rules from the supported rule families may appear in
+  the options flow
 - Firewalla-managed or automatically generated rules are excluded
 - temporary or auto-expiring rule shapes are excluded from switch selection
-- if a previously selected rule later disappears, Home Assistant can still show enough context for you to remove the stale selection cleanly
+- if a previously selected rule later disappears, Home Assistant can still show
+  enough context for you to remove the stale selection cleanly
 
 ### Persistent rules versus temporary rules
-
-This distinction matters because the integration is built primarily around
-pausing and resuming existing persistent rules, not around creating and deleting
-rules for you.
 
 Persistent rules:
 
 - stay installed in Firewalla until you explicitly change or delete them
 - can be paused and resumed in place
 - are the rule family that the integration can expose as Home Assistant
-   switches when they match the supported rule model
+  switches when they match the supported rule model
 
 Temporary rules:
 
 - are created for a short-lived timed action
 - expire or disappear automatically instead of remaining installed as a normal
-   paused rule
+  paused rule
 - are not treated as switch candidates by this integration
 
-The easiest way to make sure a rule is persistent is to create it manually in
-the Firewalla app as a normal ongoing rule.
-
-For example:
-
-- if you are using one of the simple internet-block flows, choose **Block
-   always** instead of a timed block  (You can then resume the rule or pause the rule as necessary and it will remain persistent)
-- if you want another durable rule type, create it normally in the app first
-   and then let the integration discover it as an existing rule
-
-Once a persistent rule exists, the integration can interact with it mainly by:
-
-- exposing it as a switch when it matches the supported rule families
-- pausing it
-- resuming it
-
-The integration should not be thought of as the primary place to create or
-delete rules. The Firewalla app remains the normal place to set up the rule in
-the first place.
-
-If you later decide you no longer want that persistent rule at all, delete it
-from the Firewalla app. After the rule is removed on the box:
-
-- the corresponding Home Assistant switch will become unavailable
-- you can then remove the stale selection from the integration options flow if
-   you no longer want it tracked
+The Firewalla app remains the normal place to create or delete rules. The
+integration is primarily built to expose supported persistent rules, and to
+pause or resume those existing rules cleanly.
 
 ## Services
+
+The service surface is now broad enough that it helps to think about it in
+three groups:
+
+- inspection and report services
+- host and network operator actions
+- rule control services
 
 The report-style services in this section were built primarily to help model,
 correlate, and validate Firewalla data during reverse engineering.
 
-- treat them as draft operator tools first, not as a fully refined long-term
-   public reporting API
+- treat them as operator tools first, not as a fully refined long-term public
+  reporting API
 - they should be directionally correct and useful for automations, debugging,
-   and ongoing protocol work
-- they were a large lift because the underlying data had to be correlated from
-   multiple raw families, so some sections are still more proven than polished
-- expect the shared report envelope and the major section names to be more
-   stable than the fine-grained field selection and presentation details
+  and ongoing protocol work
+- the shared report envelope and major section names are more stable than the
+  fine-grained field selection and presentation details
+
+### Service groups
+
+Inspection and report services:
+
+- `firewalla_local.get_runtime_inventory`
+- `firewalla_local.get_host_name_mapping`
+- `firewalla_local.get_network_segment_report`
+- `firewalla_local.get_network_segment_usage`
+- `firewalla_local.get_speed_test_results`
+- `firewalla_local.get_time_usage_report`
+- `firewalla_local.get_wan_data_usage`
+- `firewalla_local.get_wan_events`
+
+Host and network operator actions:
+
+- `firewalla_local.run_internet_speed_test`
+- `firewalla_local.wake_host`
+- `firewalla_local.set_host_name`
+- `firewalla_local.set_host_notify_when_next_online`
+- `firewalla_local.set_host_notify_when_next_offline`
+- `firewalla_local.set_host_dhcp_reservation`
+
+Rule control services:
+
+- `firewalla_local.pause_rule`
+- `firewalla_local.resume_rule`
 
 ### Get rule and runtime inventory
 
 Use `firewalla_local.get_runtime_inventory` to inspect the current runtime data.
 
-This is useful when you want to:
+- useful for rule discovery, group and user correlation, and debugging the
+  normalized runtime model
+- returns structured `inventory` data plus a rendered `markdown` summary
+- unlike the newer report services, it predates the shared report envelope
 
-- see the current normalized runtime objects
-- inspect rule IDs before using pause or resume services
-- compare what is live on the box with what is currently exposed in Home Assistant
+### Get host name mapping
 
-This was the first report-style service added during reverse engineering and it
-still behaves a little differently from the newer report surfaces.
+Use `firewalla_local.get_host_name_mapping` to read the current normalized host
+identity records.
 
-- it currently returns `inventory` plus a rendered `markdown` view instead of
-   the newer shared report envelope
-- its strongest use cases are rule discovery, group and user correlation, and
-   comparing the current Firewalla runtime against the normalized rule model
-- treat it as a draft mapping and inspection tool that helped bootstrap later
-   services such as rule controls and the newer report family
+- lightweight lookup for host IDs, MACs, IPs, names, and host kind
+- `refresh` defaults to `true`
+- MAC-backed hosts appear as `kind=mac_host`
+- non-MAC pseudo-hosts can still appear as `kind=pseudo_host`
 
 ### Get network segment report
 
 Use `firewalla_local.get_network_segment_report` to read one configuration-
 oriented report for a single network segment.
 
-- provide exactly one selector with `network_uuid` for deterministic
-   automations or `network_name` for interactive use
-- this is the preferred read when you want DHCP and per-host configuration
-   state
-- the response uses the shared report envelope with `target`, `query`,
-   `time_basis`, `summary`, `sections`, and `metadata`
-- the report sections include interface configuration, addressing, DNS, the
-   currently reported DHCP settings for that segment when Firewalla exposes
-   them, and per-host configuration state
-- host rows include device type, DHCP name, IP assignment mode, reserved IPv4
-   address when present, notification toggles, and Wake-on-LAN support status
-- `refresh` defaults to `true` so selector resolution and returned metadata stay
-   aligned with the latest coordinator refresh
+- use `network_uuid` for deterministic automations or `network_name` for
+  interactive use
+- preferred when you want DHCP and per-host configuration state
+- uses the shared report envelope with `target`, `query`, `time_basis`,
+  `summary`, `sections`, and `metadata`
 
 ### Get network segment usage
 
 Use `firewalla_local.get_network_segment_usage` to read one usage-oriented
 report for a single network segment.
 
-- provide exactly one selector with `network_uuid` for deterministic
-   automations or `network_name` for interactive use
-- choose one required `window` so the report focuses on a single activity
-   window instead of returning every window at once
-- the response uses the shared report envelope with `target`, `query`,
-   `time_basis`, `summary`, `sections`, and `metadata`
-- the base report returns selected-window metric summaries plus bounded
-   activity-derived devices, top upload and download destinations, and app and
-   category activity when Firewalla exposes those richer flow families
-- when the raw host counters are sparse, the device section is derived from the
-   richer flow families instead of returning long zero-heavy host lists
-- use `top_n` to limit the device, app, category, upload, and download ranking
-   rows, and use `include=series` only when you need the raw metric samples for
-   the selected window
-- public window names are `last_60_minutes`, `last_24_hours`, `last_30_days`,
-   and `last_12_months`
-- `refresh` defaults to `true` so selector resolution and returned metadata stay
-   aligned with the latest coordinator refresh
+- choose one required `window`
+- use `top_n` to limit ranking rows
+- use `include=series` only when you need raw metric samples
+- public windows are `last_60_minutes`, `last_24_hours`, `last_30_days`, and
+  `last_12_months`
 
 ### Run internet speed test
 
 Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
 
-- choose the WAN with `wan_uuid` for deterministic automations or `wan_name`
-   for interactive use
+- choose the WAN with `wan_uuid` or `wan_name`
 - if only one WAN is available, you can omit the WAN selector
-- the service returns an acknowledgement with the resolved WAN and command
-   payload
-- the service does not wait for the completed measurement because the test may
-   take around 30 seconds
+- the service returns an acknowledgement and does not wait for the completed
+  measurement
+- if you want completed results, use `firewalla_local.get_speed_test_results`
+  or the latest-speed-test sensor
 
 ### Wake host
 
 Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
 
-- choose one host with `host_mac` for deterministic automations
-- use `host_name` for interactive use when the current Firewalla host name is
-   clear and unique, or use the full host label with IP when you need to
-   disambiguate duplicate names
-- `host_id` is also accepted as an alternate selector and currently resolves to
-   the same normalized host identity as the MAC-backed host key
-- provide exactly one host selector per call
-- `refresh` defaults to `true` so the service resolves the latest host metadata
-   before sending the command
-- the service returns an acknowledgement with the resolved host and the command
-   details that were sent
-- the current implementation rejects targets that do not look Wake-on-LAN-
-   capable, such as non-MAC pseudo-hosts
+- choose one host with `host_mac`, `host_name`, or `host_id`
+- `host_mac` is best for deterministic automations
+- `refresh` defaults to `true`
+- the service returns an acknowledgement with the resolved host and command
+  details
 
 ### Host rename
 
 Use `firewalla_local.set_host_name` to send one host-scoped rename command.
 
-- choose one host with `host_mac` for deterministic automations
-- use `host_name` for interactive use when the current Firewalla host name is
-   clear and unique, or use the full host label with IP when you need to
-   disambiguate duplicate names
-- `host_id` is also accepted as an alternate selector and currently resolves to
-   the same normalized host identity as the MAC-backed host key
-- provide the exact `new_name` string you want Firewalla to store; the service
-   does not trim, rewrite, or otherwise normalize the payload before sending it
-- `refresh` defaults to `true` so the service resolves the latest host metadata
-   before sending the rename command
-- the response returns an acknowledgement with the resolved host and the
-   host-targeted command payload that was sent
+- choose one host with `host_mac`, `host_name`, or `host_id`
+- provide the exact `new_name` string you want Firewalla to store
+- `refresh` defaults to `true`
 
 ### Host notification toggles
 
@@ -361,17 +435,8 @@ Use `firewalla_local.set_host_notify_when_next_online` and
 notification toggles.
 
 - both services reuse the same host selectors as `wake_host`
-- set `enabled` to `true` or `false` to apply the requested toggle
-- choose `host_mac` for deterministic automations
-- use `host_name` for interactive use when the current Firewalla host name is
-   clear and unique, or use the full host label with IP when you need to
-   disambiguate duplicate names
-- `host_id` is also accepted as an alternate selector and currently resolves to
-   the same normalized host identity as the MAC-backed host key
-- `refresh` defaults to `true` so the service resolves the latest host metadata
-   before sending the policy write
-- the response returns the resolved host plus the policy key and boolean value
-   that were sent
+- set `enabled` to `true` or `false`
+- `refresh` defaults to `true`
 
 ### Host DHCP reservation
 
@@ -379,24 +444,12 @@ Use `firewalla_local.set_host_dhcp_reservation` to set or clear one
 host-scoped DHCP reservation on one Firewalla network.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
-- choose one network with `network_uuid` for deterministic automations or
-   `network_name` for interactive use
-- for `mode=static`, you can omit the network selector when the
-   `reserved_ipv4` address falls into exactly one known Firewalla DHCP range
-- set `mode=static` and provide `reserved_ipv4` to reserve an address for the
-   selected host on the selected network
-- set `mode=dynamic` and omit `reserved_ipv4` to clear the reservation for the
-   selected host on the selected network
-- static reservations are rejected when the address is outside the resolved
-   network DHCP range
-- static reservations are rejected when another host already owns the same
-   reserved IPv4 on the same network
-- `refresh` defaults to `true` so the service resolves the latest host and
-   network metadata before sending the policy write
-- the service preserves the host's other known network allocation entries and
-   updates only the selected network key in `host.policy.ipAllocation.allocations`
-- the response returns the resolved host, resolved network, the normalized IP
-   assignment that was requested, and the policy payload that was sent
+- choose one network with `network_uuid` or `network_name`
+- for `mode=static`, provide `reserved_ipv4`
+- for `mode=dynamic`, omit `reserved_ipv4` to clear the reservation
+- static reservations are validated against the resolved network range and
+  existing reservations
+- `refresh` defaults to `true`
 
 ### Get speed test results
 
@@ -406,71 +459,29 @@ results.
 - by default it refreshes once and returns only the most recent result
 - use `limit` to request more than one record
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
-- the response includes `latest` for the common case and `results` for the full
-   returned list
 
 ### Get time usage report
 
 Use `firewalla_local.get_time_usage_report` to read scoped historical usage for
 one device, group, or user.
 
-- the response now uses the shared report envelope:
-  - `target`
-  - `query`
-  - `time_basis`
-  - `summary`
-  - `sections`
-  - `metadata`
 - set `scope_kind` to `device`, `group`, or `user`
-- set `scope_target` to a stable id or the current display label for that scope
-- provide explicit `begin`, `end`, and `granularity` values
-- use `sections` when you want to limit the response to `internet`,
-  `app_totals`, `apps`, or `categories`
-- use `detail=summary` or `detail=standard` to choose the default section set
-- use `include=intervals` when you want optional per-device interval detail
-- the current bounded contract supports `day` and `hour` report periods
-- the top-level `summary` centers on total and unique minutes for the resolved
-   target and requested window
-- the detailed content now appears under `sections.internet`,
-   `sections.app_totals`, `sections.apps`, and `sections.categories`
-- a non-empty `app_ids` filter keeps `sections.apps` visible even when you use
-  `detail=summary`, so filtered app usage is not hidden behind the compact mode
-- app and category rows are ranked by returned usage totals, and zero-only rows
-  are dropped from the default response when Firewalla returns sparse buckets
-- `metadata` reports the applied request scope type, applied sections,
-  requested include detail, and source provenance for the major report sections
-- timestamps are returned as raw epoch values plus ISO strings in the Firewalla
-   appliance timezone when the box reports one
+- set `scope_target` to a stable id or current display label
+- provide explicit `begin`, `end`, and `granularity`
+- uses the shared report envelope
+- supports `sections`, `include=intervals`, `detail=summary`, and
+  `detail=standard`
 
 ### Get WAN data usage
 
-Use `firewalla_local.get_wan_data_usage` to read one normalized WAN
-data-usage report for each WAN.
+Use `firewalla_local.get_wan_data_usage` to read one normalized WAN data-usage
+report for each WAN.
 
-- the response now uses the shared report envelope:
-  - `target`
-  - `query`
-  - `time_basis`
-  - `summary`
-  - `sections`
-  - `metadata`
 - by default it returns one current-month report row for every discovered WAN
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
-- use `current_periods` to request current `month`, `week`, and `day` rows
-- use `history_period` with `history_count` to request historical `months`,
-   `weeks`, or `days`
-- derived week rows use Monday as the default local week start
-- current periods may be partial, while historical periods are always full
-- use `detail=full` only when you want nested subperiod breakdowns for month or
-   week rows; otherwise the default `detail=summary` is the normal report shape
-- use `include=subperiods` to request nested week or day breakdown rows where
-   that richer detail is supported
-- each WAN report now appears under `sections.reports`, with per-WAN
-   `current` and `history` sections plus a resolved WAN `target`
-- `metadata` reports applied detail, applied include sections, provenance, and
-   any unavailable sections instead of leaving those decisions implicit
-- timestamps are returned as raw epoch values and local ISO strings in the
-   Firewalla appliance timezone when the box reports one
+- use `current_periods`, `history_period`, `history_count`, `detail`, and
+  `include=subperiods` to shape the report
+- uses the shared report envelope
 
 ### Get WAN events
 
@@ -480,26 +491,15 @@ events.
 - by default it returns the most recent events across all WANs
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
 - use `limit` and `offset` to page through older events
-- the current bounded contract covers `wan_state`, `overall_wan_state`,
-   `dualwan_state`, `dns`, `ping_RTT`, and `ping_lossrate`
-- the response focuses on operational metadata such as failures, thresholds,
-   interface status, and DNS probe information rather than raw Firewalla blobs
 
 ### Pause rule
 
 Use `firewalla_local.pause_rule` to pause a managed rule.
 
-This is intended for an existing persistent rule that already exists on the
-Firewalla box.
-
-You can provide:
-
-- a `rule_target`
-- a `duration`
-- or a `resume_at` time
-
-If you provide neither duration nor resume time, the rule remains paused until
-you resume it.
+- intended for an existing persistent rule that already exists on the box
+- provide `rule_target`
+- optionally provide `duration` or `resume_at`
+- if you provide neither, the rule remains paused until resumed
 
 ### Resume rule
 
@@ -510,20 +510,27 @@ creating a new rule for you.
 
 ## Reauthentication and host changes
 
-- if credentials stop working, Home Assistant can trigger reauthentication using a fresh QR payload
-- if the local host changes, use the integration reconfigure flow instead of deleting and re-adding the device
+- if credentials stop working, Home Assistant can trigger reauthentication with
+  a fresh QR payload
+- if the local host changes, use the integration reconfigure flow instead of
+  deleting and re-adding the device
 
 ## Known limitations
 
 - discovery is not implemented
 - only the currently supported rule subset is exposed as switches
-- watched-device VPN state is intentionally deferred until the host-to-VPN mapping is proven
-- system-level online and offline device counts may use integration-derived aggregation when the raw payload does not expose a trustworthy aggregate online flag
+- watched-device VPN state is intentionally deferred until the host-to-VPN
+  mapping is proven
+- system-level online and offline device counts may use integration-derived
+  aggregation when the raw payload does not expose a trustworthy aggregate
+  online flag
 - watched-user totals currently rely on the proven `internetTimeUsageToday` and
-   `appTimeUsageToday` user payloads; fields not present there remain out of
-   scope until they are directly verified
-- watched-user entities do not expose a last-app-used field because that value is not yet proven in the local contract
+  `appTimeUsageToday` user payloads
+- watched-user entities do not expose a last-app-used field because that value
+  is not yet proven in the local contract
 - current WAN usage is exposed as a status-sensor attribute for summary and
-   automation use, not as separate per-WAN entities
-- broader mutation surfaces are still intentionally out of scope until they are proven by protocol evidence
-- this is a community integration and not an official Firewalla support channel
+  automation use, not as separate per-WAN entities
+- broader mutation surfaces remain intentionally out of scope until they are
+  proven by protocol evidence
+- this is a community integration and not an official Firewalla support
+  channel

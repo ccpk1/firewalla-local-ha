@@ -25,6 +25,7 @@ from .const import (
     ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE,
     ATTR_SYSTEM_MEMORY_FREE_MB,
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
+    ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
     ATTR_SYSTEM_WAN_IP,
@@ -137,6 +138,11 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_SYSTEM_MEMORY_FREE_MB: (
                 system_status.memory_free_mb if system_status is not None else None
             ),
+            ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT: (
+                self.coordinator.last_runtime_data_updated_at.isoformat()
+                if self.coordinator.last_runtime_data_updated_at is not None
+                else None
+            ),
             ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT: (
                 system_status.disk_usage_percent_by_mount
                 if system_status is not None
@@ -232,7 +238,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
         host = self._host
         if host is None:
             return None
-        return self.host_manager.is_host_online(host)
+        return self.host_manager.is_watched_device_online(host)
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

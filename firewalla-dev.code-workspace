@@ -18,7 +18,6 @@
       "**/.ruff_cache/**",
       "**/.tmp/**",
       "**/site-packages/**",
-      "/workspaces/controld-manager-ha/**",
     ],
     "search.exclude": {
       "**/node_modules": true,
@@ -29,7 +28,6 @@
       "**/.ruff_cache": true,
       "**/.tmp": true,
       "**/site-packages": true,
-      "/workspaces/controld-manager-ha": true,
       "/home/vscode/.local/ha-venv": true,
     },
     "files.exclude": {
@@ -40,18 +38,16 @@
       "**/.ruff_cache": true,
       // "**/.tmp": true,
       "**/site-packages": true,
-      "/workspaces/controld-manager-ha": true,
       "/home/vscode/.local/ha-venv": true,
     },
     "pylint.args": [
-      "--ignore-paths=^\\.mypy_cache/.*$,^\\.pytest_cache/.*$,^\\.ruff_cache/.*$,^\\.tmp/.*$,^.*/site-packages/.*$,^/home/vscode/\\.local/ha-venv/.*$,^/workspaces/core/.*$,^/workspaces/controld-manager-ha/.*$,^poc\\.py$,^utils/poc\\.py$",
+      "--ignore-paths=^\\.mypy_cache/.*$,^\\.pytest_cache/.*$,^\\.ruff_cache/.*$,^\\.tmp/.*$,^.*/site-packages/.*$,^/home/vscode/\\.local/ha-venv/.*$,^/workspaces/core/.*$,^poc\\.py$,^utils/poc\\.py$",
     ],
     "pylint.ignorePatterns": [
       "**/.tmp/**/*.py",
       "**/site-packages/**/*.py",
       "/home/vscode/.local/ha-venv/**/*.py",
       "/workspaces/core/**/*.py",
-      "/workspaces/controld-manager-ha/**/*.py",
       "/workspaces/firewalla-local-ha/poc.py",
       "/workspaces/firewalla-local-ha/utils/poc.py",
     ],

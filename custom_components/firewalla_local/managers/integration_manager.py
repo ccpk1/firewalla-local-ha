@@ -7,14 +7,17 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from typing import TYPE_CHECKING, Final, cast
 
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from ..const import (
     CONF_LICENSE,
     DOMAIN,
+    ENTITY_SUFFIX_DEVICE_TRACKER,
     ENTITY_SUFFIX_SWITCH,
     MANUFACTURER,
+    PLATFORM_DEVICE_TRACKER,
     PLATFORM_SWITCH,
 )
 from ..models import (
@@ -88,6 +91,8 @@ _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS: Final = (
     "/log",
     "/data",
 )
+_TRACKED_CLIENT_DEVICE_MODEL: Final = "Tracked client"
+_TRACKED_CLIENT_DEVICE_NAME_PREFIX: Final = "Client"
 
 
 class FirewallaIntegrationManager(FirewallaBaseManager):
@@ -114,6 +119,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self._latest_speed_test = self._build_latest_speed_test(
             snapshot.speed_test_results
         )
+        if (
+            host_manager := getattr(self.coordinator, "host_manager", None)
+        ) is not None:
+            self.async_reconcile_tracked_client_devices(
+                host_manager.configured_device_tracker_macs,
+                snapshot.hosts,
+            )
 
     @property
     def system_info(self) -> FirewallaSystemInfo:
@@ -427,10 +439,18 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 or appliance_identity.device_name
                 or _DEFAULT_BOX_NAME
             ),
-            model=appliance_identity.model,
+            model=self._build_model_name(appliance_identity.model),
             serial_number=appliance_identity.serial_number,
             software_version=appliance_identity.software_version,
         )
+
+    @staticmethod
+    def _build_model_name(model: str | None) -> str | None:
+        """Return a presentation-friendly Firewalla model name."""
+        if model is None:
+            return None
+
+        return " ".join(part.capitalize() for part in model.split())
 
     def _build_system_status(
         self, appliance_runtime: FirewallaApplianceRuntimeInput
@@ -2188,6 +2208,93 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             sw_version=system_info.software_version,
         )
 
+    def build_primary_device_identifier(self) -> tuple[str, str]:
+        """Build the stable identifier for the primary Firewalla device."""
+        return (DOMAIN, self.entry.unique_id or self.entry.data[CONF_LICENSE])
+
+    def build_tracked_client_device_identifier(self, mac: str) -> tuple[str, str]:
+        """Build the stable identifier for one tracked client device."""
+        return (
+            DOMAIN,
+            (
+                f"{self.entry.unique_id or self.entry.data[CONF_LICENSE]}"
+                f"_tracked_client_{dr.format_mac(mac)}"
+            ),
+        )
+
+    def _build_tracked_client_device_name(
+        self, mac: str, host: FirewallaHostRuntime | None
+    ) -> str:
+        """Build the default device name for one tracked client."""
+        if host is not None:
+            if host.display_name:
+                return host.display_name
+            if host.fallback_name:
+                return host.fallback_name
+        return f"{_TRACKED_CLIENT_DEVICE_NAME_PREFIX} {dr.format_mac(mac)}"
+
+    def async_ensure_primary_device(self) -> dr.DeviceEntry:
+        """Ensure the primary Firewalla device exists in the device registry."""
+        system_info = self.system_info
+        return dr.async_get(self.coordinator.hass).async_get_or_create(
+            config_entry_id=self.entry.entry_id,
+            identifiers={self.build_primary_device_identifier()},
+            manufacturer=MANUFACTURER,
+            model=system_info.model,
+            name=system_info.name,
+            serial_number=system_info.serial_number,
+            sw_version=system_info.software_version,
+        )
+
+    def async_reconcile_tracked_client_devices(
+        self,
+        selected_macs: tuple[str, ...],
+        hosts: tuple[FirewallaHostRuntime, ...],
+    ) -> None:
+        """Create, update, and prune tracked-client devices for device trackers."""
+        device_registry = dr.async_get(self.coordinator.hass)
+        router_device = self.async_ensure_primary_device()
+        host_lookup = {host.mac: host for host in hosts}
+        expected_identifiers = {
+            self.build_tracked_client_device_identifier(mac) for mac in selected_macs
+        }
+
+        for mac in selected_macs:
+            host = host_lookup.get(mac)
+            device_name = self._build_tracked_client_device_name(mac, host)
+            device = device_registry.async_get_or_create(
+                config_entry_id=self.entry.entry_id,
+                identifiers={self.build_tracked_client_device_identifier(mac)},
+                manufacturer=MANUFACTURER,
+                model=_TRACKED_CLIENT_DEVICE_MODEL,
+                name=device_name,
+                serial_number=dr.format_mac(mac),
+                via_device=self.build_primary_device_identifier(),
+            )
+
+            if device.name_by_user is None and device.name != device_name:
+                device_registry.async_update_device(
+                    device.id,
+                    name=device_name,
+                    manufacturer=MANUFACTURER,
+                    model=_TRACKED_CLIENT_DEVICE_MODEL,
+                    serial_number=dr.format_mac(mac),
+                    via_device_id=router_device.id,
+                )
+
+        for device in dr.async_entries_for_config_entry(
+            device_registry, self.entry.entry_id
+        ):
+            if self.build_primary_device_identifier() in device.identifiers:
+                continue
+            if not any(
+                identifier in expected_identifiers for identifier in device.identifiers
+            ):
+                device_registry.async_update_device(
+                    device.id,
+                    remove_config_entry_id=self.entry.entry_id,
+                )
+
     def build_entity_unique_id(self, *, object_id: str, suffix: str) -> str:
         """Build a multi-instance-safe unique ID for one entity surface."""
         return f"{self.entry.entry_id}_{object_id}_{suffix}"
@@ -2215,6 +2322,35 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             ):
                 continue
             if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_SWITCH}"):
+                continue
+            if entity_entry.unique_id in expected_unique_ids:
+                continue
+
+            entity_registry.async_remove(entity_entry.entity_id)
+
+    async def async_reconcile_device_tracker_entities(
+        self, selected_macs: tuple[str, ...]
+    ) -> None:
+        """Remove stale device-tracker entity entries for deselected clients."""
+        entity_registry = er.async_get(self.coordinator.hass)
+        expected_unique_ids = {
+            self.build_entity_unique_id(
+                object_id=mac,
+                suffix=ENTITY_SUFFIX_DEVICE_TRACKER,
+            )
+            for mac in selected_macs
+        }
+
+        for entity_entry in er.async_entries_for_config_entry(
+            entity_registry,
+            self.entry.entry_id,
+        ):
+            if (
+                entity_entry.domain != PLATFORM_DEVICE_TRACKER
+                or entity_entry.platform != DOMAIN
+            ):
+                continue
+            if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_DEVICE_TRACKER}"):
                 continue
             if entity_entry.unique_id in expected_unique_ids:
                 continue

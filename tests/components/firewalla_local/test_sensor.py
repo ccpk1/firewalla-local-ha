@@ -42,6 +42,7 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE,
     ATTR_SYSTEM_MEMORY_FREE_MB,
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
+    ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
     ATTR_SYSTEM_WAN_IP,
@@ -266,6 +267,7 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     hass: HomeAssistant,
 ) -> None:
     """Test the sensor platform exposes the planned monitoring entities."""
+    refresh_timestamp = datetime(2026, 4, 2, 12, 0, tzinfo=UTC)
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -282,6 +284,10 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     entry.add_to_hass(hass)
 
     with (
+        patch(
+            "custom_components.firewalla_local.coordinator.dt_util.utcnow",
+            return_value=refresh_timestamp,
+        ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
             new=AsyncMock(return_value=_runtime_payload()),
@@ -316,6 +322,10 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert system_state.attributes[ATTR_SYSTEM_CPU_USAGE_1M] == 42.1
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_USAGE_PERCENT] == 76.4
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_FREE_MB] == 911.8
+    assert (
+        system_state.attributes[ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT]
+        == refresh_timestamp.isoformat()
+    )
     assert system_state.attributes[ATTR_SYSTEM_UPTIME] == "262d 15h 02m"
     assert system_state.attributes[ATTR_SYSTEM_UPTIME_SECONDS] == 22690936
     assert system_state.attributes[ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT] == {
@@ -387,6 +397,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     hass: HomeAssistant,
 ) -> None:
     """Test the speed-test sensor stays present with no data history."""
+    refresh_timestamp = datetime(2026, 4, 2, 12, 5, tzinfo=UTC)
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -403,6 +414,10 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     entry.add_to_hass(hass)
 
     with (
+        patch(
+            "custom_components.firewalla_local.coordinator.dt_util.utcnow",
+            return_value=refresh_timestamp,
+        ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
             new=AsyncMock(return_value={"policyRules": []}),
@@ -432,6 +447,10 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert system_state.attributes[ATTR_SYSTEM_CPU_USAGE_1M] == 22.5
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_USAGE_PERCENT] == 25.0
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_FREE_MB] == 750.0
+    assert (
+        system_state.attributes[ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT]
+        == refresh_timestamp.isoformat()
+    )
     assert system_state.attributes[ATTR_SYSTEM_UPTIME] is None
     assert system_state.attributes[ATTR_SYSTEM_UPTIME_SECONDS] is None
     assert system_state.attributes[ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT] == {

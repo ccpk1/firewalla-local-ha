@@ -51,6 +51,7 @@ from .const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_RUNTIME_INVENTORY,
@@ -165,6 +166,14 @@ _TIME_USAGE_REPORT_SUMMARY_SECTIONS = (
 
 GET_RUNTIME_INVENTORY_SCHEMA = vol.Schema(
     {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_HOST_NAME_MAPPING_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -2766,6 +2775,37 @@ async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectTy
     }
 
 
+async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectType:
+    """Return the current host identity mapping for Firewalla hosts."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    hosts: list[JsonValueType] = []
+    for host in sorted(
+        entry.runtime_data.host_manager.get_hosts(),
+        key=lambda host: host.mac,
+    ):
+        is_mac_host = _supports_wake_on_lan(host.mac)
+        hosts.append(
+            {
+                "host_id": host.mac,
+                "mac": host.mac if is_mac_host else None,
+                "ip": host.ip_address,
+                "name": host.display_name,
+                "kind": "mac_host" if is_mac_host else "pseudo_host",
+            }
+        )
+
+    return {"hosts": hosts}
+
+
 async def _async_handle_run_internet_speed_test(call: ServiceCall) -> JsonObjectType:
     """Start one internet speed test on the resolved WAN interface."""
     entry = _get_loaded_entry(
@@ -3777,6 +3817,15 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             supports_response=SupportsResponse.ONLY,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_GET_HOST_NAME_MAPPING):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GET_HOST_NAME_MAPPING,
+            _async_handle_get_host_name_mapping,
+            schema=GET_HOST_NAME_MAPPING_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT):
         hass.services.async_register(
             DOMAIN,
@@ -3906,6 +3955,8 @@ def async_remove_services(hass: HomeAssistant) -> None:
     """Remove Firewalla Local services."""
     if hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_INVENTORY):
         hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_INVENTORY)
+    if hass.services.has_service(DOMAIN, SERVICE_GET_HOST_NAME_MAPPING):
+        hass.services.async_remove(DOMAIN, SERVICE_GET_HOST_NAME_MAPPING)
     if hass.services.has_service(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT):
         hass.services.async_remove(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT)
     if hass.services.has_service(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE):

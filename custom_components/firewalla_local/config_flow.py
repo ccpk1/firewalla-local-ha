@@ -25,6 +25,8 @@ from .api import (
 )
 from .const import (
     CONF_AID,
+    CONF_DEVICE_TRACKER_AWAY_WINDOW,
+    CONF_DEVICE_TRACKERS,
     CONF_EID,
     CONF_GID,
     CONF_HOST,
@@ -34,6 +36,7 @@ from .const import (
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     CONF_UPDATE_INTERVAL,
+    CONF_WATCHED_DEVICE_ONLINE_WINDOW,
     CONF_WATCHED_DEVICES,
     CONF_WATCHED_USERS,
     CONFIG_ERROR_CANNOT_CONNECT,
@@ -41,12 +44,16 @@ from .const import (
     CONFIG_ERROR_INVALID_QR,
     CONFIG_ERROR_WRONG_ACCOUNT,
     DEFAULT_BOX_NAME,
+    DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_PAIRING_DEVICE_NAME,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
     MAX_UPDATE_INTERVAL_MINUTES,
+    MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     MIN_UPDATE_INTERVAL_MINUTES,
+    MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
 )
 from .coordinator import async_update_entry_options
 from .managers import FirewallaHostManager, FirewallaRuleManager, FirewallaUserManager
@@ -57,6 +64,7 @@ from .models import (
 )
 
 _STEP_ID_INIT: Final = "init"
+_STEP_ID_EDIT_DEVICE_TRACKERS: Final = "edit_device_trackers"
 _STEP_ID_EDIT_RULE_SELECTION: Final = "edit_rule_selection"
 _STEP_ID_EDIT_WATCHED_DEVICES: Final = "edit_watched_devices"
 _STEP_ID_EDIT_WATCHED_USERS: Final = "edit_watched_users"
@@ -69,6 +77,7 @@ _STEP_ID_USER: Final = "user"
 _OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
 _UNAVAILABLE_RULE_LABEL: Final = "Unavailable rule"
 _UNAVAILABLE_RULE_SUFFIX: Final = "(unavailable)"
+_UNAVAILABLE_DEVICE_TRACKER_LABEL: Final = "Unavailable device tracker"
 _UNAVAILABLE_WATCHED_DEVICE_LABEL: Final = "Unavailable device"
 _UNAVAILABLE_WATCHED_USER_LABEL: Final = "Unavailable user"
 
@@ -90,7 +99,16 @@ class RuleSelectionOptionsInput(TypedDict, total=False):
 class SystemSettingsOptionsInput(TypedDict):
     """Validated system-settings input for the options flow."""
 
+    device_tracker_away_window: int
     update_interval: int
+    return_to_main_menu: bool
+    watched_device_online_window: int
+
+
+class DeviceTrackersOptionsInput(TypedDict, total=False):
+    """Validated device-tracker input for the options flow."""
+
+    device_trackers: list[str]
     return_to_main_menu: bool
 
 
@@ -323,7 +341,6 @@ class FirewallaOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize the options flow."""
         self._config_entry = config_entry
-        self._runtime_refreshed = False
 
     def _get_rule_manager(self) -> FirewallaRuleManager | None:
         """Return the loaded rule manager when runtime data is available."""
@@ -354,25 +371,6 @@ class FirewallaOptionsFlow(OptionsFlow):
         if isinstance(user_manager, FirewallaUserManager):
             return user_manager
         return None
-
-    async def _async_refresh_runtime_state(self) -> None:
-        """Refresh the runtime snapshot before rendering rule choices when possible."""
-        runtime_data = getattr(self._config_entry, "runtime_data", None)
-        if runtime_data is None:
-            return
-
-        coordinator = getattr(runtime_data, "coordinator", None)
-        async_request_refresh = getattr(coordinator, "async_request_refresh", None)
-        if callable(async_request_refresh):
-            await async_request_refresh()
-
-    async def _async_refresh_runtime_state_once(self) -> None:
-        """Refresh runtime state once per options-flow session."""
-        if self._runtime_refreshed:
-            return
-
-        await self._async_refresh_runtime_state()
-        self._runtime_refreshed = True
 
     def _get_rule_choices(self) -> dict[str, str]:
         """Return selectable rule IDs from the live coordinator snapshot."""
@@ -459,6 +457,33 @@ class FirewallaOptionsFlow(OptionsFlow):
 
         return raw_update_interval
 
+    def _get_stored_minute_option(
+        self, option_key: str, default: int, minimum: int
+    ) -> int:
+        """Return one validated minute-based stored option."""
+        raw_value: object = self._config_entry.options.get(option_key, default)
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+            return default
+        if raw_value < minimum:
+            return default
+        return raw_value
+
+    def _get_stored_device_tracker_away_window(self) -> int:
+        """Return the persisted device-tracker away window in minutes."""
+        return self._get_stored_minute_option(
+            CONF_DEVICE_TRACKER_AWAY_WINDOW,
+            DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
+            MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
+        )
+
+    def _get_stored_watched_device_online_window(self) -> int:
+        """Return the persisted watched-device online window in minutes."""
+        return self._get_stored_minute_option(
+            CONF_WATCHED_DEVICE_ONLINE_WINDOW,
+            DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
+            MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
+        )
+
     def _get_stored_rule_selection(
         self,
     ) -> tuple[list[str], tuple[FirewallaRuleTemplate, ...]]:
@@ -497,6 +522,13 @@ class FirewallaOptionsFlow(OptionsFlow):
             if isinstance(user_id, str) and user_id
         ]
 
+    def _get_stored_device_trackers(self) -> list[str]:
+        """Return the currently persisted device-tracker MACs."""
+        raw_device_trackers = self._config_entry.options.get(CONF_DEVICE_TRACKERS, [])
+        if not isinstance(raw_device_trackers, list):
+            return []
+        return [mac for mac in raw_device_trackers if isinstance(mac, str) and mac]
+
     def _get_watched_device_choices(self) -> dict[str, str]:
         """Return selectable watched devices keyed by MAC."""
         if host_manager := self._get_host_manager():
@@ -511,6 +543,31 @@ class FirewallaOptionsFlow(OptionsFlow):
             return {}
 
         return FirewallaHostManager.get_watched_device_choices_for_hosts(snapshot.hosts)
+
+    def _get_device_tracker_choices(self) -> dict[str, str]:
+        """Return selectable device trackers keyed by MAC."""
+        if host_manager := self._get_host_manager():
+            return host_manager.get_device_tracker_choices()
+
+        runtime_data = getattr(self._config_entry, "runtime_data", None)
+        if runtime_data is None:
+            return {}
+
+        snapshot = runtime_data.coordinator.data
+        if snapshot is None:
+            return {}
+
+        return FirewallaHostManager.get_device_tracker_choices_for_hosts(snapshot.hosts)
+
+    def _get_missing_device_tracker_choices(
+        self, live_device_tracker_choices: dict[str, str]
+    ) -> dict[str, str]:
+        """Return device-tracker selections missing from the latest runtime."""
+        return {
+            mac: f"[{mac}] {_UNAVAILABLE_DEVICE_TRACKER_LABEL}"
+            for mac in self._get_stored_device_trackers()
+            if mac not in live_device_tracker_choices
+        }
 
     def _get_missing_watched_device_choices(
         self, live_watched_device_choices: dict[str, str]
@@ -550,9 +607,12 @@ class FirewallaOptionsFlow(OptionsFlow):
     def _build_options_payload(
         self,
         *,
+        device_trackers: list[str] | None = None,
+        device_tracker_away_window: int | None = None,
         selected_rule_ids: list[str] | None = None,
         selected_rule_templates: tuple[FirewallaRuleTemplate, ...] | None = None,
         watched_devices: list[str] | None = None,
+        watched_device_online_window: int | None = None,
         watched_users: list[str] | None = None,
         update_interval: int | None = None,
     ) -> dict[str, object]:
@@ -575,10 +635,25 @@ class FirewallaOptionsFlow(OptionsFlow):
                 if watched_devices is None
                 else watched_devices
             ),
+            CONF_DEVICE_TRACKERS: (
+                self._get_stored_device_trackers()
+                if device_trackers is None
+                else device_trackers
+            ),
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: (
+                self._get_stored_device_tracker_away_window()
+                if device_tracker_away_window is None
+                else device_tracker_away_window
+            ),
             CONF_WATCHED_USERS: (
                 self._get_stored_watched_users()
                 if watched_users is None
                 else watched_users
+            ),
+            CONF_WATCHED_DEVICE_ONLINE_WINDOW: (
+                self._get_stored_watched_device_online_window()
+                if watched_device_online_window is None
+                else watched_device_online_window
             ),
             CONF_UPDATE_INTERVAL: (
                 self._get_stored_update_interval()
@@ -594,14 +669,14 @@ class FirewallaOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
-        """Show the top-level options menu after one runtime refresh."""
+        """Show the top-level options menu."""
         del user_input
-        await self._async_refresh_runtime_state_once()
         return self.async_show_menu(
             step_id=_STEP_ID_INIT,
             menu_options=[
                 _STEP_ID_RULE_SELECTION,
                 _STEP_ID_EDIT_WATCHED_DEVICES,
+                _STEP_ID_EDIT_DEVICE_TRACKERS,
                 _STEP_ID_EDIT_WATCHED_USERS,
                 _STEP_ID_GENERAL_OPTIONS,
             ],
@@ -783,6 +858,62 @@ class FirewallaOptionsFlow(OptionsFlow):
             ),
         )
 
+    async def async_step_edit_device_trackers(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
+        """Manage device-tracker selection options."""
+        live_device_tracker_choices = self._get_device_tracker_choices()
+        missing_device_tracker_choices = self._get_missing_device_tracker_choices(
+            live_device_tracker_choices
+        )
+        device_tracker_choices = {
+            **live_device_tracker_choices,
+            **missing_device_tracker_choices,
+        }
+
+        if user_input is not None:
+            typed_user_input = DeviceTrackersOptionsInput(
+                device_trackers=cast(
+                    list[str], user_input.get(CONF_DEVICE_TRACKERS, [])
+                ),
+                return_to_main_menu=cast(
+                    bool, user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False)
+                ),
+            )
+            if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
+                return await self.async_step_init()
+
+            device_trackers = sorted(
+                mac
+                for mac in typed_user_input.get(CONF_DEVICE_TRACKERS, [])
+                if mac in device_tracker_choices
+            )
+            self._update_entry_options(
+                self._build_options_payload(device_trackers=device_trackers)
+            )
+            return await self.async_step_init()
+
+        selected_device_trackers = [
+            mac
+            for mac in self._get_stored_device_trackers()
+            if mac in device_tracker_choices
+        ]
+        return self.async_show_form(
+            step_id=_STEP_ID_EDIT_DEVICE_TRACKERS,
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_DEVICE_TRACKERS,
+                        default=selected_device_trackers,
+                    ): cv.multi_select(device_tracker_choices),
+                    vol.Optional(
+                        _OPTION_RETURN_TO_MAIN_MENU,
+                        default=False,
+                    ): bool,
+                }
+            ),
+        )
+
     async def async_step_general_options(
         self, user_input: dict[str, object] | None = None
     ) -> ConfigFlowResult:
@@ -803,9 +934,15 @@ class FirewallaOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             typed_user_input = SystemSettingsOptionsInput(
+                device_tracker_away_window=cast(
+                    int, user_input[CONF_DEVICE_TRACKER_AWAY_WINDOW]
+                ),
                 update_interval=cast(int, user_input[CONF_UPDATE_INTERVAL]),
                 return_to_main_menu=cast(
                     bool, user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False)
+                ),
+                watched_device_online_window=cast(
+                    int, user_input[CONF_WATCHED_DEVICE_ONLINE_WINDOW]
                 ),
             )
             if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
@@ -815,7 +952,13 @@ class FirewallaOptionsFlow(OptionsFlow):
                 self._build_options_payload(
                     selected_rule_ids=stored_selected_rule_ids,
                     selected_rule_templates=stored_selected_rule_templates,
+                    device_tracker_away_window=typed_user_input[
+                        CONF_DEVICE_TRACKER_AWAY_WINDOW
+                    ],
                     update_interval=typed_user_input[CONF_UPDATE_INTERVAL],
+                    watched_device_online_window=typed_user_input[
+                        CONF_WATCHED_DEVICE_ONLINE_WINDOW
+                    ],
                 )
             )
             return await self.async_step_init()
@@ -824,6 +967,20 @@ class FirewallaOptionsFlow(OptionsFlow):
             step_id=_STEP_ID_SYSTEM_SETTINGS,
             data_schema=vol.Schema(
                 {
+                    vol.Required(
+                        CONF_WATCHED_DEVICE_ONLINE_WINDOW,
+                        default=self._get_stored_watched_device_online_window(),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES),
+                    ),
+                    vol.Required(
+                        CONF_DEVICE_TRACKER_AWAY_WINDOW,
+                        default=self._get_stored_device_tracker_away_window(),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES),
+                    ),
                     vol.Required(
                         CONF_UPDATE_INTERVAL,
                         default=self._get_stored_update_interval(),

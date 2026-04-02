@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import FirewallaApiClient, FirewallaApiError, FirewallaAuthError
 from .const import (
+    CONF_DEVICE_TRACKERS,
     CONF_HOST,
     CONF_LOCAL_IP,
     CONF_SELECTED_RULE_IDS,
@@ -75,6 +77,17 @@ def _get_watched_user_ids(options: Mapping[str, object]) -> tuple[str, ...]:
     )
 
 
+def _get_device_tracker_macs(options: Mapping[str, object]) -> tuple[str, ...]:
+    """Return the stored device-tracker MACs in a stable order."""
+    raw_device_trackers = options.get(CONF_DEVICE_TRACKERS, [])
+    if not isinstance(raw_device_trackers, list):
+        return ()
+
+    return tuple(
+        sorted(mac for mac in raw_device_trackers if isinstance(mac, str) and mac)
+    )
+
+
 def get_configured_update_interval(options: Mapping[str, object]) -> timedelta:
     """Return the validated polling interval configured in entry options."""
     raw_update_interval = options.get(
@@ -117,6 +130,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         """Initialize the coordinator."""
         self.client = client
         self.last_init_payload: dict[str, object] | None = None
+        self.last_runtime_data_updated_at: datetime | None = None
         self.host_manager: FirewallaHostManager | None = None
         self.integration_manager: FirewallaIntegrationManager | None = None
         self.rule_manager: FirewallaRuleManager | None = None
@@ -173,6 +187,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         if self.rule_manager is not None:
             self.rule_manager.handle_refresh(self.last_init_payload or {}, snapshot)
 
+        self.last_runtime_data_updated_at = dt_util.utcnow()
+
         return snapshot
 
     async def async_handle_entry_reload_requested(
@@ -190,14 +206,19 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         current_watched_device_macs = (
             entry.runtime_data.host_manager.configured_watched_device_macs
         )
+        current_device_tracker_macs = (
+            entry.runtime_data.host_manager.configured_device_tracker_macs
+        )
         current_watched_user_ids = (
             entry.runtime_data.user_manager.configured_watched_user_ids
         )
         if (
             current_selected_rule_ids == _get_selected_rule_ids(entry.options)
             and current_watched_device_macs == _get_watched_device_macs(entry.options)
+            and current_device_tracker_macs == _get_device_tracker_macs(entry.options)
             and current_watched_user_ids == _get_watched_user_ids(entry.options)
         ):
+            self.async_update_listeners()
             return
 
         await hass.config_entries.async_reload(entry.entry_id)
