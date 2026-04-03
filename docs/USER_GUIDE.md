@@ -564,7 +564,7 @@ Add this to your Home Assistant configuration:
 logger:
   default: warning
   logs:
-   custom_components.firewalla_local: debug
+    custom_components.firewalla_local: debug
 ```
 
 Then restart Home Assistant and retry pairing.

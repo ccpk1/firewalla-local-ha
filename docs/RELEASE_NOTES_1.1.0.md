@@ -30,6 +30,9 @@ Firewalla device.
 - Added a manual `Sync runtime` button on the main Firewalla device and a
 	`runtime_data_updated_at` system-status attribute showing when the current
 	runtime snapshot was last refreshed.
+- Added clearer pairing support tooling with enhanced debug logging breadcrumbs
+	for QR validation, cloud provisioning, and local runtime validation, plus
+	troubleshooting guidance in the user guide.
 
 ## New services since 1.0.0
 
@@ -168,5 +171,7 @@ Highlights in this release:
 	selected MAC-backed LAN clients.
 - Added a manual `Sync runtime` button on the Firewalla device and a
 	system-status attribute showing when the runtime snapshot was last refreshed.
+- Added enhanced pairing debug logging and troubleshooting guidance to make
+	first-time setup failures easier to diagnose.
 
 No migration is expected for existing 1.0.0 users.
