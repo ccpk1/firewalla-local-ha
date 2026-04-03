@@ -73,7 +73,7 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
 Connecting any external system to your firewall’s management layer requires a high degree of trust.
 *   **Independence:** This project is not affiliated with, endorsed by, or supported by Firewalla Inc.
 *   **Zero-Credential Storage:** This integration does not store your Firewalla account password. It uses an encrypted token exchange identical to the official Firewalla app.
-*   **Full Control:** Because this uses the official "Additional Pairing" protocol, you are in total control. You can revoke this integration's access at any time by simply opening the Firewalla app and removing it from your paired devices.
+*   **Local credential persistence:** Testing indicates Firewalla may return a stable local credential bundle for the box during Additional Pairing. Removing the paired-device entry in the Firewalla app should not be treated as a guaranteed revocation of already-cached local access.
 *   **Responsibility:** Access to your firewall's control plane is powerful. By bridging your firewall to Home Assistant, you are inherently expanding your network's attack surface. If your Home Assistant instance is exposed or compromised, your network routing and firewall rules could be manipulated. By using this integration, you accept this risk and are solely responsible for locking down your Home Assistant environment (e.g., enforcing 2FA, securing remote access, and managing user permissions).
 
 ## 🧭 **Design Philosophy & Scope**

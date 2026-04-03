@@ -68,6 +68,32 @@ Services added after 1.0.0:
 Because this integration communicates entirely locally, it uses the same secure
 pairing process as adding a secondary phone to your Firewalla.
 
+> Warning
+> Security notice: local credential persistence and unpairing
+>
+> This integration uses Firewalla's official Additional Pairing flow to
+> communicate directly with your Firewalla box over your local network.
+>
+> Testing indicates Firewalla may return a local credential bundle that is tied
+> to the Firewalla box rather than uniquely to one Home Assistant instance.
+> This bundle includes the values Home Assistant stores for local access, such
+> as `symmetric_key`, `gid`, `aid`, and `eid`.
+>
+> Removing the Home Assistant paired-device entry in the Firewalla mobile app
+> should not be treated as a guaranteed revocation of those already-cached local
+> credentials. If the Home Assistant config entry still exists and still holds a
+> valid local credential bundle, the integration may continue to read local
+> Firewalla data.
+>
+> To fully remove the integration from Home Assistant, delete the Firewalla
+> Local config entry from **Settings -> Devices & Services** so Home Assistant
+> removes the stored local credentials. You may also remove the paired-device
+> entry from the Firewalla app to keep the paired-device list clean.
+>
+> Current testing does not prove which Firewalla action rotates or invalidates
+> the underlying local credential bundle. Do not assume that simple unpairing in
+> the mobile app alone revokes local access.
+
 **Step 1: Start the Home Assistant setup**
 
 1. Open **Settings -> Devices & Services -> Add Integration**.
