@@ -16,6 +16,7 @@ from ..const import (
     DEFAULT_PAIRING_DEVICE_NAME,
     FIREWALLA_PROTOCOL_CLIENT_ID,
     FIREWALLA_PROTOCOL_CLIENT_KEY,
+    LOGGER,
 )
 from .crypto import (
     aes256_cbc_decrypt_from_base64,
@@ -211,6 +212,7 @@ async def login_eptoken(
     public_pem: str,
 ) -> ETPIdentity:
     """Create or refresh the ETP identity used for the cloud link step."""
+    LOGGER.debug("Requesting Firewalla cloud login token for pairing")
     status, response_text = await post_json(
         session,
         f"{APP_API_BASE}{_ENDPOINT_LOGIN_EPTOKEN}",
@@ -222,6 +224,7 @@ async def login_eptoken(
         raise FirewallaProtocolError(
             f"login/eptoken failed with HTTP {status}: {response_text}"
         )
+    LOGGER.debug("Firewalla cloud login token request succeeded")
     return parse_login_identity(response_text)
 
 
@@ -232,6 +235,7 @@ async def link_group_cloud(
     pairing_code: PairingCode,
 ) -> None:
     """Execute the authenticated cloud rendezvous step for additional pairing."""
+    LOGGER.debug("Submitting Firewalla cloud rendezvous pairing request")
     status, response_text = await post_json(
         session,
         f"{APP_API_BASE}{_ENDPOINT_CLOUD_RENDEZVOUS}",
@@ -244,6 +248,7 @@ async def link_group_cloud(
         raise FirewallaProtocolError(
             f"Cloud rendezvous failed with HTTP {status}: {response_text}"
         )
+    LOGGER.debug("Firewalla cloud rendezvous pairing request succeeded")
 
 
 def extract_groups(payload: object) -> list[CloudGroupRecord] | None:
@@ -272,6 +277,7 @@ async def fetch_groups(
 ) -> tuple[GroupFetchResult, ETPIdentity]:
     """Fetch the linked groups from the strongest known cloud sources."""
     for endpoint in APP_GROUP_ENDPOINT_CANDIDATES:
+        LOGGER.debug("Polling Firewalla cloud groups from %s", endpoint)
         status, response_text = await get_json(
             session,
             f"{APP_API_BASE}{endpoint}",
@@ -284,11 +290,16 @@ async def fetch_groups(
 
         payload = json.loads(response_text)
         if groups := extract_groups(payload):
+            LOGGER.debug(
+                "Firewalla cloud groups became visible from %s",
+                endpoint,
+            )
             return (
                 GroupFetchResult(source=endpoint, status=status, groups=groups),
                 identity,
             )
 
+    LOGGER.debug("Refreshing Firewalla cloud identity after groups polling miss")
     refreshed_identity = await login_eptoken(
         session,
         assertion_name=assertion_name,
@@ -360,6 +371,7 @@ async def async_provision_firewalla_credentials(
     interval: float = DEFAULT_GROUP_POLL_INTERVAL,
 ) -> FirewallaProvisionedCredentials:
     """Run the approved cloud provisioning flow and return durable local credentials."""
+    LOGGER.debug("Starting Firewalla cloud provisioning flow for host %s", host)
     identity = await login_eptoken(
         session,
         assertion_name=assertion_name,
@@ -374,6 +386,12 @@ async def async_provision_firewalla_credentials(
 
     current_identity = identity
     for attempt in range(attempts):
+        LOGGER.debug(
+            "Polling Firewalla cloud groups for host %s (attempt %s/%s)",
+            host,
+            attempt + 1,
+            attempts,
+        )
         if attempt:
             await asyncio.sleep(interval)
 
@@ -390,6 +408,10 @@ async def async_provision_firewalla_credentials(
             private_pem=keys.private_pem,
         )
         if credentials is not None:
+            LOGGER.debug(
+                "Firewalla cloud provisioning produced local credentials for host %s",
+                host,
+            )
             return credentials
 
     raise FirewallaProtocolError(

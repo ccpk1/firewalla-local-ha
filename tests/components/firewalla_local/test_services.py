@@ -12,9 +12,10 @@ from zoneinfo import ZoneInfo
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.firewalla_local.api import FirewallaApiError
 from custom_components.firewalla_local.const import (
     CONF_AID,
     CONF_EID,
@@ -73,6 +74,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
+    TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
 from custom_components.firewalla_local.models import (
@@ -1125,7 +1127,7 @@ async def test_pause_rule_service_rejects_invalid_duration(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    with pytest.raises(ServiceValidationError, match="Invalid duration"):
+    with pytest.raises(ServiceValidationError, match=r'duration ".*" is invalid'):
         await hass.services.async_call(
             DOMAIN,
             SERVICE_PAUSE_RULE,
@@ -1327,7 +1329,10 @@ async def test_pause_rule_service_rejects_duration_and_resume_at(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    with pytest.raises(ServiceValidationError, match="Provide either duration"):
+    with pytest.raises(
+        ServiceValidationError,
+        match="Provide either a duration or a resume time",
+    ):
         await hass.services.async_call(
             DOMAIN,
             SERVICE_PAUSE_RULE,
@@ -1682,10 +1687,7 @@ async def test_pause_rule_service_requires_selector_with_multiple_entries(
 
     with pytest.raises(
         ServiceValidationError,
-        match=(
-            "Multiple Firewalla entries are loaded; "
-            "use config_entry_id or config_entry_name"
-        ),
+        match=("Multiple Firewalla entries are loaded"),
     ):
         await hass.services.async_call(
             DOMAIN,
@@ -1746,7 +1748,10 @@ async def test_pause_rule_service_rejects_unknown_rule_target(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    with pytest.raises(ServiceValidationError, match="Rule target not found"):
+    with pytest.raises(
+        ServiceValidationError,
+        match=r'rule target ".*" does not match a managed live rule',
+    ):
         await hass.services.async_call(
             DOMAIN,
             SERVICE_PAUSE_RULE,
@@ -2248,9 +2253,9 @@ async def test_wake_host_service_rejects_ambiguous_host_name(
     with pytest.raises(
         ServiceValidationError,
         match=(
-            r"More than one host matched name Plex Server: "
-            r"Plex Server \(10\.42\.0\.2\) \[wg_peer:test-peer\], "
-            r"Plex Server \(192\.168\.10\.10\) \[00:AA:BB:CC:DD:26\]"
+            r'More than one Firewalla host matches the name "Plex Server"'
+            r".*Matching hosts: "
+            r".*wg_peer:test-peer.*00:AA:BB:CC:DD:26"
         ),
     ):
         await hass.services.async_call(
@@ -2313,6 +2318,59 @@ async def test_wake_host_service_rejects_non_wol_host(
             blocking=True,
             return_response=True,
         )
+
+
+async def test_wake_host_service_raises_translated_runtime_error(
+    hass: HomeAssistant,
+) -> None:
+    """Test the Wake-on-LAN service raises a translation-backed runtime error."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_wake_host",
+            new=AsyncMock(side_effect=FirewallaApiError("boom")),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_WAKE_HOST,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                    SERVICE_FIELD_REFRESH: False,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED
 
 
 async def test_set_host_notify_when_next_online_returns_acknowledgement(
@@ -2925,7 +2983,7 @@ async def test_set_host_dhcp_reservation_requires_ipv4_for_static_mode(
 
     with pytest.raises(
         ServiceValidationError,
-        match="reserved_ipv4 is required when mode is static",
+        match="Provide reserved IPv4 when the reservation mode is static",
     ):
         await hass.services.async_call(
             DOMAIN,
@@ -4236,7 +4294,7 @@ async def test_get_network_segment_report_service_requires_network_selector(
 
     with pytest.raises(
         ServiceValidationError,
-        match="Provide network_uuid or network_name",
+        match="Provide a network UUID or network name",
     ):
         await hass.services.async_call(
             DOMAIN,
@@ -4737,7 +4795,7 @@ async def test_get_network_segment_usage_service_requires_window(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    with pytest.raises(ServiceValidationError, match="Provide window"):
+    with pytest.raises(ServiceValidationError, match="Provide a window"):
         await hass.services.async_call(
             DOMAIN,
             SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -4785,7 +4843,7 @@ async def test_get_network_segment_usage_service_requires_network_selector(
 
     with pytest.raises(
         ServiceValidationError,
-        match="Provide network_uuid or network_name",
+        match="Provide a network UUID or network name",
     ):
         await hass.services.async_call(
             DOMAIN,

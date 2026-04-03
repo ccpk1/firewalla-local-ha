@@ -72,7 +72,7 @@ rules:
     comment: "Rule-backed switch, appliance-monitoring, watched-device, and watched-user icons are defined in icons.json instead of inline icon strings."
   stale-devices:
     status: done
-    comment: The integration exposes one stable Firewalla device per config entry with availability rules and does not dynamically remove devices.  It does properly handle lifecyle when the user chooses to items from under management.
+    comment: The integration reconciles tracked-client device-registry entries for selected device trackers, removing stale client devices when they are deselected or no longer owned by the config entry while retaining the primary Firewalla device per entry.
 
   # Platinum
   async-dependency:

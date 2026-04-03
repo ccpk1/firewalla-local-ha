@@ -254,6 +254,10 @@ TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_REQUIRED: Final = (
 TRANS_KEY_EXCEPTION_HOST_REQUIRED: Final = "host_required"
 TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT: Final = "host_selector_conflict"
 TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED: Final = "host_wake_not_supported"
+TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED: Final = (
+    "network_segment_report_failed"
+)
+TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED: Final = "network_segment_usage_failed"
 TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS: Final = "network_name_ambiguous"
 TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND: Final = "network_not_found"
 TRANS_KEY_EXCEPTION_NETWORK_REQUIRED: Final = "network_required"
@@ -265,6 +269,14 @@ TRANS_KEY_ENTITY_BUTTON_SYNC_RUNTIME: Final = "sync_runtime"
 TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT: Final = "pause_rule_timing_conflict"
 TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST: Final = "resume_at_in_past"
 TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND: Final = "rule_target_not_found"
+TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED: Final = (
+    "run_internet_speed_test_failed"
+)
+TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED: Final = (
+    "set_host_dhcp_reservation_failed"
+)
+TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED: Final = "set_host_name_failed"
+TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED: Final = "set_host_notify_failed"
 TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS: Final = (
     "speed_test_wan_name_ambiguous"
 )
@@ -282,9 +294,13 @@ TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS: Final = (
 TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND: Final = (
     "time_usage_report_scope_not_found"
 )
+TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED: Final = "time_usage_report_failed"
+TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED: Final = "wake_host_failed"
+TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED: Final = "wan_data_usage_failed"
 TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
     "wan_data_usage_history_period_required"
 )
+TRANS_KEY_EXCEPTION_WAN_EVENTS_FAILED: Final = "wan_events_failed"
 TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY: Final = "wrong_integration_entry"
 TRANS_KEY_ENTITY_BINARY_SENSOR_SYSTEM_STATUS: Final = "system_status"
 TRANS_KEY_ENTITY_BINARY_SENSOR_WATCHED_DEVICE: Final = "watched_device"
@@ -301,6 +317,11 @@ TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY: Final = (
 TRANS_KEY_PURPOSE_WATCHED_USER_USAGE: Final = "purpose_watched_user_usage"
 TRANS_KEY_PURPOSE_SPEED_TEST: Final = "purpose_speed_test"
 TRANS_KEY_PURPOSE_RULE_SWITCH: Final = "purpose_rule_control"
+TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE: Final = "unavailable_device"
+TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE_TRACKER: Final = "unavailable_device_tracker"
+TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE: Final = "unavailable_rule"
+TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE_SUFFIX: Final = "unavailable_rule_suffix"
+TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER: Final = "unavailable_user"
 TRANS_PLACEHOLDER_DURATION: Final = "duration"
 TRANS_PLACEHOLDER_HOST_MATCHES: Final = "host_matches"
 TRANS_PLACEHOLDER_HOST_NAME: Final = "host_name"

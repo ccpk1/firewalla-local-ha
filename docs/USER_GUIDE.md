@@ -534,3 +534,64 @@ creating a new rule for you.
   proven by protocol evidence
 - this is a community integration and not an official Firewalla support
   channel
+
+## Troubleshooting pairing
+
+If pairing fails, start with the simplest checks first.
+
+### Basic checks
+
+1. Confirm Home Assistant can reach the Firewalla local address you entered.
+  If `fire.walla` does not resolve correctly on your network, retry with the
+  Firewalla LAN IP instead. For reference, communication occurs over port 8833.
+2. Generate a fresh QR code in the Firewalla app and copy the raw JSON again.
+  The QR payload is time-limited, so stale content can fail even when the
+  rest of the setup is correct.
+3. Make sure Home Assistant has outbound internet access during pairing.
+  The long-term data path is local, but the initial pairing flow includes a
+  cloud-brokered credential exchange.
+4. Make sure your Home Assistant instance is not isolated from the Firewalla
+  management IP by VLAN or firewall policy.
+
+### Enable debug logging before first pairing
+
+If the integration has not been configured successfully yet, use manual Home
+Assistant logger configuration before retrying.
+
+Add this to your Home Assistant configuration:
+
+```yaml
+logger:
+  default: warning
+  logs:
+   custom_components.firewalla_local: debug
+```
+
+Then restart Home Assistant and retry pairing.
+
+This is the most reliable way to capture first-pair failures because there may
+not be a config entry yet, which means entry-scoped diagnostics are not always
+available.
+
+### If an entry already exists
+
+If Firewalla Local already appears in **Settings -> Devices & Services**, you
+can usually enable debug logging from the Home Assistant UI for the integration
+and then retry the failing action.
+
+If the entry loads successfully, you can also download integration diagnostics.
+Diagnostics are useful for existing entries, but they do not replace the log
+capture for a first-time pairing failure.
+
+### What to capture for support
+
+When asking for help, try to include:
+
+1. Whether you used `fire.walla` or a direct IP address
+2. Whether this is a first-time pairing or a reauthentication attempt
+3. The Home Assistant log output from the failed attempt after debug logging
+  was enabled
+4. Diagnostics from the integration UI if the config entry already exists
+
+The pairing logs now distinguish QR validation, cloud provisioning, and local
+runtime validation failures, which makes support triage much more direct.

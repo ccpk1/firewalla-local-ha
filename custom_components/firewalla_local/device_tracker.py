@@ -96,13 +96,9 @@ class FirewallaDeviceTracker(
         """Return the currently resolved device-tracker host."""
         return self.host_manager.get_host(self._mac)
 
-    def _handle_coordinator_update(self) -> None:
-        """Write updated state from the coordinator."""
-        super()._handle_coordinator_update()
-
-    async def async_internal_added_to_hass(self) -> None:
+    async def async_added_to_hass(self) -> None:
         """Attach the tracker to its client device and normalize auto IDs."""
-        await super().async_internal_added_to_hass()
+        await super().async_added_to_hass()
 
         if self.registry_entry is None:
             return

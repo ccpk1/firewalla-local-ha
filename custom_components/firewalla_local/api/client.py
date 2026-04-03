@@ -18,6 +18,7 @@ from ..const import (
     DEFAULT_INIT_TARGET,
     FIREWALLA_PROTOCOL_CLIENT_ID,
     FIREWALLA_PROTOCOL_CLIENT_VERSION,
+    LOGGER,
 )
 from ..models import (
     FirewallaApplianceIdentityInput,
@@ -258,8 +259,14 @@ class FirewallaApiClient:
     ) -> tuple[int, str]:
         """Post an encrypted payload to the local runtime endpoint."""
         url = f"http://{self.host}:8833/v1/encipher/message/{self.gid}"
+        LOGGER.debug("Posting Firewalla local runtime payload to host %s", self.host)
         try:
             async with self._session.post(url, json=payload) as response:
+                LOGGER.debug(
+                    "Firewalla local runtime responded with HTTP %s for host %s",
+                    response.status,
+                    self.host,
+                )
                 return response.status, await response.text()
         except ClientError as err:
             raise FirewallaConnectionError(
@@ -310,6 +317,11 @@ class FirewallaApiClient:
 
         response_status, response_text = await self._async_post_local_payload(payload)
         if response_status == 401:
+            LOGGER.debug(
+                "Firewalla local runtime returned unauthorized for host %s; "
+                "retrying once",
+                self.host,
+            )
             response_status, response_text = await self._async_post_local_payload(
                 payload
             )
@@ -371,6 +383,7 @@ class FirewallaApiClient:
 
     async def async_get_runtime_init_payload(self) -> dict[str, object]:
         """Fetch the raw Firewalla init payload from the local runtime."""
+        LOGGER.debug("Requesting Firewalla local init payload from host %s", self.host)
         return await self._async_send_local_message(
             message_type=_INIT_MESSAGE_TYPE,
             data={_COMMAND_GET_KEY: DEFAULT_INIT_TARGET},

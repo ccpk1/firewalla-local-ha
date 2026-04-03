@@ -274,47 +274,47 @@ set_host_notify_when_next_online:
       required: true
       example: true
       selector:
-        boolean:
+        boolean: {}
       name: Enabled
       description: Required. Turn the selected host's notify-when-next-online setting on or off.
     host_mac:
       required: false
       example: "00:AA:BB:CC:DD:26"
       selector:
-        text:
+        text: {}
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
       example: "Plex Server"
       selector:
-        text:
+        text: {}
       name: Host name
       description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
     host_id:
       required: false
       example: "00:AA:BB:CC:DD:26"
       selector:
-        text:
+        text: {}
       name: Host ID
       description: Optional. Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC.
     refresh:
       required: false
       example: true
       selector:
-        boolean:
+        boolean: {}
       name: Refresh first
       description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the notification-setting change.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
       selector:
-        text:
+        text: {}
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
-        text:
+        text: {}
 
 set_host_notify_when_next_offline:
   name: Set host notify when next offline
@@ -507,21 +507,21 @@ get_time_usage_report:
       required: true
       example: "EC:0D:51:CC:BA:BC"
       selector:
-        text:
+        text: {}
       name: Scope target
       description: Required. Use a stable ID or the current display label for the selected scope.
     begin:
       required: true
       example: "2026-03-20 00:00:00"
       selector:
-        datetime:
+        datetime: {}
       name: Begin
       description: Required. Local date and time for the beginning of the usage window.
     end:
       required: true
       example: "2026-03-27 00:00:00"
       selector:
-        datetime:
+        datetime: {}
       name: End
       description: Required. Local date and time for the end of the usage window.
     granularity:
@@ -578,19 +578,19 @@ get_time_usage_report:
       required: false
       example: "internet,facebook"
       selector:
-        text:
+        text: {}
       name: App IDs
       description: Optional. Provide a comma-separated list in the UI, or a list in YAML. Omit this field to return all available app sections. A non-empty list also keeps the apps section in the response.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
       selector:
-        text:
+        text: {}
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
-        text:
+        text: {}
 
 get_wan_data_usage:
   name: Get WAN data usage

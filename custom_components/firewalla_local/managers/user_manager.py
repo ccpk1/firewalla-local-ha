@@ -14,8 +14,6 @@ from ..models import (
 )
 from .base_manager import FirewallaBaseManager
 
-_UNAVAILABLE_USER_LABEL = "Unavailable user"
-
 
 class FirewallaUserManager(FirewallaBaseManager):
     """Own normalized watched-user lookups and host associations."""
@@ -173,17 +171,6 @@ class FirewallaUserManager(FirewallaBaseManager):
     def get_watched_user_choices(self) -> dict[str, str]:
         """Return watched-user choices from the latest normalized runtime data."""
         return self.get_watched_user_choices_for_users(self.get_users())
-
-    def get_missing_watched_user_choices(
-        self, configured_watched_user_ids: tuple[str, ...]
-    ) -> dict[str, str]:
-        """Return unavailable watched-user labels for missing configured users."""
-        live_choices = self.get_watched_user_choices()
-        return {
-            user_id: f"[{user_id}] {_UNAVAILABLE_USER_LABEL}"
-            for user_id in configured_watched_user_ids
-            if user_id not in live_choices
-        }
 
     def get_user(self, user_id: str) -> FirewallaWatchedUser | None:
         """Return one watched-user view by identifier."""

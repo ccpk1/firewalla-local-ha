@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from datetime import UTC, datetime, tzinfo
 from ipaddress import AddressValueError, IPv4Address, IPv4Network
-from typing import cast
+from typing import Any, cast
 
 import voluptuous as vol
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import (
+    EntityServiceResponse,
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
@@ -88,19 +94,29 @@ from .const import (
     TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
     TRANS_KEY_EXCEPTION_NETWORK_REQUIRED,
+    TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED,
+    TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED,
     TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_NETWORK_USAGE_WINDOW_REQUIRED,
     TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT,
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
     TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
+    TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED,
+    TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED,
+    TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED,
     TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
+    TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED,
     TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
+    TRANS_KEY_EXCEPTION_WAN_EVENTS_FAILED,
     TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY,
     TRANS_PLACEHOLDER_DURATION,
     TRANS_PLACEHOLDER_HOST_MATCHES,
@@ -358,6 +374,34 @@ GET_WAN_EVENTS_SCHEMA = vol.Schema(
     }
 )
 
+
+def _raise_runtime_service_error(
+    err: FirewallaApiError,
+    *,
+    log_message: str,
+    translation_key: str,
+) -> None:
+    """Raise one translation-backed runtime service error."""
+    LOGGER.debug("%s: %s", log_message, err)
+    raise HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key=translation_key,
+    ) from err
+
+
+def _service_validation_error(
+    *,
+    translation_key: str,
+    translation_placeholders: dict[str, str] | None = None,
+) -> ServiceValidationError:
+    """Return one translation-backed service validation error."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key=translation_key,
+        translation_placeholders=translation_placeholders,
+    )
+
+
 _USAGE_HISTORY_REQUEST_SCOPE_HOST = "host"
 _USAGE_HISTORY_REQUEST_SCOPE_TAG = "tag"
 
@@ -377,21 +421,15 @@ def _get_loaded_entry(
 
     if entry_id:
         if not (entry := hass.config_entries.async_get_entry(entry_id)):
-            raise ServiceValidationError(
-                "Config entry not found",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND,
             )
         if entry.domain != DOMAIN:
-            raise ServiceValidationError(
-                "Config entry does not belong to Firewalla Local",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY,
             )
         if entry.runtime_data is None:
-            raise ServiceValidationError(
-                "Config entry is not loaded",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_LOADED,
             )
         return cast(FirewallaConfigEntry, entry)
@@ -401,15 +439,11 @@ def _get_loaded_entry(
             entry for entry in loaded_entries if entry.title == entry_name
         ]
         if not matching_entries:
-            raise ServiceValidationError(
-                "Config entry name not found",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
             )
         if len(matching_entries) > 1:
-            raise ServiceValidationError(
-                "Config entry name is ambiguous; use config_entry_id",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS,
             )
         return cast(FirewallaConfigEntry, matching_entries[0])
@@ -417,12 +451,7 @@ def _get_loaded_entry(
     if len(loaded_entries) == 1:
         return cast(FirewallaConfigEntry, loaded_entries[0])
 
-    raise ServiceValidationError(
-        (
-            "Multiple Firewalla entries are loaded; "
-            "use config_entry_id or config_entry_name"
-        ),
-        translation_domain=DOMAIN,
+    raise _service_validation_error(
         translation_key=TRANS_KEY_EXCEPTION_MULTIPLE_ENTRIES_LOADED,
     )
 
@@ -1588,9 +1617,7 @@ def _resolve_requested_network_required(
     if resolved_network is not None:
         return resolved_network
 
-    raise ServiceValidationError(
-        "Provide network_uuid or network_name",
-        translation_domain=DOMAIN,
+    raise _service_validation_error(
         translation_key=TRANS_KEY_EXCEPTION_NETWORK_REQUIRED,
     )
 
@@ -1610,9 +1637,7 @@ def _resolve_requested_host(
         if isinstance(value, str) and value.strip()
     ]
     if len(selector_values) > 1:
-        raise ServiceValidationError(
-            "Provide only one of host_id, host_mac, or host_name",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT,
         )
 
@@ -1621,18 +1646,14 @@ def _resolve_requested_host(
     if host_mac is not None:
         if host := host_manager.get_host(host_mac):
             return host
-        raise ServiceValidationError(
-            f"No host matched selector {host_mac}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
         )
 
     if host_id is not None:
         if host := host_manager.get_host(host_id):
             return host
-        raise ServiceValidationError(
-            f"No host matched selector {host_id}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
         )
 
@@ -1662,25 +1683,19 @@ def _resolve_requested_host(
                     key=lambda mac: ((choices.get(mac) or mac).casefold(), mac),
                 )
             )
-            raise ServiceValidationError(
-                f"More than one host matched name {host_name}: {matching_labels}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS,
                 translation_placeholders={
                     TRANS_PLACEHOLDER_HOST_MATCHES: matching_labels,
                     TRANS_PLACEHOLDER_HOST_NAME: host_name,
                 },
             )
-        raise ServiceValidationError(
-            f"No host matched selector {host_name}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
         )
 
     if required:
-        raise ServiceValidationError(
-            "Provide host_id, host_mac, or host_name",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_REQUIRED,
         )
 
@@ -1919,9 +1934,7 @@ def _resolve_dhcp_reservation_network(
         )
 
     if reserved_ipv4 is None:
-        raise ServiceValidationError(
-            "Provide network_uuid or network_name",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_NETWORK_REQUIRED,
         )
 
@@ -1942,18 +1955,14 @@ def _resolve_dhcp_reservation_network(
         return matching_networks[0]
 
     if not matching_networks:
-        raise ServiceValidationError(
-            f"No network matched reserved IPv4 {reserved_ipv4}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_NOT_FOUND,
             translation_placeholders={
                 TRANS_PLACEHOLDER_RESERVED_IPV4: str(reserved_ipv4),
             },
         )
 
-    raise ServiceValidationError(
-        f"More than one network matched reserved IPv4 {reserved_ipv4}",
-        translation_domain=DOMAIN,
+    raise _service_validation_error(
         translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_NETWORK_AMBIGUOUS,
         translation_placeholders={
             TRANS_PLACEHOLDER_RESERVED_IPV4: str(reserved_ipv4),
@@ -1981,12 +1990,7 @@ def _validate_dhcp_reservation_request(
         dhcp_config is not None
         and _ipv4_in_dhcp_range(reserved_ipv4, dhcp_config) is False
     ):
-        raise ServiceValidationError(
-            (
-                f"Reserved IPv4 {reserved_ipv4} is outside the DHCP "
-                f"range for {network.name}"
-            ),
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_OUT_OF_RANGE,
             translation_placeholders={
                 TRANS_PLACEHOLDER_NETWORK_NAME: network.name,
@@ -2012,12 +2016,7 @@ def _validate_dhcp_reservation_request(
                 if duplicate_host is not None
                 else raw_host_mac
             )
-            raise ServiceValidationError(
-                (
-                    f"Reserved IPv4 {reserved_ipv4} is already assigned "
-                    f"to {duplicate_host_name}"
-                ),
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_IN_USE,
                 translation_placeholders={
                     TRANS_PLACEHOLDER_HOST_NAME: duplicate_host_name,
@@ -2505,9 +2504,7 @@ def _resolve_requested_wan(
 ) -> FirewallaWanInterface | None:
     """Resolve one optional or required WAN selector against runtime metadata."""
     if wan_uuid and wan_name:
-        raise ServiceValidationError(
-            "Provide either wan_uuid or wan_name, not both",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT,
         )
 
@@ -2519,9 +2516,7 @@ def _resolve_requested_wan(
             None,
         ):
             return resolved_wan
-        raise ServiceValidationError(
-            f"No WAN matched UUID {wan_uuid}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
             translation_placeholders={TRANS_PLACEHOLDER_WAN_UUID: wan_uuid},
         )
@@ -2531,16 +2526,12 @@ def _resolve_requested_wan(
             wan for wan in available_wans if wan.name.casefold() == wan_name.casefold()
         ]
         if not matching_wans:
-            raise ServiceValidationError(
-                f"No WAN matched name {wan_name}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
                 translation_placeholders={TRANS_PLACEHOLDER_WAN_NAME: wan_name},
             )
         if len(matching_wans) > 1:
-            raise ServiceValidationError(
-                f"More than one WAN matched name {wan_name}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS,
                 translation_placeholders={TRANS_PLACEHOLDER_WAN_NAME: wan_name},
             )
@@ -2549,9 +2540,7 @@ def _resolve_requested_wan(
     if required:
         if len(available_wans) == 1:
             return available_wans[0]
-        raise ServiceValidationError(
-            "A WAN selector is required for this service call",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED,
         )
 
@@ -2566,9 +2555,7 @@ def _resolve_requested_network(
 ) -> FirewallaNetworkSegment | None:
     """Resolve one optional network selector against runtime metadata."""
     if network_uuid and network_name:
-        raise ServiceValidationError(
-            "Provide either network_uuid or network_name, not both",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT,
         )
 
@@ -2580,9 +2567,7 @@ def _resolve_requested_network(
             None,
         ):
             return resolved_network
-        raise ServiceValidationError(
-            f"No network matched UUID {network_uuid}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
             translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network_uuid},
         )
@@ -2594,16 +2579,12 @@ def _resolve_requested_network(
             if network.name.casefold() == network_name.casefold()
         ]
         if not matching_networks:
-            raise ServiceValidationError(
-                f"No network matched name {network_name}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
                 translation_placeholders={TRANS_PLACEHOLDER_NETWORK_NAME: network_name},
             )
         if len(matching_networks) > 1:
-            raise ServiceValidationError(
-                f"More than one network matched name {network_name}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS,
                 translation_placeholders={TRANS_PLACEHOLDER_NETWORK_NAME: network_name},
             )
@@ -2647,18 +2628,14 @@ def _resolve_usage_history_target(
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
             )
         if len(matches) > 1:
-            raise ServiceValidationError(
-                f"More than one {scope_kind} matched {scope_target}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
                 translation_placeholders={
                     TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
                     TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
                 },
             )
-        raise ServiceValidationError(
-            f"No {scope_kind} matched {scope_target}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
             translation_placeholders={
                 TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
@@ -2694,18 +2671,14 @@ def _resolve_usage_history_target(
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
             )
         if len(matches) > 1:
-            raise ServiceValidationError(
-                f"More than one {scope_kind} matched {scope_target}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
                 translation_placeholders={
                     TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
                     TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
                 },
             )
-        raise ServiceValidationError(
-            f"No {scope_kind} matched {scope_target}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
             translation_placeholders={
                 TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
@@ -2737,18 +2710,14 @@ def _resolve_usage_history_target(
             request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
         )
     if len(group_matches) > 1:
-        raise ServiceValidationError(
-            f"More than one {scope_kind} matched {scope_target}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
             translation_placeholders={
                 TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
                 TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
             },
         )
-    raise ServiceValidationError(
-        f"No {scope_kind} matched {scope_target}",
-        translation_domain=DOMAIN,
+    raise _service_validation_error(
         translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
         translation_placeholders={
             TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
@@ -2829,9 +2798,11 @@ async def _async_handle_run_internet_speed_test(call: ServiceCall) -> JsonObject
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(
-            f"Could not start the internet speed test: {err}"
-        ) from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to start internet speed test",
+            translation_key=TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
+        )
 
     return {
         "config_entry_id": entry.entry_id,
@@ -2866,9 +2837,7 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
     assert host is not None
 
     if not _supports_wake_on_lan(host.mac):
-        raise ServiceValidationError(
-            f"Host does not appear to support Wake-on-LAN: {host.mac}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED,
         )
 
@@ -2877,7 +2846,11 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
             host.mac
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(f"Could not wake host: {err}") from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to wake host",
+            translation_key=TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
+        )
 
     return {
         "config_entry_id": entry.entry_id,
@@ -2940,9 +2913,11 @@ async def _async_handle_set_host_notification(
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(
-            f"Could not update host notification setting: {err}"
-        ) from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to update host notification setting",
+            translation_key=TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED,
+        )
 
     return {
         "config_entry_id": entry.entry_id,
@@ -3030,7 +3005,11 @@ async def _async_handle_set_host_name(
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(f"Could not rename host: {err}") from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to rename host",
+            translation_key=TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED,
+        )
 
     return {
         "config_entry_id": entry.entry_id,
@@ -3093,16 +3072,12 @@ async def _async_handle_set_host_dhcp_reservation(
     )
 
     if mode == "static" and reserved_ipv4_input is None:
-        raise ServiceValidationError(
-            "reserved_ipv4 is required when mode is static",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_REQUIRED,
         )
 
     if mode == "dynamic" and reserved_ipv4_input is not None:
-        raise ServiceValidationError(
-            "reserved_ipv4 is only allowed when mode is static",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_CONFLICT,
         )
 
@@ -3111,9 +3086,7 @@ async def _async_handle_set_host_dhcp_reservation(
         try:
             reserved_ipv4 = IPv4Address(reserved_ipv4_input)
         except AddressValueError as err:
-            raise ServiceValidationError(
-                f"Invalid IPv4 address: {reserved_ipv4_input}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_INVALID,
             ) from err
 
@@ -3152,9 +3125,11 @@ async def _async_handle_set_host_dhcp_reservation(
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(
-            f"Could not update host DHCP reservation: {err}"
-        ) from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to update host DHCP reservation",
+            translation_key=TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED,
+        )
 
     return {
         "config_entry_id": entry.entry_id,
@@ -3262,9 +3237,7 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
     end_utc = dt_util.as_utc(end_input)
     time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
     if end_utc <= begin_utc:
-        raise ServiceValidationError(
-            "end must be after begin",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN,
         )
 
@@ -3297,7 +3270,11 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(f"Could not read time usage report: {err}") from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to read time usage report",
+            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED,
+        )
 
     return {
         "config_entry_id": entry.entry_id,
@@ -3343,9 +3320,7 @@ def _resolve_wan_data_usage_inputs(
     )
 
     if history_count > 0 and history_period is None:
-        raise ServiceValidationError(
-            "history_period is required when history_count is greater than zero",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
         )
 
@@ -3492,7 +3467,11 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
             time_zone=time_zone,
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(f"Could not read WAN data usage: {err}") from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to read WAN data usage",
+            translation_key=TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED,
+        )
     serialized_reports: list[JsonValueType] = [
         _serialize_wan_data_usage_report(report, time_zone=time_zone)
         for report in usage_reports
@@ -3600,14 +3579,14 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(
-            f"Could not read network segment report: {err}"
-        ) from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to read network segment report",
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED,
+        )
 
     if not network_views:
-        raise ServiceValidationError(
-            f"No network matched UUID {network.uuid}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
             translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
         )
@@ -3637,9 +3616,7 @@ async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObje
         network_name=call.data.get(SERVICE_FIELD_NETWORK_NAME),
     )
     if not isinstance(call.data.get(SERVICE_FIELD_WINDOW), str):
-        raise ServiceValidationError(
-            "Provide window for this service call",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_NETWORK_USAGE_WINDOW_REQUIRED,
         )
 
@@ -3658,14 +3635,14 @@ async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObje
             )
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(
-            f"Could not read network segment usage: {err}"
-        ) from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to read network segment usage",
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED,
+        )
 
     if not network_views:
-        raise ServiceValidationError(
-            f"No network matched UUID {network.uuid}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
             translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
         )
@@ -3707,7 +3684,11 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
             offset=offset,
         )
     except FirewallaApiError as err:
-        raise HomeAssistantError(f"Could not read WAN events: {err}") from err
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to read WAN events",
+            translation_key=TRANS_KEY_EXCEPTION_WAN_EVENTS_FAILED,
+        )
 
     serialized_events: list[JsonValueType] = [
         _serialize_wan_event(event) for event in events
@@ -3742,17 +3723,13 @@ async def _async_handle_pause_rule(call: ServiceCall) -> None:
     resume_at = call.data.get(SERVICE_FIELD_RULE_RESUME_AT)
 
     if not entry.runtime_data.rule_manager.has_rule_target(rule_target):
-        raise ServiceValidationError(
-            f"Rule target not found: {rule_target}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
             translation_placeholders={TRANS_PLACEHOLDER_RULE_TARGET: rule_target},
         )
 
     if duration is not None and resume_at is not None:
-        raise ServiceValidationError(
-            "Provide either duration or resume_at, not both",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT,
         )
 
@@ -3762,9 +3739,7 @@ async def _async_handle_pause_rule(call: ServiceCall) -> None:
         try:
             duration_seconds = parse_duration_to_seconds(duration)
         except ValueError as err:
-            raise ServiceValidationError(
-                f"Invalid duration: {duration}",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_INVALID_DURATION,
                 translation_placeholders={TRANS_PLACEHOLDER_DURATION: duration},
             ) from err
@@ -3774,9 +3749,7 @@ async def _async_handle_pause_rule(call: ServiceCall) -> None:
     elif isinstance(resume_at, datetime):
         resume_at_utc = dt_util.as_utc(resume_at)
         if resume_at_utc <= dt_util.utcnow():
-            raise ServiceValidationError(
-                "resume_at must be in the future",
-                translation_domain=DOMAIN,
+            raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
             )
         resume_ts = int(resume_at_utc.timestamp())
@@ -3796,9 +3769,7 @@ async def _async_handle_resume_rule(call: ServiceCall) -> None:
     rule_target = call.data[SERVICE_FIELD_RULE_TARGET]
 
     if not entry.runtime_data.rule_manager.has_rule_target(rule_target):
-        raise ServiceValidationError(
-            f"Rule target not found: {rule_target}",
-            translation_domain=DOMAIN,
+        raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
             translation_placeholders={TRANS_PLACEHOLDER_RULE_TARGET: rule_target},
         )
@@ -3806,182 +3777,156 @@ async def _async_handle_resume_rule(call: ServiceCall) -> None:
     await entry.runtime_data.rule_manager.async_resume_rule(rule_target)
 
 
+type FirewallaServiceHandler = Callable[
+    [ServiceCall],
+    Coroutine[Any, Any, ServiceResponse | EntityServiceResponse]
+    | ServiceResponse
+    | EntityServiceResponse
+    | None,
+]
+
+type FirewallaServiceRegistration = tuple[
+    str,
+    FirewallaServiceHandler,
+    vol.Schema,
+    SupportsResponse,
+]
+
+_SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
+    (
+        SERVICE_GET_RUNTIME_INVENTORY,
+        _async_handle_get_runtime_inventory,
+        GET_RUNTIME_INVENTORY_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_HOST_NAME_MAPPING,
+        _async_handle_get_host_name_mapping,
+        GET_HOST_NAME_MAPPING_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_NETWORK_SEGMENT_REPORT,
+        _async_handle_get_network_segment_report,
+        GET_NETWORK_SEGMENT_REPORT_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_NETWORK_SEGMENT_USAGE,
+        _async_handle_get_network_segment_usage,
+        GET_NETWORK_SEGMENT_USAGE_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_RUN_INTERNET_SPEED_TEST,
+        _async_handle_run_internet_speed_test,
+        RUN_INTERNET_SPEED_TEST_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_WAKE_HOST,
+        _async_handle_wake_host,
+        WAKE_HOST_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_SET_HOST_NAME,
+        _async_handle_set_host_name,
+        SET_HOST_NAME_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+        _async_handle_set_host_notify_when_next_online,
+        SET_HOST_NOTIFY_WHEN_NEXT_ONLINE_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
+        _async_handle_set_host_notify_when_next_offline,
+        SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_SET_HOST_DHCP_RESERVATION,
+        _async_handle_set_host_dhcp_reservation,
+        SET_HOST_DHCP_RESERVATION_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_SPEED_TEST_RESULTS,
+        _async_handle_get_speed_test_results,
+        GET_SPEED_TEST_RESULTS_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_TIME_USAGE_REPORT,
+        _async_handle_get_time_usage_report,
+        GET_TIME_USAGE_REPORT_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_WAN_DATA_USAGE,
+        _async_handle_get_wan_data_usage,
+        GET_WAN_DATA_USAGE_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_WAN_EVENTS,
+        _async_handle_get_wan_events,
+        GET_WAN_EVENTS_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_PAUSE_RULE,
+        _async_handle_pause_rule,
+        PAUSE_RULE_SCHEMA,
+        SupportsResponse.NONE,
+    ),
+    (
+        SERVICE_RESUME_RULE,
+        _async_handle_resume_rule,
+        RESUME_RULE_SCHEMA,
+        SupportsResponse.NONE,
+    ),
+)
+
+
+def _async_register_service(
+    hass: HomeAssistant,
+    *,
+    service: str,
+    handler: FirewallaServiceHandler,
+    schema: vol.Schema,
+    supports_response: SupportsResponse,
+) -> None:
+    """Register one Firewalla Local service when it is not already present."""
+    if hass.services.has_service(DOMAIN, service):
+        return
+
+    hass.services.async_register(
+        DOMAIN,
+        service,
+        handler,
+        schema=schema,
+        supports_response=supports_response,
+    )
+
+
 async def async_setup_services(hass: HomeAssistant) -> None:
     """Register Firewalla Local services."""
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_INVENTORY):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_RUNTIME_INVENTORY,
-            _async_handle_get_runtime_inventory,
-            schema=GET_RUNTIME_INVENTORY_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_HOST_NAME_MAPPING):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_HOST_NAME_MAPPING,
-            _async_handle_get_host_name_mapping,
-            schema=GET_HOST_NAME_MAPPING_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_REPORT,
-            _async_handle_get_network_segment_report,
-            schema=GET_NETWORK_SEGMENT_REPORT_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
-            _async_handle_get_network_segment_usage,
-            schema=GET_NETWORK_SEGMENT_USAGE_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_RUN_INTERNET_SPEED_TEST,
-            _async_handle_run_internet_speed_test,
-            schema=RUN_INTERNET_SPEED_TEST_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_WAKE_HOST):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_WAKE_HOST,
-            _async_handle_wake_host,
-            schema=WAKE_HOST_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NAME):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_SET_HOST_NAME,
-            _async_handle_set_host_name,
-            schema=SET_HOST_NAME_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
-            _async_handle_set_host_notify_when_next_online,
-            schema=SET_HOST_NOTIFY_WHEN_NEXT_ONLINE_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
-            _async_handle_set_host_notify_when_next_offline,
-            schema=SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_SET_HOST_DHCP_RESERVATION,
-            _async_handle_set_host_dhcp_reservation,
-            schema=SET_HOST_DHCP_RESERVATION_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_SPEED_TEST_RESULTS,
-            _async_handle_get_speed_test_results,
-            schema=GET_SPEED_TEST_RESULTS_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
-            _async_handle_get_time_usage_report,
-            schema=GET_TIME_USAGE_REPORT_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_WAN_DATA_USAGE):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
-            _async_handle_get_wan_data_usage,
-            schema=GET_WAN_DATA_USAGE_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_GET_WAN_EVENTS):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_GET_WAN_EVENTS,
-            _async_handle_get_wan_events,
-            schema=GET_WAN_EVENTS_SCHEMA,
-            supports_response=SupportsResponse.ONLY,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_PAUSE_RULE):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_PAUSE_RULE,
-            _async_handle_pause_rule,
-            schema=PAUSE_RULE_SCHEMA,
-        )
-
-    if not hass.services.has_service(DOMAIN, SERVICE_RESUME_RULE):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_RESUME_RULE,
-            _async_handle_resume_rule,
-            schema=RESUME_RULE_SCHEMA,
+    for service, handler, schema, supports_response in _SERVICE_REGISTRATIONS:
+        _async_register_service(
+            hass,
+            service=service,
+            handler=handler,
+            schema=schema,
+            supports_response=supports_response,
         )
 
 
 def async_remove_services(hass: HomeAssistant) -> None:
     """Remove Firewalla Local services."""
-    if hass.services.has_service(DOMAIN, SERVICE_GET_RUNTIME_INVENTORY):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_RUNTIME_INVENTORY)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_HOST_NAME_MAPPING):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_HOST_NAME_MAPPING)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE)
-    if hass.services.has_service(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST):
-        hass.services.async_remove(DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST)
-    if hass.services.has_service(DOMAIN, SERVICE_WAKE_HOST):
-        hass.services.async_remove(DOMAIN, SERVICE_WAKE_HOST)
-    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NAME):
-        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NAME)
-    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE):
-        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE)
-    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE):
-        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE)
-    if hass.services.has_service(DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION):
-        hass.services.async_remove(DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_TIME_USAGE_REPORT)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_DATA_USAGE):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_DATA_USAGE)
-    if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_EVENTS):
-        hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_EVENTS)
-    if hass.services.has_service(DOMAIN, SERVICE_PAUSE_RULE):
-        hass.services.async_remove(DOMAIN, SERVICE_PAUSE_RULE)
-    if hass.services.has_service(DOMAIN, SERVICE_RESUME_RULE):
-        hass.services.async_remove(DOMAIN, SERVICE_RESUME_RULE)
+    for service, _, _, _ in _SERVICE_REGISTRATIONS:
+        if hass.services.has_service(DOMAIN, service):
+            hass.services.async_remove(DOMAIN, service)

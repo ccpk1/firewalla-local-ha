@@ -13,6 +13,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import translation as translation_helper
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
@@ -50,10 +51,16 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
+    LOGGER,
     MAX_UPDATE_INTERVAL_MINUTES,
     MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     MIN_UPDATE_INTERVAL_MINUTES,
     MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
+    TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE,
+    TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE_TRACKER,
+    TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE,
+    TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE_SUFFIX,
+    TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER,
 )
 from .coordinator import async_update_entry_options
 from .managers import FirewallaHostManager, FirewallaRuleManager, FirewallaUserManager
@@ -75,11 +82,6 @@ _STEP_ID_RULE_SELECTION: Final = "rule_selection"
 _STEP_ID_SYSTEM_SETTINGS: Final = "system_settings"
 _STEP_ID_USER: Final = "user"
 _OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
-_UNAVAILABLE_RULE_LABEL: Final = "Unavailable rule"
-_UNAVAILABLE_RULE_SUFFIX: Final = "(unavailable)"
-_UNAVAILABLE_DEVICE_TRACKER_LABEL: Final = "Unavailable device tracker"
-_UNAVAILABLE_WATCHED_DEVICE_LABEL: Final = "Unavailable device"
-_UNAVAILABLE_WATCHED_USER_LABEL: Final = "Unavailable user"
 
 
 class PairingUserInput(TypedDict):
@@ -180,15 +182,23 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         host = _normalize_host(user_input[CONF_HOST])
         qr_data = load_qr_json(user_input[CONF_QR_JSON])
 
+        LOGGER.debug("Starting Firewalla pairing for host %s", host)
+
         self.license = qr_data.license
         self.host = host
 
+        LOGGER.debug("Generating Firewalla pairing keypair for host %s", host)
         keys = await self.hass.async_add_executor_job(generate_firewalla_keys)
+        LOGGER.debug("Requesting Firewalla cloud provisioning for host %s", host)
         credentials = await async_provision_firewalla_credentials(
             async_get_clientsession(self.hass),
             qr_data=qr_data,
             host=host,
             keys=keys,
+        )
+        LOGGER.debug(
+            "Cloud provisioning completed for host %s; validating local runtime",
+            credentials.host,
         )
         client = FirewallaApiClient(
             session=async_get_clientsession(self.hass),
@@ -201,6 +211,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             timezone_name=self.hass.config.time_zone,
         )
         await client.async_get_runtime_init_payload()
+        LOGGER.debug("Firewalla local runtime validation succeeded for host %s", host)
 
         title_name = credentials.box_name or DEFAULT_BOX_NAME
         return (
@@ -234,8 +245,10 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                 host = _normalize_host(typed_user_input[CONF_HOST])
                 qr_data = load_qr_json(typed_user_input[CONF_QR_JSON])
             except ValueError:
+                LOGGER.debug("Rejected Firewalla pairing request with empty host")
                 errors["base"] = CONFIG_ERROR_INVALID_HOST
             except FirewallaValidationError:
+                LOGGER.debug("Rejected Firewalla pairing request with invalid QR JSON")
                 errors["base"] = CONFIG_ERROR_INVALID_QR
             else:
                 self.license = qr_data.license
@@ -245,7 +258,12 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
 
                 try:
                     pairing_result = await self._async_pair_firewalla(typed_user_input)
-                except FirewallaApiError:
+                except FirewallaApiError as err:
+                    LOGGER.debug(
+                        "Firewalla pairing failed for host %s: %s",
+                        host,
+                        err,
+                    )
                     errors["base"] = CONFIG_ERROR_CANNOT_CONNECT
                 else:
                     assert pairing_result is not None
@@ -281,10 +299,17 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 pairing_result = await self._async_pair_firewalla(typed_user_input)
             except ValueError:
+                LOGGER.debug("Rejected Firewalla reauth request with empty host")
                 errors["base"] = CONFIG_ERROR_INVALID_HOST
             except FirewallaValidationError:
+                LOGGER.debug("Rejected Firewalla reauth request with invalid QR JSON")
                 errors["base"] = CONFIG_ERROR_INVALID_QR
-            except FirewallaApiError:
+            except FirewallaApiError as err:
+                LOGGER.debug(
+                    "Firewalla reauth failed for host %s: %s",
+                    cast(str, user_input[CONF_HOST]),
+                    err,
+                )
                 errors["base"] = CONFIG_ERROR_CANNOT_CONNECT
             else:
                 assert pairing_result is not None
@@ -341,6 +366,50 @@ class FirewallaOptionsFlow(OptionsFlow):
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize the options flow."""
         self._config_entry = config_entry
+        self._option_label_cache: dict[str, str] | None = None
+
+    async def _async_get_option_labels(self) -> dict[str, str]:
+        """Return translation-backed labels used in dynamic option rows."""
+        if self._option_label_cache is not None:
+            return self._option_label_cache
+
+        hass = self.hass
+        assert hass is not None
+
+        translations = await translation_helper.async_get_translations(
+            hass,
+            hass.config.language,
+            "exceptions",
+            integrations=[DOMAIN],
+        )
+        self._option_label_cache = {
+            TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE: translations.get(
+                f"component.{DOMAIN}.exceptions."
+                f"{TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE}.message",
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE,
+            ),
+            TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE_SUFFIX: translations.get(
+                f"component.{DOMAIN}.exceptions."
+                f"{TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE_SUFFIX}.message",
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE_SUFFIX,
+            ),
+            TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE: translations.get(
+                f"component.{DOMAIN}.exceptions."
+                f"{TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE}.message",
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE,
+            ),
+            TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE_TRACKER: translations.get(
+                f"component.{DOMAIN}.exceptions."
+                f"{TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE_TRACKER}.message",
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE_TRACKER,
+            ),
+            TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER: translations.get(
+                f"component.{DOMAIN}.exceptions."
+                f"{TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER}.message",
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER,
+            ),
+        }
+        return self._option_label_cache
 
     def _get_rule_manager(self) -> FirewallaRuleManager | None:
         """Return the loaded rule manager when runtime data is available."""
@@ -396,7 +465,11 @@ class FirewallaOptionsFlow(OptionsFlow):
         return {template.source_rule_id: template for template in templates}
 
     def _get_missing_rule_choices(
-        self, live_rule_choices: dict[str, str]
+        self,
+        live_rule_choices: dict[str, str],
+        *,
+        unavailable_rule_label: str,
+        unavailable_rule_suffix: str,
     ) -> dict[str, str]:
         """Return persisted selections whose backing live rules are missing."""
         stored_selected_rule_ids = self._config_entry.options.get(
@@ -413,10 +486,10 @@ class FirewallaOptionsFlow(OptionsFlow):
 
             if template := stored_templates.get(rule_id):
                 missing_rule_choices[rule_id] = (
-                    f"[{rule_id}] {template.name} {_UNAVAILABLE_RULE_SUFFIX}"
+                    f"[{rule_id}] {template.name} {unavailable_rule_suffix}"
                 )
             else:
-                missing_rule_choices[rule_id] = f"[{rule_id}] {_UNAVAILABLE_RULE_LABEL}"
+                missing_rule_choices[rule_id] = f"[{rule_id}] {unavailable_rule_label}"
 
         return missing_rule_choices
 
@@ -560,21 +633,27 @@ class FirewallaOptionsFlow(OptionsFlow):
         return FirewallaHostManager.get_device_tracker_choices_for_hosts(snapshot.hosts)
 
     def _get_missing_device_tracker_choices(
-        self, live_device_tracker_choices: dict[str, str]
+        self,
+        live_device_tracker_choices: dict[str, str],
+        *,
+        unavailable_device_tracker_label: str,
     ) -> dict[str, str]:
         """Return device-tracker selections missing from the latest runtime."""
         return {
-            mac: f"[{mac}] {_UNAVAILABLE_DEVICE_TRACKER_LABEL}"
+            mac: f"[{mac}] {unavailable_device_tracker_label}"
             for mac in self._get_stored_device_trackers()
             if mac not in live_device_tracker_choices
         }
 
     def _get_missing_watched_device_choices(
-        self, live_watched_device_choices: dict[str, str]
+        self,
+        live_watched_device_choices: dict[str, str],
+        *,
+        unavailable_watched_device_label: str,
     ) -> dict[str, str]:
         """Return watched-device selections missing from the latest runtime."""
         return {
-            mac: f"[{mac}] {_UNAVAILABLE_WATCHED_DEVICE_LABEL}"
+            mac: f"[{mac}] {unavailable_watched_device_label}"
             for mac in self._get_stored_watched_devices()
             if mac not in live_watched_device_choices
         }
@@ -595,11 +674,14 @@ class FirewallaOptionsFlow(OptionsFlow):
         return FirewallaUserManager.get_watched_user_choices_for_snapshot(snapshot)
 
     def _get_missing_watched_user_choices(
-        self, live_watched_user_choices: dict[str, str]
+        self,
+        live_watched_user_choices: dict[str, str],
+        *,
+        unavailable_watched_user_label: str,
     ) -> dict[str, str]:
         """Return watched-user selections missing from the latest runtime."""
         return {
-            user_id: f"[{user_id}] {_UNAVAILABLE_WATCHED_USER_LABEL}"
+            user_id: f"[{user_id}] {unavailable_watched_user_label}"
             for user_id in self._get_stored_watched_users()
             if user_id not in live_watched_user_choices
         }
@@ -697,7 +779,16 @@ class FirewallaOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage rule-selection options."""
         live_rule_choices = self._get_rule_choices()
-        missing_rule_choices = self._get_missing_rule_choices(live_rule_choices)
+        option_labels = await self._async_get_option_labels()
+        missing_rule_choices = self._get_missing_rule_choices(
+            live_rule_choices,
+            unavailable_rule_label=option_labels[
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE
+            ],
+            unavailable_rule_suffix=option_labels[
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE_SUFFIX
+            ],
+        )
         rule_choices = {**live_rule_choices, **missing_rule_choices}
         rule_templates = self._get_rule_templates()
 
@@ -753,8 +844,12 @@ class FirewallaOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage watched-device selection options."""
         live_watched_device_choices = self._get_watched_device_choices()
+        option_labels = await self._async_get_option_labels()
         missing_watched_device_choices = self._get_missing_watched_device_choices(
-            live_watched_device_choices
+            live_watched_device_choices,
+            unavailable_watched_device_label=option_labels[
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE
+            ],
         )
         watched_device_choices = {
             **live_watched_device_choices,
@@ -809,8 +904,12 @@ class FirewallaOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage watched-user selection options."""
         live_watched_user_choices = self._get_watched_user_choices()
+        option_labels = await self._async_get_option_labels()
         missing_watched_user_choices = self._get_missing_watched_user_choices(
-            live_watched_user_choices
+            live_watched_user_choices,
+            unavailable_watched_user_label=option_labels[
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER
+            ],
         )
         watched_user_choices = {
             **live_watched_user_choices,
@@ -863,8 +962,12 @@ class FirewallaOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage device-tracker selection options."""
         live_device_tracker_choices = self._get_device_tracker_choices()
+        option_labels = await self._async_get_option_labels()
         missing_device_tracker_choices = self._get_missing_device_tracker_choices(
-            live_device_tracker_choices
+            live_device_tracker_choices,
+            unavailable_device_tracker_label=option_labels[
+                TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE_TRACKER
+            ],
         )
         device_tracker_choices = {
             **live_device_tracker_choices,

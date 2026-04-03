@@ -543,6 +543,27 @@
     "host_wake_not_supported": {
       "message": "The selected host does not appear to support Wake-on-LAN."
     },
+    "unavailable_device": {
+      "message": "Unavailable device"
+    },
+    "unavailable_device_tracker": {
+      "message": "Unavailable device tracker"
+    },
+    "unavailable_rule": {
+      "message": "Unavailable rule"
+    },
+    "unavailable_rule_suffix": {
+      "message": "(unavailable)"
+    },
+    "unavailable_user": {
+      "message": "Unavailable user"
+    },
+    "network_segment_report_failed": {
+      "message": "The integration could not read the network segment report. Check the Firewalla connection and try again."
+    },
+    "network_segment_usage_failed": {
+      "message": "The integration could not read the network segment usage report. Check the Firewalla connection and try again."
+    },
     "network_name_ambiguous": {
       "message": "More than one Firewalla network matches the name \"{network_name}\". Use the network UUID instead."
     },
@@ -564,8 +585,20 @@
     "resume_at_in_past": {
       "message": "The resume time must be in the future."
     },
+    "run_internet_speed_test_failed": {
+      "message": "The integration could not start the internet speed test. Check the Firewalla connection and try again."
+    },
     "rule_target_not_found": {
       "message": "The rule target \"{rule_target}\" does not match a managed live rule."
+    },
+    "set_host_dhcp_reservation_failed": {
+      "message": "The integration could not update the host DHCP reservation. Check the Firewalla connection and try again."
+    },
+    "set_host_name_failed": {
+      "message": "The integration could not rename the host. Check the Firewalla connection and try again."
+    },
+    "set_host_notify_failed": {
+      "message": "The integration could not update the host notification setting. Check the Firewalla connection and try again."
     },
     "speed_test_wan_name_ambiguous": {
       "message": "More than one Firewalla WAN matches the name \"{wan_name}\". Use the WAN UUID instead."
@@ -588,8 +621,20 @@
     "time_usage_report_scope_not_found": {
       "message": "No {scope_kind} matched \"{scope_target}\". Check the selector and try again."
     },
+    "time_usage_report_failed": {
+      "message": "The integration could not read the time usage report. Check the Firewalla connection and try again."
+    },
+    "wake_host_failed": {
+      "message": "The integration could not wake the host. Check the Firewalla connection and try again."
+    },
+    "wan_data_usage_failed": {
+      "message": "The integration could not read WAN data usage. Check the Firewalla connection and try again."
+    },
     "wan_data_usage_history_period_required": {
       "message": "History period is required when history count is greater than zero."
+    },
+    "wan_events_failed": {
+      "message": "The integration could not read WAN events. Check the Firewalla connection and try again."
     },
     "wrong_integration_entry": {
       "message": "The requested config entry does not belong to Firewalla Local."

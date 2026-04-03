@@ -1467,7 +1467,10 @@ async def test_get_runtime_inventory_service_rejects_unknown_entry(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    with pytest.raises(ServiceValidationError, match="Config entry not found"):
+    with pytest.raises(
+        ServiceValidationError,
+        match="requested Firewalla config entry was not found",
+    ):
         await hass.services.async_call(
             DOMAIN,
             SERVICE_GET_RUNTIME_INVENTORY,
@@ -1525,10 +1528,7 @@ async def test_get_runtime_inventory_service_requires_selector_with_multiple_ent
 
     with pytest.raises(
         ServiceValidationError,
-        match=(
-            "Multiple Firewalla entries are loaded; "
-            "use config_entry_id or config_entry_name"
-        ),
+        match="Multiple Firewalla entries are loaded",
     ):
         await hass.services.async_call(
             DOMAIN,

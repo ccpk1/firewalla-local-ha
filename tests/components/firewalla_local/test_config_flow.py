@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # pylint: disable=too-many-lines
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -248,6 +249,42 @@ async def test_user_flow_cannot_connect_shows_form_error(hass) -> None:
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_user_flow_logs_pairing_failure_details(hass, caplog) -> None:
+    """Test pairing failures emit useful debug logs for support triage."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    caplog.set_level(logging.DEBUG, logger="custom_components.firewalla_local")
+
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(side_effect=FirewallaApiError("cloud link failed")),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: DEFAULT_FIREWALLA_HOST,
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert "Starting Firewalla pairing for host fire.walla" in caplog.text
+    assert "Requesting Firewalla cloud provisioning for host fire.walla" in caplog.text
+    assert (
+        "Firewalla pairing failed for host fire.walla: cloud link failed" in caplog.text
+    )
 
 
 async def test_reauth_updates_existing_entry(hass) -> None:
@@ -774,6 +811,7 @@ async def test_options_flow_updates_selected_rule_ids(hass) -> None:
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
+    options_flow.hass = hass
     await options_flow.async_step_init()
     await options_flow.async_step_rule_selection()
     preview_result = await options_flow.async_step_edit_rule_selection()
@@ -1276,6 +1314,7 @@ async def test_options_flow_system_settings_enforces_update_interval_bounds(
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
+    options_flow.hass = hass
     await options_flow.async_step_init()
     result = await options_flow.async_step_system_settings()
 
@@ -1391,6 +1430,7 @@ async def test_options_flow_does_not_refresh_runtime_on_main_menu(hass) -> None:
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
+    options_flow.hass = hass
     result = await options_flow.async_step_init()
 
     assert result["type"] is FlowResultType.MENU
@@ -1505,6 +1545,7 @@ async def test_options_flow_fallback_excludes_system_managed_rules(hass) -> None
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
+    options_flow.hass = hass
     await options_flow.async_step_init()
     await options_flow.async_step_rule_selection()
     preview_result = await options_flow.async_step_edit_rule_selection()
@@ -1608,6 +1649,7 @@ async def test_options_flow_fallback_matches_runtime_inventory_candidates(
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
+    options_flow.hass = hass
     await options_flow.async_step_init()
     await options_flow.async_step_rule_selection()
     preview_result = await options_flow.async_step_edit_rule_selection()
@@ -1697,6 +1739,7 @@ async def test_options_flow_allows_removing_missing_selected_rule(hass) -> None:
     entry.add_to_hass(hass)
 
     options_flow = FirewallaOptionsFlow(entry)
+    options_flow.hass = hass
     await options_flow.async_step_init()
     await options_flow.async_step_rule_selection()
     preview_result = await options_flow.async_step_edit_rule_selection()
@@ -1901,7 +1944,7 @@ async def test_system_settings_can_return_to_main_menu_without_saving(hass) -> N
     }
 
 
-async def test_options_flow_uses_manager_candidate_logic_for_rule_choices() -> None:
+async def test_options_flow_uses_manager_candidate_logic_for_rule_choices(hass) -> None:
     """Test the options flow matches runtime inventory candidate eligibility."""
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -1988,6 +2031,7 @@ async def test_options_flow_uses_manager_candidate_logic_for_rule_choices() -> N
     )
 
     options_flow = FirewallaOptionsFlow(entry)
+    options_flow.hass = hass
     await options_flow.async_step_init()
     await options_flow.async_step_rule_selection()
     preview_result = await options_flow.async_step_edit_rule_selection()

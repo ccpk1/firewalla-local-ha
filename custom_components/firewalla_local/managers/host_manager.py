@@ -21,8 +21,6 @@ from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from ..models import FirewallaHostRuntime, FirewallaRuntimeSnapshot
 from .base_manager import FirewallaBaseManager
 
-_UNAVAILABLE_HOST_LABEL = "Unavailable device"
-
 
 class FirewallaHostManager(FirewallaBaseManager):
     """Own normalized host lookups for watched-device and device-tracker features."""
@@ -152,28 +150,6 @@ class FirewallaHostManager(FirewallaBaseManager):
         """Return device-tracker choices from the latest normalized host inventory."""
         return self.get_device_tracker_choices_for_hosts(self.get_hosts())
 
-    def get_missing_watched_device_choices(
-        self, configured_watched_device_macs: tuple[str, ...]
-    ) -> dict[str, str]:
-        """Return unavailable watched-device labels for missing configured MACs."""
-        live_choices = self.get_watched_device_choices()
-        return {
-            mac: f"[{mac}] {_UNAVAILABLE_HOST_LABEL}"
-            for mac in configured_watched_device_macs
-            if mac not in live_choices
-        }
-
-    def get_missing_device_tracker_choices(
-        self, configured_device_tracker_macs: tuple[str, ...]
-    ) -> dict[str, str]:
-        """Return unavailable device-tracker labels for missing configured MACs."""
-        live_choices = self.get_device_tracker_choices()
-        return {
-            mac: f"[{mac}] {_UNAVAILABLE_HOST_LABEL}"
-            for mac in configured_device_tracker_macs
-            if mac not in live_choices
-        }
-
     def get_host(self, mac: str) -> FirewallaHostRuntime | None:
         """Return one normalized host by its Firewalla MAC identifier."""
         return self._host_index.get(mac)
@@ -239,10 +215,6 @@ class FirewallaHostManager(FirewallaBaseManager):
             reference_last_active - host.last_active
             <= self.watched_device_online_window_seconds
         )
-
-    def is_host_online(self, host: FirewallaHostRuntime) -> bool | None:
-        """Return whether one normalized host appears online."""
-        return self.is_watched_device_online(host)
 
     def is_device_tracker_home(self, host: FirewallaHostRuntime) -> bool | None:
         """Return whether one normalized host should be considered home."""
