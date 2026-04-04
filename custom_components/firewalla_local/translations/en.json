@@ -5,6 +5,7 @@
     },
     "error": {
       "cannot_connect": "The Firewalla pairing or local connection test failed.",
+      "cloud_link_timeout": "The Firewalla QR code was accepted, but cloud pairing did not finish before timing out.",
       "invalid_host": "The Firewalla local hostname or IP address is invalid.",
       "invalid_qr": "The Firewalla QR JSON or local IP address is invalid.",
       "wrong_account": "The new QR code belongs to a different Firewalla box."
@@ -115,6 +116,15 @@
         "state_attributes": {
           "boot_complete": {
             "name": "Boot complete"
+          },
+          "box_image_version": {
+            "name": "Box image version"
+          },
+          "software_version": {
+            "name": "Box version"
+          },
+          "box_image_codename": {
+            "name": "Box image codename"
           },
           "cpu_usage_1m": {
             "name": "CPU usage (%)"
@@ -529,7 +539,7 @@
       "message": "No Firewalla network matched the reserved IPv4 address {reserved_ipv4}. Provide a valid reservation address or choose the network explicitly."
     },
     "host_reservation_ipv4_out_of_range": {
-      "message": "The reserved IPv4 address {reserved_ipv4} is outside the DHCP range for the selected network: {network_name}."
+      "message": "The reserved IPv4 address {reserved_ipv4} is outside the IPv4 subnet for the selected network: {network_name}."
     },
     "host_reservation_ipv4_required": {
       "message": "Provide reserved IPv4 when the reservation mode is static."

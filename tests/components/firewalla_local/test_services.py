@@ -2778,7 +2778,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_MODE: "static",
-                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.150",
+                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.250",
                 SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
                 SERVICE_FIELD_NETWORK_UUID: "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
                 SERVICE_FIELD_REFRESH: False,
@@ -2798,7 +2798,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
                         "type": "static",
                     },
                     "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
-                        "ipv4": "192.168.200.150",
+                        "ipv4": "192.168.200.250",
                         "type": "static",
                     },
                 }
@@ -2820,7 +2820,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
         },
         "query": {
             "mode": "static",
-            "reserved_ipv4": "192.168.200.150",
+            "reserved_ipv4": "192.168.200.250",
             "host_id": None,
             "host_mac": "00:AA:BB:CC:DD:26",
             "host_name": None,
@@ -2831,7 +2831,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
         "ip_assignment": {
             "mode": "static",
             "network_uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
-            "reserved_ipv4": "192.168.200.150",
+            "reserved_ipv4": "192.168.200.250",
         },
         "command": {
             "item": "policy",
@@ -2844,7 +2844,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
                             "type": "static",
                         },
                         "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
-                            "ipv4": "192.168.200.150",
+                            "ipv4": "192.168.200.250",
                             "type": "static",
                         },
                     }
@@ -3003,7 +3003,7 @@ async def test_set_host_dhcp_reservation_requires_ipv4_for_static_mode(
 async def test_set_host_dhcp_reservation_infers_network_from_ipv4(
     hass: HomeAssistant,
 ) -> None:
-    """Test static reservations can infer the target network from IPv4."""
+    """Test static reservations can infer the target network by subnet."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -3042,7 +3042,7 @@ async def test_set_host_dhcp_reservation_infers_network_from_ipv4(
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_MODE: "static",
-                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.150",
+                SERVICE_FIELD_RESERVED_IPV4: "192.168.200.250",
                 SERVICE_FIELD_HOST_NAME: "Plex Server",
                 SERVICE_FIELD_REFRESH: False,
             },
@@ -3061,7 +3061,7 @@ async def test_set_host_dhcp_reservation_infers_network_from_ipv4(
                         "type": "static",
                     },
                     "d7e5a5c4-0b28-4010-b3c6-dad1a868693f": {
-                        "ipv4": "192.168.200.150",
+                        "ipv4": "192.168.200.250",
                         "type": "static",
                     },
                 }
@@ -3078,7 +3078,7 @@ async def test_set_host_dhcp_reservation_infers_network_from_ipv4(
 async def test_set_host_dhcp_reservation_rejects_ipv4_outside_network_range(
     hass: HomeAssistant,
 ) -> None:
-    """Test static reservations reject IPv4 values outside the network range."""
+    """Test static reservations reject IPv4 values outside the network subnet."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -3109,7 +3109,7 @@ async def test_set_host_dhcp_reservation_rejects_ipv4_outside_network_range(
 
     with pytest.raises(
         ServiceValidationError,
-        match="outside the DHCP range",
+        match="outside the IPv4 subnet",
     ):
         await hass.services.async_call(
             DOMAIN,

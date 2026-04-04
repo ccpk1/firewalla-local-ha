@@ -19,5 +19,9 @@ class FirewallaProtocolError(FirewallaApiError):
     """Raise when Firewalla returns an unexpected protocol payload."""
 
 
+class FirewallaPairingTimeoutError(FirewallaProtocolError):
+    """Raise when cloud pairing does not surface credentials before timing out."""
+
+
 class FirewallaValidationError(FirewallaApiError):
     """Raise when user-supplied Firewalla input is invalid."""

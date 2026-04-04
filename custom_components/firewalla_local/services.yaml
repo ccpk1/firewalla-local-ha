@@ -388,7 +388,7 @@ set_host_dhcp_reservation:
       selector:
         text:
       name: Reserved IPv4
-      description: Optional. Required when mode is static. Omit it when mode is dynamic.
+      description: Optional. Required when mode is static. The address must belong to the selected network's IPv4 subnet. Omit it when mode is dynamic.
     host_mac:
       required: false
       example: "00:AA:BB:CC:DD:26"

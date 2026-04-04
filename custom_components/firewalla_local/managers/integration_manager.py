@@ -93,6 +93,13 @@ _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS: Final = (
 )
 _TRACKED_CLIENT_DEVICE_MODEL: Final = "Tracked client"
 _TRACKED_CLIENT_DEVICE_NAME_PREFIX: Final = "Client"
+_UBUNTU_DIST_RELEASES: Final = {
+    "xenial": ("16.04 LTS", "Xenial Xerus"),
+    "bionic": ("18.04 LTS", "Bionic Beaver"),
+    "focal": ("20.04 LTS", "Focal Fossa"),
+    "jammy": ("22.04 LTS", "Jammy Jellyfish"),
+    "noble": ("24.04 LTS", "Noble Numbat"),
+}
 
 
 class FirewallaIntegrationManager(FirewallaBaseManager):
@@ -458,6 +465,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Shape the appliance status view from protocol-facing input."""
         return FirewallaSystemStatus(
             booting_complete=appliance_runtime.booting_complete,
+            box_image_codename=appliance_runtime.dist_codename,
+            box_image_version=self._build_box_image_version(appliance_runtime),
             cloud_connected=appliance_runtime.cloud_connected,
             ddns=appliance_runtime.ddns,
             firmware_release_type=appliance_runtime.firmware_release_type,
@@ -471,6 +480,22 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 appliance_runtime.disk_usages
             ),
         )
+
+    def _build_box_image_version(
+        self, appliance_runtime: FirewallaApplianceRuntimeInput
+    ) -> str | None:
+        """Build a trusted box image version from the runtime codename."""
+        dist_codename = appliance_runtime.dist_codename
+        if dist_codename is None:
+            return None
+
+        if (
+            release_details := _UBUNTU_DIST_RELEASES.get(dist_codename.casefold())
+        ) is None:
+            return dist_codename
+
+        release_version, release_name = release_details
+        return f"Ubuntu {release_version} ({release_name})"
 
     def _build_wan_ip(
         self, appliance_runtime: FirewallaApplianceRuntimeInput

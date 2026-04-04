@@ -90,6 +90,7 @@ _RAW_RULE_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
 _RAW_SYSTEM_MODEL_KEY: Final = "model"
 _RAW_SYSTEM_CPU_ID_KEY: Final = "cpuid"
 _RAW_SYSTEM_LONG_VERSION_KEY: Final = "longVersion"
+_RAW_SYSTEM_DIST_CODENAME_KEY: Final = "distCodename"
 _RAW_SYSTEM_GROUP_NAME_KEY: Final = "groupName"
 _RAW_SYSTEM_DEVICE_NAME_KEY: Final = "device"
 _RAW_SYSTEM_BOOTING_COMPLETE_KEY: Final = "bootingComplete"
@@ -702,6 +703,15 @@ class FirewallaApiClient:
         return FirewallaApplianceRuntimeInput(
             booting_complete=self._coerce_boolish(
                 data.get(_RAW_SYSTEM_BOOTING_COMPLETE_KEY)
+            ),
+            dist_codename=(
+                dist_codename
+                if isinstance(
+                    (dist_codename := data.get(_RAW_SYSTEM_DIST_CODENAME_KEY)),
+                    str,
+                )
+                and dist_codename
+                else None
             ),
             cloud_connected=self._coerce_boolish(
                 data.get(_RAW_SYSTEM_CLOUD_CONNECTED_KEY)

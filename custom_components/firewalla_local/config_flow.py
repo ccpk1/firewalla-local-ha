@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from collections.abc import Mapping
 from typing import Final, Self, TypedDict, cast
 
@@ -19,6 +21,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import (
     FirewallaApiClient,
     FirewallaApiError,
+    FirewallaPairingTimeoutError,
     FirewallaValidationError,
     async_provision_firewalla_credentials,
     generate_firewalla_keys,
@@ -63,7 +66,11 @@ from .const import (
     TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER,
 )
 from .coordinator import async_update_entry_options
-from .managers import FirewallaHostManager, FirewallaRuleManager, FirewallaUserManager
+from .managers import (
+    FirewallaHostManager,
+    FirewallaRuleManager,
+    FirewallaUserManager,
+)
 from .models import (
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
@@ -82,6 +89,7 @@ _STEP_ID_RULE_SELECTION: Final = "rule_selection"
 _STEP_ID_SYSTEM_SETTINGS: Final = "system_settings"
 _STEP_ID_USER: Final = "user"
 _OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
+_CONFIG_ERROR_CLOUD_LINK_TIMEOUT: Final = "cloud_link_timeout"
 
 
 class PairingUserInput(TypedDict):
@@ -141,6 +149,31 @@ def _format_rule_option(rule: FirewallaPolicyRule) -> str:
     return f"[{rule.rule_id}] {format_policy_rule_label(rule)}"
 
 
+def _resolve_default_pairing_host() -> str | None:
+    """Resolve the default Firewalla hostname to one IPv4 address when possible."""
+    try:
+        addrinfo = socket.getaddrinfo(
+            DEFAULT_FIREWALLA_HOST,
+            None,
+            family=socket.AF_INET,
+            type=socket.SOCK_STREAM,
+        )
+    except OSError:
+        return None
+
+    for family, _socktype, _proto, _canonname, sockaddr in addrinfo:
+        if family is not socket.AF_INET:
+            continue
+        candidate = cast(str, sockaddr[0])
+        try:
+            ipaddress.IPv4Address(candidate)
+        except ipaddress.AddressValueError:
+            continue
+        return candidate
+
+    return None
+
+
 class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Firewalla Local."""
 
@@ -156,6 +189,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.license: str | None = None
         self.host: str | None = None
+        self._suggested_host: str | None = None
 
     @staticmethod
     def _build_pairing_schema(*, host: str | None = None) -> vol.Schema:
@@ -182,21 +216,21 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         host = _normalize_host(user_input[CONF_HOST])
         qr_data = load_qr_json(user_input[CONF_QR_JSON])
 
-        LOGGER.debug("Starting Firewalla pairing for host %s", host)
+        LOGGER.info("Starting Firewalla pairing for host %s", host)
 
         self.license = qr_data.license
         self.host = host
 
-        LOGGER.debug("Generating Firewalla pairing keypair for host %s", host)
+        LOGGER.info("Generating Firewalla pairing keypair for host %s", host)
         keys = await self.hass.async_add_executor_job(generate_firewalla_keys)
-        LOGGER.debug("Requesting Firewalla cloud provisioning for host %s", host)
+        LOGGER.info("Requesting Firewalla cloud provisioning for host %s", host)
         credentials = await async_provision_firewalla_credentials(
             async_get_clientsession(self.hass),
             qr_data=qr_data,
             host=host,
             keys=keys,
         )
-        LOGGER.debug(
+        LOGGER.info(
             "Cloud provisioning completed for host %s; validating local runtime",
             credentials.host,
         )
@@ -211,7 +245,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             timezone_name=self.hass.config.time_zone,
         )
         await client.async_get_runtime_init_payload()
-        LOGGER.debug("Firewalla local runtime validation succeeded for host %s", host)
+        LOGGER.info("Firewalla local runtime validation succeeded for host %s", host)
 
         title_name = credentials.box_name or DEFAULT_BOX_NAME
         return (
@@ -245,10 +279,12 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                 host = _normalize_host(typed_user_input[CONF_HOST])
                 qr_data = load_qr_json(typed_user_input[CONF_QR_JSON])
             except ValueError:
-                LOGGER.debug("Rejected Firewalla pairing request with empty host")
+                LOGGER.warning("Rejected Firewalla pairing request with empty host")
                 errors["base"] = CONFIG_ERROR_INVALID_HOST
             except FirewallaValidationError:
-                LOGGER.debug("Rejected Firewalla pairing request with invalid QR JSON")
+                LOGGER.warning(
+                    "Rejected Firewalla pairing request with invalid QR JSON"
+                )
                 errors["base"] = CONFIG_ERROR_INVALID_QR
             else:
                 self.license = qr_data.license
@@ -258,8 +294,17 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
 
                 try:
                     pairing_result = await self._async_pair_firewalla(typed_user_input)
+                except FirewallaPairingTimeoutError as err:
+                    LOGGER.warning(
+                        "Firewalla pairing timed out waiting for cloud group "
+                        "visibility "
+                        "for host %s: %s",
+                        host,
+                        err,
+                    )
+                    errors["base"] = _CONFIG_ERROR_CLOUD_LINK_TIMEOUT
                 except FirewallaApiError as err:
-                    LOGGER.debug(
+                    LOGGER.warning(
                         "Firewalla pairing failed for host %s: %s",
                         host,
                         err,
@@ -270,9 +315,14 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                     entry_data, title = pairing_result
                     return self.async_create_entry(title=title, data=entry_data)
 
+        if self._suggested_host is None:
+            self._suggested_host = await self.hass.async_add_executor_job(
+                _resolve_default_pairing_host
+            )
+
         return self.async_show_form(
             step_id=_STEP_ID_USER,
-            data_schema=self._build_pairing_schema(),
+            data_schema=self._build_pairing_schema(host=self._suggested_host or ""),
             errors=errors,
         )
 
@@ -299,13 +349,21 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 pairing_result = await self._async_pair_firewalla(typed_user_input)
             except ValueError:
-                LOGGER.debug("Rejected Firewalla reauth request with empty host")
+                LOGGER.warning("Rejected Firewalla reauth request with empty host")
                 errors["base"] = CONFIG_ERROR_INVALID_HOST
             except FirewallaValidationError:
-                LOGGER.debug("Rejected Firewalla reauth request with invalid QR JSON")
+                LOGGER.warning("Rejected Firewalla reauth request with invalid QR JSON")
                 errors["base"] = CONFIG_ERROR_INVALID_QR
+            except FirewallaPairingTimeoutError as err:
+                LOGGER.warning(
+                    "Firewalla reauth timed out waiting for cloud group visibility "
+                    "for host %s: %s",
+                    cast(str, user_input[CONF_HOST]),
+                    err,
+                )
+                errors["base"] = _CONFIG_ERROR_CLOUD_LINK_TIMEOUT
             except FirewallaApiError as err:
-                LOGGER.debug(
+                LOGGER.warning(
                     "Firewalla reauth failed for host %s: %s",
                     cast(str, user_input[CONF_HOST]),
                     err,

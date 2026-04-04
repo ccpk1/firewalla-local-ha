@@ -31,6 +31,8 @@ from custom_components.firewalla_local.const import (
     ATTR_SPEED_TEST_UPLOAD_MBYTES,
     ATTR_SPEED_TEST_VENDOR,
     ATTR_SYSTEM_BOOT_COMPLETE,
+    ATTR_SYSTEM_BOX_IMAGE_CODENAME,
+    ATTR_SYSTEM_BOX_IMAGE_VERSION,
     ATTR_SYSTEM_CLOUD_CONNECTED,
     ATTR_SYSTEM_CPU_USAGE_1M,
     ATTR_SYSTEM_CURRENT_WAN_USAGE,
@@ -43,6 +45,7 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_MEMORY_FREE_MB,
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
     ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
+    ATTR_SYSTEM_SOFTWARE_VERSION,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
     ATTR_SYSTEM_WAN_IP,
@@ -143,6 +146,7 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
         ),
         appliance_runtime=FirewallaApplianceRuntimeInput(
             booting_complete=bool(with_speed_test),
+            dist_codename="bionic",
             cloud_connected=bool(with_speed_test),
             ddns="box.example.firewalla.org" if with_speed_test else None,
             firmware_release_type="alpha" if with_speed_test else None,
@@ -311,8 +315,17 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert system_state is not None
     assert system_state.name == "Firewalla System Status"
     assert system_state.state == STATE_ON
+    attribute_keys = list(system_state.attributes)
     assert system_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is True
+    assert attribute_keys.index(
+        ATTR_SYSTEM_BOX_IMAGE_VERSION
+    ) + 1 == attribute_keys.index(ATTR_SYSTEM_SOFTWARE_VERSION)
+    assert system_state.attributes[ATTR_SYSTEM_BOX_IMAGE_CODENAME] == "bionic"
+    assert (
+        system_state.attributes[ATTR_SYSTEM_BOX_IMAGE_VERSION]
+        == "Ubuntu 18.04 LTS (Bionic Beaver)"
+    )
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] == "23.245.207.179"
     assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] == {"eth0": "23.245.207.179"}
     assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {
@@ -342,6 +355,7 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert system_state.attributes[ATTR_SYSTEM_DEVICES_OFFLINE] == 1
     assert system_state.attributes[ATTR_SYSTEM_DDNS] == "box.example.firewalla.org"
     assert system_state.attributes[ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE] == "alpha"
+    assert system_state.attributes[ATTR_SYSTEM_SOFTWARE_VERSION] == "1.0.0"
 
     system_entry = next(
         entry
@@ -441,6 +455,11 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert system_state.state == STATE_ON
     assert system_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is False
+    assert system_state.attributes[ATTR_SYSTEM_BOX_IMAGE_CODENAME] == "bionic"
+    assert (
+        system_state.attributes[ATTR_SYSTEM_BOX_IMAGE_VERSION]
+        == "Ubuntu 18.04 LTS (Bionic Beaver)"
+    )
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] is None
     assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] is None
     assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {}
@@ -467,6 +486,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert system_state.attributes[ATTR_SYSTEM_DEVICES_OFFLINE] == 1
     assert system_state.attributes[ATTR_SYSTEM_DDNS] is None
     assert system_state.attributes[ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE] is None
+    assert system_state.attributes[ATTR_SYSTEM_SOFTWARE_VERSION] == "1.0.0"
 
     assert speedtest_state.state == "unknown"
     assert speedtest_state.name == "Firewalla Speed Test"

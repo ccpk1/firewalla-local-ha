@@ -67,6 +67,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
         ),
         appliance_runtime=FirewallaApplianceRuntimeInput(
             booting_complete=True,
+            dist_codename="bionic",
             cloud_connected=False,
             ddns="box.example.firewalla.org",
             firmware_release_type="alpha",
@@ -173,6 +174,8 @@ def test_handle_refresh_shapes_appliance_views() -> None:
     assert manager.system_info.host == "192.168.200.1"
     assert manager.system_status is not None
     assert manager.system_status.wan_ip == "23.245.207.179"
+    assert manager.system_status.box_image_codename == "bionic"
+    assert manager.system_status.box_image_version == "Ubuntu 18.04 LTS (Bionic Beaver)"
     assert manager.system_status.cpu_usage_1m == 37.5
     assert manager.system_status.memory_usage_percent == 25.0
     assert manager.system_status.memory_free_mb == 750.0
@@ -187,6 +190,33 @@ def test_handle_refresh_shapes_appliance_views() -> None:
     assert manager.latest_speed_test.wan_uuid == "wan-1"
     assert manager.latest_speed_test.wan_name == "WAN-ONE"
     assert manager.system_info.model == "Gold"
+
+
+def test_handle_refresh_uses_raw_codename_when_release_map_is_missing() -> None:
+    """Test the box image version falls back to the raw codename."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name=None,
+            device_name="Hallway Box",
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(
+            dist_codename="plucky",
+        ),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+
+    manager = _build_manager(snapshot)
+
+    manager.handle_refresh(snapshot)
+
+    assert manager.system_status is not None
+    assert manager.system_status.box_image_codename == "plucky"
+    assert manager.system_status.box_image_version == "plucky"
 
 
 def test_build_device_info_uses_default_name_and_entry_unique_id() -> None:

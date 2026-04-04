@@ -6,6 +6,7 @@ from .exceptions import (
     FirewallaApiError,
     FirewallaAuthError,
     FirewallaConnectionError,
+    FirewallaPairingTimeoutError,
     FirewallaProtocolError,
     FirewallaValidationError,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "FirewallaApiError",
     "FirewallaAuthError",
     "FirewallaConnectionError",
+    "FirewallaPairingTimeoutError",
     "FirewallaProtocolError",
     "FirewallaValidationError",
     "async_provision_firewalla_credentials",

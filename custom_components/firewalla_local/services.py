@@ -1892,30 +1892,51 @@ def _resolve_network_dhcp_config(
     )
 
 
-def _ipv4_in_dhcp_range(
+def _resolve_network_ipv4_subnet(
+    entry: FirewallaConfigEntry,
+    *,
+    network_uuid: str,
+) -> IPv4Network | None:
+    """Resolve the IPv4 subnet for one network from runtime metadata."""
+    raw_network_profiles = (entry.runtime_data.coordinator.last_init_payload or {}).get(
+        "networkProfiles"
+    )
+    if isinstance(raw_network_profiles, dict):
+        raw_profile = raw_network_profiles.get(network_uuid)
+        if isinstance(raw_profile, dict) and isinstance(
+            raw_ipv4_subnet := raw_profile.get("ipv4Subnet"),
+            str,
+        ):
+            try:
+                return IPv4Network(raw_ipv4_subnet, strict=False)
+            except AddressValueError:
+                return None
+
+    dhcp_config = _resolve_network_dhcp_config(entry, network_uuid=network_uuid)
+    if (
+        dhcp_config is None
+        or dhcp_config.gateway is None
+        or dhcp_config.subnet_mask is None
+    ):
+        return None
+
+    try:
+        return IPv4Network(
+            f"{dhcp_config.gateway}/{dhcp_config.subnet_mask}",
+            strict=False,
+        )
+    except AddressValueError:
+        return None
+
+
+def _ipv4_in_network_subnet(
     address: IPv4Address,
-    dhcp_config: FirewallaNetworkDhcpConfig,
+    network: IPv4Network | None,
 ) -> bool | None:
-    """Return whether one IPv4 address falls inside the known DHCP range."""
-    if dhcp_config.range_start is not None and dhcp_config.range_end is not None:
-        try:
-            range_start = IPv4Address(dhcp_config.range_start)
-            range_end = IPv4Address(dhcp_config.range_end)
-        except AddressValueError:
-            return None
-        return range_start <= address <= range_end
-
-    if dhcp_config.gateway is not None and dhcp_config.subnet_mask is not None:
-        try:
-            network = IPv4Network(
-                f"{dhcp_config.gateway}/{dhcp_config.subnet_mask}",
-                strict=False,
-            )
-        except AddressValueError:
-            return None
-        return address in network
-
-    return None
+    """Return whether one IPv4 address falls inside the known network subnet."""
+    if network is None:
+        return None
+    return address in network
 
 
 def _resolve_dhcp_reservation_network(
@@ -1941,14 +1962,11 @@ def _resolve_dhcp_reservation_network(
     matching_networks = [
         network
         for network in entry.runtime_data.integration_manager.get_available_networks()
-        if (
-            dhcp_config := _resolve_network_dhcp_config(
-                entry,
-                network_uuid=network.uuid,
-            )
+        if _ipv4_in_network_subnet(
+            reserved_ipv4,
+            _resolve_network_ipv4_subnet(entry, network_uuid=network.uuid),
         )
-        is not None
-        and _ipv4_in_dhcp_range(reserved_ipv4, dhcp_config) is True
+        is True
     ]
 
     if len(matching_networks) == 1:
@@ -1982,13 +2000,12 @@ def _validate_dhcp_reservation_request(
     if reserved_ipv4 is None:
         return
 
-    dhcp_config = _resolve_network_dhcp_config(
-        entry,
-        network_uuid=network.uuid,
-    )
     if (
-        dhcp_config is not None
-        and _ipv4_in_dhcp_range(reserved_ipv4, dhcp_config) is False
+        _ipv4_in_network_subnet(
+            reserved_ipv4,
+            _resolve_network_ipv4_subnet(entry, network_uuid=network.uuid),
+        )
+        is False
     ):
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_OUT_OF_RANGE,
