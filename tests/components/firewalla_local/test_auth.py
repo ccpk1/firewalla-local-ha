@@ -25,6 +25,7 @@ from custom_components.firewalla_local.api.models import (
     GroupFetchResult,
     PairingCode,
 )
+from custom_components.firewalla_local.const import DEFAULT_GROUP_POLL_ATTEMPTS
 
 
 def test_load_qr_json_rejects_non_object_root() -> None:
@@ -96,6 +97,11 @@ def test_extract_group_credentials_returns_credentials() -> None:
         symmetric_key="plain-symmetric-key",
         box_name=None,
     )
+
+
+def test_default_group_poll_attempts_extended_for_slower_cloud_link() -> None:
+    """Test the default polling window allows slower cloud group visibility."""
+    assert DEFAULT_GROUP_POLL_ATTEMPTS == 20
 
 
 @pytest.mark.asyncio

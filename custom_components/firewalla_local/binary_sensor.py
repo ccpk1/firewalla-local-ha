@@ -14,6 +14,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .const import (
     ATTR_PURPOSE,
     ATTR_SYSTEM_BOOT_COMPLETE,
+    ATTR_SYSTEM_BOX_IMAGE_CODENAME,
+    ATTR_SYSTEM_BOX_IMAGE_VERSION,
     ATTR_SYSTEM_CLOUD_CONNECTED,
     ATTR_SYSTEM_CPU_USAGE_1M,
     ATTR_SYSTEM_CURRENT_WAN_USAGE,
@@ -26,6 +28,7 @@ from .const import (
     ATTR_SYSTEM_MEMORY_FREE_MB,
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
     ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
+    ATTR_SYSTEM_SOFTWARE_VERSION,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
     ATTR_SYSTEM_WAN_IP,
@@ -107,6 +110,13 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ),
             ATTR_SYSTEM_BOOT_COMPLETE: (
                 system_status.booting_complete if system_status is not None else None
+            ),
+            ATTR_SYSTEM_BOX_IMAGE_VERSION: (
+                system_status.box_image_version if system_status is not None else None
+            ),
+            ATTR_SYSTEM_SOFTWARE_VERSION: self.system_info.software_version,
+            ATTR_SYSTEM_BOX_IMAGE_CODENAME: (
+                system_status.box_image_codename if system_status is not None else None
             ),
             ATTR_SYSTEM_CLOUD_CONNECTED: (
                 system_status.cloud_connected if system_status is not None else None

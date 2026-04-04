@@ -5,6 +5,7 @@ from __future__ import annotations
 # pylint: disable=too-many-lines
 import logging
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -14,6 +15,9 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.api import FirewallaApiError
+from custom_components.firewalla_local.api.exceptions import (
+    FirewallaPairingTimeoutError,
+)
 from custom_components.firewalla_local.api.models import (
     FirewallaProvisionedCredentials,
     GeneratedKeys,
@@ -104,6 +108,46 @@ def _mock_credentials(
         symmetric_key="symmetric-key",
         box_name="Firewalla",
     )
+
+
+def _get_schema_default(result: dict[str, object], field_name: str) -> object:
+    """Return one default value from the result data schema."""
+    for marker in cast(vol.Schema, result["data_schema"]).schema:
+        if marker.schema == field_name:
+            return marker.default()
+    raise AssertionError(f"Field {field_name} not found in schema")
+
+
+async def test_user_flow_prefills_resolved_default_host(hass) -> None:
+    """Test the user step prefers a resolved Firewalla IPv4 default."""
+    with patch(
+        "custom_components.firewalla_local.config_flow._resolve_default_pairing_host",
+        return_value="192.168.200.129",
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert _get_schema_default(result, CONF_HOST) == "192.168.200.129"
+
+
+async def test_user_flow_leaves_default_host_blank_when_resolution_fails(hass) -> None:
+    """Test the user step leaves the host field blank when lookup fails."""
+    with patch(
+        "custom_components.firewalla_local.config_flow._resolve_default_pairing_host",
+        return_value=None,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert _get_schema_default(result, CONF_HOST) == ""
 
 
 async def test_user_flow_creates_entry(hass) -> None:
@@ -251,14 +295,48 @@ async def test_user_flow_cannot_connect_shows_form_error(hass) -> None:
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-async def test_user_flow_logs_pairing_failure_details(hass, caplog) -> None:
-    """Test pairing failures emit useful debug logs for support triage."""
+async def test_user_flow_cloud_link_timeout_shows_specific_error(hass) -> None:
+    """Test a cloud pairing timeout returns a specific config flow error."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
     )
 
-    caplog.set_level(logging.DEBUG, logger="custom_components.firewalla_local")
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(
+                side_effect=FirewallaPairingTimeoutError(
+                    "Cloud link did not produce a visible group before polling "
+                    "timed out"
+                )
+            ),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: DEFAULT_FIREWALLA_HOST,
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cloud_link_timeout"}
+
+
+async def test_user_flow_logs_pairing_failure_details(hass, caplog) -> None:
+    """Test pairing failures emit useful logs for support triage."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    caplog.set_level(logging.INFO, logger="custom_components.firewalla_local")
 
     with (
         patch(
@@ -476,6 +554,53 @@ async def test_reauth_cannot_connect_shows_form_error(hass) -> None:
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_reauth_cloud_link_timeout_shows_specific_error(hass) -> None:
+    """Test reauth returns a specific error for cloud pairing timeout."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.9",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-old",
+            CONF_AID: "aid-old",
+            CONF_SYMMETRIC_KEY: "old-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_REAUTH,
+            "entry_id": entry.entry_id,
+            "unique_id": entry.unique_id,
+        },
+        data=entry.data,
+    )
+
+    with patch(
+        "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+        new=AsyncMock(
+            side_effect=FirewallaPairingTimeoutError(
+                "Cloud link did not produce a visible group before polling timed out"
+            )
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: "192.168.200.9",
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cloud_link_timeout"}
 
 
 async def test_reauth_wrong_account_aborts(hass) -> None:

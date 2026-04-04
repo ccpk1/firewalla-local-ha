@@ -258,6 +258,7 @@ class FirewallaApplianceRuntimeInput:
     """Protocol-facing appliance runtime input extracted from one payload."""
 
     booting_complete: bool | None = None
+    dist_codename: str | None = None
     cloud_connected: bool | None = None
     ddns: str | None = None
     firmware_release_type: str | None = None
@@ -276,6 +277,8 @@ class FirewallaSystemStatus:
     """Normalized system-status state for the Firewalla appliance."""
 
     booting_complete: bool | None = None
+    box_image_codename: str | None = None
+    box_image_version: str | None = None
     cloud_connected: bool | None = None
     ddns: str | None = None
     firmware_release_type: str | None = None

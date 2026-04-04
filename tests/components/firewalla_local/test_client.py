@@ -49,6 +49,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                     "model": "gold",
                     "cpuid": "serial-123",
                     "longVersion": "1.0.0",
+                    "distCodename": "bionic",
                     "bootingComplete": True,
                     "cloudConnected": True,
                     "ddns": "box.example.firewalla.org",
@@ -255,6 +256,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     )
     assert snapshot.exception_rule_count == 2
     assert snapshot.appliance_runtime.booting_complete is True
+    assert snapshot.appliance_runtime.dist_codename == "bionic"
     assert snapshot.appliance_runtime.cloud_connected is True
     assert snapshot.appliance_runtime.ddns == "box.example.firewalla.org"
     assert snapshot.appliance_runtime.firmware_release_type == "alpha"
