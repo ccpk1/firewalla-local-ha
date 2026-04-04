@@ -38,6 +38,7 @@ from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
     FirewallaAuthError,
     FirewallaConnectionError,
+    FirewallaLocalRuntimeNotReadyError,
     FirewallaProtocolError,
 )
 
@@ -330,6 +331,12 @@ class FirewallaApiClient:
                 raise FirewallaAuthError(
                     "Firewalla local runtime returned unauthorized after one retry"
                 )
+
+        if response_status == 412:
+            raise FirewallaLocalRuntimeNotReadyError(
+                "Firewalla local runtime has not accepted the new pairing yet: "
+                f"HTTP {response_status}: {response_text}"
+            )
 
         if response_status != 200:
             raise FirewallaProtocolError(

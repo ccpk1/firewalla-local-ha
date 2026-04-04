@@ -10,7 +10,10 @@ from aiohttp import ClientSession
 
 from custom_components.firewalla_local.api.client import FirewallaApiClient
 from custom_components.firewalla_local.api.crypto import aes256_cbc_encrypt_to_base64
-from custom_components.firewalla_local.api.exceptions import FirewallaAuthError
+from custom_components.firewalla_local.api.exceptions import (
+    FirewallaAuthError,
+    FirewallaLocalRuntimeNotReadyError,
+)
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaDiskUsageInput,
@@ -25,6 +28,34 @@ from custom_components.firewalla_local.models import (
 )
 
 TEST_SYMMETRIC_KEY = "0123456789abcdef0123456789abcdef"
+
+
+@pytest.mark.asyncio
+async def test_local_runtime_412_raises_not_ready_error() -> None:
+    """Test HTTP 412 is treated as a temporary local pairing activation delay."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with (
+            patch.object(
+                client,
+                "_async_post_local_payload",
+                AsyncMock(return_value=(412, '{"error":{}}')),
+            ),
+            pytest.raises(
+                FirewallaLocalRuntimeNotReadyError,
+                match="has not accepted the new pairing yet",
+            ),
+        ):
+            await client.async_get_runtime_init_payload()
 
 
 @pytest.mark.asyncio

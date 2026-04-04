@@ -8,6 +8,7 @@
       "cloud_link_timeout": "The Firewalla QR code was accepted, but cloud pairing did not finish before timing out.",
       "invalid_host": "The Firewalla local hostname or IP address is invalid.",
       "invalid_qr": "The Firewalla QR JSON or local IP address is invalid.",
+      "local_pairing_timeout": "The Firewalla QR code was accepted, but the box did not finish activating the new local pairing before timing out.",
       "wrong_account": "The new QR code belongs to a different Firewalla box."
     },
     "step": {

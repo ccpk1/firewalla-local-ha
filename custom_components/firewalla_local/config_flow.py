@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from collections.abc import Mapping
@@ -21,6 +22,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import (
     FirewallaApiClient,
     FirewallaApiError,
+    FirewallaLocalPairingTimeoutError,
+    FirewallaLocalRuntimeNotReadyError,
     FirewallaPairingTimeoutError,
     FirewallaValidationError,
     async_provision_firewalla_credentials,
@@ -90,6 +93,9 @@ _STEP_ID_SYSTEM_SETTINGS: Final = "system_settings"
 _STEP_ID_USER: Final = "user"
 _OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
 _CONFIG_ERROR_CLOUD_LINK_TIMEOUT: Final = "cloud_link_timeout"
+_CONFIG_ERROR_LOCAL_PAIRING_TIMEOUT: Final = "local_pairing_timeout"
+_LOCAL_RUNTIME_VALIDATION_ATTEMPTS: Final = 5
+_LOCAL_RUNTIME_VALIDATION_INTERVAL: Final = 2.0
 
 
 class PairingUserInput(TypedDict):
@@ -244,7 +250,23 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             device_name=DEFAULT_PAIRING_DEVICE_NAME,
             timezone_name=self.hass.config.time_zone,
         )
-        await client.async_get_runtime_init_payload()
+        for attempt in range(_LOCAL_RUNTIME_VALIDATION_ATTEMPTS):
+            try:
+                await client.async_get_runtime_init_payload()
+            except FirewallaLocalRuntimeNotReadyError as err:
+                if attempt + 1 == _LOCAL_RUNTIME_VALIDATION_ATTEMPTS:
+                    raise FirewallaLocalPairingTimeoutError(
+                        "Local runtime did not accept the new pairing before timing out"
+                    ) from err
+
+                LOGGER.info(
+                    "Firewalla local runtime is not ready for paired credentials "
+                    "on host %s yet (attempt %s/%s)",
+                    host,
+                    attempt + 1,
+                    _LOCAL_RUNTIME_VALIDATION_ATTEMPTS,
+                )
+                await asyncio.sleep(_LOCAL_RUNTIME_VALIDATION_INTERVAL)
         LOGGER.info("Firewalla local runtime validation succeeded for host %s", host)
 
         title_name = credentials.box_name or DEFAULT_BOX_NAME
@@ -303,6 +325,14 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                         err,
                     )
                     errors["base"] = _CONFIG_ERROR_CLOUD_LINK_TIMEOUT
+                except FirewallaLocalPairingTimeoutError as err:
+                    LOGGER.warning(
+                        "Firewalla pairing timed out waiting for local runtime "
+                        "activation for host %s: %s",
+                        host,
+                        err,
+                    )
+                    errors["base"] = _CONFIG_ERROR_LOCAL_PAIRING_TIMEOUT
                 except FirewallaApiError as err:
                     LOGGER.warning(
                         "Firewalla pairing failed for host %s: %s",
@@ -362,6 +392,14 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                     err,
                 )
                 errors["base"] = _CONFIG_ERROR_CLOUD_LINK_TIMEOUT
+            except FirewallaLocalPairingTimeoutError as err:
+                LOGGER.warning(
+                    "Firewalla reauth timed out waiting for local runtime "
+                    "activation for host %s: %s",
+                    cast(str, user_input[CONF_HOST]),
+                    err,
+                )
+                errors["base"] = _CONFIG_ERROR_LOCAL_PAIRING_TIMEOUT
             except FirewallaApiError as err:
                 LOGGER.warning(
                     "Firewalla reauth failed for host %s: %s",

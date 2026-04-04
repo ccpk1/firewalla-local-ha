@@ -16,6 +16,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.api import FirewallaApiError
 from custom_components.firewalla_local.api.exceptions import (
+    FirewallaLocalRuntimeNotReadyError,
     FirewallaPairingTimeoutError,
 )
 from custom_components.firewalla_local.api.models import (
@@ -329,6 +330,102 @@ async def test_user_flow_cloud_link_timeout_shows_specific_error(hass) -> None:
     assert result["errors"] == {"base": "cloud_link_timeout"}
 
 
+async def test_user_flow_retries_local_runtime_activation_on_http_412(hass) -> None:
+    """Test pairing retries temporary local runtime activation delays."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    mock_client = AsyncMock()
+    validation_attempts = 0
+
+    async def _mock_runtime_validation() -> dict[str, object]:
+        nonlocal validation_attempts
+        validation_attempts += 1
+        if validation_attempts == 1:
+            raise FirewallaLocalRuntimeNotReadyError(
+                "Firewalla local runtime has not accepted the new pairing "
+                'yet: HTTP 412: {"error":{}}'
+            )
+        return {}
+
+    mock_client.async_get_runtime_init_payload = AsyncMock(
+        side_effect=_mock_runtime_validation
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(return_value=_mock_credentials()),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient",
+            return_value=mock_client,
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.asyncio.sleep",
+            new=AsyncMock(),
+        ) as mock_sleep,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: "192.168.200.1",
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert mock_sleep.await_count == 1
+
+
+async def test_user_flow_local_runtime_timeout_shows_specific_error(hass) -> None:
+    """Test local pairing activation timeout returns a specific config error."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(return_value=_mock_credentials()),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(
+                side_effect=FirewallaLocalRuntimeNotReadyError(
+                    "Firewalla local runtime has not accepted the new pairing yet: "
+                    'HTTP 412: {"error":{}}'
+                )
+            ),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: "192.168.200.1",
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "local_pairing_timeout"}
+
+
 async def test_user_flow_logs_pairing_failure_details(hass, caplog) -> None:
     """Test pairing failures emit useful logs for support triage."""
     result = await hass.config_entries.flow.async_init(
@@ -601,6 +698,68 @@ async def test_reauth_cloud_link_timeout_shows_specific_error(hass) -> None:
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "cloud_link_timeout"}
+
+
+async def test_reauth_local_runtime_timeout_shows_specific_error(hass) -> None:
+    """Test reauth returns a specific error for local pairing activation timeout."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.9",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-old",
+            CONF_AID: "aid-old",
+            CONF_SYMMETRIC_KEY: "old-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_REAUTH,
+            "entry_id": entry.entry_id,
+            "unique_id": entry.unique_id,
+        },
+        data=entry.data,
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(return_value=_mock_credentials()),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(
+                side_effect=FirewallaLocalRuntimeNotReadyError(
+                    "Firewalla local runtime has not accepted the new pairing yet: "
+                    'HTTP 412: {"error":{}}'
+                )
+            ),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: "192.168.200.9",
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "local_pairing_timeout"}
 
 
 async def test_reauth_wrong_account_aborts(hass) -> None:

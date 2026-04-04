@@ -23,5 +23,13 @@ class FirewallaPairingTimeoutError(FirewallaProtocolError):
     """Raise when cloud pairing does not surface credentials before timing out."""
 
 
+class FirewallaLocalRuntimeNotReadyError(FirewallaProtocolError):
+    """Raise when the local runtime is not ready for newly paired credentials."""
+
+
+class FirewallaLocalPairingTimeoutError(FirewallaProtocolError):
+    """Raise when local pairing activation does not settle before timing out."""
+
+
 class FirewallaValidationError(FirewallaApiError):
     """Raise when user-supplied Firewalla input is invalid."""
