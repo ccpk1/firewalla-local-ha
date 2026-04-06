@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+import time
 from collections.abc import Mapping
 from typing import Final, Self, TypedDict, cast
 
@@ -94,8 +95,10 @@ _STEP_ID_USER: Final = "user"
 _OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
 _CONFIG_ERROR_CLOUD_LINK_TIMEOUT: Final = "cloud_link_timeout"
 _CONFIG_ERROR_LOCAL_PAIRING_TIMEOUT: Final = "local_pairing_timeout"
-_LOCAL_RUNTIME_VALIDATION_ATTEMPTS: Final = 5
-_LOCAL_RUNTIME_VALIDATION_INTERVAL: Final = 2.0
+_LOCAL_RUNTIME_VALIDATION_FAST_ATTEMPTS: Final = 5
+_LOCAL_RUNTIME_VALIDATION_FAST_INTERVAL: Final = 2.0
+_LOCAL_RUNTIME_VALIDATION_SLOW_INTERVAL: Final = 5.0
+_LOCAL_RUNTIME_VALIDATION_TIMEOUT: Final = 90.0
 
 
 class PairingUserInput(TypedDict):
@@ -180,6 +183,18 @@ def _resolve_default_pairing_host() -> str | None:
     return None
 
 
+def _pairing_monotonic() -> float:
+    """Return a monotonic clock for pairing instrumentation."""
+    return time.monotonic()
+
+
+def _get_local_runtime_validation_interval(attempt: int) -> float:
+    """Return the next wait interval for local pairing activation retries."""
+    if attempt <= _LOCAL_RUNTIME_VALIDATION_FAST_ATTEMPTS:
+        return _LOCAL_RUNTIME_VALIDATION_FAST_INTERVAL
+    return _LOCAL_RUNTIME_VALIDATION_SLOW_INTERVAL
+
+
 class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Firewalla Local."""
 
@@ -221,6 +236,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         """Validate pairing input and return durable credential data plus title."""
         host = _normalize_host(user_input[CONF_HOST])
         qr_data = load_qr_json(user_input[CONF_QR_JSON])
+        pairing_started_at = _pairing_monotonic()
 
         LOGGER.info("Starting Firewalla pairing for host %s", host)
 
@@ -236,9 +252,12 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             host=host,
             keys=keys,
         )
+        cloud_provisioning_elapsed = _pairing_monotonic() - pairing_started_at
         LOGGER.info(
-            "Cloud provisioning completed for host %s; validating local runtime",
+            "Cloud provisioning completed for host %s after %.1fs; validating "
+            "local runtime",
             credentials.host,
+            cloud_provisioning_elapsed,
         )
         client = FirewallaApiClient(
             session=async_get_clientsession(self.hass),
@@ -250,24 +269,56 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
             device_name=DEFAULT_PAIRING_DEVICE_NAME,
             timezone_name=self.hass.config.time_zone,
         )
-        for attempt in range(_LOCAL_RUNTIME_VALIDATION_ATTEMPTS):
+        LOGGER.info(
+            "Starting Firewalla local runtime validation for host %s "
+            "(aid present: %s, device name: %s, timezone: %s)",
+            credentials.host,
+            bool(credentials.aid),
+            DEFAULT_PAIRING_DEVICE_NAME,
+            self.hass.config.time_zone,
+        )
+        local_validation_started_at = _pairing_monotonic()
+        attempt = 0
+        while True:
+            attempt += 1
             try:
-                await client.async_get_runtime_init_payload()
+                await client.async_get_runtime_init_payload(log_as_info=True)
             except FirewallaLocalRuntimeNotReadyError as err:
-                if attempt + 1 == _LOCAL_RUNTIME_VALIDATION_ATTEMPTS:
+                elapsed = _pairing_monotonic() - local_validation_started_at
+                if elapsed >= _LOCAL_RUNTIME_VALIDATION_TIMEOUT:
                     raise FirewallaLocalPairingTimeoutError(
-                        "Local runtime did not accept the new pairing before timing out"
+                        "Local runtime did not accept the new pairing before "
+                        f"timing out after {attempt} attempts and {elapsed:.1f}s"
                     ) from err
 
+                wait_interval = min(
+                    _get_local_runtime_validation_interval(attempt),
+                    _LOCAL_RUNTIME_VALIDATION_TIMEOUT - elapsed,
+                )
                 LOGGER.info(
                     "Firewalla local runtime is not ready for paired credentials "
-                    "on host %s yet (attempt %s/%s)",
+                    "on host %s yet (attempt %s, elapsed %.1fs/%ss); waiting %.1fs "
+                    "before retry",
                     host,
-                    attempt + 1,
-                    _LOCAL_RUNTIME_VALIDATION_ATTEMPTS,
+                    attempt,
+                    elapsed,
+                    _LOCAL_RUNTIME_VALIDATION_TIMEOUT,
+                    wait_interval,
                 )
-                await asyncio.sleep(_LOCAL_RUNTIME_VALIDATION_INTERVAL)
-        LOGGER.info("Firewalla local runtime validation succeeded for host %s", host)
+                await asyncio.sleep(wait_interval)
+                continue
+
+            validation_elapsed = _pairing_monotonic() - local_validation_started_at
+            total_elapsed = _pairing_monotonic() - pairing_started_at
+            LOGGER.info(
+                "Firewalla local runtime validation succeeded for host %s after "
+                "%s attempt(s) and %.1fs of local wait (total pairing %.1fs)",
+                host,
+                attempt,
+                validation_elapsed,
+                total_elapsed,
+            )
+            break
 
         title_name = credentials.box_name or DEFAULT_BOX_NAME
         return (

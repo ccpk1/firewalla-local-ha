@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import time
 import uuid
@@ -257,14 +258,22 @@ class FirewallaApiClient:
         }
 
     async def _async_post_local_payload(
-        self, payload: dict[str, object]
+        self,
+        payload: dict[str, object],
+        *,
+        log_level: int = logging.DEBUG,
     ) -> tuple[int, str]:
         """Post an encrypted payload to the local runtime endpoint."""
         url = f"http://{self.host}:8833/v1/encipher/message/{self.gid}"
-        LOGGER.debug("Posting Firewalla local runtime payload to host %s", self.host)
+        LOGGER.log(
+            log_level,
+            "Posting Firewalla local runtime payload to host %s",
+            self.host,
+        )
         try:
             async with self._session.post(url, json=payload) as response:
-                LOGGER.debug(
+                LOGGER.log(
+                    log_level,
                     "Firewalla local runtime responded with HTTP %s for host %s",
                     response.status,
                     self.host,
@@ -281,12 +290,14 @@ class FirewallaApiClient:
         message_type: str,
         data: dict[str, object],
         target: str = DEFAULT_INIT_TARGET,
+        log_level: int = logging.DEBUG,
     ) -> dict[str, object]:
         """Send a local Encipher message and return one decrypted data object."""
         data_payload = await self._async_send_local_message_data(
             message_type=message_type,
             data=data,
             target=target,
+            log_level=log_level,
         )
         if not isinstance(data_payload, dict):
             raise FirewallaProtocolError(
@@ -301,6 +312,7 @@ class FirewallaApiClient:
         message_type: str,
         data: dict[str, object],
         target: str = DEFAULT_INIT_TARGET,
+        log_level: int = logging.DEBUG,
     ) -> object:
         """Send a local Encipher message and return the decrypted data payload."""
         message = self._build_fwmessage(
@@ -317,7 +329,10 @@ class FirewallaApiClient:
             _RAW_MESSAGE_TIMESTAMP_KEY: int(time.time()),
         }
 
-        response_status, response_text = await self._async_post_local_payload(payload)
+        response_status, response_text = await self._async_post_local_payload(
+            payload,
+            log_level=log_level,
+        )
         if response_status == 401:
             LOGGER.debug(
                 "Firewalla local runtime returned unauthorized for host %s; "
@@ -325,7 +340,8 @@ class FirewallaApiClient:
                 self.host,
             )
             response_status, response_text = await self._async_post_local_payload(
-                payload
+                payload,
+                log_level=log_level,
             )
             if response_status == 401:
                 raise FirewallaAuthError(
@@ -389,13 +405,30 @@ class FirewallaApiClient:
         data_payload = decrypted_payload.get(_RAW_MESSAGE_DATA_KEY)
         return data_payload
 
-    async def async_get_runtime_init_payload(self) -> dict[str, object]:
+    async def async_get_runtime_init_payload(
+        self, *, log_as_info: bool = False
+    ) -> dict[str, object]:
         """Fetch the raw Firewalla init payload from the local runtime."""
-        LOGGER.debug("Requesting Firewalla local init payload from host %s", self.host)
+        log_level = logging.INFO if log_as_info else logging.DEBUG
+        LOGGER.log(
+            log_level,
+            "Requesting Firewalla local init payload from host %s",
+            self.host,
+        )
+        if log_as_info:
+            LOGGER.info(
+                "Firewalla local init request metadata for host %s: aid present=%s, "
+                "device name=%s, timezone=%s",
+                self.host,
+                bool(self.aid),
+                self.device_name,
+                self.timezone_name,
+            )
         return await self._async_send_local_message(
             message_type=_INIT_MESSAGE_TYPE,
             data={_COMMAND_GET_KEY: DEFAULT_INIT_TARGET},
             target=DEFAULT_INIT_TARGET,
+            log_level=log_level,
         )
 
     async def async_create_rule(self, template: FirewallaRuleTemplate) -> None:

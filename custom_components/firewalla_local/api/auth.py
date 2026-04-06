@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Final, cast
 
 from aiohttp import ClientError, ClientSession
@@ -390,6 +391,7 @@ async def async_provision_firewalla_credentials(
     interval: float = DEFAULT_GROUP_POLL_INTERVAL,
 ) -> FirewallaProvisionedCredentials:
     """Run the approved cloud provisioning flow and return durable local credentials."""
+    provisioning_started_at = time.monotonic()
     LOGGER.info("Starting Firewalla cloud provisioning flow for host %s", host)
     identity = await login_eptoken(
         session,
@@ -405,11 +407,13 @@ async def async_provision_firewalla_credentials(
 
     current_identity = identity
     for attempt in range(attempts):
+        elapsed = time.monotonic() - provisioning_started_at
         LOGGER.info(
-            "Polling Firewalla cloud groups for host %s (attempt %s/%s)",
+            "Polling Firewalla cloud groups for host %s (attempt %s/%s, elapsed %.1fs)",
             host,
             attempt + 1,
             attempts,
+            elapsed,
         )
         if attempt:
             await asyncio.sleep(interval)
@@ -427,12 +431,18 @@ async def async_provision_firewalla_credentials(
             private_pem=keys.private_pem,
         )
         if credentials is not None:
+            total_elapsed = time.monotonic() - provisioning_started_at
             LOGGER.info(
-                "Firewalla cloud provisioning produced local credentials for host %s",
+                "Firewalla cloud provisioning produced local credentials for host %s "
+                "from %s after %.1fs",
                 host,
+                fetch_result.source,
+                total_elapsed,
             )
             return credentials
 
+    total_elapsed = time.monotonic() - provisioning_started_at
     raise FirewallaPairingTimeoutError(
-        "Cloud link did not produce a visible group before polling timed out"
+        "Cloud link did not produce a visible group before polling timed out "
+        f"after {total_elapsed:.1f}s"
     )

@@ -340,7 +340,10 @@ async def test_user_flow_retries_local_runtime_activation_on_http_412(hass) -> N
     mock_client = AsyncMock()
     validation_attempts = 0
 
-    async def _mock_runtime_validation() -> dict[str, object]:
+    async def _mock_runtime_validation(
+        *, log_as_info: bool = False
+    ) -> dict[str, object]:
+        _ = log_as_info
         nonlocal validation_attempts
         validation_attempts += 1
         if validation_attempts == 1:
@@ -413,6 +416,10 @@ async def test_user_flow_local_runtime_timeout_shows_specific_error(hass) -> Non
             "custom_components.firewalla_local.config_flow.asyncio.sleep",
             new=AsyncMock(),
         ),
+        patch(
+            "custom_components.firewalla_local.config_flow._pairing_monotonic",
+            side_effect=[0.0, 0.0, 0.0, 30.0, 60.0, 95.0],
+        ),
     ):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -424,6 +431,80 @@ async def test_user_flow_local_runtime_timeout_shows_specific_error(hass) -> Non
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "local_pairing_timeout"}
+
+
+async def test_user_flow_logs_local_pairing_wait_details(hass, caplog) -> None:
+    """Test local pairing waits emit info-level timing logs."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    mock_client = AsyncMock()
+    validation_attempts = 0
+
+    async def _mock_runtime_validation(
+        *, log_as_info: bool = False
+    ) -> dict[str, object]:
+        _ = log_as_info
+        nonlocal validation_attempts
+        validation_attempts += 1
+        if validation_attempts == 1:
+            raise FirewallaLocalRuntimeNotReadyError(
+                "Firewalla local runtime has not accepted the new pairing "
+                'yet: HTTP 412: {"error":{}}'
+            )
+        return {}
+
+    mock_client.async_get_runtime_init_payload = AsyncMock(
+        side_effect=_mock_runtime_validation
+    )
+    caplog.set_level(logging.INFO, logger="custom_components.firewalla_local")
+
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(return_value=_mock_credentials()),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient",
+            return_value=mock_client,
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow._pairing_monotonic",
+            side_effect=[0.0, 8.0, 8.0, 9.0, 12.0, 15.0],
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: "192.168.200.1",
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert (
+        "Cloud provisioning completed for host 192.168.200.1 after 8.0s; "
+        "validating local runtime" in caplog.text
+    )
+    assert (
+        "Firewalla local runtime is not ready for paired credentials on host "
+        "192.168.200.1 yet (attempt 1, elapsed 1.0s/90.0s); waiting 2.0s before "
+        "retry" in caplog.text
+    )
+    assert (
+        "Firewalla local runtime validation succeeded for host 192.168.200.1 "
+        "after 2 attempt(s) and 4.0s of local wait (total pairing 15.0s)" in caplog.text
+    )
 
 
 async def test_user_flow_logs_pairing_failure_details(hass, caplog) -> None:
@@ -748,6 +829,10 @@ async def test_reauth_local_runtime_timeout_shows_specific_error(hass) -> None:
         patch(
             "custom_components.firewalla_local.config_flow.asyncio.sleep",
             new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow._pairing_monotonic",
+            side_effect=[0.0, 0.0, 0.0, 30.0, 60.0, 95.0],
         ),
     ):
         result = await hass.config_entries.flow.async_configure(

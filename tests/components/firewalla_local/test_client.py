@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -56,6 +57,47 @@ async def test_local_runtime_412_raises_not_ready_error() -> None:
             ),
         ):
             await client.async_get_runtime_init_payload()
+
+
+@pytest.mark.asyncio
+async def test_local_runtime_init_logs_at_info_for_pairing(caplog) -> None:
+    """Test pairing-time local init uses info-level request and response logs."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+            timezone_name="UTC",
+        )
+        encrypted_response = aes256_cbc_encrypt_to_base64(
+            json.dumps({"code": 200, "data": {}}),
+            TEST_SYMMETRIC_KEY,
+        )
+        caplog.set_level(logging.INFO, logger="custom_components.firewalla_local")
+
+        with patch.object(
+            client,
+            "_async_post_local_payload",
+            AsyncMock(
+                return_value=(
+                    200,
+                    json.dumps({"message": encrypted_response}),
+                )
+            ),
+        ):
+            await client.async_get_runtime_init_payload(log_as_info=True)
+
+    assert (
+        "Requesting Firewalla local init payload from host 192.168.200.1" in caplog.text
+    )
+    assert (
+        "Firewalla local init request metadata for host 192.168.200.1: "
+        "aid present=True, device name=Home Assistant, timezone=UTC" in caplog.text
+    )
 
 
 @pytest.mark.asyncio
