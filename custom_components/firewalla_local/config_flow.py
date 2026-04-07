@@ -95,8 +95,14 @@ _STEP_ID_USER: Final = "user"
 _OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
 _CONFIG_ERROR_CLOUD_LINK_TIMEOUT: Final = "cloud_link_timeout"
 _CONFIG_ERROR_LOCAL_PAIRING_TIMEOUT: Final = "local_pairing_timeout"
+# 45 attempts x 2 s = 90 s polling window.  The box's local API service
+# typically returns HTTP 412 for ~15 s, disconnects while restarting to
+# activate the new credentials, then comes back up ~8-10 s later.  The
+# 90 s window gives ample margin for the full activation cycle.
 _LOCAL_RUNTIME_VALIDATION_ATTEMPTS: Final = 45
 _LOCAL_RUNTIME_VALIDATION_INTERVAL: Final = 2.0
+# Extra backoff after a server disconnect: allow the box's local API service
+# time to fully restart before the next connection attempt.
 _LOCAL_RUNTIME_DISCONNECT_BACKOFF: Final = 8.0
 
 
