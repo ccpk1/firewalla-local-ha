@@ -23,6 +23,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import (
     FirewallaApiClient,
     FirewallaApiError,
+    FirewallaConnectionError,
     FirewallaLocalPairingTimeoutError,
     FirewallaLocalRuntimeNotReadyError,
     FirewallaPairingTimeoutError,
@@ -299,6 +300,30 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                     "Firewalla local runtime is not ready for paired credentials "
                     "on host %s yet (attempt %s, elapsed %.1fs/%ss); waiting %.1fs "
                     "before retry",
+                    host,
+                    attempt,
+                    elapsed,
+                    _LOCAL_RUNTIME_VALIDATION_TIMEOUT,
+                    wait_interval,
+                )
+                await asyncio.sleep(wait_interval)
+                continue
+            except FirewallaConnectionError as err:
+                elapsed = _pairing_monotonic() - local_validation_started_at
+                if elapsed >= _LOCAL_RUNTIME_VALIDATION_TIMEOUT:
+                    raise FirewallaLocalPairingTimeoutError(
+                        "Local runtime did not accept the new pairing before "
+                        f"timing out after {attempt} attempts and {elapsed:.1f}s"
+                    ) from err
+
+                wait_interval = min(
+                    _LOCAL_RUNTIME_VALIDATION_SLOW_INTERVAL,
+                    _LOCAL_RUNTIME_VALIDATION_TIMEOUT - elapsed,
+                )
+                LOGGER.info(
+                    "Firewalla local runtime disconnected during paired credential "
+                    "activation on host %s (attempt %s, elapsed %.1fs/%ss); "
+                    "waiting %.1fs before retry",
                     host,
                     attempt,
                     elapsed,

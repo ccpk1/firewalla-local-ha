@@ -16,6 +16,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.api import FirewallaApiError
 from custom_components.firewalla_local.api.exceptions import (
+    FirewallaConnectionError,
     FirewallaLocalRuntimeNotReadyError,
     FirewallaPairingTimeoutError,
 )
@@ -504,6 +505,135 @@ async def test_user_flow_logs_local_pairing_wait_details(hass, caplog) -> None:
     assert (
         "Firewalla local runtime validation succeeded for host 192.168.200.1 "
         "after 2 attempt(s) and 4.0s of local wait (total pairing 15.0s)" in caplog.text
+    )
+
+
+async def test_user_flow_retries_local_runtime_disconnect_during_activation(
+    hass,
+) -> None:
+    """Test pairing retries a transient local disconnect during activation."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    mock_client = AsyncMock()
+    validation_attempts = 0
+
+    async def _mock_runtime_validation(
+        *, log_as_info: bool = False
+    ) -> dict[str, object]:
+        _ = log_as_info
+        nonlocal validation_attempts
+        validation_attempts += 1
+        if validation_attempts == 1:
+            raise FirewallaConnectionError(
+                "Could not reach Firewalla box at 192.168.200.1: Server disconnected"
+            )
+        return {}
+
+    mock_client.async_get_runtime_init_payload = AsyncMock(
+        side_effect=_mock_runtime_validation
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(return_value=_mock_credentials()),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient",
+            return_value=mock_client,
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.asyncio.sleep",
+            new=AsyncMock(),
+        ) as mock_sleep,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: "192.168.200.1",
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert mock_sleep.await_count == 1
+    mock_sleep.assert_awaited_with(5.0)
+
+
+async def test_user_flow_logs_local_disconnect_wait_details(hass, caplog) -> None:
+    """Test local activation disconnects emit retriable timing logs."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    mock_client = AsyncMock()
+    validation_attempts = 0
+
+    async def _mock_runtime_validation(
+        *, log_as_info: bool = False
+    ) -> dict[str, object]:
+        _ = log_as_info
+        nonlocal validation_attempts
+        validation_attempts += 1
+        if validation_attempts == 1:
+            raise FirewallaConnectionError(
+                "Could not reach Firewalla box at 192.168.200.1: Server disconnected"
+            )
+        return {}
+
+    mock_client.async_get_runtime_init_payload = AsyncMock(
+        side_effect=_mock_runtime_validation
+    )
+    caplog.set_level(logging.INFO, logger="custom_components.firewalla_local")
+
+    with (
+        patch(
+            "custom_components.firewalla_local.config_flow.generate_firewalla_keys",
+            return_value=_mock_keys(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.async_provision_firewalla_credentials",
+            new=AsyncMock(return_value=_mock_credentials()),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient",
+            return_value=mock_client,
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.firewalla_local.config_flow._pairing_monotonic",
+            side_effect=[0.0, 8.0, 8.0, 13.0, 20.0, 24.0],
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_HOST: "192.168.200.1",
+                CONF_QR_JSON: TEST_QR_JSON,
+            },
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert (
+        "Firewalla local runtime disconnected during paired credential "
+        "activation on host 192.168.200.1 (attempt 1, elapsed 5.0s/90.0s); "
+        "waiting 5.0s before retry" in caplog.text
+    )
+    assert (
+        "Firewalla local runtime validation succeeded for host 192.168.200.1 "
+        "after 2 attempt(s) and 12.0s of local wait (total pairing 24.0s)"
+        in caplog.text
     )
 
 
