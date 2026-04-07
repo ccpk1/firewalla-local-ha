@@ -22,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import (
     FirewallaApiClient,
     FirewallaApiError,
+    FirewallaConnectionError,
     FirewallaLocalPairingTimeoutError,
     FirewallaLocalRuntimeNotReadyError,
     FirewallaPairingTimeoutError,
@@ -94,8 +95,9 @@ _STEP_ID_USER: Final = "user"
 _OPTION_RETURN_TO_MAIN_MENU: Final = "return_to_main_menu"
 _CONFIG_ERROR_CLOUD_LINK_TIMEOUT: Final = "cloud_link_timeout"
 _CONFIG_ERROR_LOCAL_PAIRING_TIMEOUT: Final = "local_pairing_timeout"
-_LOCAL_RUNTIME_VALIDATION_ATTEMPTS: Final = 5
+_LOCAL_RUNTIME_VALIDATION_ATTEMPTS: Final = 45
 _LOCAL_RUNTIME_VALIDATION_INTERVAL: Final = 2.0
+_LOCAL_RUNTIME_DISCONNECT_BACKOFF: Final = 8.0
 
 
 class PairingUserInput(TypedDict):
@@ -253,6 +255,7 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         for attempt in range(_LOCAL_RUNTIME_VALIDATION_ATTEMPTS):
             try:
                 await client.async_get_runtime_init_payload()
+                break
             except FirewallaLocalRuntimeNotReadyError as err:
                 if attempt + 1 == _LOCAL_RUNTIME_VALIDATION_ATTEMPTS:
                     raise FirewallaLocalPairingTimeoutError(
@@ -267,6 +270,20 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                     _LOCAL_RUNTIME_VALIDATION_ATTEMPTS,
                 )
                 await asyncio.sleep(_LOCAL_RUNTIME_VALIDATION_INTERVAL)
+            except FirewallaConnectionError as err:
+                if attempt + 1 == _LOCAL_RUNTIME_VALIDATION_ATTEMPTS:
+                    raise FirewallaLocalPairingTimeoutError(
+                        "Local runtime did not accept the new pairing before timing out"
+                    ) from err
+
+                LOGGER.info(
+                    "Firewalla local runtime disconnected on host %s "
+                    "(attempt %s/%s); waiting for service restart before retrying",
+                    host,
+                    attempt + 1,
+                    _LOCAL_RUNTIME_VALIDATION_ATTEMPTS,
+                )
+                await asyncio.sleep(_LOCAL_RUNTIME_DISCONNECT_BACKOFF)
         LOGGER.info("Firewalla local runtime validation succeeded for host %s", host)
 
         title_name = credentials.box_name or DEFAULT_BOX_NAME
