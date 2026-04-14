@@ -1002,8 +1002,9 @@ async def test_async_set_host_name_sends_host_targeted_write_and_accepts_null_ac
 
 
 @pytest.mark.asyncio
-async def test_async_set_host_dns_hostname_sends_hostdomain_write_and_accepts_null_ack(
-) -> None:
+async def test_async_set_host_dns_hostname_sends_hostdomain_write_and_accepts_null_ack() -> (
+    None
+):
     """Test DNS hostname override uses the captured hostDomain write."""
     async with ClientSession() as session:
         client = FirewallaApiClient(
@@ -1037,8 +1038,9 @@ async def test_async_set_host_dns_hostname_sends_hostdomain_write_and_accepts_nu
 
 
 @pytest.mark.asyncio
-async def test_async_set_host_device_type_sends_feedback_write_and_accepts_null_ack(
-) -> None:
+async def test_async_set_host_device_type_sends_feedback_write_and_accepts_null_ack() -> (
+    None
+):
     """Test device type override uses the captured feedback write."""
     async with ClientSession() as session:
         client = FirewallaApiClient(
