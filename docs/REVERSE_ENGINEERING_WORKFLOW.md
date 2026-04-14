@@ -1420,6 +1420,48 @@ Conclusion:
 - the read model still needs separate confirmation before the integration can
   promise immediate renamed-state readback after the write
 
+### Finding 17: Host identity readback exposes separate human-facing, DNS, and DHCP naming fields
+
+Scenario:
+
+- compared steady-state runtime pulls taken before and after host-focused app
+  actions, alongside the raw host records returned in the local init payload
+
+Artifacts:
+
+- `.artifacts/runtime-pull/20260331-022009/`
+- `.artifacts/runtime-pull/20260331-022718/`
+
+Observed host identity read model:
+
+- host records can expose multiple naming-related fields at the same time
+- currently observed raw fields include:
+  - `bname` for the primary human-facing label shown in the app
+  - `name` for the DNS-oriented hostname label
+  - `dhcpName` for the DHCP-origin hostname value when present
+  - `bonjourName` for the Bonjour-discovered hostname value when present
+  - `localDomain` for the host-local fully qualified DNS name when present
+- segment DHCP configuration exposes `searchDomain` under
+  `networkConfig.dhcp[<interface_name>]`
+
+Observed classification read model:
+
+- host classification can be read back from host detect or feedback data
+- the normalized write path observed in Finding 15 uses feedback key
+  `device.detect` with nested field `value.type`
+
+Implementation impact:
+
+- the integration should keep host identity fields separate in the normalized
+  model instead of flattening them into one display-name convenience field
+- `host_name` should represent the primary human-facing Firewalla label
+- `dns_hostname`, `dns_domain`, and `dns_fqdn` should remain explicit DNS
+  surfaces
+- `dhcp_name` should remain a provenance-specific DHCP field rather than a
+  fallback alias for `host_name`
+- `host_device_type` should remain the normalized Firewalla host
+  classification field surfaced from detect or feedback data
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two

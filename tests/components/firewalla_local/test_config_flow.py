@@ -1415,8 +1415,7 @@ async def test_options_flow_updates_watched_devices(hass) -> None:
                 hosts=(
                     FirewallaHostRuntime(
                         mac="AA:BB:CC:DD:EE:FF",
-                        display_name="Kaden Phone",
-                        fallback_name=None,
+                        host_name="Kaden Phone",
                         ip_address="192.168.200.25",
                         group_name=None,
                         network_name=None,
@@ -1428,8 +1427,7 @@ async def test_options_flow_updates_watched_devices(hass) -> None:
                     ),
                     FirewallaHostRuntime(
                         mac="wg_peer:test-peer",
-                        display_name="WireGuard Kaden",
-                        fallback_name=None,
+                        host_name="WireGuard Kaden",
                         ip_address="10.42.0.2",
                         group_name=None,
                         network_name=None,
@@ -1510,8 +1508,7 @@ async def test_options_flow_updates_device_trackers(hass) -> None:
                 hosts=(
                     FirewallaHostRuntime(
                         mac="AA:BB:CC:DD:EE:FF",
-                        display_name="Kaden Phone",
-                        fallback_name=None,
+                        host_name="Kaden Phone",
                         ip_address="192.168.200.25",
                         group_name=None,
                         network_name=None,
@@ -1523,8 +1520,7 @@ async def test_options_flow_updates_device_trackers(hass) -> None:
                     ),
                     FirewallaHostRuntime(
                         mac="wg_peer:test-peer",
-                        display_name="WireGuard Kaden",
-                        fallback_name=None,
+                        host_name="WireGuard Kaden",
                         ip_address="10.42.0.2",
                         group_name=None,
                         network_name=None,
@@ -1689,8 +1685,7 @@ async def test_options_flow_updates_watched_users(hass) -> None:
                 hosts=(
                     FirewallaHostRuntime(
                         mac="AA:BB:CC:DD:EE:FF",
-                        display_name="Kaden Phone",
-                        fallback_name=None,
+                        host_name="Kaden Phone",
                         ip_address="192.168.200.25",
                         group_name="KADEN's Devices",
                         network_name=None,

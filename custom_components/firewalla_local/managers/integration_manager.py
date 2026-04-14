@@ -244,6 +244,14 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Write one host-scoped custom name to the requested host."""
         return await self.client.async_set_host_name(host_mac, host_name)
 
+    async def async_set_host_device_type(
+        self,
+        host_mac: str,
+        device_type: str,
+    ) -> dict[str, object]:
+        """Write one host-scoped device type through the feedback path."""
+        return await self.client.async_set_host_device_type(host_mac, device_type)
+
     async def async_get_usage_history(
         self,
         *,
@@ -735,7 +743,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             hosts.append(
                 FirewallaNetworkHostTotals(
                     host_id=host_id,
-                    host_name=host.display_name if host is not None else None,
+                    host_name=host.host_name if host is not None else None,
                     ip_address=host.ip_address if host is not None else None,
                     conn=self._optional_int(raw_totals.get("conn")),
                     dns=self._optional_int(raw_totals.get("dns")),
@@ -777,7 +785,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             activity = activity_by_host.setdefault(
                 host_id,
                 {
-                    "host_name": host.display_name if host is not None else None,
+                    "host_name": host.host_name if host is not None else None,
                     "ip_address": host.ip_address if host is not None else ip_address,
                     "conn": 0,
                     "download_bytes": 0,
@@ -991,7 +999,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             rankings.append(
                 FirewallaNetworkHostRanking(
                     host_id=host_id,
-                    host_name=host.display_name if host is not None else None,
+                    host_name=host.host_name if host is not None else None,
                     ip_address=(
                         host.ip_address
                         if host is not None
@@ -2103,7 +2111,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             return ()
 
         host_name_by_id = (
-            {host.mac: host.display_name for host in self.coordinator.data.hosts}
+            {host.mac: host.host_name for host in self.coordinator.data.hosts}
             if self.coordinator.data is not None
             else {}
         )
@@ -2251,11 +2259,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self, mac: str, host: FirewallaHostRuntime | None
     ) -> str:
         """Build the default device name for one tracked client."""
-        if host is not None:
-            if host.display_name:
-                return host.display_name
-            if host.fallback_name:
-                return host.fallback_name
+        if host is not None and host.host_name:
+            return host.host_name
         return f"{_TRACKED_CLIENT_DEVICE_NAME_PREFIX} {dr.format_mac(mac)}"
 
     def async_ensure_primary_device(self) -> dr.DeviceEntry:

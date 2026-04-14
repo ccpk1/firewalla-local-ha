@@ -28,6 +28,11 @@ Use repository terminology consistently.
 - use `domain` only for the Home Assistant integration domain `firewalla_local`
 - use `rule`, `rule template`, `runtime snapshot`, and `registry` for Firewalla data concepts
 - use `item type` or `record type` for Firewalla-specific categories such as `rule`
+- use `host` for Firewalla endpoint or client inventory records
+- use `host_name` for the primary user-facing Firewalla host label
+- use `dns_hostname`, `dns_domain`, and `dns_fqdn` for DNS-oriented host identity fields
+- use `dhcp_name` only for the DHCP-origin hostname field
+- use `host_device_type` for the Firewalla host classification field
 - use `entity` only for Home Assistant platform objects
 - use `device tracker` only for Home Assistant `device_tracker` entities and never as shorthand for generic host inventory or the Firewalla box device
 - use `unique ID` for the stable registry identifier and `entity_id` for the Home Assistant registry string
@@ -36,8 +41,15 @@ Use repository terminology consistently.
 Critical rule:
 
 - never call a Firewalla rule or normalized runtime record an entity
+- never call a Firewalla host record a device unless the code is explicitly modeling a Home Assistant device registry object
 - never use `tracked device` as a synonym for the Home Assistant `device_tracker` surface
 - never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
+
+Normalized host identity rule:
+
+- keep the primary Firewalla host label separate from DNS and DHCP-derived naming fields
+- do not collapse `host_name`, `dns_hostname`, `dns_domain`, `dns_fqdn`, and `dhcp_name` into one convenience field
+- do not add compatibility aliases such as duplicate `display_name` or `fallback_name` fields once a normalized host contract exists
 
 ## Constants taxonomy
 
@@ -186,6 +198,7 @@ Rules:
 - they must delegate business logic to manager methods
 - they must not perform protocol calls directly
 - they must map failures into specific Home Assistant exception types and translation keys
+- services that target hosts must resolve against the normalized host contract and keep `host_name` as the primary human-facing selector surface
 - watched-user entity attributes must distinguish raw payload facts from
 	integration-derived joins, especially for totals, per-app usage, and
 	host-derived `last_active` metadata

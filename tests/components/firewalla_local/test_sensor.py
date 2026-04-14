@@ -200,8 +200,7 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
         hosts=(
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:01",
-                display_name="Online device 1",
-                fallback_name=None,
+                host_name="Online device 1",
                 ip_address="192.168.200.11",
                 group_name=None,
                 network_name=None,
@@ -213,8 +212,7 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
             ),
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:02",
-                display_name="Online device 2",
-                fallback_name=None,
+                host_name="Online device 2",
                 ip_address="192.168.200.12",
                 group_name=None,
                 network_name=None,
@@ -226,8 +224,7 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
             ),
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:03",
-                display_name="Offline device",
-                fallback_name=None,
+                host_name="Offline device",
                 ip_address="192.168.200.13",
                 group_name=None,
                 network_name=None,
@@ -528,8 +525,7 @@ async def test_sensor_setup_exposes_watched_user_usage_sensor(
         hosts=(
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:01",
-                display_name="Kaden Phone",
-                fallback_name=None,
+                host_name="Kaden Phone",
                 ip_address="192.168.200.25",
                 group_name="KADEN's Devices",
                 network_name=None,
@@ -542,8 +538,7 @@ async def test_sensor_setup_exposes_watched_user_usage_sensor(
             ),
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:02",
-                display_name="Kaden Chromebook",
-                fallback_name=None,
+                host_name="Kaden Chromebook",
                 ip_address="192.168.200.26",
                 group_name="KADEN's Devices",
                 network_name=None,
@@ -760,8 +755,7 @@ async def test_sensor_setup_derives_watched_user_totals_and_group_associations(
         hosts=(
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:23",
-                display_name="Payton iPad",
-                fallback_name=None,
+                host_name="Payton iPad",
                 ip_address="192.168.200.27",
                 group_name="PAYTON's Devices",
                 network_name=None,
@@ -877,8 +871,7 @@ async def test_system_status_device_counts_use_recent_activity_not_stale_only(
         hosts=(
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:01",
-                display_name="Recent 1",
-                fallback_name=None,
+                host_name="Recent 1",
                 ip_address="192.168.200.11",
                 group_name=None,
                 network_name=None,
@@ -890,8 +883,7 @@ async def test_system_status_device_counts_use_recent_activity_not_stale_only(
             ),
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:02",
-                display_name="Recent 2",
-                fallback_name=None,
+                host_name="Recent 2",
                 ip_address="192.168.200.12",
                 group_name=None,
                 network_name=None,
@@ -903,8 +895,7 @@ async def test_system_status_device_counts_use_recent_activity_not_stale_only(
             ),
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:03",
-                display_name="Older 1",
-                fallback_name=None,
+                host_name="Older 1",
                 ip_address="192.168.200.13",
                 group_name=None,
                 network_name=None,
@@ -916,8 +907,7 @@ async def test_system_status_device_counts_use_recent_activity_not_stale_only(
             ),
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:04",
-                display_name="Older 2",
-                fallback_name=None,
+                host_name="Older 2",
                 ip_address="192.168.200.14",
                 group_name=None,
                 network_name=None,

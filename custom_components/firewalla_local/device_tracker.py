@@ -17,6 +17,11 @@ from .const import (
     ATTR_PURPOSE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
+    ATTR_WATCHED_DEVICE_DNS_DOMAIN,
+    ATTR_WATCHED_DEVICE_DNS_FQDN,
+    ATTR_WATCHED_DEVICE_DNS_HOSTNAME,
+    ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE,
+    ATTR_WATCHED_DEVICE_HOST_NAME,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
@@ -167,7 +172,7 @@ class FirewallaDeviceTracker(
     def hostname(self) -> str | None:
         """Return the hostname for the selected host."""
         host = self._host
-        return host.display_name if host is not None else None
+        return host.dns_hostname if host is not None else None
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
@@ -177,6 +182,19 @@ class FirewallaDeviceTracker(
             ATTR_PURPOSE: TRANS_KEY_PURPOSE_DEVICE_TRACKER_PRESENCE,
             ATTR_WATCHED_DEVICE_IP_ADDRESS: (
                 host.ip_address if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_HOST_NAME: (
+                host.host_name if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_DNS_HOSTNAME: (
+                host.dns_hostname if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_DNS_DOMAIN: (
+                host.dns_domain if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_DNS_FQDN: (host.dns_fqdn if host is not None else None),
+            ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE: (
+                host.host_device_type if host is not None else None
             ),
             ATTR_WATCHED_DEVICE_DEVICE_GROUP: (
                 host.group_name if host is not None else None

@@ -96,8 +96,8 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
     snapshot = _snapshot_with_hosts(
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:FF",
-            display_name="Kaden Phone",
-            fallback_name="kaden-phone",
+            host_name="Kaden Phone",
+            dns_hostname="kaden-phone",
             ip_address="192.168.200.25",
             group_name="KADEN's Devices (KADEN)",
             network_name="VLAN10 CORE",
@@ -215,8 +215,7 @@ async def test_watched_device_binary_sensor_uses_recent_activity_window(
     snapshot = _snapshot_with_hosts(
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:FF",
-            display_name="Older device",
-            fallback_name=None,
+            host_name="Older device",
             ip_address="192.168.200.25",
             group_name=None,
             network_name=None,
@@ -228,8 +227,7 @@ async def test_watched_device_binary_sensor_uses_recent_activity_window(
         ),
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:01",
-            display_name="Recent device",
-            fallback_name=None,
+            host_name="Recent device",
             ip_address="192.168.200.26",
             group_name=None,
             network_name=None,
@@ -243,8 +241,12 @@ async def test_watched_device_binary_sensor_uses_recent_activity_window(
 
     with (
         patch(
+            "custom_components.firewalla_local.managers.host_manager.dt_util.utcnow",
+            return_value=datetime.fromtimestamp(10_000.0, UTC),
+        ),
+        patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_runtime_payload()),
+            new=AsyncMock(return_value={"policyRules": []}),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -285,8 +287,7 @@ async def test_watched_device_binary_sensor_name_updates_after_host_rename(
     initial_snapshot = _snapshot_with_hosts(
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:FF",
-            display_name="Kaden Phone",
-            fallback_name=None,
+            host_name="Kaden Phone",
             ip_address="192.168.200.25",
             group_name=None,
             network_name=None,
@@ -300,8 +301,7 @@ async def test_watched_device_binary_sensor_name_updates_after_host_rename(
     renamed_snapshot = _snapshot_with_hosts(
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:FF",
-            display_name="Kaden Pixel",
-            fallback_name=None,
+            host_name="Kaden Pixel",
             ip_address="192.168.200.25",
             group_name=None,
             network_name=None,
@@ -385,8 +385,7 @@ async def test_watched_device_binary_sensor_unique_ids_are_entry_scoped(
 
     host = FirewallaHostRuntime(
         mac="AA:BB:CC:DD:EE:FF",
-        display_name="Kaden Phone",
-        fallback_name=None,
+        host_name="Kaden Phone",
         ip_address="192.168.200.25",
         group_name=None,
         network_name=None,

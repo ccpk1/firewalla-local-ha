@@ -86,9 +86,9 @@ class FirewallaHostManager(FirewallaBaseManager):
     @staticmethod
     def _format_host_choice_label(host: FirewallaHostRuntime) -> str:
         """Build the best available user-facing host label."""
-        if host.ip_address is not None and host.ip_address != host.display_name:
-            return f"{host.display_name} ({host.ip_address})"
-        return host.display_name
+        if host.ip_address is not None and host.ip_address != host.host_name:
+            return f"{host.host_name} ({host.ip_address})"
+        return host.host_name
 
     @classmethod
     def get_watched_device_choices_for_hosts(

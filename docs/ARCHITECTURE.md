@@ -58,6 +58,13 @@ Use terms consistently across code, documentation, diagnostics, and review.
 | Domain | The Home Assistant integration domain `firewalla_local` only |
 | Rule | A normalized Firewalla policy rule from runtime data |
 | Item type / record type | A Firewalla data category such as a rule, tag, host, or network profile |
+| Host | One Firewalla endpoint or client record from runtime data; never a Home Assistant device registry record |
+| Host name | The primary user-facing Firewalla host label exposed by the integration as `host_name` |
+| DNS hostname | The per-host DNS label exposed by Firewalla runtime data and normalized as `dns_hostname` |
+| DNS domain | The segment-level search domain derived from DHCP configuration and normalized as `dns_domain` |
+| DNS FQDN | The fully qualified local-domain value exposed by runtime data and normalized as `dns_fqdn` |
+| DHCP name | The DHCP-origin hostname value exposed by runtime data and normalized as `dhcp_name` |
+| Host device type | The Firewalla host classification exposed by detect or feedback data and normalized as `host_device_type` |
 | Rule template | The persisted matching contract used to find the intended live rule even if the live rule ID changes |
 | Runtime snapshot | The coordinator-owned normalized in-memory view of the current Firewalla state |
 | Registry | The manager-owned indexed runtime structure derived from the raw Firewalla payload |
@@ -72,6 +79,7 @@ Critical rule:
 
 - never use `entity` to refer to a Firewalla rule, target, network, tag, or other normalized runtime record
 - never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
+- never use `device` for Firewalla endpoint inventory, naming fields, or selector behavior unless the code is explicitly referring to a Home Assistant device registry concept
 
 ## Protocol baseline
 
@@ -497,6 +505,9 @@ Rules:
 - mutable labels such as rule names, watched users, and watched devices must flow through `_attr_translation_placeholders`
 - entities with mutable labels must refresh `_attr_translation_placeholders` during coordinator updates and invalidate the cached `name` before writing state
 - unique IDs must remain stable and name-independent so app-side renames never create duplicate entities or replace entity identity
+- normalized host identity must keep human-facing naming separate from DNS-facing naming
+- the normalized host contract is `host_name`, `dns_hostname`, `dns_domain`, `dns_fqdn`, `dhcp_name`, and `host_device_type`
+- compatibility aliases such as duplicate `display_name` or `fallback_name` fields must not be reintroduced once a normalized host contract exists
 
 ## Translation and error contract
 

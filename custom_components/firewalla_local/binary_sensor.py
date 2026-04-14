@@ -35,7 +35,12 @@ from .const import (
     ATTR_SYSTEM_WAN_IPS,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
+    ATTR_WATCHED_DEVICE_DNS_DOMAIN,
+    ATTR_WATCHED_DEVICE_DNS_FQDN,
+    ATTR_WATCHED_DEVICE_DNS_HOSTNAME,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
+    ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE,
+    ATTR_WATCHED_DEVICE_HOST_NAME,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
@@ -228,7 +233,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
         """Refresh name placeholders from the latest watched-host view."""
         host = self._host
         self._attr_translation_placeholders = {
-            "host_name": host.display_name if host is not None else self._mac
+            "host_name": host.host_name if host is not None else self._mac
         }
         self.__dict__.pop("name", None)
 
@@ -258,6 +263,19 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_PURPOSE: TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY,
             ATTR_WATCHED_DEVICE_IP_ADDRESS: (
                 host.ip_address if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_HOST_NAME: (
+                host.host_name if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_DNS_HOSTNAME: (
+                host.dns_hostname if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_DNS_DOMAIN: (
+                host.dns_domain if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_DNS_FQDN: (host.dns_fqdn if host is not None else None),
+            ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE: (
+                host.host_device_type if host is not None else None
             ),
             ATTR_WATCHED_DEVICE_DEVICE_GROUP: (
                 host.group_name if host is not None else None

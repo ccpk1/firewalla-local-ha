@@ -110,7 +110,7 @@ class FirewallaUserManager(FirewallaBaseManager):
                 user.affiliated_group_id is not None
                 and user.affiliated_group_id in host.group_ids
             ):
-                associated_hosts.append((host.mac, host.display_name, host.last_active))
+                associated_hosts.append((host.mac, host.host_name, host.last_active))
         return associated_hosts
 
     @staticmethod

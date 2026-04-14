@@ -608,9 +608,12 @@ class FirewallaNetworkHostDetail:
 
     host_id: str
     host_name: str | None = None
+    dns_hostname: str | None = None
+    dns_domain: str | None = None
+    dns_fqdn: str | None = None
     ip_address: str | None = None
     dhcp_name: str | None = None
-    device_type: str | None = None
+    host_device_type: str | None = None
     ip_assignment: FirewallaNetworkHostIpAssignment | None = None
     notifications: FirewallaNetworkHostNotifications | None = None
     actions: FirewallaNetworkHostActions | None = None
@@ -685,8 +688,7 @@ class FirewallaHostRuntime:
     """Minimal normalized host inventory used for watched-device surfaces."""
 
     mac: str
-    display_name: str
-    fallback_name: str | None
+    host_name: str
     ip_address: str | None
     group_name: str | None
     network_name: str | None
@@ -695,6 +697,11 @@ class FirewallaHostRuntime:
     download_bytes: int | None
     upload_bytes: int | None
     stale: bool | None
+    dns_hostname: str | None = None
+    dns_domain: str | None = None
+    dns_fqdn: str | None = None
+    dhcp_name: str | None = None
+    host_device_type: str | None = None
     vpn_client: FirewallaHostVpnClient | None = None
     group_ids: tuple[str, ...] = ()
     user_ids: tuple[str, ...] = ()

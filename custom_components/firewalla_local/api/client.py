@@ -69,6 +69,7 @@ _COMMAND_POLICY_UPDATE: Final = "policy:update"
 _COMMAND_RUN_INTERNET_SPEED_TEST: Final = "runInternetSpeedtest"
 _COMMAND_WAKE_HOST: Final = "wol:wake"
 _COMMAND_SET_HOST: Final = "host"
+_COMMAND_SET_FEEDBACK: Final = "feedback"
 _COMMAND_POLICY_ID_KEY: Final = "policyID"
 
 _RAW_RULE_ID_KEY: Final = "pid"
@@ -126,11 +127,17 @@ _RAW_USER_TAGS_KEY: Final = "userTags"
 _RAW_HOSTS_KEY: Final = "hosts"
 _RAW_HOST_MAC_KEY: Final = "mac"
 _RAW_HOST_BACKUP_NAME_KEY: Final = "bname"
+_RAW_HOST_BONJOUR_NAME_KEY: Final = "bonjourName"
+_RAW_HOST_DHCP_NAME_KEY: Final = "dhcpName"
+_RAW_HOST_LOCAL_DOMAIN_KEY: Final = "localDomain"
 _RAW_HOST_IP_KEY: Final = "ip"
 _RAW_HOST_LAST_ACTIVE_KEY: Final = "lastActive"
 _RAW_HOST_FLOWSUMMARY_KEY: Final = "flowsummary"
 _RAW_HOST_STALE_KEY: Final = "stale"
 _RAW_HOST_POLICY_KEY: Final = "policy"
+_RAW_HOST_DETECT_KEY: Final = "detect"
+_RAW_HOST_FEEDBACK_KEY: Final = "feedback"
+_RAW_HOST_TYPE_KEY: Final = "type"
 _RAW_HOST_VPN_CLIENT_KEY: Final = "vpnClient"
 _RAW_HOST_STATE_KEY: Final = "state"
 _RAW_HOST_PROFILE_ID_KEY: Final = "profileId"
@@ -571,6 +578,25 @@ class FirewallaApiClient:
         raise FirewallaProtocolError(
             "Firewalla host rename response did not include "
             "a JSON object or null data payload"
+        )
+
+    async def async_set_host_device_type(
+        self,
+        host_mac: str,
+        device_type: str,
+    ) -> dict[str, object]:
+        """Write one host-scoped device type through the feedback path."""
+        return await self._async_send_local_message(
+            message_type=_SET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_SET_FEEDBACK,
+                _COMMAND_VALUE_KEY: {
+                    "key": "device.detect",
+                    "target": host_mac,
+                    _COMMAND_VALUE_KEY: {_RAW_HOST_TYPE_KEY: device_type},
+                },
+            },
+            target=DEFAULT_INIT_TARGET,
         )
 
     async def async_get_monthly_wan_usage_payload(self) -> dict[str, object]:
@@ -1114,8 +1140,47 @@ class FirewallaApiClient:
     def _build_host_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of host MAC addresses to host names."""
         return {
-            host.mac: host.display_name for host in self._normalize_host_inventory(data)
+            host.mac: host.host_name for host in self._normalize_host_inventory(data)
         }
+
+    def _build_host_domain_lookup(self, data: dict[str, object]) -> dict[str, str]:
+        """Build a lookup of interface UUIDs to one primary search domain."""
+        raw_network_profiles = data.get(_RAW_NETWORK_PROFILES_KEY)
+        raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
+        if not isinstance(raw_network_profiles, dict) or not isinstance(
+            raw_network_config, dict
+        ):
+            return {}
+
+        raw_dhcp = raw_network_config.get("dhcp")
+        if not isinstance(raw_dhcp, dict):
+            return {}
+
+        domain_lookup: dict[str, str] = {}
+        for interface_id, raw_profile in raw_network_profiles.items():
+            if not isinstance(interface_id, str) or not isinstance(raw_profile, dict):
+                continue
+
+            interface_name = self._normalized_optional_string(
+                raw_profile.get(_RAW_INTF_KEY)
+            )
+            if interface_name is None:
+                continue
+
+            raw_interface_dhcp = raw_dhcp.get(interface_name)
+            if not isinstance(raw_interface_dhcp, dict):
+                continue
+
+            raw_search_domains = raw_interface_dhcp.get("searchDomain")
+            if not isinstance(raw_search_domains, list):
+                continue
+
+            for raw_search_domain in raw_search_domains:
+                if search_domain := self._normalized_optional_string(raw_search_domain):
+                    domain_lookup[interface_id] = search_domain
+                    break
+
+        return domain_lookup
 
     @staticmethod
     def _normalized_optional_string(value: object) -> str | None:
@@ -1125,16 +1190,32 @@ class FirewallaApiClient:
         stripped_value = value.strip()
         return stripped_value or None
 
-    def _resolve_host_display_names(
-        self, raw_host: dict[str, object]
-    ) -> tuple[str, str | None]:
-        """Resolve the best display name and one fallback name for a host."""
+    def _resolve_host_identity(
+        self,
+        raw_host: dict[str, object],
+        *,
+        dns_domain: str | None,
+    ) -> tuple[str, str | None, str | None, str | None, str | None]:
+        """Resolve user-facing and DNS-oriented identity fields for a host."""
+        host_name = self._normalized_optional_string(
+            raw_host.get(_RAW_HOST_BACKUP_NAME_KEY)
+        )
+        dns_hostname = self._normalized_optional_string(raw_host.get(_RAW_NAME_KEY))
+        dhcp_name = self._normalized_optional_string(
+            raw_host.get(_RAW_HOST_DHCP_NAME_KEY)
+        )
+        bonjour_name = self._normalized_optional_string(
+            raw_host.get(_RAW_HOST_BONJOUR_NAME_KEY)
+        )
+        dns_fqdn = self._normalized_optional_string(
+            raw_host.get(_RAW_HOST_LOCAL_DOMAIN_KEY)
+        )
         raw_candidates = (
-            raw_host.get(_RAW_NAME_KEY),
-            raw_host.get(_RAW_HOST_BACKUP_NAME_KEY),
-            raw_host.get("dhcpName"),
-            raw_host.get("bonjourName"),
-            raw_host.get("localDomain"),
+            host_name,
+            dns_hostname,
+            dhcp_name,
+            bonjour_name,
+            dns_fqdn,
         )
         candidates = [
             candidate
@@ -1144,17 +1225,43 @@ class FirewallaApiClient:
         unique_candidates = tuple(dict.fromkeys(candidates))
 
         if unique_candidates:
-            return unique_candidates[0], unique_candidates[1] if len(
-                unique_candidates
-            ) > 1 else None
+            return (
+                unique_candidates[0],
+                dns_hostname,
+                dns_fqdn,
+                dns_domain,
+                dhcp_name,
+            )
 
         if ip_address := self._normalized_optional_string(
             raw_host.get(_RAW_HOST_IP_KEY)
         ):
-            return ip_address, None
+            return ip_address, dns_hostname, dns_fqdn, dns_domain, dhcp_name
 
         host_mac = self._normalized_optional_string(raw_host.get(_RAW_HOST_MAC_KEY))
-        return host_mac or _DEFAULT_BOX_NAME, None
+        return (
+            host_mac or _DEFAULT_BOX_NAME,
+            dns_hostname,
+            dns_fqdn,
+            dns_domain,
+            dhcp_name,
+        )
+
+    def _resolve_host_device_type(self, raw_host: dict[str, object]) -> str | None:
+        """Resolve one normalized host device type from feedback or detect data."""
+        raw_detect = raw_host.get(_RAW_HOST_DETECT_KEY)
+        if not isinstance(raw_detect, dict):
+            return None
+
+        raw_feedback = raw_detect.get(_RAW_HOST_FEEDBACK_KEY)
+        if isinstance(raw_feedback, dict) and (
+            feedback_type := self._normalized_optional_string(
+                raw_feedback.get(_RAW_HOST_TYPE_KEY)
+            )
+        ):
+            return feedback_type
+
+        return self._normalized_optional_string(raw_detect.get(_RAW_HOST_TYPE_KEY))
 
     def _resolve_host_group_name(
         self,
@@ -1235,6 +1342,7 @@ class FirewallaApiClient:
             return ()
 
         network_lookup = self._build_network_lookup(data)
+        host_domain_lookup = self._build_host_domain_lookup(data)
         tag_lookup = self._build_named_lookup(data, "tags")
         device_tag_lookup = self._build_named_lookup(data, _RAW_DEVICE_TAGS_KEY)
         affiliated_user_lookup = self._build_affiliated_user_lookup(data)
@@ -1248,16 +1356,33 @@ class FirewallaApiClient:
             if host_mac is None:
                 continue
 
-            display_name, fallback_name = self._resolve_host_display_names(raw_host)
+            interface_id = self._normalized_optional_string(raw_host.get(_RAW_INTF_KEY))
+            (
+                host_name,
+                dns_hostname,
+                dns_fqdn,
+                dns_domain,
+                dhcp_name,
+            ) = self._resolve_host_identity(
+                raw_host,
+                dns_domain=(
+                    host_domain_lookup.get(interface_id)
+                    if interface_id is not None
+                    else None
+                ),
+            )
             flowsummary = raw_host.get(_RAW_HOST_FLOWSUMMARY_KEY)
             normalized_hosts.append(
                 FirewallaHostRuntime(
                     mac=host_mac,
-                    display_name=display_name,
-                    fallback_name=fallback_name,
+                    host_name=host_name,
                     ip_address=self._normalized_optional_string(
                         raw_host.get(_RAW_HOST_IP_KEY)
                     ),
+                    dns_hostname=dns_hostname,
+                    dns_domain=dns_domain,
+                    dns_fqdn=dns_fqdn,
+                    dhcp_name=dhcp_name,
                     group_name=self._resolve_host_group_name(
                         raw_host,
                         tags=tag_lookup,
@@ -1265,12 +1390,7 @@ class FirewallaApiClient:
                     ),
                     network_name=(
                         network_lookup.get(interface_id)
-                        if (
-                            interface_id := self._normalized_optional_string(
-                                raw_host.get(_RAW_INTF_KEY)
-                            )
-                        )
-                        is not None
+                        if interface_id is not None
                         else None
                     ),
                     connection_type=self._resolve_host_connection_type(
@@ -1291,6 +1411,7 @@ class FirewallaApiClient:
                         else None
                     ),
                     stale=self._coerce_boolish(raw_host.get(_RAW_HOST_STALE_KEY)),
+                    host_device_type=self._resolve_host_device_type(raw_host),
                     vpn_client=self._normalize_host_vpn_client(raw_host),
                     group_ids=tuple(
                         sorted(
@@ -1776,7 +1897,7 @@ class FirewallaApiClient:
             appliance_runtime=self._extract_appliance_runtime(data),
             policy_rules=self._normalize_policy_rules(
                 data,
-                host_lookup={host.mac: host.display_name for host in hosts},
+                host_lookup={host.mac: host.host_name for host in hosts},
             ),
             exception_rule_count=self._count_exception_rules(data),
             hosts=hosts,

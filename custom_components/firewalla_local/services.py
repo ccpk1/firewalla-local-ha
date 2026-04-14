@@ -1375,7 +1375,7 @@ def _serialize_network_host_detail(
         "host_name": host.host_name,
         "ip_address": host.ip_address,
         "dhcp_name": host.dhcp_name,
-        "device_type": host.device_type,
+        "device_type": host.host_device_type,
         "ip_assignment": _serialize_network_host_ip_assignment(host.ip_assignment),
         "notifications": _serialize_network_host_notifications(host.notifications),
         "actions": _serialize_network_host_actions(host.actions),
@@ -1663,10 +1663,18 @@ def _resolve_requested_host(
         matches = [
             host.mac
             for host in host_manager.get_hosts()
-            if host.display_name.casefold() == host_name_folded
+            if host.host_name.casefold() == host_name_folded
             or (
-                host.fallback_name is not None
-                and host.fallback_name.casefold() == host_name_folded
+                host.dns_hostname is not None
+                and host.dns_hostname.casefold() == host_name_folded
+            )
+            or (
+                host.dhcp_name is not None
+                and host.dhcp_name.casefold() == host_name_folded
+            )
+            or (
+                host.dns_fqdn is not None
+                and host.dns_fqdn.casefold() == host_name_folded
             )
             or choices.get(host.mac, "").casefold() == host_name_folded
         ]
@@ -2029,9 +2037,7 @@ def _validate_dhcp_reservation_request(
         ):
             duplicate_host = entry.runtime_data.host_manager.get_host(raw_host_mac)
             duplicate_host_name = (
-                duplicate_host.display_name
-                if duplicate_host is not None
-                else raw_host_mac
+                duplicate_host.host_name if duplicate_host is not None else raw_host_mac
             )
             raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_IN_USE,
@@ -2068,7 +2074,7 @@ def _build_network_host_detail_rows(
                 if (raw_host := raw_host_lookup.get(host.host_id)) is not None
                 else None
             ),
-            device_type=_resolve_host_device_type(
+            host_device_type=_resolve_host_device_type(
                 raw_host_lookup.get(host.host_id),
                 device_tag_lookup=device_tag_lookup,
             ),
@@ -2623,7 +2629,7 @@ def _resolve_usage_history_target(
             return FirewallaUsageHistoryTarget(
                 scope_kind=scope_kind,
                 target_id=host.mac,
-                target_name=host.display_name,
+                target_name=host.host_name,
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
             )
 
@@ -2631,7 +2637,7 @@ def _resolve_usage_history_target(
         matches = [
             host.mac
             for host in host_manager.get_hosts()
-            if host.display_name.casefold() == scope_target.casefold()
+            if host.host_name.casefold() == scope_target.casefold()
             or choices.get(host.mac, "").casefold() == scope_target.casefold()
         ]
         if (
@@ -2641,7 +2647,7 @@ def _resolve_usage_history_target(
             return FirewallaUsageHistoryTarget(
                 scope_kind=scope_kind,
                 target_id=host.mac,
-                target_name=host.display_name,
+                target_name=host.host_name,
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
             )
         if len(matches) > 1:
@@ -2784,7 +2790,7 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
                 "host_id": host.mac,
                 "mac": host.mac if is_mac_host else None,
                 "ip": host.ip_address,
-                "name": host.display_name,
+                "name": host.host_name,
                 "kind": "mac_host" if is_mac_host else "pseudo_host",
             }
         )
@@ -2876,7 +2882,7 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
             FirewallaReportTarget(
                 kind="host",
                 id=host.mac,
-                name=host.display_name,
+                name=host.host_name,
             )
         ),
         "query": {
@@ -2943,7 +2949,7 @@ async def _async_handle_set_host_notification(
             FirewallaReportTarget(
                 kind="host",
                 id=host.mac,
-                name=host.display_name,
+                name=host.host_name,
             )
         ),
         "query": {
@@ -3035,7 +3041,7 @@ async def _async_handle_set_host_name(
             FirewallaReportTarget(
                 kind="host",
                 id=host.mac,
-                name=host.display_name,
+                name=host.host_name,
             )
         ),
         "query": {
@@ -3155,7 +3161,7 @@ async def _async_handle_set_host_dhcp_reservation(
             FirewallaReportTarget(
                 kind="host",
                 id=host.mac,
-                name=host.display_name,
+                name=host.host_name,
             )
         ),
         "network": _serialize_network_segment(network),

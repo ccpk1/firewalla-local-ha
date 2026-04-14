@@ -96,8 +96,7 @@ def _mock_snapshot() -> FirewallaRuntimeSnapshot:
         hosts=(
             FirewallaHostRuntime(
                 mac="wg_peer:test-peer",
-                display_name="WireGuard Kaden",
-                fallback_name=None,
+                host_name="WireGuard Kaden",
                 ip_address="10.42.0.2",
                 group_name=None,
                 network_name="VLAN10 CORE",
@@ -730,8 +729,7 @@ async def test_deselecting_device_tracker_removes_client_device_and_entity(
         hosts=(
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:FF",
-                display_name="Kaden Phone",
-                fallback_name=None,
+                host_name="Kaden Phone",
                 ip_address="192.168.200.25",
                 group_name=None,
                 network_name=None,
@@ -838,8 +836,7 @@ async def test_unloading_device_tracker_entry_preserves_registry_for_reload(
         hosts=(
             FirewallaHostRuntime(
                 mac="AA:BB:CC:DD:EE:FF",
-                display_name="Kaden Phone",
-                fallback_name=None,
+                host_name="Kaden Phone",
                 ip_address="192.168.200.25",
                 group_name=None,
                 network_name=None,

@@ -500,8 +500,8 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
     assert snapshot.hosts == (
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:FF",
-            display_name="kaden-phone",
-            fallback_name="Kaden Phone",
+            host_name="Kaden Phone",
+            dns_hostname="kaden-phone",
             ip_address="192.168.200.25",
             group_name="KADEN's Devices (KADEN)",
             network_name="VLAN10 CORE",
@@ -515,8 +515,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
         ),
         FirewallaHostRuntime(
             mac="wg_peer:test-peer",
-            display_name="WireGuard Kaden",
-            fallback_name=None,
+            host_name="WireGuard Kaden",
             ip_address="10.42.0.2",
             group_name=None,
             network_name="VLAN10 CORE",
@@ -590,8 +589,8 @@ async def test_get_runtime_snapshot_derives_user_totals_and_group_links() -> Non
     assert snapshot.hosts == (
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:23",
-            display_name="Payton iPad",
-            fallback_name=None,
+            host_name="Payton iPad",
+            dns_hostname="Payton iPad",
             ip_address=None,
             group_name="PAYTON's Devices (PAYTON)",
             network_name=None,

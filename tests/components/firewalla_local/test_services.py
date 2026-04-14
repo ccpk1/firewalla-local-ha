@@ -456,8 +456,7 @@ def _speed_test_snapshot(
         hosts=(
             FirewallaHostRuntime(
                 mac="0C:85:E1:B0:1D:1C",
-                display_name="Office Phone",
-                fallback_name=None,
+                host_name="Office Phone",
                 ip_address="192.168.10.44",
                 group_name=None,
                 network_name="VLAN10 CORE",
@@ -469,8 +468,7 @@ def _speed_test_snapshot(
             ),
             FirewallaHostRuntime(
                 mac="00:AA:BB:CC:DD:26",
-                display_name="Plex Server",
-                fallback_name=None,
+                host_name="Plex Server",
                 ip_address="192.168.10.10",
                 group_name=None,
                 network_name="VLAN10 CORE",
@@ -548,8 +546,7 @@ def _wake_host_snapshot(*, duplicate_name: bool = False) -> FirewallaRuntimeSnap
         hosts=(
             FirewallaHostRuntime(
                 mac="00:AA:BB:CC:DD:26",
-                display_name="Plex Server",
-                fallback_name=None,
+                host_name="Plex Server",
                 ip_address="192.168.10.10",
                 group_name=None,
                 network_name="VLAN10 CORE",
@@ -561,8 +558,7 @@ def _wake_host_snapshot(*, duplicate_name: bool = False) -> FirewallaRuntimeSnap
             ),
             FirewallaHostRuntime(
                 mac="wg_peer:test-peer",
-                display_name=second_name,
-                fallback_name=None,
+                host_name=second_name,
                 ip_address="10.42.0.2",
                 group_name=None,
                 network_name="VLAN10 CORE",
@@ -774,8 +770,7 @@ def _usage_history_snapshot() -> FirewallaRuntimeSnapshot:
         hosts=(
             FirewallaHostRuntime(
                 mac="EC:0D:51:CC:BA:BC",
-                display_name="Kaden Phone",
-                fallback_name=None,
+                host_name="Kaden Phone",
                 ip_address="192.168.200.25",
                 group_name="KADEN's Devices (KADEN)",
                 network_name="VLAN10 CORE",
