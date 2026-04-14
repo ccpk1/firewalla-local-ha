@@ -15,7 +15,7 @@ get_runtime_inventory:
 
 get_host_name_mapping:
   name: Get host name mapping
-  description: Return the current Firewalla host identity records with host ID, MAC when available, IP, name, and host kind.
+  description: Return the current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.
   fields:
     refresh:
       required: false
@@ -255,6 +255,153 @@ set_host_name:
         boolean:
       name: Refresh first
       description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the rename command.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+set_host_dns_hostname:
+  name: Set host DNS hostname
+  description: Set one Firewalla host DNS hostname override through the captured host-scoped hostDomain path.
+  fields:
+    dns_hostname:
+      required: true
+      example: "paytons.chromebook.3"
+      selector:
+        text:
+      name: DNS hostname
+      description: Required. Send this exact DNS hostname override to Firewalla without additional normalization.
+    host_mac:
+      required: false
+      example: "00:AA:BB:CC:DD:26"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Use the Firewalla host MAC for deterministic automations.
+    host_name:
+      required: false
+      example: "Plex Server"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+    host_id:
+      required: false
+      example: "00:AA:BB:CC:DD:26"
+      selector:
+        text:
+      name: Host ID
+      description: Optional. Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the DNS hostname override.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+set_host_device_type:
+  name: Set host device type
+  description: Set one Firewalla host device type through the captured feedback device.detect path.
+  fields:
+    host_device_type:
+      required: true
+      example: "tablet"
+      selector:
+        select:
+          options:
+            - value: "desktop"
+              label: Desktop
+            - value: "phone"
+              label: Phone
+            - value: "tablet"
+              label: Tablet
+            - value: "wearable"
+              label: Wearable
+            - value: "personal_default"
+              label: Personal default
+            - value: "console"
+              label: Console
+            - value: "smart speaker"
+              label: Smart speaker
+            - value: "tv"
+              label: TV
+            - value: "projector"
+              label: Projector
+            - value: "tv&projector"
+              label: TV and projector
+            - value: "entertainment_default"
+              label: Entertainment default
+            - value: "portable media player"
+              label: Portable media player
+            - value: "smart display"
+              label: Smart display
+            - value: "switch"
+              label: Switch
+            - value: "sensor&automation"
+              label: Sensor and automation
+            - value: "automation"
+              label: Automation
+            - value: "iot_default"
+              label: IoT default
+            - value: "peripheral"
+              label: Peripheral
+            - value: "nas&server"
+              label: NAS and server
+            - value: "router"
+              label: Router
+            - value: "camera"
+              label: Camera
+            - value: "network_default"
+              label: Network default
+            - value: "nas"
+              label: NAS
+      name: Host device type
+      description: Required. Choose one known Firewalla host device type value from the current runtime category set.
+    host_mac:
+      required: false
+      example: "00:AA:BB:CC:DD:26"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Use the Firewalla host MAC for deterministic automations.
+    host_name:
+      required: false
+      example: "Plex Server"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+    host_id:
+      required: false
+      example: "00:AA:BB:CC:DD:26"
+      selector:
+        text:
+      name: Host ID
+      description: Optional. Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the device type override.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

@@ -147,6 +147,8 @@ def decode_body(body: bytes, key: str) -> dict[str, object] | None:
     if not isinstance(payload, dict):
         return None
     message = payload.get("message")
+    if isinstance(message, dict):
+        return payload
     if not isinstance(message, str):
         return None
     crypto_module = importlib.import_module(

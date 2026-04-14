@@ -244,6 +244,14 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Write one host-scoped custom name to the requested host."""
         return await self.client.async_set_host_name(host_mac, host_name)
 
+    async def async_set_host_dns_hostname(
+        self,
+        host_mac: str,
+        dns_hostname: str,
+    ) -> dict[str, object]:
+        """Write one host-scoped DNS hostname override to the requested host."""
+        return await self.client.async_set_host_dns_hostname(host_mac, dns_hostname)
+
     async def async_set_host_device_type(
         self,
         host_mac: str,

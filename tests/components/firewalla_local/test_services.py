@@ -30,9 +30,11 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
+    SERVICE_FIELD_DNS_HOSTNAME,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
+    SERVICE_FIELD_HOST_DEVICE_TYPE,
     SERVICE_FIELD_HOST_ID,
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_HOST_NAME,
@@ -69,7 +71,9 @@ from custom_components.firewalla_local.const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_SET_HOST_DEVICE_TYPE,
     SERVICE_SET_HOST_DHCP_RESERVATION,
+    SERVICE_SET_HOST_DNS_HOSTNAME,
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
@@ -555,6 +559,11 @@ def _wake_host_snapshot(*, duplicate_name: bool = False) -> FirewallaRuntimeSnap
                 download_bytes=100,
                 upload_bytes=50,
                 stale=False,
+                dns_hostname="plex-server",
+                dns_domain="int.ccpk.us",
+                dns_fqdn="plex-server.int.ccpk.us",
+                dhcp_name="plex-server",
+                host_device_type="tablet",
             ),
             FirewallaHostRuntime(
                 mac="wg_peer:test-peer",
@@ -567,6 +576,7 @@ def _wake_host_snapshot(*, duplicate_name: bool = False) -> FirewallaRuntimeSnap
                 download_bytes=1,
                 upload_bytes=1,
                 stale=False,
+                dns_domain="int.ccpk.us",
             ),
         ),
     )
@@ -2652,6 +2662,174 @@ async def test_set_host_name_resolves_unique_host_name(
     )
 
 
+async def test_set_host_dns_hostname_returns_acknowledgement_for_host_mac(
+    hass: HomeAssistant,
+) -> None:
+    """Test the host DNS hostname service returns an acknowledgement."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_dns_hostname",
+            new=AsyncMock(return_value={}),
+        ) as mock_set_host_dns_hostname,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DNS_HOSTNAME,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_DNS_HOSTNAME: "plex.server.3",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_dns_hostname.await_args is not None
+    assert mock_set_host_dns_hostname.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        "plex.server.3",
+    )
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "target": {
+            "kind": "host",
+            "id": "00:AA:BB:CC:DD:26",
+            "name": "Plex Server",
+        },
+        "query": {
+            "dns_hostname": "plex.server.3",
+            "host_id": None,
+            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_name": None,
+            "refresh": False,
+        },
+        "dns_hostname": {
+            "dns_hostname": "plex.server.3",
+        },
+        "command": {
+            "item": "hostDomain",
+            "target": "00:AA:BB:CC:DD:26",
+            "value": {"customizeDomainName": "plex.server.3"},
+        },
+        "command_response": {},
+    }
+
+
+async def test_set_host_device_type_returns_acknowledgement_for_host_mac(
+    hass: HomeAssistant,
+) -> None:
+    """Test the host device type service returns an acknowledgement."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_device_type",
+            new=AsyncMock(return_value={}),
+        ) as mock_set_host_device_type,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DEVICE_TYPE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_HOST_DEVICE_TYPE: "tablet",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_set_host_device_type.await_args is not None
+    assert mock_set_host_device_type.await_args.args == (
+        "00:AA:BB:CC:DD:26",
+        "tablet",
+    )
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "target": {
+            "kind": "host",
+            "id": "00:AA:BB:CC:DD:26",
+            "name": "Plex Server",
+        },
+        "query": {
+            "host_device_type": "tablet",
+            "host_id": None,
+            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_name": None,
+            "refresh": False,
+        },
+        "host_device_type": {
+            "host_device_type": "tablet",
+        },
+        "command": {
+            "item": "feedback",
+            "target": "0.0.0.0",
+            "value": {
+                "key": "device.detect",
+                "target": "00:AA:BB:CC:DD:26",
+                "value": {"type": "tablet"},
+            },
+        },
+        "command_response": {},
+    }
+
+
 async def test_get_host_name_mapping_returns_host_identity_records(
     hass: HomeAssistant,
 ) -> None:
@@ -2701,15 +2879,25 @@ async def test_get_host_name_mapping_returns_host_identity_records(
             {
                 "host_id": "00:AA:BB:CC:DD:26",
                 "mac": "00:AA:BB:CC:DD:26",
-                "ip": "192.168.10.10",
-                "name": "Plex Server",
+                "ip_address": "192.168.10.10",
+                "host_name": "Plex Server",
+                "dns_hostname": "plex-server",
+                "dns_domain": "int.ccpk.us",
+                "dns_fqdn": "plex-server.int.ccpk.us",
+                "dhcp_name": "plex-server",
+                "host_device_type": "tablet",
                 "kind": "mac_host",
             },
             {
                 "host_id": "wg_peer:test-peer",
                 "mac": None,
-                "ip": "10.42.0.2",
-                "name": "WireGuard Kaden",
+                "ip_address": "10.42.0.2",
+                "host_name": "WireGuard Kaden",
+                "dns_hostname": None,
+                "dns_domain": "int.ccpk.us",
+                "dns_fqdn": None,
+                "dhcp_name": None,
+                "host_device_type": None,
                 "kind": "pseudo_host",
             },
         ],

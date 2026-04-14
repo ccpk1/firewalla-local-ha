@@ -163,6 +163,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                     "timezone": "America/New_York",
                     "hosts": [{"mac": "00:08:9B:FB:01:D9", "name": "Kitchen speaker"}],
                     "networkConfig": {
+                        "dhcp": {"bond0.10": {"searchDomain": ["int.ccpk.us"]}},
                         "interface": {
                             "bond": {
                                 "bond0.10": {
@@ -172,7 +173,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                                     }
                                 }
                             }
-                        }
+                        },
                     },
                     "networkProfiles": {
                         "5799d896-5e0f-40a5-a776-38a5d7746204": {"intf": "bond0.10"}
@@ -441,6 +442,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
                     "cpuid": "serial-123",
                     "longVersion": "1.0.0",
                     "networkConfig": {
+                        "dhcp": {"bond0.10": {"searchDomain": ["int.ccpk.us"]}},
                         "interface": {
                             "bond": {
                                 "bond0.10": {
@@ -450,7 +452,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
                                     }
                                 }
                             }
-                        }
+                        },
                     },
                     "networkProfiles": {
                         "5799d896-5e0f-40a5-a776-38a5d7746204": {"intf": "bond0.10"}
@@ -467,6 +469,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
                             "mac": "AA:BB:CC:DD:EE:FF",
                             "name": "kaden-phone",
                             "bname": "Kaden Phone",
+                            "localDomain": "kaden-phone",
                             "ip": "192.168.200.25",
                             "lastActive": 1774287984.272,
                             "flowsummary": {"inbytes": 1234, "outbytes": 5678},
@@ -502,6 +505,9 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
             mac="AA:BB:CC:DD:EE:FF",
             host_name="Kaden Phone",
             dns_hostname="kaden-phone",
+            dns_domain="int.ccpk.us",
+            dns_fqdn="kaden-phone.int.ccpk.us",
+            dhcp_name=None,
             ip_address="192.168.200.25",
             group_name="KADEN's Devices (KADEN)",
             network_name="VLAN10 CORE",
@@ -516,7 +522,121 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
         FirewallaHostRuntime(
             mac="wg_peer:test-peer",
             host_name="WireGuard Kaden",
+            dns_domain="int.ccpk.us",
             ip_address="10.42.0.2",
+            group_name=None,
+            network_name="VLAN10 CORE",
+            connection_type=None,
+            last_active=1774287000.5,
+            download_bytes=99,
+            upload_bytes=100,
+            stale=False,
+            vpn_client=None,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_snapshot_prefers_customized_dns_hostname() -> None:
+    """Test host normalization prefers one explicit DNS override over other names."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "model": "gold",
+                    "cpuid": "serial-123",
+                    "longVersion": "1.0.0",
+                    "networkConfig": {
+                        "dhcp": {"bond0.10": {"searchDomain": ["int.ccpk.us"]}},
+                        "interface": {
+                            "bond": {
+                                "bond0.10": {
+                                    "meta": {
+                                        "name": "VLAN10 CORE",
+                                        "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "networkProfiles": {
+                        "5799d896-5e0f-40a5-a776-38a5d7746204": {"intf": "bond0.10"}
+                    },
+                    "deviceTags": {
+                        "43": {"name": "phone"},
+                    },
+                    "hosts": [
+                        {
+                            "mac": "EC:0D:51:CC:BA:BC",
+                            "name": "Chads-Phone",
+                            "bname": "Chads-Phone",
+                            "dhcpName": "Chads-Phone",
+                            "localDomain": "chads-phone",
+                            "userLocalDomain": "chads-phone2",
+                            "ip": "192.168.202.101",
+                            "lastActive": 1774287984.272,
+                            "flowsummary": {"inbytes": 1234, "outbytes": 5678},
+                            "intf": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                            "deviceTags": ["43"],
+                            "stale": False,
+                        },
+                        {
+                            "mac": "00:18:DD:05:5A:37",
+                            "name": "HDHR",
+                            "bname": "HDHR-1055A37C",
+                            "dhcpName": "HDHR-1055A37C",
+                            "localDomain": "hdhr",
+                            "ip": "192.168.202.50",
+                            "lastActive": 1774287000.5,
+                            "flowsummary": {"inbytes": "99", "outbytes": "100"},
+                            "intf": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                            "stale": False,
+                        },
+                    ],
+                    "policyRules": [],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    assert snapshot.hosts == (
+        FirewallaHostRuntime(
+            mac="EC:0D:51:CC:BA:BC",
+            host_name="Chads-Phone",
+            dns_hostname="chads-phone2",
+            dns_domain="int.ccpk.us",
+            dns_fqdn="chads-phone2.int.ccpk.us",
+            dhcp_name="Chads-Phone",
+            ip_address="192.168.202.101",
+            group_name=None,
+            network_name="VLAN10 CORE",
+            connection_type="phone",
+            last_active=1774287984.272,
+            download_bytes=1234,
+            upload_bytes=5678,
+            stale=False,
+            vpn_client=None,
+        ),
+        FirewallaHostRuntime(
+            mac="00:18:DD:05:5A:37",
+            host_name="HDHR",
+            dns_hostname="hdhr",
+            dns_domain="int.ccpk.us",
+            dns_fqdn="hdhr.int.ccpk.us",
+            dhcp_name="HDHR-1055A37C",
+            ip_address="192.168.202.50",
             group_name=None,
             network_name="VLAN10 CORE",
             connection_type=None,
@@ -591,6 +711,7 @@ async def test_get_runtime_snapshot_derives_user_totals_and_group_links() -> Non
             mac="AA:BB:CC:DD:EE:23",
             host_name="Payton iPad",
             dns_hostname="Payton iPad",
+            dns_fqdn="Payton iPad",
             ip_address=None,
             group_name="PAYTON's Devices (PAYTON)",
             network_name=None,
@@ -877,6 +998,80 @@ async def test_async_set_host_name_sends_host_targeted_write_and_accepts_null_ac
             "value": {"name": "Plex Server Renamed"},
         },
         "target": "00:AA:BB:CC:DD:26",
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_set_host_dns_hostname_sends_hostdomain_write_and_accepts_null_ack(
+) -> None:
+    """Test DNS hostname override uses the captured hostDomain write."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value=None),
+        ) as mock_send:
+            response = await client.async_set_host_dns_hostname(
+                "00:AA:BB:CC:DD:26",
+                "plex.server.3",
+            )
+
+    assert response == {}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "set",
+        "data": {
+            "item": "hostDomain",
+            "value": {"customizeDomainName": "plex.server.3"},
+        },
+        "target": "00:AA:BB:CC:DD:26",
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_set_host_device_type_sends_feedback_write_and_accepts_null_ack(
+) -> None:
+    """Test device type override uses the captured feedback write."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value=None),
+        ) as mock_send:
+            response = await client.async_set_host_device_type(
+                "00:AA:BB:CC:DD:26",
+                "tablet",
+            )
+
+    assert response == {}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "set",
+        "data": {
+            "item": "feedback",
+            "value": {
+                "key": "device.detect",
+                "target": "00:AA:BB:CC:DD:26",
+                "value": {"type": "tablet"},
+            },
+        },
+        "target": "0.0.0.0",
     }
 
 

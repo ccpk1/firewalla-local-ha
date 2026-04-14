@@ -69,6 +69,7 @@ _COMMAND_POLICY_UPDATE: Final = "policy:update"
 _COMMAND_RUN_INTERNET_SPEED_TEST: Final = "runInternetSpeedtest"
 _COMMAND_WAKE_HOST: Final = "wol:wake"
 _COMMAND_SET_HOST: Final = "host"
+_COMMAND_SET_HOST_DOMAIN: Final = "hostDomain"
 _COMMAND_SET_FEEDBACK: Final = "feedback"
 _COMMAND_POLICY_ID_KEY: Final = "policyID"
 
@@ -130,6 +131,7 @@ _RAW_HOST_BACKUP_NAME_KEY: Final = "bname"
 _RAW_HOST_BONJOUR_NAME_KEY: Final = "bonjourName"
 _RAW_HOST_DHCP_NAME_KEY: Final = "dhcpName"
 _RAW_HOST_LOCAL_DOMAIN_KEY: Final = "localDomain"
+_RAW_HOST_USER_LOCAL_DOMAIN_KEY: Final = "userLocalDomain"
 _RAW_HOST_IP_KEY: Final = "ip"
 _RAW_HOST_LAST_ACTIVE_KEY: Final = "lastActive"
 _RAW_HOST_FLOWSUMMARY_KEY: Final = "flowsummary"
@@ -138,6 +140,7 @@ _RAW_HOST_POLICY_KEY: Final = "policy"
 _RAW_HOST_DETECT_KEY: Final = "detect"
 _RAW_HOST_FEEDBACK_KEY: Final = "feedback"
 _RAW_HOST_TYPE_KEY: Final = "type"
+_RAW_HOST_CUSTOMIZE_DOMAIN_NAME_KEY: Final = "customizeDomainName"
 _RAW_HOST_VPN_CLIENT_KEY: Final = "vpnClient"
 _RAW_HOST_STATE_KEY: Final = "state"
 _RAW_HOST_PROFILE_ID_KEY: Final = "profileId"
@@ -563,21 +566,36 @@ class FirewallaApiClient:
         host_name: str,
     ) -> dict[str, object]:
         """Write one host-scoped custom name to the requested host."""
-        data_payload = await self._async_send_local_message_data(
-            message_type=_SET_MESSAGE_TYPE,
+        return await self._async_send_nullable_set_response(
             data={
                 _COMMAND_ITEM_KEY: _COMMAND_SET_HOST,
                 _COMMAND_VALUE_KEY: {_RAW_NAME_KEY: host_name},
             },
             target=host_mac,
+            error_message=(
+                "Firewalla host rename response did not include "
+                "a JSON object or null data payload"
+            ),
         )
-        if data_payload is None:
-            return {}
-        if isinstance(data_payload, dict):
-            return data_payload
-        raise FirewallaProtocolError(
-            "Firewalla host rename response did not include "
-            "a JSON object or null data payload"
+
+    async def async_set_host_dns_hostname(
+        self,
+        host_mac: str,
+        dns_hostname: str,
+    ) -> dict[str, object]:
+        """Write one host-scoped DNS hostname override to the requested host."""
+        return await self._async_send_nullable_set_response(
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_SET_HOST_DOMAIN,
+                _COMMAND_VALUE_KEY: {
+                    _RAW_HOST_CUSTOMIZE_DOMAIN_NAME_KEY: dns_hostname,
+                },
+            },
+            target=host_mac,
+            error_message=(
+                "Firewalla host DNS hostname response did not include "
+                "a JSON object or null data payload"
+            ),
         )
 
     async def async_set_host_device_type(
@@ -586,8 +604,7 @@ class FirewallaApiClient:
         device_type: str,
     ) -> dict[str, object]:
         """Write one host-scoped device type through the feedback path."""
-        return await self._async_send_local_message(
-            message_type=_SET_MESSAGE_TYPE,
+        return await self._async_send_nullable_set_response(
             data={
                 _COMMAND_ITEM_KEY: _COMMAND_SET_FEEDBACK,
                 _COMMAND_VALUE_KEY: {
@@ -597,7 +614,30 @@ class FirewallaApiClient:
                 },
             },
             target=DEFAULT_INIT_TARGET,
+            error_message=(
+                "Firewalla host device type response did not include "
+                "a JSON object or null data payload"
+            ),
         )
+
+    async def _async_send_nullable_set_response(
+        self,
+        *,
+        data: dict[str, object],
+        target: str,
+        error_message: str,
+    ) -> dict[str, object]:
+        """Send one set command that may acknowledge with null response data."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=_SET_MESSAGE_TYPE,
+            data=data,
+            target=target,
+        )
+        if data_payload is None:
+            return {}
+        if isinstance(data_payload, dict):
+            return data_payload
+        raise FirewallaProtocolError(error_message)
 
     async def async_get_monthly_wan_usage_payload(self) -> dict[str, object]:
         """Fetch the current-month WAN usage payload from the local runtime."""
@@ -1197,22 +1237,43 @@ class FirewallaApiClient:
         dns_domain: str | None,
     ) -> tuple[str, str | None, str | None, str | None, str | None]:
         """Resolve user-facing and DNS-oriented identity fields for a host."""
-        host_name = self._normalized_optional_string(
+        backup_name = self._normalized_optional_string(
             raw_host.get(_RAW_HOST_BACKUP_NAME_KEY)
         )
-        dns_hostname = self._normalized_optional_string(raw_host.get(_RAW_NAME_KEY))
+        raw_name = self._normalized_optional_string(raw_host.get(_RAW_NAME_KEY))
         dhcp_name = self._normalized_optional_string(
             raw_host.get(_RAW_HOST_DHCP_NAME_KEY)
         )
         bonjour_name = self._normalized_optional_string(
             raw_host.get(_RAW_HOST_BONJOUR_NAME_KEY)
         )
-        dns_fqdn = self._normalized_optional_string(
+        effective_dns_hostname = self._normalized_optional_string(
             raw_host.get(_RAW_HOST_LOCAL_DOMAIN_KEY)
         )
+        customized_dns_hostname = self._normalized_optional_string(
+            raw_host.get(_RAW_HOST_USER_LOCAL_DOMAIN_KEY)
+        )
+        dns_hostname = customized_dns_hostname or effective_dns_hostname or raw_name
+        dns_fqdn = (
+            f"{dns_hostname}.{dns_domain}"
+            if dns_hostname is not None and dns_domain is not None
+            else dns_hostname
+        )
+
+        host_name = backup_name
+        if (
+            backup_name is not None
+            and dhcp_name is not None
+            and backup_name.casefold() == dhcp_name.casefold()
+            and raw_name is not None
+            and raw_name.casefold() != backup_name.casefold()
+        ):
+            host_name = raw_name
+
         raw_candidates = (
             host_name,
-            dns_hostname,
+            backup_name,
+            raw_name,
             dhcp_name,
             bonjour_name,
             dns_fqdn,

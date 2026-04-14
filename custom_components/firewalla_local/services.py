@@ -22,15 +22,19 @@ from homeassistant.util.json import JsonObjectType, JsonValueType
 
 from .api import FirewallaApiError
 from .const import (
+    DEFAULT_INIT_TARGET,
     DOMAIN,
+    HOST_DEVICE_TYPE_OPTIONS,
     LOGGER,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
+    SERVICE_FIELD_DNS_HOSTNAME,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
+    SERVICE_FIELD_HOST_DEVICE_TYPE,
     SERVICE_FIELD_HOST_ID,
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_HOST_NAME,
@@ -68,7 +72,9 @@ from .const import (
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
+    SERVICE_SET_HOST_DEVICE_TYPE,
     SERVICE_SET_HOST_DHCP_RESERVATION,
+    SERVICE_SET_HOST_DNS_HOSTNAME,
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
@@ -102,7 +108,9 @@ from .const import (
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
     TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
+    TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED,
+    TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS,
@@ -284,6 +292,20 @@ SET_HOST_NAME_SCHEMA = vol.Schema(
     {
         **_HOST_TARGET_SCHEMA_FIELDS,
         vol.Required(SERVICE_FIELD_NEW_NAME): cv.string,
+    }
+)
+
+SET_HOST_DNS_HOSTNAME_SCHEMA = vol.Schema(
+    {
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Required(SERVICE_FIELD_DNS_HOSTNAME): cv.string,
+    }
+)
+
+SET_HOST_DEVICE_TYPE_SCHEMA = vol.Schema(
+    {
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Required(SERVICE_FIELD_HOST_DEVICE_TYPE): vol.In(HOST_DEVICE_TYPE_OPTIONS),
     }
 )
 
@@ -2789,8 +2811,13 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
             {
                 "host_id": host.mac,
                 "mac": host.mac if is_mac_host else None,
-                "ip": host.ip_address,
-                "name": host.host_name,
+                "ip_address": host.ip_address,
+                "host_name": host.host_name,
+                "dns_hostname": host.dns_hostname,
+                "dns_domain": host.dns_domain,
+                "dns_fqdn": host.dns_fqdn,
+                "dhcp_name": host.dhcp_name,
+                "host_device_type": host.host_device_type,
                 "kind": "mac_host" if is_mac_host else "pseudo_host",
             }
         )
@@ -2999,6 +3026,95 @@ async def _async_handle_set_host_name(
     call: ServiceCall,
 ) -> JsonObjectType:
     """Set one custom host name on the resolved host."""
+    return await _async_handle_host_string_mutation(
+        call,
+        mutation_value_field=SERVICE_FIELD_NEW_NAME,
+        result_key="host_name",
+        result_value_key=SERVICE_FIELD_NEW_NAME,
+        mutation_executor=(
+            lambda manager, host_mac, value: manager.async_set_host_name(
+                host_mac,
+                value,
+            )
+        ),
+        command_builder=lambda host_mac, value: {
+            "item": "host",
+            "target": host_mac,
+            "value": {"name": value},
+        },
+        log_message="Failed to rename host",
+        translation_key=TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED,
+    )
+
+
+async def _async_handle_set_host_dns_hostname(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Set one custom host DNS hostname on the resolved host."""
+    return await _async_handle_host_string_mutation(
+        call,
+        mutation_value_field=SERVICE_FIELD_DNS_HOSTNAME,
+        result_key="dns_hostname",
+        result_value_key=SERVICE_FIELD_DNS_HOSTNAME,
+        mutation_executor=(
+            lambda manager, host_mac, value: manager.async_set_host_dns_hostname(
+                host_mac,
+                value,
+            )
+        ),
+        command_builder=lambda host_mac, value: {
+            "item": "hostDomain",
+            "target": host_mac,
+            "value": {"customizeDomainName": value},
+        },
+        log_message="Failed to update host DNS hostname",
+        translation_key=TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED,
+    )
+
+
+async def _async_handle_set_host_device_type(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Set one custom host device type on the resolved host."""
+    return await _async_handle_host_string_mutation(
+        call,
+        mutation_value_field=SERVICE_FIELD_HOST_DEVICE_TYPE,
+        result_key="host_device_type",
+        result_value_key=SERVICE_FIELD_HOST_DEVICE_TYPE,
+        mutation_executor=(
+            lambda manager, host_mac, value: manager.async_set_host_device_type(
+                host_mac,
+                value,
+            )
+        ),
+        command_builder=lambda host_mac, value: {
+            "item": "feedback",
+            "target": DEFAULT_INIT_TARGET,
+            "value": {
+                "key": "device.detect",
+                "target": host_mac,
+                "value": {"type": value},
+            },
+        },
+        log_message="Failed to update host device type",
+        translation_key=TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED,
+    )
+
+
+async def _async_handle_host_string_mutation(
+    call: ServiceCall,
+    *,
+    mutation_value_field: str,
+    result_key: str,
+    result_value_key: str,
+    mutation_executor: Callable[
+        [Any, str, str], Coroutine[Any, Any, dict[str, object]]
+    ],
+    command_builder: Callable[[str, str], JsonObjectType],
+    log_message: str,
+    translation_key: str,
+) -> JsonObjectType:
+    """Resolve one host-targeted string mutation and return one shared response."""
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
@@ -3018,20 +3134,19 @@ async def _async_handle_set_host_name(
     )
     assert host is not None
 
-    new_name = cast(str, call.data[SERVICE_FIELD_NEW_NAME])
+    mutation_value = cast(str, call.data[mutation_value_field])
 
     try:
-        command_response = (
-            await entry.runtime_data.integration_manager.async_set_host_name(
-                host.mac,
-                new_name,
-            )
+        command_response = await mutation_executor(
+            entry.runtime_data.integration_manager,
+            host.mac,
+            mutation_value,
         )
     except FirewallaApiError as err:
         _raise_runtime_service_error(
             err,
-            log_message="Failed to rename host",
-            translation_key=TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED,
+            log_message=log_message,
+            translation_key=translation_key,
         )
 
     return {
@@ -3045,20 +3160,16 @@ async def _async_handle_set_host_name(
             )
         ),
         "query": {
-            "new_name": new_name,
+            mutation_value_field: mutation_value,
             "host_id": call.data.get(SERVICE_FIELD_HOST_ID),
             "host_mac": call.data.get(SERVICE_FIELD_HOST_MAC),
             "host_name": call.data.get(SERVICE_FIELD_HOST_NAME),
             "refresh": refresh_requested,
         },
-        "host_name": {
-            "new_name": new_name,
+        result_key: {
+            result_value_key: mutation_value,
         },
-        "command": {
-            "item": "host",
-            "target": host.mac,
-            "value": {"name": new_name},
-        },
+        "command": command_builder(host.mac, mutation_value),
         "command_response": cast(JsonObjectType, command_response),
     }
 
@@ -3856,6 +3967,18 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_SET_HOST_NAME,
         _async_handle_set_host_name,
         SET_HOST_NAME_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_SET_HOST_DNS_HOSTNAME,
+        _async_handle_set_host_dns_hostname,
+        SET_HOST_DNS_HOSTNAME_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_SET_HOST_DEVICE_TYPE,
+        _async_handle_set_host_device_type,
+        SET_HOST_DEVICE_TYPE_SCHEMA,
         SupportsResponse.ONLY,
     ),
     (

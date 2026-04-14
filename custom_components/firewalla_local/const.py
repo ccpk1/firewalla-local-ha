@@ -116,6 +116,7 @@ SERVICE_FIELD_HISTORY_PERIOD: Final = "history_period"
 SERVICE_FIELD_HOST_ID: Final = "host_id"
 SERVICE_FIELD_HOST_MAC: Final = "host_mac"
 SERVICE_FIELD_HOST_NAME: Final = "host_name"
+SERVICE_FIELD_DNS_HOSTNAME: Final = "dns_hostname"
 SERVICE_FIELD_MODE: Final = "mode"
 SERVICE_FIELD_NEW_NAME: Final = "new_name"
 SERVICE_FIELD_HOST_DEVICE_TYPE: Final = "host_device_type"
@@ -226,6 +227,7 @@ SERVICE_GET_TIME_USAGE_REPORT: Final = "get_time_usage_report"
 SERVICE_GET_WAN_DATA_USAGE: Final = "get_wan_data_usage"
 SERVICE_GET_WAN_EVENTS: Final = "get_wan_events"
 SERVICE_SET_HOST_NAME: Final = "set_host_name"
+SERVICE_SET_HOST_DNS_HOSTNAME: Final = "set_host_dns_hostname"
 SERVICE_SET_HOST_DEVICE_TYPE: Final = "set_host_device_type"
 SERVICE_SET_HOST_DHCP_RESERVATION: Final = "set_host_dhcp_reservation"
 SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE: Final = "set_host_notify_when_next_offline"
@@ -234,6 +236,31 @@ SERVICE_WAKE_HOST: Final = "wake_host"
 SERVICE_PAUSE_RULE: Final = "pause_rule"
 SERVICE_RESUME_RULE: Final = "resume_rule"
 SERVICE_RUN_INTERNET_SPEED_TEST: Final = "run_internet_speed_test"
+HOST_DEVICE_TYPE_OPTIONS: Final = (
+    "desktop",
+    "phone",
+    "tablet",
+    "wearable",
+    "personal_default",
+    "console",
+    "smart speaker",
+    "tv",
+    "projector",
+    "tv&projector",
+    "entertainment_default",
+    "portable media player",
+    "smart display",
+    "switch",
+    "sensor&automation",
+    "automation",
+    "iot_default",
+    "peripheral",
+    "nas&server",
+    "router",
+    "camera",
+    "network_default",
+    "nas",
+)
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS: Final = "config_entry_name_ambiguous"
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND: Final = "config_entry_name_not_found"
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND: Final = "config_entry_not_found"
@@ -285,6 +312,7 @@ TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED: Final = (
 TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED: Final = (
     "set_host_dhcp_reservation_failed"
 )
+TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED: Final = "set_host_dns_hostname_failed"
 TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED: Final = "set_host_device_type_failed"
 TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED: Final = "set_host_name_failed"
 TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED: Final = "set_host_notify_failed"

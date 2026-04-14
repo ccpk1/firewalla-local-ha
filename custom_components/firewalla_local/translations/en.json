@@ -605,6 +605,12 @@
     "set_host_dhcp_reservation_failed": {
       "message": "The integration could not update the host DHCP reservation. Check the Firewalla connection and try again."
     },
+    "set_host_dns_hostname_failed": {
+      "message": "The integration could not update the host DNS hostname. Check the Firewalla connection and try again."
+    },
+    "set_host_device_type_failed": {
+      "message": "The integration could not update the host device type. Check the Firewalla connection and try again."
+    },
     "set_host_name_failed": {
       "message": "The integration could not rename the host. Check the Firewalla connection and try again."
     },
@@ -654,7 +660,7 @@
   "services": {
     "get_host_name_mapping": {
       "name": "Get host name mapping",
-      "description": "Return current Firewalla host identity records with host ID, MAC when available, IP, name, and kind.",
+      "description": "Return current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.",
       "fields": {
         "refresh": {
           "name": "Refresh first",
@@ -831,6 +837,74 @@
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and sending the rename command."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "set_host_dns_hostname": {
+      "name": "Set host DNS hostname",
+      "description": "Set one Firewalla host DNS hostname override through the host-scoped hostDomain path.",
+      "fields": {
+        "dns_hostname": {
+          "name": "DNS hostname",
+          "description": "Required. Send this exact DNS hostname override to Firewalla without changes."
+        },
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Use the Firewalla host MAC for deterministic automations."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Use the current Firewalla host display name or full host label."
+        },
+        "host_id": {
+          "name": "Host ID (Optional)",
+          "description": "Alternate host selector. It currently resolves to the same host as the MAC selector."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and sending the DNS hostname override."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "set_host_device_type": {
+      "name": "Set host device type",
+      "description": "Set one Firewalla host device type through the feedback device.detect path.",
+      "fields": {
+        "host_device_type": {
+          "name": "Host device type",
+          "description": "Required. Choose one known Firewalla host device type value from the current runtime category set. Supported values: desktop, phone, tablet, wearable, personal_default, console, smart speaker, tv, projector, tv&projector, entertainment_default, portable media player, smart display, switch, sensor&automation, automation, iot_default, peripheral, nas&server, router, camera, network_default, nas."
+        },
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Use the Firewalla host MAC for deterministic automations."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Use the current Firewalla host display name or full host label."
+        },
+        "host_id": {
+          "name": "Host ID (Optional)",
+          "description": "Alternate host selector. It currently resolves to the same host as the MAC selector."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and sending the device type override."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

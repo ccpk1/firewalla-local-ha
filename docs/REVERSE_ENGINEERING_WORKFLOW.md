@@ -1462,6 +1462,96 @@ Implementation impact:
 - `host_device_type` should remain the normalized Firewalla host
   classification field surfaced from detect or feedback data
 
+### Finding 18: Host DNS override uses a host-scoped `item=hostDomain` write, while host rename still uses `item=host`
+
+Scenario:
+
+- changed host classification, host label, and DNS hostname for host
+  `4C:1D:96:E3:3A:96` from the official Firewalla app while the phone was on
+  the same Wi-Fi segment as the Firewalla box
+
+Artifacts:
+
+- `.tmp/paytons_chromebook_dns_capture.pcap`
+- `.tmp/paytons_chromebook_dns_capture.decoded.txt`
+- post-action runtime pull: `.artifacts/runtime-pull/20260414-182650/`
+
+Observed mutations:
+
+```json
+{
+  "item": "feedback",
+  "value": {
+    "key": "device.detect",
+    "target": "4C:1D:96:E3:3A:96",
+    "value": {
+      "type": "tablet"
+    }
+  }
+}
+```
+
+```json
+{
+  "item": "host",
+  "target": "4C:1D:96:E3:3A:96",
+  "value": {
+    "name": "Paytons Chromebook 2"
+  }
+}
+```
+
+```json
+{
+  "item": "hostDomain",
+  "target": "4C:1D:96:E3:3A:96",
+  "value": {
+    "customizeDomainName": "paytons.chromebook.3"
+  }
+}
+```
+
+```json
+{
+  "item": "host",
+  "target": "4C:1D:96:E3:3A:96",
+  "value": {
+    "name": "Paytons Chromebook 4"
+  }
+}
+```
+
+Transport details:
+
+- all four mutations used outer message type `set`
+- the host classification write remained targetless at the outer level and
+  carried the host MAC under `value.target`
+- both host label and host DNS override writes targeted the host MAC directly
+- all captured mutation responses acknowledged with decrypted `code=None` and
+  `data=null`
+
+Observed readback behavior after the sequence:
+
+- `detect.feedback.type` read back as `tablet`
+- `detect.type` still read back as `desktop`
+- `name` read back as `Paytons Chromebook 4`
+- `localDomain` read back as `paytons.chromebook.4`
+- `userLocalDomain` read back as `paytons.chromebook.3`
+
+Conclusion:
+
+- host DNS override is a distinct host-scoped write and does not reuse the
+  generic host rename payload
+- the local runtime write contract for DNS override is `item=hostDomain` with
+  nested field `value.customizeDomainName`
+- a later host rename can still update `localDomain` even when an explicit DNS
+  override is present
+- the explicit DNS override currently reads back separately in
+  `userLocalDomain`, so the integration should model that field separately from
+  the observed `localDomain`
+- host device type should continue to normalize from `detect.feedback.type`
+  first, because `detect.type` may remain the vendor or classifier default
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
