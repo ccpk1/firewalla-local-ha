@@ -42,6 +42,8 @@ Services added after 1.0.0:
 - `firewalla_local.run_internet_speed_test`
 - `firewalla_local.wake_host`
 - `firewalla_local.set_host_name`
+- `firewalla_local.set_host_dns_hostname`
+- `firewalla_local.set_host_device_type`
 - `firewalla_local.set_host_notify_when_next_online`
 - `firewalla_local.set_host_notify_when_next_offline`
 - `firewalla_local.set_host_dhcp_reservation`
@@ -375,6 +377,8 @@ Host and network operator actions:
 - `firewalla_local.run_internet_speed_test`
 - `firewalla_local.wake_host`
 - `firewalla_local.set_host_name`
+- `firewalla_local.set_host_dns_hostname`
+- `firewalla_local.set_host_device_type`
 - `firewalla_local.set_host_notify_when_next_online`
 - `firewalla_local.set_host_notify_when_next_offline`
 - `firewalla_local.set_host_dhcp_reservation`
@@ -452,7 +456,34 @@ Use `firewalla_local.set_host_name` to send one host-scoped rename command.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide the exact `new_name` string you want Firewalla to store
+- this writes the Firewalla custom host name, not the DNS hostname override
 - `refresh` defaults to `true`
+
+### Host DNS hostname override
+
+Use `firewalla_local.set_host_dns_hostname` to send one host-scoped DNS
+hostname override through the captured `hostDomain` path.
+
+- choose one host with `host_mac`, `host_name`, or `host_id`
+- provide the exact `dns_hostname` string you want Firewalla to store
+- this is separate from `set_host_name` and targets DNS naming rather than the
+  Firewalla display or custom host name
+- `refresh` defaults to `true`
+
+### Host device type
+
+Use `firewalla_local.set_host_device_type` to set one Firewalla host device
+type through the captured `feedback.device.detect` path.
+
+- choose one host with `host_mac`, `host_name`, or `host_id`
+- provide one supported `host_device_type` value from the current runtime
+  category set
+- `refresh` defaults to `true`
+- supported values are `desktop`, `phone`, `tablet`, `wearable`,
+  `personal_default`, `console`, `smart speaker`, `tv`, `projector`,
+  `entertainment_default`, `switch`, `automation`, `iot_default`,
+  `peripheral`, `router`, `camera`, `network_default`, `nas`, `printer`,
+  `security`, `sensor`, `car browser`, `business`, `medical`, and `ap`
 
 ### Host notification toggles
 
