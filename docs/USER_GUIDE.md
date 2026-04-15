@@ -596,6 +596,11 @@ creating a new rule for you.
 
 If pairing fails, start with the simplest checks first.
 
+Before collecting any packet capture, update to the latest Firewalla Local
+build and try pairing again. The pairing process was reworked to match the
+native Firewalla app flow more closely, so the first retry after updating may
+already succeed without any additional troubleshooting.
+
 ### Basic checks
 
 1. Confirm Home Assistant can reach the Firewalla local address you entered.
@@ -642,13 +647,23 @@ capture for a first-time pairing failure.
 
 ### What to capture for support
 
+If pairing still fails after updating and retrying, the next step is a paired
+comparison capture. The current support workflow is designed to stay simple and
+usually takes around 10 minutes.
+
 When asking for help, try to include:
 
 1. Whether you used `fire.walla` or a direct IP address
 2. Whether this is a first-time pairing or a reauthentication attempt
-3. The Home Assistant log output from the failed attempt after debug logging
-  was enabled
-4. Diagnostics from the integration UI if the config entry already exists
+3. One successful phone pairing capture from the same environment
+4. One Home Assistant pairing-attempt capture from the updated integration
+5. The Home Assistant log output from the failed attempt after debug logging
+   was enabled
+6. Diagnostics from the integration UI if the config entry already exists
+
+The Windows capture helper generates a local safe report zip from cleartext
+packet metadata so you can usually share the comparison output without sending
+the raw `.pcap` publicly.
 
 The pairing logs now distinguish QR validation, cloud provisioning, and local
 runtime validation failures, which makes support triage much more direct.

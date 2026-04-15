@@ -30,9 +30,12 @@ Firewalla device.
 - Added a manual `Sync runtime` button on the main Firewalla device and a
 	`runtime_data_updated_at` system-status attribute showing when the current
 	runtime snapshot was last refreshed.
-- Added clearer pairing support tooling with enhanced debug logging breadcrumbs
-	for QR validation, cloud provisioning, and local runtime validation, plus
-	troubleshooting guidance in the user guide.
+- Reworked the pairing process to match the native Firewalla app flow more
+	closely, which improves compatibility before any packet capture is needed.
+- Added clearer pairing support tooling with enhanced debug logging
+	breadcrumbs for QR validation, cloud provisioning, and local runtime
+	validation, plus a Windows capture workflow that produces local safe reports
+	from cleartext packet metadata.
 
 ## New services since 1.0.0
 
@@ -136,6 +139,9 @@ you can request an immediate refresh without opening the options flow.
 - No migration step is expected for existing 1.0.0 users.
 - Existing entities and paired config entries should continue to work normally
 	after upgrade.
+- If pairing previously failed, update first and retry before collecting any
+	packet capture. The pairing flow was reworked specifically to match the
+	native Firewalla app more closely.
 - The original 1.0.0 rule services and runtime inventory service continue to
 	work as before.
 - The new services are additive and can be adopted incrementally.
@@ -171,7 +177,11 @@ Highlights in this release:
 	selected MAC-backed LAN clients.
 - Added a manual `Sync runtime` button on the Firewalla device and a
 	system-status attribute showing when the runtime snapshot was last refreshed.
-- Added enhanced pairing debug logging and troubleshooting guidance to make
-	first-time setup failures easier to diagnose.
+- Reworked the pairing flow to match the native Firewalla app more closely,
+	so users should retry pairing after upgrading before moving to packet
+	capture.
+- Added enhanced pairing debug logging, updated troubleshooting guidance, and
+	a Windows packet capture workflow that produces local safe reports for
+	phone-versus-Home-Assistant comparison.
 
 No migration is expected for existing 1.0.0 users.
