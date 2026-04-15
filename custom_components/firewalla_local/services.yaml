@@ -344,26 +344,16 @@ set_host_device_type:
               label: TV
             - value: "projector"
               label: Projector
-            - value: "tv&projector"
-              label: TV and projector
             - value: "entertainment_default"
               label: Entertainment default
-            - value: "portable media player"
-              label: Portable media player
-            - value: "smart display"
-              label: Smart display
             - value: "switch"
               label: Switch
-            - value: "sensor&automation"
-              label: Sensor and automation
             - value: "automation"
               label: Automation
             - value: "iot_default"
               label: IoT default
             - value: "peripheral"
               label: Peripheral
-            - value: "nas&server"
-              label: NAS and server
             - value: "router"
               label: Router
             - value: "camera"
@@ -372,6 +362,20 @@ set_host_device_type:
               label: Network default
             - value: "nas"
               label: NAS
+            - value: "printer"
+              label: Printer
+            - value: "security"
+              label: Security
+            - value: "sensor"
+              label: Sensor
+            - value: "car browser"
+              label: Car browser
+            - value: "business"
+              label: Business
+            - value: "medical"
+              label: Medical
+            - value: "ap"
+              label: AP
       name: Host device type
       description: Required. Choose one known Firewalla host device type value from the current runtime category set.
     host_mac:

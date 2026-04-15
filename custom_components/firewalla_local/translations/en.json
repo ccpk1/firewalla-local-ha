@@ -888,7 +888,7 @@
       "fields": {
         "host_device_type": {
           "name": "Host device type",
-          "description": "Required. Choose one known Firewalla host device type value from the current runtime category set. Supported values: desktop, phone, tablet, wearable, personal_default, console, smart speaker, tv, projector, tv&projector, entertainment_default, portable media player, smart display, switch, sensor&automation, automation, iot_default, peripheral, nas&server, router, camera, network_default, nas."
+          "description": "Required. Choose one known Firewalla host device type value from the current runtime category set. Supported values: desktop, phone, tablet, wearable, personal_default, console, smart speaker, tv, projector, entertainment_default, switch, automation, iot_default, peripheral, router, camera, network_default, nas, printer, security, sensor, car browser, business, medical, ap."
         },
         "host_mac": {
           "name": "Host MAC (Optional)",
