@@ -56,6 +56,16 @@ class TranscriptEvent:
     content_length: int | None = None
 
 
+@dataclass(slots=True)
+class HttpMessage:
+    """One parsed HTTP message from a reassembled port 8833 TCP stream."""
+
+    ts: float | None
+    first_line: str
+    headers: dict[str, str]
+    content_length: int
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
     parser = argparse.ArgumentParser(
@@ -93,6 +103,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--filter",
         default=DEFAULT_CAPTURE_FILTER,
         help="tcpdump filter expression",
+    )
+    parser.add_argument(
+        "--client-ip",
+        help=(
+            "Only include transcript events for one client IP talking to the "
+            "Firewalla box on port 8833"
+        ),
+    )
+    parser.add_argument(
+        "--pairing-only",
+        action="store_true",
+        help=(
+            "Only include pairing POST and JSON response metadata in the "
+            "redacted transcript"
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -220,13 +245,19 @@ def parse_http_messages(
     offsets: list[tuple[int, float]],
     *,
     request: bool,
-) -> list[tuple[float | None, str, int]]:
+) -> list[HttpMessage]:
     """Split a byte stream into HTTP messages with timestamps and body sizes."""
-    marker = b"POST " if request else b"HTTP/1.1 "
+    request_markers = (b"POST ", b"GET ")
+    response_marker = b"HTTP/1.1 "
     index = 0
-    parsed: list[tuple[float | None, str, int]] = []
+    parsed: list[HttpMessage] = []
     while True:
-        start = blob.find(marker, index)
+        if request:
+            starts = [blob.find(marker, index) for marker in request_markers]
+            starts = [start for start in starts if start >= 0]
+            start = min(starts) if starts else -1
+        else:
+            start = blob.find(response_marker, index)
         if start < 0:
             break
         header_end = blob.find(b"\r\n\r\n", start)
@@ -235,16 +266,18 @@ def parse_http_messages(
 
         header = blob[start:header_end].decode("latin1", errors="ignore")
         first_line, *rest = header.split("\r\n")
+        headers: dict[str, str] = {}
         content_length = 0
         for line in rest:
             name, _, value = line.partition(":")
-            if name.lower() != "content-length":
-                continue
-            try:
-                content_length = int(value.strip())
-            except ValueError:
-                content_length = 0
-            break
+            header_name = name.lower()
+            header_value = value.strip()
+            headers[header_name] = header_value
+            if header_name == "content-length":
+                try:
+                    content_length = int(header_value)
+                except ValueError:
+                    content_length = 0
 
         body_start = header_end + 4
         body_end = body_start + content_length
@@ -252,10 +285,33 @@ def parse_http_messages(
         if len(body) < content_length:
             break
 
-        parsed.append((ts_for_offset(offsets, start), first_line, len(body)))
+        parsed.append(
+            HttpMessage(
+                ts=ts_for_offset(offsets, start),
+                first_line=first_line,
+                headers=headers,
+                content_length=len(body),
+            )
+        )
         index = body_end
 
     return parsed
+
+
+def classify_transcript_message(message: HttpMessage, *, request: bool) -> str:
+    """Return one compact transcript class label."""
+    if request:
+        if message.first_line.startswith("GET "):
+            return "live_stream_get"
+        if message.first_line.startswith("POST "):
+            return "pairing_post"
+        return "request_unknown"
+
+    if message.headers.get("content-type", "").startswith("text/event-stream"):
+        return "live_stream_response"
+    if message.headers.get("content-type", "").startswith("application/json"):
+        return "pairing_response"
+    return "response_unknown"
 
 
 def flow_direction_label(is_request: bool, peer_index: int) -> str:
@@ -266,7 +322,12 @@ def flow_direction_label(is_request: bool, peer_index: int) -> str:
     return f"BOX -> {peer}"
 
 
-def build_transcript(capture_path: Path) -> list[TranscriptEvent]:
+def build_transcript(
+    capture_path: Path,
+    *,
+    client_ip: str | None = None,
+    pairing_only: bool = False,
+) -> list[TranscriptEvent]:
     """Build a redacted transcript from one port 8833 pcap."""
     flows: dict[tuple[str, int, str, int], list[Segment]] = defaultdict(list)
     events: list[TranscriptEvent] = []
@@ -282,6 +343,8 @@ def build_transcript(capture_path: Path) -> list[TranscriptEvent]:
             continue
 
         peer_ip = ip.src if tcp.sport != SERVER_PORT else ip.dst
+        if client_ip and peer_ip != client_ip:
+            continue
         peer_index = peer_indices.setdefault(peer_ip, len(peer_indices) + 1)
         direction = flow_direction_label(tcp.dport == SERVER_PORT, peer_index)
 
@@ -318,20 +381,26 @@ def build_transcript(capture_path: Path) -> list[TranscriptEvent]:
         peer_index = peer_indices[peer_ip]
         direction = flow_direction_label(is_request, peer_index)
         blob, offsets = reassemble(segments)
-        for ts, first_line, content_length in parse_http_messages(
+        for message in parse_http_messages(
             blob,
             offsets,
             request=is_request,
         ):
-            if ts is None:
+            if message.ts is None:
+                continue
+            message_class = classify_transcript_message(message, request=is_request)
+            if pairing_only and message_class in {
+                "live_stream_get",
+                "live_stream_response",
+            }:
                 continue
             events.append(
                 TranscriptEvent(
-                    timestamp_utc=format_ts(ts),
+                    timestamp_utc=format_ts(message.ts),
                     direction=direction,
                     kind="http_request" if is_request else "http_response",
-                    summary=first_line,
-                    content_length=content_length,
+                    summary=f"{message.first_line} [{message_class}]",
+                    content_length=message.content_length,
                 )
             )
 
@@ -343,6 +412,8 @@ def build_summary(
     *,
     duration_seconds: int,
     capture_filter: str,
+    client_ip: str | None,
+    pairing_only: bool,
 ) -> dict[str, object]:
     """Build a compact summary for the shareable bundle."""
     http_responses = [
@@ -355,9 +426,14 @@ def build_summary(
         "created_at_utc": datetime.now(UTC).isoformat(),
         "capture_duration_seconds": duration_seconds,
         "capture_filter": capture_filter,
+        "client_ip_filter": client_ip,
+        "pairing_only": pairing_only,
         "http_request_count": sum(event.kind == "http_request" for event in events),
         "http_response_count": sum(event.kind == "http_response" for event in events),
         "http_response_status_counts": dict(Counter(http_responses)),
+        "http_summary_counts": dict(
+            Counter(event.summary for event in events if event.kind.startswith("http_"))
+        ),
         "tcp_event_counts": dict(tcp_events),
         "notes": [
             "This redacted bundle excludes the raw pcap by default.",
@@ -462,11 +538,17 @@ def main() -> int:
             ]
         )
 
-    events = build_transcript(local_pcap)
+    events = build_transcript(
+        local_pcap,
+        client_ip=args.client_ip,
+        pairing_only=args.pairing_only,
+    )
     summary = build_summary(
         events,
         duration_seconds=args.duration,
         capture_filter=args.filter,
+        client_ip=args.client_ip,
+        pairing_only=args.pairing_only,
     )
     bundle_path = write_redacted_bundle(run_dir, events=events, summary=summary)
 

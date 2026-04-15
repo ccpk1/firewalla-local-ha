@@ -42,6 +42,16 @@ class Segment:
     ts: float
 
 
+@dataclass(slots=True)
+class HttpMessage:
+    """One parsed HTTP message from a reassembled port 8833 TCP stream."""
+
+    ts: float | None
+    first_line: str
+    headers: dict[str, str]
+    body: bytes
+
+
 def load_symmetric_key() -> str:
     """Return the active Firewalla symmetric key from Home Assistant storage."""
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -100,13 +110,19 @@ def parse_http_messages(
     offsets: list[tuple[int, float]],
     *,
     request: bool,
-) -> list[tuple[float | None, str, bytes]]:
+) -> list[HttpMessage]:
     """Split a byte stream into HTTP messages with timestamps and bodies."""
-    marker = b"POST " if request else b"HTTP/1.1 "
+    request_markers = (b"POST ", b"GET ")
+    response_marker = b"HTTP/1.1 "
     index = 0
-    parsed: list[tuple[float | None, str, bytes]] = []
+    parsed: list[HttpMessage] = []
     while True:
-        start = blob.find(marker, index)
+        if request:
+            starts = [blob.find(marker, index) for marker in request_markers]
+            starts = [start for start in starts if start >= 0]
+            start = min(starts) if starts else -1
+        else:
+            start = blob.find(response_marker, index)
         if start < 0:
             break
         header_end = blob.find(b"\r\n\r\n", start)
@@ -115,16 +131,18 @@ def parse_http_messages(
 
         header = blob[start:header_end].decode("latin1", errors="ignore")
         first_line, *rest = header.split("\r\n")
+        headers: dict[str, str] = {}
         content_length = 0
         for line in rest:
             name, _, value = line.partition(":")
-            if name.lower() != "content-length":
-                continue
-            try:
-                content_length = int(value.strip())
-            except ValueError:
-                content_length = 0
-            break
+            header_name = name.lower()
+            header_value = value.strip()
+            headers[header_name] = header_value
+            if header_name == "content-length":
+                try:
+                    content_length = int(header_value)
+                except ValueError:
+                    content_length = 0
 
         body_start = header_end + 4
         body_end = body_start + content_length
@@ -132,10 +150,84 @@ def parse_http_messages(
         if len(body) < content_length:
             break
 
-        parsed.append((ts_for_offset(offsets, start), first_line, body))
+        parsed.append(
+            HttpMessage(
+                ts=ts_for_offset(offsets, start),
+                first_line=first_line,
+                headers=headers,
+                body=body,
+            )
+        )
         index = body_end
 
     return parsed
+
+
+def classify_request(message: HttpMessage, decoded: dict[str, object] | None) -> str:
+    """Classify one request into a stable pairing-analysis bucket."""
+    if message.first_line.startswith("GET "):
+        return "live_stream_get"
+
+    if not decoded:
+        return "post_unknown"
+
+    obj = decoded.get("message", {}).get("obj", {})
+    if not isinstance(obj, dict):
+        return "post_unknown"
+
+    match obj.get("mtype"):
+        case "init":
+            return "pairing_init"
+        case "cmd":
+            return "command_post"
+        case _:
+            return "post_unknown"
+
+
+def classify_response(message: HttpMessage, decoded: dict[str, object] | None) -> str:
+    """Classify one response into a stable pairing-analysis bucket."""
+    content_type = message.headers.get("content-type", "")
+    if content_type.startswith("text/event-stream"):
+        return "live_stream_response"
+    if content_type.startswith("application/json") and decoded is not None:
+        return "json_response"
+    if content_type.startswith("application/json"):
+        return "json_response_undecoded"
+    return "response_unknown"
+
+
+def header_summary(message: HttpMessage, *, request: bool) -> str:
+    """Return a compact header summary for pairing comparisons."""
+    if request:
+        parts: list[str] = []
+        if user_agent := message.headers.get("user-agent"):
+            parts.append(f"user_agent={user_agent}")
+        if content_length := message.headers.get("content-length"):
+            parts.append(f"content_length={content_length}")
+        if content_type := message.headers.get("content-type"):
+            parts.append(f"content_type={content_type}")
+        return " ".join(parts)
+
+    parts = []
+    if content_type := message.headers.get("content-type"):
+        parts.append(f"content_type={content_type}")
+    if content_length := message.headers.get("content-length"):
+        parts.append(f"content_length={content_length}")
+    return " ".join(parts)
+
+
+def format_elapsed(base_ts: float | None, ts: float | None) -> str:
+    """Render elapsed time from the first visible message."""
+    if base_ts is None or ts is None:
+        return "elapsed=unknown"
+    return f"elapsed=+{ts - base_ts:.3f}s"
+
+
+def flow_peer_key(flow: tuple[str, int, str, int], *, request: bool) -> tuple[str, int]:
+    """Return a stable client endpoint key for one parsed flow."""
+    if request:
+        return (flow[0], flow[1])
+    return (flow[2], flow[3])
 
 
 def decode_body(body: bytes, key: str) -> dict[str, object] | None:
@@ -183,6 +275,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PCAP_PATH,
         help="Path to the .pcap file to decode",
     )
+    parser.add_argument(
+        "--client-ip",
+        help=(
+            "Only decode flows for one specific client IP talking to the "
+            "Firewalla box on port 8833"
+        ),
+    )
+    parser.add_argument(
+        "--pairing-only",
+        action="store_true",
+        help=(
+            "Suppress live-stream GET and text/event-stream traffic so the "
+            "output stays focused on pairing POST traffic"
+        ),
+    )
     return parser
 
 
@@ -192,6 +299,7 @@ def main() -> None:
     capture_path = args.capture_path.resolve()
     key = load_symmetric_key()
     flows: dict[tuple[str, int, str, int], list[Segment]] = defaultdict(list)
+    matched_payload_packets = 0
     for packet in rdpcap(str(capture_path)):
         if IP not in packet or TCP not in packet:
             continue
@@ -199,12 +307,35 @@ def main() -> None:
         tcp = packet[TCP]
         if tcp.sport != SERVER_PORT and tcp.dport != SERVER_PORT:
             continue
+        peer_ip = ip.src if tcp.dport == SERVER_PORT else ip.dst
+        if args.client_ip and peer_ip != args.client_ip:
+            continue
         payload = bytes(tcp.payload)
         if not payload:
             continue
+        matched_payload_packets += 1
         flows[(ip.src, tcp.sport, ip.dst, tcp.dport)].append(
             Segment(seq=int(tcp.seq), data=payload, ts=float(packet.time))
         )
+
+    if args.client_ip:
+        print(f"FILTER client_ip={args.client_ip}")
+    if args.pairing_only:
+        print("FILTER pairing_only=true")
+
+    if matched_payload_packets == 0:
+        if args.client_ip:
+            print(
+                "No matching payload-bearing port 8833 flows were found for "
+                f"client {args.client_ip}"
+            )
+            return
+        print("No payload-bearing port 8833 flows were found")
+        return
+
+    parsed_flows: list[tuple[tuple[str, int, str, int], bool, list[HttpMessage]]] = []
+    base_ts: float | None = None
+    request_started_at: dict[tuple[str, int], float] = {}
 
     for flow, segments in sorted(flows.items()):
         blob, offsets = reassemble(segments)
@@ -212,42 +343,135 @@ def main() -> None:
         messages = parse_http_messages(blob, offsets, request=is_request)
         if not messages:
             continue
+        parsed_flows.append((flow, is_request, messages))
+        for message in messages:
+            if message.ts is None:
+                continue
+            if base_ts is None or message.ts < base_ts:
+                base_ts = message.ts
+            if is_request:
+                peer_key = flow_peer_key(flow, request=True)
+                request_started_at.setdefault(peer_key, message.ts)
+
+    printed_any = False
+    for flow, is_request, messages in parsed_flows:
         direction = "request" if is_request else "response"
-        print(
-            f"FLOW {direction} {flow[0]}:{flow[1]} -> "
-            f"{flow[2]}:{flow[3]} count={len(messages)}"
-        )
-        for ts, first_line, body in messages[:40]:
+        peer_key = flow_peer_key(flow, request=is_request)
+        flow_header_printed = False
+        for message in messages[:40]:
             try:
-                decoded = decode_body(body, key)
+                decoded = decode_body(message.body, key)
             except ValueError as err:
+                request_class = classify_request(message, None) if is_request else ""
+                response_class = (
+                    classify_response(message, None) if not is_request else ""
+                )
+                if args.pairing_only and (
+                    request_class == "live_stream_get"
+                    or response_class == "live_stream_response"
+                ):
+                    continue
+                if not flow_header_printed:
+                    print(
+                        f"FLOW {direction} {flow[0]}:{flow[1]} -> "
+                        f"{flow[2]}:{flow[3]} count={len(messages)}"
+                    )
+                    flow_header_printed = True
+                printed_any = True
                 print(
-                    f"  {format_ts(ts)} {first_line} "
+                    f"  {format_ts(message.ts)} {message.first_line} "
+                    f"{format_elapsed(base_ts, message.ts)} "
                     f"decode_error={type(err).__name__}: {err}"
                 )
                 continue
-            if decoded is None:
-                print(f"  {format_ts(ts)} {first_line} undecodable")
-                continue
 
             if is_request:
-                obj = decoded.get("message", {}).get("obj", {})
+                request_class = classify_request(message, decoded)
+                if args.pairing_only and request_class == "live_stream_get":
+                    continue
+                if not flow_header_printed:
+                    print(
+                        f"FLOW {direction} {flow[0]}:{flow[1]} -> "
+                        f"{flow[2]}:{flow[3]} count={len(messages)}"
+                    )
+                    flow_header_printed = True
+                printed_any = True
+                if request_class == "live_stream_get":
+                    print(
+                        f"  {format_ts(message.ts)} {message.first_line} "
+                        f"{format_elapsed(base_ts, message.ts)} class={request_class}"
+                    )
+                    continue
+
+                obj = decoded.get("message", {}).get("obj", {}) if decoded else {}
                 if not isinstance(obj, dict):
-                    print(f"  {format_ts(ts)} {first_line} request_missing_obj")
+                    print(
+                        f"  {format_ts(message.ts)} {message.first_line} "
+                        f"{format_elapsed(base_ts, message.ts)} class={request_class} "
+                        "request_missing_obj"
+                    )
                     continue
                 print(
-                    f"  {format_ts(ts)} {first_line} "
+                    f"  {format_ts(message.ts)} {message.first_line} "
+                    f"{format_elapsed(base_ts, message.ts)} class={request_class} "
                     f"mtype={obj.get('mtype')} target={obj.get('target')}"
                 )
+                if summary := header_summary(message, request=True):
+                    print(f"     headers={summary}")
                 print(f"     data={json.dumps(obj.get('data'), sort_keys=True)[:800]}")
+                continue
+
+            response_class = classify_response(message, decoded)
+            if args.pairing_only and response_class == "live_stream_response":
+                continue
+            if not flow_header_printed:
+                print(
+                    f"FLOW {direction} {flow[0]}:{flow[1]} -> "
+                    f"{flow[2]}:{flow[3]} count={len(messages)}"
+                )
+                flow_header_printed = True
+            printed_any = True
+
+            latency_note = ""
+            if message.ts is not None and (
+                request_ts := request_started_at.get(peer_key)
+            ):
+                latency_note = f" latency={message.ts - request_ts:.3f}s"
+            if response_class == "live_stream_response":
+                print(
+                    f"  {format_ts(message.ts)} {message.first_line} "
+                    f"{format_elapsed(base_ts, message.ts)} class={response_class}"
+                    f"{latency_note}"
+                )
+                if summary := header_summary(message, request=False):
+                    print(f"     headers={summary}")
+                continue
+
+            if decoded is None:
+                print(
+                    f"  {format_ts(message.ts)} {message.first_line} "
+                    f"{format_elapsed(base_ts, message.ts)} class={response_class}"
+                    f"{latency_note} undecodable"
+                )
+                if summary := header_summary(message, request=False):
+                    print(f"     headers={summary}")
                 continue
 
             data = decoded.get("data")
             preview = data
             if isinstance(data, dict):
                 preview = {key: data[key] for key in list(data)[:8]}
-            print(f"  {format_ts(ts)} {first_line} code={decoded.get('code')}")
+            print(
+                f"  {format_ts(message.ts)} {message.first_line} "
+                f"{format_elapsed(base_ts, message.ts)} class={response_class}"
+                f"{latency_note} code={decoded.get('code')}"
+            )
+            if summary := header_summary(message, request=False):
+                print(f"     headers={summary}")
             print(f"     data={json.dumps(preview, sort_keys=True)[:800]}")
+
+    if args.pairing_only and not printed_any:
+        print("No pairing-focused HTTP messages were found for the selected filters")
 
 
 if __name__ == "__main__":

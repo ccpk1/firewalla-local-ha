@@ -172,9 +172,12 @@ async def test_user_flow_creates_entry(hass) -> None:
             new=AsyncMock(return_value=_mock_credentials()),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_pairing_runtime_init_payload",
             new=AsyncMock(return_value={}),
         ),
+        patch(
+            "custom_components.firewalla_local.config_flow.cache_pending_pairing_init_payload"
+        ) as mock_cache_pairing_payload,
     ):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -194,6 +197,7 @@ async def test_user_flow_creates_entry(hass) -> None:
         CONF_AID: "aid-123",
         CONF_SYMMETRIC_KEY: "symmetric-key",
     }
+    mock_cache_pairing_payload.assert_called_once_with(hass, "license-123", {})
 
 
 async def test_duplicate_license_aborts(hass) -> None:
@@ -354,7 +358,7 @@ async def test_user_flow_retries_local_runtime_activation_on_http_412(hass) -> N
             )
         return {}
 
-    mock_client.async_get_runtime_init_payload = AsyncMock(
+    mock_client.async_get_pairing_runtime_init_payload = AsyncMock(
         side_effect=_mock_runtime_validation
     )
 
@@ -405,7 +409,7 @@ async def test_user_flow_local_runtime_timeout_shows_specific_error(hass) -> Non
             new=AsyncMock(return_value=_mock_credentials()),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_pairing_runtime_init_payload",
             new=AsyncMock(
                 side_effect=FirewallaLocalRuntimeNotReadyError(
                     "Firewalla local runtime has not accepted the new pairing yet: "
@@ -457,7 +461,7 @@ async def test_user_flow_logs_local_pairing_wait_details(hass, caplog) -> None:
             )
         return {}
 
-    mock_client.async_get_runtime_init_payload = AsyncMock(
+    mock_client.async_get_pairing_runtime_init_payload = AsyncMock(
         side_effect=_mock_runtime_validation
     )
     caplog.set_level(logging.INFO, logger="custom_components.firewalla_local")
@@ -532,7 +536,7 @@ async def test_user_flow_retries_local_runtime_disconnect_during_activation(
             )
         return {}
 
-    mock_client.async_get_runtime_init_payload = AsyncMock(
+    mock_client.async_get_pairing_runtime_init_payload = AsyncMock(
         side_effect=_mock_runtime_validation
     )
 
@@ -589,7 +593,7 @@ async def test_user_flow_logs_local_disconnect_wait_details(hass, caplog) -> Non
             )
         return {}
 
-    mock_client.async_get_runtime_init_payload = AsyncMock(
+    mock_client.async_get_pairing_runtime_init_payload = AsyncMock(
         side_effect=_mock_runtime_validation
     )
     caplog.set_level(logging.INFO, logger="custom_components.firewalla_local")
@@ -713,7 +717,7 @@ async def test_reauth_updates_existing_entry(hass) -> None:
             new=AsyncMock(return_value=_mock_credentials()),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_pairing_runtime_init_payload",
             new=AsyncMock(return_value={}),
         ),
     ):
@@ -948,7 +952,7 @@ async def test_reauth_local_runtime_timeout_shows_specific_error(hass) -> None:
             new=AsyncMock(return_value=_mock_credentials()),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_pairing_runtime_init_payload",
             new=AsyncMock(
                 side_effect=FirewallaLocalRuntimeNotReadyError(
                     "Firewalla local runtime has not accepted the new pairing yet: "
@@ -1014,7 +1018,7 @@ async def test_reauth_wrong_account_aborts(hass) -> None:
             new=AsyncMock(return_value=_mock_credentials(license_id="license-999")),
         ),
         patch(
-            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_runtime_init_payload",
+            "custom_components.firewalla_local.config_flow.FirewallaApiClient.async_get_pairing_runtime_init_payload",
             new=AsyncMock(return_value={}),
         ),
     ):

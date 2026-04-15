@@ -70,7 +70,10 @@ from .const import (
     TRANS_KEY_OPTION_LABEL_UNAVAILABLE_RULE_SUFFIX,
     TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER,
 )
-from .coordinator import async_update_entry_options
+from .coordinator import (
+    async_update_entry_options,
+    cache_pending_pairing_init_payload,
+)
 from .managers import (
     FirewallaHostManager,
     FirewallaRuleManager,
@@ -283,7 +286,9 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
         while True:
             attempt += 1
             try:
-                await client.async_get_runtime_init_payload(log_as_info=True)
+                pairing_payload = await client.async_get_pairing_runtime_init_payload(
+                    log_as_info=True
+                )
             except FirewallaLocalRuntimeNotReadyError as err:
                 elapsed = _pairing_monotonic() - local_validation_started_at
                 if elapsed >= _LOCAL_RUNTIME_VALIDATION_TIMEOUT:
@@ -333,6 +338,9 @@ class FirewallaConfigFlow(ConfigFlow, domain=DOMAIN):
                 await asyncio.sleep(wait_interval)
                 continue
 
+            cache_pending_pairing_init_payload(
+                self.hass, credentials.license, pairing_payload
+            )
             validation_elapsed = _pairing_monotonic() - local_validation_started_at
             total_elapsed = _pairing_monotonic() - pairing_started_at
             LOGGER.info(

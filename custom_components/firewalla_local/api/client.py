@@ -59,6 +59,17 @@ _COMMAND_MESSAGE_TYPE: Final = "cmd"
 _GET_MESSAGE_TYPE: Final = "get"
 _INIT_MESSAGE_TYPE: Final = "init"
 _SET_MESSAGE_TYPE: Final = "set"
+_PAIRING_COMMAND_TIMEOUT_KEY: Final = "COMMAND_TIMEOUT"
+_PAIRING_DAP_OPS_KEY: Final = "dapOps"
+_PAIRING_FWAPC_OPS_KEY: Final = "fwapcOps"
+_PAIRING_HTTP_METHOD_KEY: Final = "method"
+_PAIRING_HTTP_PATH_KEY: Final = "path"
+_PAIRING_HTTP_BODY_KEY: Final = "body"
+_PAIRING_HTTP_RESULT_KEY: Final = "key"
+_PAIRING_VALUE_KEY: Final = "value"
+_PAIRING_TIMEOUT_SECONDS: Final = 15
+_HTTP_CONNECTION_HEADER: Final = "Connection"
+_HTTP_CONNECTION_CLOSE_VALUE: Final = "close"
 _COMMAND_ITEM_KEY: Final = "item"
 _COMMAND_VALUE_KEY: Final = "value"
 _COMMAND_GET_KEY: Final = "get"
@@ -271,17 +282,27 @@ class FirewallaApiClient:
         self,
         payload: dict[str, object],
         *,
+        force_close: bool = False,
         log_level: int = logging.DEBUG,
     ) -> tuple[int, str]:
         """Post an encrypted payload to the local runtime endpoint."""
         url = f"http://{self.host}:8833/v1/encipher/message/{self.gid}"
+        headers = (
+            {_HTTP_CONNECTION_HEADER: _HTTP_CONNECTION_CLOSE_VALUE}
+            if force_close
+            else None
+        )
         LOGGER.log(
             log_level,
             "Posting Firewalla local runtime payload to host %s",
             self.host,
         )
         try:
-            async with self._session.post(url, json=payload) as response:
+            async with self._session.post(
+                url,
+                json=payload,
+                headers=headers,
+            ) as response:
                 LOGGER.log(
                     log_level,
                     "Firewalla local runtime responded with HTTP %s for host %s",
@@ -299,6 +320,7 @@ class FirewallaApiClient:
         *,
         message_type: str,
         data: dict[str, object],
+        force_close: bool = False,
         target: str = DEFAULT_INIT_TARGET,
         log_level: int = logging.DEBUG,
     ) -> dict[str, object]:
@@ -306,6 +328,7 @@ class FirewallaApiClient:
         data_payload = await self._async_send_local_message_data(
             message_type=message_type,
             data=data,
+            force_close=force_close,
             target=target,
             log_level=log_level,
         )
@@ -321,6 +344,7 @@ class FirewallaApiClient:
         *,
         message_type: str,
         data: dict[str, object],
+        force_close: bool = False,
         target: str = DEFAULT_INIT_TARGET,
         log_level: int = logging.DEBUG,
     ) -> object:
@@ -341,6 +365,7 @@ class FirewallaApiClient:
 
         response_status, response_text = await self._async_post_local_payload(
             payload,
+            force_close=force_close,
             log_level=log_level,
         )
         if response_status == 401:
@@ -351,6 +376,7 @@ class FirewallaApiClient:
             )
             response_status, response_text = await self._async_post_local_payload(
                 payload,
+                force_close=force_close,
                 log_level=log_level,
             )
             if response_status == 401:
@@ -437,6 +463,74 @@ class FirewallaApiClient:
         return await self._async_send_local_message(
             message_type=_INIT_MESSAGE_TYPE,
             data={_COMMAND_GET_KEY: DEFAULT_INIT_TARGET},
+            target=DEFAULT_INIT_TARGET,
+            log_level=log_level,
+        )
+
+    async def async_get_pairing_runtime_init_payload(
+        self, *, log_as_info: bool = False
+    ) -> dict[str, object]:
+        """Run the staged local init sequence observed during phone pairing."""
+        log_level = logging.INFO if log_as_info else logging.DEBUG
+        LOGGER.log(
+            log_level,
+            "Requesting Firewalla pairing init sequence from host %s",
+            self.host,
+        )
+        if log_as_info:
+            LOGGER.info(
+                "Firewalla pairing init request metadata for host %s: aid "
+                "present=%s, device name=%s, timezone=%s",
+                self.host,
+                bool(self.aid),
+                self.device_name,
+                self.timezone_name,
+            )
+
+        await self._async_send_local_message(
+            message_type=_INIT_MESSAGE_TYPE,
+            data={
+                _PAIRING_COMMAND_TIMEOUT_KEY: _PAIRING_TIMEOUT_SECONDS,
+                _COMMAND_GET_KEY: DEFAULT_INIT_TARGET,
+            },
+            force_close=True,
+            target=DEFAULT_INIT_TARGET,
+            log_level=log_level,
+        )
+
+        detailed_pairing_data: dict[str, object] = {
+            _PAIRING_DAP_OPS_KEY: [
+                {
+                    _PAIRING_HTTP_BODY_KEY: {},
+                    _PAIRING_HTTP_RESULT_KEY: "dapInfo",
+                    _PAIRING_HTTP_METHOD_KEY: "GET",
+                    _PAIRING_HTTP_PATH_KEY: "/info",
+                }
+            ],
+            _PAIRING_FWAPC_OPS_KEY: [
+                {
+                    _PAIRING_HTTP_BODY_KEY: {},
+                    _PAIRING_HTTP_RESULT_KEY: "stationControls",
+                    _PAIRING_HTTP_METHOD_KEY: "GET",
+                    _PAIRING_HTTP_PATH_KEY: "/config/stations",
+                }
+            ],
+            _COMMAND_GET_KEY: DEFAULT_INIT_TARGET,
+            _PAIRING_VALUE_KEY: {},
+        }
+
+        await self._async_send_local_message(
+            message_type=_INIT_MESSAGE_TYPE,
+            data=detailed_pairing_data,
+            force_close=True,
+            target=DEFAULT_INIT_TARGET,
+            log_level=log_level,
+        )
+
+        return await self._async_send_local_message(
+            message_type=_INIT_MESSAGE_TYPE,
+            data=detailed_pairing_data,
+            force_close=True,
             target=DEFAULT_INIT_TARGET,
             log_level=log_level,
         )

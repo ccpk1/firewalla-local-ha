@@ -324,6 +324,12 @@ Purpose:
 
 Run `utils/analyze_capture.py <pcap_path>`.
 
+If the capture is noisy, scope the report to the pairing phone with
+`utils/analyze_capture.py <pcap_path> --client-ip <phone_ip>`.
+
+If you want to suppress live-stream `GET` and `text/event-stream` traffic and
+focus only on the pairing `POST` flow, add `--pairing-only`.
+
 Inspect the decoded request for:
 
 - outer message type such as `cmd` or `init`

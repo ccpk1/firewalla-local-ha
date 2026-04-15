@@ -179,6 +179,42 @@ async def test_setup_entry(hass: HomeAssistant) -> None:
     assert watched_user.associated_host_names == ("WireGuard Kaden",)
 
 
+async def test_setup_entry_reuses_cached_pairing_payload(hass: HomeAssistant) -> None:
+    """Test setup consumes the cached pairing payload before polling again."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    hass.data[DOMAIN] = {
+        "pending_pairing_init_payloads": {"license-123": _mock_runtime_payload()}
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(),
+        ) as mock_get_runtime_init_payload,
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert mock_get_runtime_init_payload.await_count == 0
+    assert hass.data[DOMAIN] == {}
+
+
 async def test_setup_entry_creates_runtime_sync_button(hass: HomeAssistant) -> None:
     """Test setup adds a runtime sync button on the main Firewalla device."""
     entry = MockConfigEntry(

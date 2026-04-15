@@ -17,6 +17,7 @@ from .api import FirewallaApiClient, FirewallaApiError, FirewallaAuthError
 from .const import (
     CONF_DEVICE_TRACKERS,
     CONF_HOST,
+    CONF_LICENSE,
     CONF_LOCAL_IP,
     CONF_SELECTED_RULE_IDS,
     CONF_UPDATE_INTERVAL,
@@ -30,6 +31,8 @@ from .const import (
     MIN_UPDATE_INTERVAL_MINUTES,
 )
 from .models import FirewallaRuntimeSnapshot
+
+_PENDING_PAIRING_INIT_PAYLOADS: str = "pending_pairing_init_payloads"
 
 if TYPE_CHECKING:
     from .managers import (
@@ -109,6 +112,40 @@ def get_configured_update_interval(options: Mapping[str, object]) -> timedelta:
 
 
 @callback
+def cache_pending_pairing_init_payload(
+    hass: HomeAssistant, license_id: str, payload: dict[str, object]
+) -> None:
+    """Store one validated pairing payload for the next entry setup refresh."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    pending_payloads = domain_data.setdefault(_PENDING_PAIRING_INIT_PAYLOADS, {})
+    if not isinstance(pending_payloads, dict):
+        domain_data[_PENDING_PAIRING_INIT_PAYLOADS] = {license_id: dict(payload)}
+        return
+
+    pending_payloads[license_id] = dict(payload)
+
+
+@callback
+def pop_pending_pairing_init_payload(
+    hass: HomeAssistant, license_id: str
+) -> dict[str, object] | None:
+    """Return and clear one cached pairing payload for entry setup."""
+    domain_data = hass.data.get(DOMAIN)
+    if not isinstance(domain_data, dict):
+        return None
+
+    pending_payloads = domain_data.get(_PENDING_PAIRING_INIT_PAYLOADS)
+    if not isinstance(pending_payloads, dict):
+        return None
+
+    payload = pending_payloads.pop(license_id, None)
+    if not pending_payloads:
+        domain_data.pop(_PENDING_PAIRING_INIT_PAYLOADS, None)
+
+    return payload if isinstance(payload, dict) else None
+
+
+@callback
 def async_update_entry_options(
     hass: HomeAssistant,
     entry: FirewallaConfigEntry | ConfigEntry,
@@ -129,6 +166,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
     ) -> None:
         """Initialize the coordinator."""
         self.client = client
+        self._license = config_entry.data[CONF_LICENSE]
         self.last_init_payload: dict[str, object] | None = None
         self.last_runtime_data_updated_at: datetime | None = None
         self.host_manager: FirewallaHostManager | None = None
@@ -161,7 +199,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
     async def _async_update_data(self) -> FirewallaRuntimeSnapshot:
         """Fetch data from Firewalla Local."""
         try:
-            payload = await self.client.async_get_runtime_init_payload()
+            payload = pop_pending_pairing_init_payload(self.hass, self._license)
+            if payload is None:
+                payload = await self.client.async_get_runtime_init_payload()
             self.last_init_payload = payload
             snapshot = self.client.build_runtime_snapshot(payload)
         except FirewallaAuthError as err:

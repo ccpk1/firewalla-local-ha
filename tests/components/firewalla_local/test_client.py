@@ -82,22 +82,77 @@ async def test_local_runtime_init_logs_at_info_for_pairing(caplog) -> None:
         with patch.object(
             client,
             "_async_post_local_payload",
-            AsyncMock(
-                return_value=(
-                    200,
-                    json.dumps({"message": encrypted_response}),
-                )
-            ),
+            AsyncMock(return_value=(200, json.dumps({"message": encrypted_response}))),
         ):
-            await client.async_get_runtime_init_payload(log_as_info=True)
+            await client.async_get_pairing_runtime_init_payload(log_as_info=True)
 
     assert (
-        "Requesting Firewalla local init payload from host 192.168.200.1" in caplog.text
+        "Requesting Firewalla pairing init sequence from host 192.168.200.1"
+        in caplog.text
     )
     assert (
-        "Firewalla local init request metadata for host 192.168.200.1: "
+        "Firewalla pairing init request metadata for host 192.168.200.1: "
         "aid present=True, device name=Home Assistant, timezone=UTC" in caplog.text
     )
+
+
+@pytest.mark.asyncio
+async def test_get_pairing_runtime_init_payload_uses_phone_like_sequence() -> None:
+    """Test pairing-time init mirrors the observed phone request sequence."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(side_effect=[{"step": 1}, {"step": 2}, {"step": 3}]),
+        ) as mock_send:
+            payload = await client.async_get_pairing_runtime_init_payload()
+
+    assert payload == {"step": 3}
+    assert mock_send.await_count == 3
+    assert mock_send.await_args_list[0].kwargs == {
+        "message_type": "init",
+        "data": {"COMMAND_TIMEOUT": 15, "get": "0.0.0.0"},
+        "force_close": True,
+        "target": "0.0.0.0",
+        "log_level": logging.DEBUG,
+    }
+    expected_detail_data = {
+        "dapOps": [{"body": {}, "key": "dapInfo", "method": "GET", "path": "/info"}],
+        "fwapcOps": [
+            {
+                "body": {},
+                "key": "stationControls",
+                "method": "GET",
+                "path": "/config/stations",
+            }
+        ],
+        "get": "0.0.0.0",
+        "value": {},
+    }
+    assert mock_send.await_args_list[1].kwargs == {
+        "message_type": "init",
+        "data": expected_detail_data,
+        "force_close": True,
+        "target": "0.0.0.0",
+        "log_level": logging.DEBUG,
+    }
+    assert mock_send.await_args_list[2].kwargs == {
+        "message_type": "init",
+        "data": expected_detail_data,
+        "force_close": True,
+        "target": "0.0.0.0",
+        "log_level": logging.DEBUG,
+    }
 
 
 @pytest.mark.asyncio
