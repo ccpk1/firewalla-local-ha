@@ -1331,9 +1331,6 @@ class FirewallaApiClient:
         dns_domain: str | None,
     ) -> tuple[str, str | None, str | None, str | None, str | None]:
         """Resolve user-facing and DNS-oriented identity fields for a host."""
-        backup_name = self._normalized_optional_string(
-            raw_host.get(_RAW_HOST_BACKUP_NAME_KEY)
-        )
         raw_name = self._normalized_optional_string(raw_host.get(_RAW_NAME_KEY))
         dhcp_name = self._normalized_optional_string(
             raw_host.get(_RAW_HOST_DHCP_NAME_KEY)
@@ -1354,19 +1351,7 @@ class FirewallaApiClient:
             else dns_hostname
         )
 
-        host_name = backup_name
-        if (
-            backup_name is not None
-            and dhcp_name is not None
-            and backup_name.casefold() == dhcp_name.casefold()
-            and raw_name is not None
-            and raw_name.casefold() != backup_name.casefold()
-        ):
-            host_name = raw_name
-
         raw_candidates = (
-            host_name,
-            backup_name,
             raw_name,
             dhcp_name,
             bonjour_name,

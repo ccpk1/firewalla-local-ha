@@ -2803,12 +2803,19 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
+    raw_host_lookup = _build_raw_host_lookup(entry)
     hosts: list[JsonValueType] = []
     for host in sorted(
         entry.runtime_data.host_manager.get_hosts(),
         key=lambda host: host.mac,
     ):
         is_mac_host = _supports_wake_on_lan(host.mac)
+        raw_host = raw_host_lookup.get(host.mac)
+        raw_network_uuid = (
+            _optional_string(raw_host.get("intf"))
+            if isinstance(raw_host, dict)
+            else None
+        )
         hosts.append(
             {
                 "host_id": host.mac,
@@ -2819,7 +2826,13 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
                 "dns_domain": host.dns_domain,
                 "dns_fqdn": host.dns_fqdn,
                 "dhcp_name": host.dhcp_name,
+                "group_name": host.group_name,
                 "host_device_type": host.host_device_type,
+                "ip_assignment": _serialize_network_host_ip_assignment(
+                    _resolve_host_ip_assignment(raw_host, network_uuid=raw_network_uuid)
+                    if raw_network_uuid is not None
+                    else None
+                ),
                 "kind": "mac_host" if is_mac_host else "pseudo_host",
             }
         )
