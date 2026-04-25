@@ -19,6 +19,7 @@ from ..const import (
 )
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from ..models import FirewallaHostRuntime, FirewallaRuntimeSnapshot
+from ..utils.mac import normalize_mac_address
 from .base_manager import FirewallaBaseManager
 
 
@@ -124,7 +125,11 @@ class FirewallaHostManager(FirewallaBaseManager):
 
     def handle_refresh(self, snapshot: FirewallaRuntimeSnapshot) -> None:
         """Route refreshed host inventory into manager-owned indexes."""
-        self._host_index = {host.mac: host for host in snapshot.hosts}
+        self._host_index = {
+            normalized_mac: host
+            for host in snapshot.hosts
+            if (normalized_mac := normalize_mac_address(host.mac)) is not None
+        }
 
     @property
     def configured_watched_device_macs(self) -> tuple[str, ...]:
@@ -152,7 +157,9 @@ class FirewallaHostManager(FirewallaBaseManager):
 
     def get_host(self, mac: str) -> FirewallaHostRuntime | None:
         """Return one normalized host by its Firewalla MAC identifier."""
-        return self._host_index.get(mac)
+        if normalized_mac := normalize_mac_address(mac):
+            return self._host_index.get(normalized_mac)
+        return None
 
     def _get_window_minutes(self, option_key: str, default: int, minimum: int) -> int:
         """Return one validated minute-based activity window from options."""

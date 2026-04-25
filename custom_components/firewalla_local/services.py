@@ -176,6 +176,7 @@ from .models import (
     FirewallaWanInterface,
 )
 from .utils.duration import parse_duration_to_seconds
+from .utils.mac import normalize_mac_address
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
     "internet",
@@ -1742,7 +1743,8 @@ def _build_raw_host_lookup(entry: FirewallaConfigEntry) -> dict[str, dict[str, o
     for raw_host in raw_hosts:
         if not isinstance(raw_host, dict):
             continue
-        if not (host_id := _optional_string(raw_host.get("mac"))):
+        raw_host_mac = _optional_string(raw_host.get("mac"))
+        if not (host_id := normalize_mac_address(raw_host_mac)):
             continue
         host_lookup[host_id] = raw_host
     return host_lookup
@@ -2046,7 +2048,7 @@ def _validate_dhcp_reservation_request(
         )
 
     for raw_host_mac, raw_host in raw_host_lookup.items():
-        if raw_host_mac == host.mac:
+        if normalize_mac_address(raw_host_mac) == normalize_mac_address(host.mac):
             continue
         existing_assignment = _resolve_host_ip_assignment(
             raw_host,
