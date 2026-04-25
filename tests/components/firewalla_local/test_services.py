@@ -530,7 +530,11 @@ def _speed_test_snapshot(
     )
 
 
-def _wake_host_snapshot(*, duplicate_name: bool = False) -> FirewallaRuntimeSnapshot:
+def _wake_host_snapshot(
+    *,
+    duplicate_name: bool = False,
+    primary_group_name: str | None = None,
+) -> FirewallaRuntimeSnapshot:
     """Return a runtime snapshot with Wake-on-LAN-capable and unsupported hosts."""
     second_name = "Plex Server" if duplicate_name else "WireGuard Kaden"
     return FirewallaRuntimeSnapshot(
@@ -552,7 +556,7 @@ def _wake_host_snapshot(*, duplicate_name: bool = False) -> FirewallaRuntimeSnap
                 mac="00:AA:BB:CC:DD:26",
                 host_name="Plex Server",
                 ip_address="192.168.10.10",
-                group_name=None,
+                group_name=primary_group_name,
                 network_name="VLAN10 CORE",
                 connection_type=None,
                 last_active=None,
@@ -2087,7 +2091,7 @@ async def test_wake_host_service_returns_acknowledgement_for_host_mac(
             SERVICE_WAKE_HOST,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_HOST_MAC: "00:aa:bb:cc:dd:26",
                 SERVICE_FIELD_REFRESH: False,
             },
             blocking=True,
@@ -2107,7 +2111,7 @@ async def test_wake_host_service_returns_acknowledgement_for_host_mac(
         },
         "query": {
             "host_id": None,
-            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_mac": "00:aa:bb:cc:dd:26",
             "host_name": None,
             "refresh": False,
         },
@@ -2298,11 +2302,11 @@ async def test_wake_host_service_rejects_non_wol_host(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_runtime_payload()),
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
-            return_value=_wake_host_snapshot(),
+            return_value=_wake_host_snapshot(primary_group_name="Media Devices"),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -2852,11 +2856,11 @@ async def test_get_host_name_mapping_returns_host_identity_records(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_runtime_payload()),
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
-            return_value=_wake_host_snapshot(),
+            return_value=_wake_host_snapshot(primary_group_name="Media Devices"),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -2885,7 +2889,13 @@ async def test_get_host_name_mapping_returns_host_identity_records(
                 "dns_domain": "int.ccpk.us",
                 "dns_fqdn": "plex-server.int.ccpk.us",
                 "dhcp_name": "plex-server",
+                "group_name": "Media Devices",
                 "host_device_type": "tablet",
+                "ip_assignment": {
+                    "mode": "static",
+                    "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                    "reserved_ipv4": "192.168.10.10",
+                },
                 "kind": "mac_host",
             },
             {
@@ -2897,7 +2907,9 @@ async def test_get_host_name_mapping_returns_host_identity_records(
                 "dns_domain": "int.ccpk.us",
                 "dns_fqdn": None,
                 "dhcp_name": None,
+                "group_name": None,
                 "host_device_type": None,
+                "ip_assignment": None,
                 "kind": "pseudo_host",
             },
         ],
@@ -2962,7 +2974,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_MODE: "static",
                 SERVICE_FIELD_RESERVED_IPV4: "192.168.200.250",
-                SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                SERVICE_FIELD_HOST_MAC: "00:aa:bb:cc:dd:26",
                 SERVICE_FIELD_NETWORK_UUID: "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
                 SERVICE_FIELD_REFRESH: False,
             },
@@ -3005,7 +3017,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
             "mode": "static",
             "reserved_ipv4": "192.168.200.250",
             "host_id": None,
-            "host_mac": "00:AA:BB:CC:DD:26",
+            "host_mac": "00:aa:bb:cc:dd:26",
             "host_name": None,
             "network_uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
             "network_name": None,

@@ -558,7 +558,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
     assert snapshot.hosts == (
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:FF",
-            host_name="Kaden Phone",
+            host_name="kaden-phone",
             dns_hostname="kaden-phone",
             dns_domain="int.ccpk.us",
             dns_fqdn="kaden-phone.int.ccpk.us",
@@ -576,7 +576,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
         ),
         FirewallaHostRuntime(
             mac="wg_peer:test-peer",
-            host_name="WireGuard Kaden",
+            host_name="10.42.0.2",
             dns_domain="int.ccpk.us",
             ip_address="10.42.0.2",
             group_name=None,
@@ -698,6 +698,84 @@ async def test_get_runtime_snapshot_prefers_customized_dns_hostname() -> None:
             last_active=1774287000.5,
             download_bytes=99,
             upload_bytes=100,
+            stale=False,
+            vpn_client=None,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_snapshot_prefers_name_over_bname() -> None:
+    """Test host normalization ignores backup names for primary host names."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "model": "gold",
+                    "cpuid": "serial-123",
+                    "longVersion": "1.0.0",
+                    "networkConfig": {
+                        "dhcp": {"bond0.10": {"searchDomain": ["int.ccpk.us"]}},
+                        "interface": {
+                            "bond": {
+                                "bond0.10": {
+                                    "meta": {
+                                        "name": "VLAN10 CORE",
+                                        "uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "networkProfiles": {
+                        "5799d896-5e0f-40a5-a776-38a5d7746204": {"intf": "bond0.10"}
+                    },
+                    "hosts": [
+                        {
+                            "mac": "00:71:47:4D:A4:8B",
+                            "name": "FTV-Veranda",
+                            "bname": "Fire TV Veranda",
+                            "dhcpName": "amazon-21315c414",
+                            "localDomain": "ftv-veranda",
+                            "ip": "192.168.202.47",
+                            "lastActive": 1774287000.5,
+                            "intf": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                            "stale": False,
+                        }
+                    ],
+                    "policyRules": [],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    assert snapshot.hosts == (
+        FirewallaHostRuntime(
+            mac="00:71:47:4D:A4:8B",
+            host_name="FTV-Veranda",
+            dns_hostname="ftv-veranda",
+            dns_domain="int.ccpk.us",
+            dns_fqdn="ftv-veranda.int.ccpk.us",
+            dhcp_name="amazon-21315c414",
+            ip_address="192.168.202.47",
+            group_name=None,
+            network_name="VLAN10 CORE",
+            connection_type=None,
+            last_active=1774287000.5,
+            download_bytes=None,
+            upload_bytes=None,
             stale=False,
             vpn_client=None,
         ),
