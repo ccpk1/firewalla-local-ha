@@ -558,7 +558,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
     assert snapshot.hosts == (
         FirewallaHostRuntime(
             mac="AA:BB:CC:DD:EE:FF",
-            host_name="Kaden Phone",
+            host_name="kaden-phone",
             dns_hostname="kaden-phone",
             dns_domain="int.ccpk.us",
             dns_fqdn="kaden-phone.int.ccpk.us",
@@ -576,7 +576,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
         ),
         FirewallaHostRuntime(
             mac="wg_peer:test-peer",
-            host_name="WireGuard Kaden",
+            host_name="10.42.0.2",
             dns_domain="int.ccpk.us",
             ip_address="10.42.0.2",
             group_name=None,
@@ -740,9 +740,7 @@ async def test_get_runtime_snapshot_prefers_name_over_bname() -> None:
                         },
                     },
                     "networkProfiles": {
-                        "5799d896-5e0f-40a5-a776-38a5d7746204": {
-                            "intf": "bond0.10"
-                        }
+                        "5799d896-5e0f-40a5-a776-38a5d7746204": {"intf": "bond0.10"}
                     },
                     "hosts": [
                         {

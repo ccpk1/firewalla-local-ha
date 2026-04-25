@@ -2856,11 +2856,11 @@ async def test_get_host_name_mapping_returns_host_identity_records(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_runtime_payload()),
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
-            return_value=_wake_host_snapshot(),
+            return_value=_wake_host_snapshot(primary_group_name="Media Devices"),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
