@@ -82,6 +82,11 @@ Rules for derived fields:
 - keep them out of mutation payload contracts unless Firewalla publishes the
   same concept directly
 
+Identity interpretation rule:
+
+- when local rule payloads identify applicability through a backing group or tag that has affiliated user metadata, the Home Assistant-facing readable name should prefer the affiliated user identity over the backing group name
+- raw backing group names remain valid inventory or diagnostic evidence, but they are not the default presentation contract for rule names or related metadata
+
 ### Practical design consequence
 
 For future rule services, the working default should be:
@@ -248,6 +253,18 @@ Interpretation rule:
 
 - raw `_name` is a user-defined display name and should be preferred for
   options-list and other user-facing rule naming when present
+- raw `app_name` should be preferred over internal category target slugs such as `TLX-fw-*` when both are present and the surface is user-facing
+
+### Identity and naming metadata
+
+The integration may need to derive readable rule applicability and target names
+from multiple raw fields.
+
+Interpretation rules:
+
+- affiliated user identity is the first-choice readable name for user-scoped applicability when Firewalla models that scope through a backing group
+- backing group names are evidence of the underlying payload shape, not the default user-facing label
+- app-backed category rules should prefer `app_name` over raw `TLX-*` target slugs on user-facing surfaces
 
 ### Timing and expiry metadata
 

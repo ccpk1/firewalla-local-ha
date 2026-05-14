@@ -1420,11 +1420,10 @@ class FirewallaApiClient:
         for raw_tag_id in raw_tags:
             if not isinstance(raw_tag_id, str) or not raw_tag_id:
                 continue
-            if not (tag_name := tags.get(raw_tag_id)):
-                continue
             if user_names := affiliated_users.get(raw_tag_id):
-                resolved_tags.append(f"{tag_name} ({', '.join(user_names)})")
-            else:
+                resolved_tags.append(", ".join(user_names))
+                continue
+            if tag_name := tags.get(raw_tag_id):
                 resolved_tags.append(tag_name)
 
         if not resolved_tags:

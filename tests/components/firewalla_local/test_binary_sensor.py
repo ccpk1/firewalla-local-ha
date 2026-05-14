@@ -99,7 +99,7 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
             host_name="Kaden Phone",
             dns_hostname="kaden-phone",
             ip_address="192.168.200.25",
-            group_name="KADEN's Devices (KADEN)",
+            group_name="KADEN",
             network_name="VLAN10 CORE",
             connection_type="phone",
             last_active=1774287984.272,
@@ -135,10 +135,7 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
         == TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
     )
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_IP_ADDRESS] == "192.168.200.25"
-    assert (
-        watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP]
-        == "KADEN's Devices (KADEN)"
-    )
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] == "KADEN"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_NETWORK_NAME] == "VLAN10 CORE"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_CONNECTION_TYPE] == "phone"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE] == 1234

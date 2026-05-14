@@ -145,7 +145,7 @@ def test_build_runtime_inventory_report() -> None:
     assert report["users"] == [
         {
             "affiliated_group_id": "10",
-            "affiliated_group_name": "KADEN's Devices",
+            "affiliated_group_name": "KADEN",
             "id": "21",
             "name": "KADEN",
         }

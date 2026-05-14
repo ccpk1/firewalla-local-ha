@@ -64,6 +64,7 @@ Use terms consistently across code, documentation, diagnostics, and review.
 | DNS domain | The segment-level search domain derived from DHCP configuration and normalized as `dns_domain` |
 | DNS FQDN | The fully qualified local-domain value exposed by runtime data and normalized as `dns_fqdn` |
 | DHCP name | The DHCP-origin hostname value exposed by runtime data and normalized as `dhcp_name` |
+| User-facing identity | The app-visible person or device label the integration should prefer for entity names and attributes when Firewalla also exposes an internal backing group or tag |
 | Host device type | The Firewalla host classification exposed by detect or feedback data and normalized as `host_device_type` |
 | Rule template | The persisted matching contract used to find the intended live rule even if the live rule ID changes |
 | Runtime snapshot | The coordinator-owned normalized in-memory view of the current Firewalla state |
@@ -80,6 +81,12 @@ Critical rule:
 - never use `entity` to refer to a Firewalla rule, target, network, tag, or other normalized runtime record
 - never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
 - never use `device` for Firewalla endpoint inventory, naming fields, or selector behavior unless the code is explicitly referring to a Home Assistant device registry concept
+
+Identity presentation rule:
+
+- when Firewalla exposes both an app-visible user identity and a backing group or tag used only to model assignment, Home Assistant-facing surfaces must prefer the user-facing identity
+- backing group names are implementation details unless the surface is explicitly diagnostic or inventory-oriented
+- this rule applies to normalized rule applicability, watched-user associations, and host-backed entity attributes derived from group membership
 
 ## Protocol baseline
 
@@ -233,6 +240,7 @@ At minimum:
 - `HostManager` owns normalized endpoint-host inventory, watched-device lookup state, device-tracker lookup state, and host-scoped orchestration for watched-device, device-tracker, and host-derived summary surfaces
 - `RuleManager` owns rule-specific behavior, including registry indexing, rule-template matching, runtime inventory inputs, and rule-command orchestration
 - `UserManager` owns watched-user identity, usage shaping, selection lookups, host association joins, total and unique fallback handling, and user-scoped orchestration for the proven user-usage surface
+- normalization owned by `api/` and manager-owned view shaping must preserve the distinction between raw backing group identity and the app-facing identity actually shown to Home Assistant users
 
 Manager methods are the single write and mutation path for runtime behavior above the API layer.
 

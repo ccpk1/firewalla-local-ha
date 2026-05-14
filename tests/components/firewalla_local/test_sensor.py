@@ -606,7 +606,7 @@ async def test_sensor_setup_exposes_watched_user_usage_sensor(
     )
     assert (
         watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP]
-        == "KADEN's Devices"
+        == "KADEN"
     )
     assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICES] == [
         "Kaden Chromebook",
@@ -822,6 +822,10 @@ async def test_sensor_setup_derives_watched_user_totals_and_group_associations(
 
     assert watched_user_state is not None
     assert watched_user_state.state == "44"
+    assert (
+        watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP]
+        == "PAYTON"
+    )
     assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICES] == [
         "Payton iPad"
     ]
