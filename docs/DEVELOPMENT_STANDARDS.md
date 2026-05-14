@@ -51,6 +51,12 @@ Normalized host identity rule:
 - do not collapse `host_name`, `dns_hostname`, `dns_domain`, `dns_fqdn`, and `dhcp_name` into one convenience field
 - do not add compatibility aliases such as duplicate `display_name` or `fallback_name` fields once a normalized host contract exists
 
+User-facing identity rule:
+
+- when local payloads expose both a user-facing identity and an affiliated backing group or tag, prefer the user-facing identity for Home Assistant names and attributes
+- treat backing group names as implementation detail unless the current surface is explicitly diagnostic, inventory-oriented, or otherwise intended to expose raw Firewalla structure
+- do not concatenate backing group names into entity or attribute labels just because the raw payload links the user through that group
+
 ## Constants taxonomy
 
 Use explicit constants instead of scattered literals.
@@ -202,6 +208,7 @@ Rules:
 - watched-user entity attributes must distinguish raw payload facts from
 	integration-derived joins, especially for totals, per-app usage, and
 	host-derived `last_active` metadata
+- watched-user, watched-device, and device-tracker attributes must not expose backing group names when an app-facing user identity is available for the same relationship
 - `device_tracker` is reserved for MAC-backed LAN hosts only; VPN, tunnel,
 	overlay, and pseudo-host identities such as `wg_peer:*` are excluded by
 	design and must not be surfaced as presence trackers

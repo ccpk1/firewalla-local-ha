@@ -228,6 +228,13 @@ Current watched-user baseline:
 - `appTimeUsageToday` is the source for per-app watched-user usage buckets
 - associated watched-user device and activity metadata may require
   integration-side joins against normalized hosts and affiliated groups
+- direct-to-user assignment in the Firewalla app may still appear in local
+  payloads as a backing group or tag plus affiliated user metadata; treat that
+  backing group as an implementation detail until a user-facing surface proves
+  otherwise
+- when captures show both a backing group name and an affiliated user name,
+  record both in the evidence, but do not assume the backing group should be
+  shown in Home Assistant
 
 ### 4. Escalate to packet capture only when needed
 

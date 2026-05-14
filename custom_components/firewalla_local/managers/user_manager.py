@@ -146,7 +146,11 @@ class FirewallaUserManager(FirewallaBaseManager):
         return FirewallaWatchedUser(
             user_id=user.user_id,
             name=user.name,
-            affiliated_group_name=user.affiliated_group_name,
+            affiliated_group_name=(
+                user.name
+                if user.affiliated_group_id is not None
+                else user.affiliated_group_name
+            ),
             total_minutes_today=total_minutes_today,
             unique_minutes_today=unique_minutes_today,
             app_usage_today=user.app_usage_today,

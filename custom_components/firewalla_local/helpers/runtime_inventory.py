@@ -380,7 +380,6 @@ def _build_user_inventory(
 ) -> list[RuntimeUserInventoryRecord]:
     """Build a readable inventory of Firewalla users."""
     user_index = _build_user_index(data)
-    group_names = {group["id"]: group["name"] for group in _build_group_inventory(data)}
     users: list[RuntimeUserInventoryRecord] = []
     for user in user_index.values():
         affiliated_group_id = user["affiliated_group_id"]
@@ -388,9 +387,7 @@ def _build_user_inventory(
             {
                 **user,
                 "affiliated_group_name": (
-                    group_names.get(affiliated_group_id)
-                    if isinstance(affiliated_group_id, str)
-                    else None
+                    user["name"] if isinstance(affiliated_group_id, str) else None
                 ),
             }
         )
