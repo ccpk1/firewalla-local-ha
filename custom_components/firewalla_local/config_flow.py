@@ -171,7 +171,7 @@ def _resolve_default_pairing_host() -> str | None:
             family=socket.AF_INET,
             type=socket.SOCK_STREAM,
         )
-    except OSError:
+    except OSError, RuntimeError:
         return None
 
     for family, _socktype, _proto, _canonname, sockaddr in addrinfo:

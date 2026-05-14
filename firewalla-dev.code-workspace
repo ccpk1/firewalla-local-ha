@@ -58,7 +58,7 @@
       {
         "label": "Auto-Link Firewalla Local",
         "type": "shell",
-        "command": "mkdir -p /workspaces/core/config/custom_components && ln -snf /workspaces/firewalla-local-ha/custom_components/firewalla_local /workspaces/core/config/custom_components/firewalla_local",
+        "command": "mkdir -p /workspaces/core/config/custom_components && touch /workspaces/core/config/custom_components/__init__.py && ln -snf /workspaces/firewalla-local-ha/custom_components/firewalla_local /workspaces/core/config/custom_components/firewalla_local",
         "runOptions": {
           "runOn": "folderOpen",
         },

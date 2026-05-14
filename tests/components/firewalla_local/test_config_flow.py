@@ -24,7 +24,10 @@ from custom_components.firewalla_local.api.models import (
     FirewallaProvisionedCredentials,
     GeneratedKeys,
 )
-from custom_components.firewalla_local.config_flow import FirewallaOptionsFlow
+from custom_components.firewalla_local.config_flow import (
+    FirewallaOptionsFlow,
+    _resolve_default_pairing_host,
+)
 from custom_components.firewalla_local.const import (
     CONF_AID,
     CONF_DEVICE_TRACKER_AWAY_WINDOW,
@@ -150,6 +153,15 @@ async def test_user_flow_leaves_default_host_blank_when_resolution_fails(hass) -
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
     assert _get_schema_default(result, CONF_HOST) == ""
+
+
+def test_resolve_default_pairing_host_returns_none_when_dns_is_disabled() -> None:
+    """Test default host resolution degrades cleanly when DNS is blocked."""
+    with patch(
+        "custom_components.firewalla_local.config_flow.socket.getaddrinfo",
+        side_effect=RuntimeError("DNS resolution disabled in tests"),
+    ):
+        assert _resolve_default_pairing_host() is None
 
 
 async def test_user_flow_creates_entry(hass) -> None:
