@@ -96,6 +96,7 @@ _RAW_RULE_DISABLED_KEY: Final = "disabled"
 _RAW_RULE_UPDATED_TIME_KEY: Final = "updatedTime"
 _RAW_RULE_IDLE_TS_KEY: Final = "idleTs"
 _RAW_RULE_TARGET_NAME_KEY: Final = "target_name"
+_RAW_RULE_APP_NAME_KEY: Final = "app_name"
 _RAW_RULE_ACTIVATED_TIME_KEY: Final = "activatedTime"
 _RAW_RULE_LAST_ACTIVATED_TIME_KEY: Final = "lastActivatedTime"
 _RAW_RULE_EXPIRE_KEY: Final = "expire"
@@ -1749,9 +1750,9 @@ class FirewallaApiClient:
             return None
 
         if tag_prefix == _RAW_TAG_PREFIX_GROUP:
+            if user_names := affiliated_users.get(tag_value):
+                return ", ".join(user_names)
             if tag_name := tags.get(tag_value):
-                if user_names := affiliated_users.get(tag_value):
-                    return f"{tag_name} ({', '.join(user_names)})"
                 return tag_name
             return None
         if tag_prefix == _RAW_TAG_PREFIX_DEVICE:
@@ -1841,6 +1842,9 @@ class FirewallaApiClient:
             return networks.get(target)
 
         if target_type == _RULE_TARGET_TYPE_CATEGORY:
+            app_name = raw_rule.get(_RAW_RULE_APP_NAME_KEY)
+            if isinstance(app_name, str) and app_name:
+                return app_name.replace("_", " ").title()
             if target in categories:
                 return categories[target]
             if target.startswith(_RULE_TARGET_LIST_PREFIX):

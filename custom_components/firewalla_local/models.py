@@ -79,6 +79,7 @@ _INTERNAL_IDENTIFIER_SEPARATOR: Final = "-"
 _PRETTIFIED_TARGET_SEPARATOR: Final = "_"
 _PRETTIFIED_TARGET_REPLACEMENT: Final = " "
 _TARGET_LIST_PREFIX: Final = "TL-"
+_APP_CATEGORY_TARGET_PREFIX: Final = "TLX-"
 _WEEKDAY_LABELS: Final = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _WEEKDAY_ORDER: Final = {
     weekday: index for index, weekday in enumerate(_WEEKDAY_LABELS)
@@ -1236,9 +1237,14 @@ def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:
             RULE_TARGET_TYPE_NETWORK,
             RULE_TARGET_TYPE_CATEGORY,
         } and _looks_like_internal_identifier(rule.target)
+        target_is_internal_category_ref = (
+            rule.target_type == RULE_TARGET_TYPE_CATEGORY
+            and rule.target.startswith(_APP_CATEGORY_TARGET_PREFIX)
+        )
         if (
             rule.target_name.casefold() == prettified_target.casefold()
             or target_is_internal_id
+            or target_is_internal_category_ref
         ):
             display_target = rule.target_name
         elif rule.target_name != rule.target:

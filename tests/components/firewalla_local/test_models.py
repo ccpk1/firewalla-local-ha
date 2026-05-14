@@ -76,6 +76,24 @@ def test_format_policy_rule_name_hides_internal_qos_uuid() -> None:
     assert format_policy_rule_name(rule) == "qos category QoS Zoom"
 
 
+def test_format_policy_rule_name_hides_app_category_target_slug() -> None:
+    """Test app-backed category labels avoid leaking raw TLX target slugs."""
+    rule = FirewallaPolicyRule(
+        rule_id="5a",
+        action="block",
+        target="TLX-fw-instagram",
+        target_type="category",
+        direction="outbound",
+        enabled=True,
+        purpose=None,
+        scope=(),
+        applies_to=("PAYTONS_PHONE",),
+        target_name="Instagram",
+    )
+
+    assert format_policy_rule_name(rule) == "block category Instagram for PAYTONS_PHONE"
+
+
 def test_format_policy_rule_name_prefers_custom_name() -> None:
     """Test a user-defined custom rule name overrides generated labels."""
     rule = FirewallaPolicyRule(

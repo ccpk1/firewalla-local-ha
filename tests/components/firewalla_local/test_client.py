@@ -456,7 +456,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert rules[1].target_name == "DAP - 00:08:9B:FB:01:D9"
     assert rules[2].target_name == "VLAN10 CORE"
     assert rules[3].target_name == "Quarantine"
-    assert rules[4].applies_to == ("KADEN's Devices (KADEN)",)
+    assert rules[4].applies_to == ("KADEN",)
     assert rules[5].target_name == "social"
     assert rules[5].tag_refs == ("tag:12",)
     assert rules[5].activated_time == 1774299013.0
@@ -958,6 +958,79 @@ async def test_get_runtime_snapshot_prefers_internet_usage_totals_for_users() ->
                     unique_minutes=2,
                 ),
             ),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_snapshot_uses_affiliated_user_names_and_app_name_for_rules() -> (
+    None
+):
+    """Test rule normalization prefers affiliated user names and app names."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "model": "gold",
+                    "cpuid": "serial-123",
+                    "longVersion": "1.0.0",
+                    "tags": {
+                        "10": {"name": "KADEN's Devices"},
+                    },
+                    "userTags": {"21": {"name": "KADEN", "affiliatedTag": "10"}},
+                    "policyRules": [
+                        {
+                            "pid": "741",
+                            "action": "block",
+                            "target": "TLX-fw-instagram",
+                            "type": "category",
+                            "direction": "outbound",
+                            "disabled": "0",
+                            "tag": ["tag:10"],
+                            "app_name": "instagram",
+                        }
+                    ],
+                    "exceptionRules": [],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    assert snapshot.policy_rules == (
+        FirewallaPolicyRule(
+            rule_id="741",
+            action="block",
+            target="TLX-fw-instagram",
+            target_type="category",
+            direction="outbound",
+            enabled=True,
+            purpose=None,
+            scope=(),
+            applies_to=("KADEN",),
+            tag_refs=("tag:10",),
+            target_name="Instagram",
+            raw_update_payload={
+                "pid": "741",
+                "action": "block",
+                "target": "TLX-fw-instagram",
+                "type": "category",
+                "direction": "outbound",
+                "disabled": "0",
+                "tag": ["tag:10"],
+                "app_name": "instagram",
+            },
         ),
     )
 
