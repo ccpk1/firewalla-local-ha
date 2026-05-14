@@ -963,9 +963,7 @@ async def test_get_runtime_snapshot_prefers_internet_usage_totals_for_users() ->
 
 
 @pytest.mark.asyncio
-async def test_get_runtime_snapshot_uses_affiliated_user_names_and_app_name_for_rules() -> (
-    None
-):
+async def test_get_runtime_snapshot_uses_user_names_and_app_names() -> None:
     """Test rule normalization prefers affiliated user names and app names."""
     async with ClientSession() as session:
         client = FirewallaApiClient(
