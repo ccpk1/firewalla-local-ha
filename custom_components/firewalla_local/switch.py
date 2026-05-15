@@ -11,6 +11,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_RULE_ACTION,
+    ATTR_RULE_APPLIES_TO,
+    ATTR_RULE_APPLIES_TO_KIND,
+    ATTR_RULE_CATEGORY,
     ATTR_RULE_CURRENT_STATE_REASON,
     ATTR_RULE_CUSTOM_NAME,
     ATTR_RULE_ID,
@@ -136,10 +139,22 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
             else None
         )
         attributes: dict[str, object] = {
-            ATTR_RULE_PURPOSE: TRANS_KEY_PURPOSE_RULE_SWITCH,
+            **self.build_state_attributes(
+                TRANS_KEY_PURPOSE_RULE_SWITCH,
+                purpose_key=ATTR_RULE_PURPOSE,
+            ),
             ATTR_RULE_ID: matched_rule.rule_id if matched_rule is not None else None,
             ATTR_RULE_NAME: self._template.name,
         }
+
+        if matched_rule is not None and matched_rule.applies_to:
+            attributes[ATTR_RULE_APPLIES_TO] = list(matched_rule.applies_to)
+
+        if matched_rule is not None and matched_rule.applies_to_kind:
+            attributes[ATTR_RULE_APPLIES_TO_KIND] = list(matched_rule.applies_to_kind)
+
+        if matched_rule is not None and matched_rule.category is not None:
+            attributes[ATTR_RULE_CATEGORY] = matched_rule.category
 
         if (
             matched_rule is not None

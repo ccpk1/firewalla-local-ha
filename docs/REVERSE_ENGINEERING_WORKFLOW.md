@@ -116,6 +116,12 @@ This helper:
 Use this first when the question is about what the box reports right now, for
 example current user usage fields or the exact contents of `userTags`.
 
+Applicability interpretation note:
+
+- local rule payloads may still express direct-to-user assignment through a backing group tag plus affiliated user metadata
+- when that happens, Home Assistant-facing rule applicability should record both the readable label and the applicability kind as `user`
+- preserve the raw backing group reference only in diagnostic or capture artifacts, not in the default Home Assistant-facing applicability attributes
+
 ### Runtime inventory capture helper
 
 - `.tmp/capture_runtime_inventory.py`

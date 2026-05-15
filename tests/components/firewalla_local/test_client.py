@@ -306,7 +306,19 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                             "vendor": "ookla",
                         },
                     ],
-                    "userTags": {"21": {"name": "KADEN", "affiliatedTag": "10"}},
+                    "userTags": {
+                        "21": {
+                            "name": "KADEN",
+                            "affiliatedTag": "10",
+                            "appTimeUsageToday": {
+                                "instagram": {
+                                    "category": "social",
+                                    "totalMins": 12,
+                                    "uniqueMins": 12,
+                                }
+                            },
+                        }
+                    },
                     "exceptionRules": [{"aid": "1"}, {"aid": "2"}],
                     "policyRules": [
                         {
@@ -515,7 +527,19 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
                     "tags": {
                         "10": {"name": "KADEN's Devices"},
                     },
-                    "userTags": {"21": {"name": "KADEN", "affiliatedTag": "10"}},
+                    "userTags": {
+                        "21": {
+                            "name": "KADEN",
+                            "affiliatedTag": "10",
+                            "appTimeUsageToday": {
+                                "instagram": {
+                                    "category": "social",
+                                    "totalMins": 12,
+                                    "uniqueMins": 12,
+                                }
+                            },
+                        }
+                    },
                     "deviceTags": {
                         "43": {"name": "phone"},
                     },
@@ -987,7 +1011,19 @@ async def test_get_runtime_snapshot_uses_user_names_and_app_names() -> None:
                     "tags": {
                         "10": {"name": "KADEN's Devices"},
                     },
-                    "userTags": {"21": {"name": "KADEN", "affiliatedTag": "10"}},
+                    "userTags": {
+                        "21": {
+                            "name": "KADEN",
+                            "affiliatedTag": "10",
+                            "appTimeUsageToday": {
+                                "instagram": {
+                                    "category": "social",
+                                    "totalMins": 12,
+                                    "uniqueMins": 12,
+                                }
+                            },
+                        }
+                    },
                     "policyRules": [
                         {
                             "pid": "741",
@@ -1017,8 +1053,10 @@ async def test_get_runtime_snapshot_uses_user_names_and_app_names() -> None:
             purpose=None,
             scope=(),
             applies_to=("KADEN",),
+            applies_to_kind=("user",),
             tag_refs=("tag:10",),
             target_name="Instagram",
+            category="social",
             raw_update_payload={
                 "pid": "741",
                 "action": "block",

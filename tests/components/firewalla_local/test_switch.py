@@ -10,7 +10,11 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
+    ATTR_INTEGRATION,
     ATTR_RULE_ACTION,
+    ATTR_RULE_APPLIES_TO,
+    ATTR_RULE_APPLIES_TO_KIND,
+    ATTR_RULE_CATEGORY,
     ATTR_RULE_CURRENT_STATE_REASON,
     ATTR_RULE_CUSTOM_NAME,
     ATTR_RULE_ID,
@@ -66,6 +70,7 @@ def _snapshot_with_rule(
     target_type: str = "category",
     target_name: str | None = "social",
     applies_to: tuple[str, ...] = ("AV_SMART_TV",),
+    applies_to_kind: tuple[str, ...] = ("device",),
     tag_refs: tuple[str, ...] = ("tag:17",),
     dnsmasq_only: bool | None = True,
     auto_delete_when_expires: bool | None = None,
@@ -102,6 +107,7 @@ def _snapshot_with_rule(
                 tag_refs=tag_refs,
                 target_name=target_name,
                 applies_to=applies_to,
+                applies_to_kind=applies_to_kind,
                 auto_delete_when_expires=auto_delete_when_expires,
                 dnsmasq_only=dnsmasq_only,
                 raw_update_payload=raw_update_payload,
@@ -200,13 +206,19 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
         assert state.state == "on"
         attributes = state.attributes
         assert attributes[ATTR_RULE_PURPOSE] == TRANS_KEY_PURPOSE_RULE_SWITCH
+        assert attributes[ATTR_INTEGRATION] == DOMAIN
         assert attributes[ATTR_RULE_ID] == "744"
         assert attributes[ATTR_RULE_NAME] == "block category social for AV_SMART_TV"
+        assert attributes[ATTR_RULE_APPLIES_TO] == ["AV_SMART_TV"]
+        assert attributes[ATTR_RULE_APPLIES_TO_KIND] == ["device"]
         assert next(iter(attributes)) == ATTR_RULE_PURPOSE
         assert _visible_attribute_keys(attributes) == [
             ATTR_RULE_PURPOSE,
+            ATTR_INTEGRATION,
             ATTR_RULE_ID,
             ATTR_RULE_NAME,
+            ATTR_RULE_APPLIES_TO,
+            ATTR_RULE_APPLIES_TO_KIND,
             ATTR_RULE_ACTION,
             ATTR_RULE_IS_PAUSED,
             ATTR_RULE_CURRENT_STATE_REASON,
@@ -261,6 +273,8 @@ async def test_selected_rule_switch_uses_live_custom_name(
         scope=(),
         tag_refs=("tag:17",),
         applies_to=("AV_SMART_TV",),
+        applies_to_kind=("device",),
+        category="social",
         raw_update_payload={
             "pid": "772",
             "action": "allow",
@@ -332,6 +346,10 @@ async def test_selected_rule_switch_uses_live_custom_name(
 
     assert state is not None
     assert state.name == "Firewalla ChoreOps Custom Allow"
+    assert state.attributes[ATTR_INTEGRATION] == DOMAIN
+    assert state.attributes[ATTR_RULE_APPLIES_TO] == ["AV_SMART_TV"]
+    assert state.attributes[ATTR_RULE_APPLIES_TO_KIND] == ["device"]
+    assert state.attributes[ATTR_RULE_CATEGORY] == "social"
     assert ATTR_RULE_CUSTOM_NAME not in state.attributes
 
 
@@ -622,7 +640,10 @@ async def test_selected_rule_switch_exposes_pause_and_notes_attributes(
     entity_id = next(iter(hass.states.async_entity_ids("switch")))
     attributes = hass.states.get(entity_id).attributes
     assert attributes[ATTR_RULE_PURPOSE] == TRANS_KEY_PURPOSE_RULE_SWITCH
+    assert attributes[ATTR_INTEGRATION] == DOMAIN
     assert attributes[ATTR_RULE_ID] == "744"
+    assert attributes[ATTR_RULE_APPLIES_TO] == ["AV_SMART_TV"]
+    assert attributes[ATTR_RULE_APPLIES_TO_KIND] == ["device"]
     assert attributes[ATTR_RULE_ACTION] == "block"
     assert attributes[ATTR_RULE_NOTES] == "Pause for maintenance"
     assert attributes[ATTR_RULE_IS_PAUSED] is True

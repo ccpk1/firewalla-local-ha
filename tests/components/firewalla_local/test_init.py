@@ -20,6 +20,8 @@ from custom_components.firewalla_local.api.exceptions import (
     FirewallaConnectionError,
 )
 from custom_components.firewalla_local.const import (
+    ATTR_INTEGRATION,
+    ATTR_PURPOSE,
     CONF_AID,
     CONF_DEVICE_TRACKER_AWAY_WINDOW,
     CONF_DEVICE_TRACKERS,
@@ -57,6 +59,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_WAKE_HOST,
+    TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON,
 )
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
@@ -256,6 +259,12 @@ async def test_setup_entry_creates_runtime_sync_button(hass: HomeAssistant) -> N
 
     button_entry = entity_registry.async_get(button_entity_id)
     assert button_entry is not None
+    button_state = hass.states.get(button_entity_id)
+    assert button_state is not None
+    assert (
+        button_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON
+    )
+    assert button_state.attributes[ATTR_INTEGRATION] == DOMAIN
 
     device_registry = dr.async_get(hass)
     router_device = device_registry.async_get_device(

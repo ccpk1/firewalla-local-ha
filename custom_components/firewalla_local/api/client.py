@@ -1164,6 +1164,39 @@ class FirewallaApiClient:
 
         return category_lookup
 
+    def _build_app_category_lookup(self, data: dict[str, object]) -> dict[str, str]:
+        """Build a lookup of app identifiers to their reported category names."""
+        raw_user_tags = data.get(_RAW_USER_TAGS_KEY)
+        if not isinstance(raw_user_tags, dict):
+            return {}
+
+        app_category_lookup: dict[str, str] = {}
+        for raw_user in raw_user_tags.values():
+            if not isinstance(raw_user, dict):
+                continue
+
+            raw_app_usage_today = raw_user.get(_RAW_USER_APP_TIME_USAGE_TODAY_KEY)
+            if not isinstance(raw_app_usage_today, dict):
+                continue
+
+            for app_id, raw_app_usage in raw_app_usage_today.items():
+                if app_id in {_RAW_USER_TOTAL_MINS_KEY, _RAW_USER_UNIQUE_MINS_KEY}:
+                    continue
+                if not isinstance(app_id, str) or not app_id:
+                    continue
+                if not isinstance(raw_app_usage, dict):
+                    continue
+                if app_id in app_category_lookup:
+                    continue
+
+                category = self._normalized_optional_string(
+                    raw_app_usage.get(_RAW_USER_CATEGORY_KEY)
+                )
+                if category is not None:
+                    app_category_lookup[app_id] = category
+
+        return app_category_lookup
+
     def _build_network_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of network UUIDs to readable network names."""
         raw_network_profiles = data.get(_RAW_NETWORK_PROFILES_KEY)
@@ -1742,24 +1775,30 @@ class FirewallaApiClient:
         user_tags: dict[str, str],
         networks: dict[str, str],
         affiliated_users: dict[str, tuple[str, ...]],
-    ) -> str | None:
-        """Resolve a Firewalla tag reference string into a readable name."""
+    ) -> tuple[str, str] | None:
+        """Resolve a Firewalla tag reference into a readable name and kind."""
         tag_prefix, _, tag_value = tag_reference.partition(_RAW_TAG_SEPARATOR)
         if not tag_value:
             return None
 
         if tag_prefix == _RAW_TAG_PREFIX_GROUP:
             if user_names := affiliated_users.get(tag_value):
-                return ", ".join(user_names)
+                return ", ".join(user_names), "user"
             if tag_name := tags.get(tag_value):
-                return tag_name
+                return tag_name, "group"
             return None
         if tag_prefix == _RAW_TAG_PREFIX_DEVICE:
-            return device_tags.get(tag_value)
+            if tag_name := device_tags.get(tag_value):
+                return tag_name, "device"
+            return None
         if tag_prefix in {_RAW_TAG_PREFIX_USER, _RAW_TAG_PREFIX_USER_ALT}:
-            return user_tags.get(tag_value)
+            if tag_name := user_tags.get(tag_value):
+                return tag_name, "user"
+            return None
         if tag_prefix == _RAW_TAG_PREFIX_NETWORK:
-            return networks.get(tag_value)
+            if tag_name := networks.get(tag_value):
+                return tag_name, "network"
+            return None
         return None
 
     def _resolve_rule_applicability(
@@ -1771,18 +1810,18 @@ class FirewallaApiClient:
         user_tags: dict[str, str],
         networks: dict[str, str],
         affiliated_users: dict[str, tuple[str, ...]],
-    ) -> tuple[str, ...]:
-        """Resolve tag-based rule applicability into readable labels."""
+    ) -> tuple[tuple[str, str], ...]:
+        """Resolve tag-based rule applicability into readable labels and kinds."""
         raw_tags = raw_rule.get(_RAW_RULE_TAGS_KEY)
         if not isinstance(raw_tags, list):
             return ()
 
         resolved_tags = [
-            resolved_name
+            resolved_entry
             for tag_reference in raw_tags
             if isinstance(tag_reference, str)
             and (
-                resolved_name := self._resolve_tag_reference_name(
+                resolved_entry := self._resolve_tag_reference_name(
                     tag_reference,
                     tags=tags,
                     device_tags=device_tags,
@@ -1818,11 +1857,11 @@ class FirewallaApiClient:
                 raw_tags = raw_rule.get(_RAW_RULE_TAGS_KEY)
                 if isinstance(raw_tags, list):
                     resolved_tags = [
-                        resolved_name
+                        resolved_entry[0]
                         for tag_reference in raw_tags
                         if isinstance(tag_reference, str)
                         and (
-                            resolved_name := self._resolve_tag_reference_name(
+                            resolved_entry := self._resolve_tag_reference_name(
                                 tag_reference,
                                 tags=tags,
                                 device_tags=device_tags,
@@ -1911,6 +1950,7 @@ class FirewallaApiClient:
             return ()
 
         category_lookup = self._build_category_lookup(data)
+        app_category_lookup = self._build_app_category_lookup(data)
         network_lookup = self._build_network_lookup(data)
         tag_lookup = self._build_named_lookup(data, "tags")
         device_tag_lookup = self._build_named_lookup(data, _RAW_DEVICE_TAGS_KEY)
@@ -1986,6 +2026,9 @@ class FirewallaApiClient:
                 hosts=host_lookup,
                 affiliated_users=affiliated_user_lookup,
             )
+            app_name = self._normalized_optional_string(
+                raw_rule.get(_RAW_RULE_APP_NAME_KEY)
+            )
             applies_to = self._resolve_rule_applicability(
                 raw_rule,
                 tags=tag_lookup,
@@ -1993,6 +2036,14 @@ class FirewallaApiClient:
                 user_tags=user_tag_lookup,
                 networks=network_lookup,
                 affiliated_users=affiliated_user_lookup,
+            )
+            category = (
+                app_category_lookup.get(app_name)
+                if (
+                    raw_target_type == _RULE_TARGET_TYPE_CATEGORY
+                    and app_name is not None
+                )
+                else None
             )
 
             normalized_rules.append(
@@ -2007,7 +2058,8 @@ class FirewallaApiClient:
                     scope=scope,
                     tag_refs=tag_refs,
                     target_name=target_name,
-                    applies_to=applies_to,
+                    applies_to=tuple(name for name, _kind in applies_to),
+                    applies_to_kind=tuple(kind for _name, kind in applies_to),
                     activated_time=activated_time,
                     updated_time=updated_time,
                     last_activated_time=last_activated_time,
@@ -2015,6 +2067,7 @@ class FirewallaApiClient:
                     expires_at=expires_at,
                     auto_delete_when_expires=auto_delete_when_expires,
                     dnsmasq_only=dnsmasq_only,
+                    category=category,
                     raw_update_payload=dict(raw_rule),
                 )
             )

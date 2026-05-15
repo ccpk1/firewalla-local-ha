@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
+    ATTR_INTEGRATION,
     ATTR_PURPOSE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
@@ -134,6 +135,7 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
         watched_state.attributes[ATTR_PURPOSE]
         == TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
     )
+    assert watched_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_IP_ADDRESS] == "192.168.200.25"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] == "KADEN"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_NETWORK_NAME] == "VLAN10 CORE"

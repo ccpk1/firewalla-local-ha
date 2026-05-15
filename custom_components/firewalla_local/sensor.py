@@ -14,7 +14,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
-    ATTR_PURPOSE,
     ATTR_SPEED_TEST_DOWNLOAD_MBYTES,
     ATTR_SPEED_TEST_ISP,
     ATTR_SPEED_TEST_JITTER,
@@ -100,7 +99,7 @@ class FirewallaLatestSpeedTestDownloadSensor(FirewallaEntity, SensorEntity):
         """Return stable attributes describing the latest speed test."""
         speed_test = self.latest_speed_test
         return {
-            ATTR_PURPOSE: TRANS_KEY_PURPOSE_SPEED_TEST,
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_SPEED_TEST),
             ATTR_SPEED_TEST_TESTED_AT: (
                 datetime.fromtimestamp(speed_test.tested_at_timestamp, UTC).isoformat()
                 if speed_test is not None
@@ -208,7 +207,7 @@ class FirewallaWatchedUserTodayUsageSensor(FirewallaEntity, SensorEntity):
         """Return bounded watched-user metadata attributes."""
         watched_user = self._watched_user
         return {
-            ATTR_PURPOSE: TRANS_KEY_PURPOSE_WATCHED_USER_USAGE,
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_WATCHED_USER_USAGE),
             ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP: (
                 watched_user.affiliated_group_name if watched_user is not None else None
             ),
