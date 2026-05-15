@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
 from .const import (
-    ATTR_PURPOSE,
+    ATTR_INTEGRATION,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
     ATTR_WATCHED_DEVICE_DNS_DOMAIN,
@@ -25,6 +25,7 @@ from .const import (
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
+    DOMAIN,
     ENTITY_SUFFIX_DEVICE_TRACKER,
     TRANS_KEY_ENTITY_DEVICE_TRACKER_PRESENCE,
     TRANS_KEY_PURPOSE_DEVICE_TRACKER_PRESENCE,
@@ -85,6 +86,13 @@ class FirewallaDeviceTracker(
     def entity_category(self) -> EntityCategory | None:
         """Return the entity category for this tracker."""
         return None
+
+    def _build_state_attributes(self, purpose: str) -> dict[str, object]:
+        """Return the common identifying state attributes for this tracker."""
+        return {
+            "purpose": purpose,
+            ATTR_INTEGRATION: DOMAIN,
+        }
 
     def find_device_entry(self) -> dr.DeviceEntry | None:
         """Return the tracked-client device entry for this tracker."""
@@ -179,7 +187,7 @@ class FirewallaDeviceTracker(
         """Return bounded device-tracker metadata attributes."""
         host = self._host
         return {
-            ATTR_PURPOSE: TRANS_KEY_PURPOSE_DEVICE_TRACKER_PRESENCE,
+            **self._build_state_attributes(TRANS_KEY_PURPOSE_DEVICE_TRACKER_PRESENCE),
             ATTR_WATCHED_DEVICE_IP_ADDRESS: (
                 host.ip_address if host is not None else None
             ),

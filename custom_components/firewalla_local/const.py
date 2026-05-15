@@ -11,10 +11,14 @@ LOGGER: Final = logging.getLogger(__name__)
 MANUFACTURER: Final = "Firewalla"
 
 # Entity state attributes
+ATTR_INTEGRATION: Final = "integration"
 ATTR_PURPOSE: Final = "purpose"
 ATTR_RULE_PURPOSE: Final = "purpose"
 ATTR_RULE_ID: Final = "rule_id"
 ATTR_RULE_NAME: Final = "rule_name"
+ATTR_RULE_APPLIES_TO: Final = "applies_to"
+ATTR_RULE_APPLIES_TO_KIND: Final = "applies_to_kind"
+ATTR_RULE_CATEGORY: Final = "category"
 ATTR_RULE_CUSTOM_NAME: Final = "custom_name"
 ATTR_RULE_ACTION: Final = "action"
 ATTR_RULE_TEMPLATE_TARGET: Final = "target"
@@ -357,6 +361,7 @@ TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY: Final = (
 )
 TRANS_KEY_PURPOSE_WATCHED_USER_USAGE: Final = "purpose_watched_user_usage"
 TRANS_KEY_PURPOSE_SPEED_TEST: Final = "purpose_speed_test"
+TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON: Final = "purpose_runtime_sync_button"
 TRANS_KEY_PURPOSE_RULE_SWITCH: Final = "purpose_rule_control"
 TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE: Final = "unavailable_device"
 TRANS_KEY_OPTION_LABEL_UNAVAILABLE_DEVICE_TRACKER: Final = "unavailable_device_tracker"

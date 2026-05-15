@@ -852,6 +852,7 @@ class FirewallaPolicyRule:
     tag_refs: tuple[str, ...] = ()
     target_name: str | None = None
     applies_to: tuple[str, ...] = ()
+    applies_to_kind: tuple[str, ...] = ()
     activated_time: float | None = None
     updated_time: float | None = None
     last_activated_time: float | None = None
@@ -859,6 +860,7 @@ class FirewallaPolicyRule:
     expires_at: float | None = None
     auto_delete_when_expires: bool | None = None
     dnsmasq_only: bool | None = None
+    category: str | None = None
     raw_update_payload: dict[str, object] = field(default_factory=dict, compare=False)
 
     @property

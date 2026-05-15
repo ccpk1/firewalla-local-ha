@@ -86,6 +86,7 @@ Identity interpretation rule:
 
 - when local rule payloads identify applicability through a backing group or tag that has affiliated user metadata, the Home Assistant-facing readable name should prefer the affiliated user identity over the backing group name
 - raw backing group names remain valid inventory or diagnostic evidence, but they are not the default presentation contract for rule names or related metadata
+- when rule applicability is rewritten this way, the exposed applicability kind must follow the rewritten Home Assistant-facing identity and be reported as `user`, not `group`
 
 ### Practical design consequence
 

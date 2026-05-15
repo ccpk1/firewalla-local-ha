@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
+    ATTR_INTEGRATION,
     ATTR_PURPOSE,
     ATTR_SPEED_TEST_DOWNLOAD_MBYTES,
     ATTR_SPEED_TEST_ISP,
@@ -314,6 +315,7 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert system_state.state == STATE_ON
     attribute_keys = list(system_state.attributes)
     assert system_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS
+    assert system_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is True
     assert attribute_keys.index(
         ATTR_SYSTEM_BOX_IMAGE_VERSION
@@ -366,6 +368,7 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert speedtest_state.name == "Firewalla Speed Test"
     assert float(speedtest_state.state) == pytest.approx(507.17651748657227)
     assert speedtest_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SPEED_TEST
+    assert speedtest_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert speedtest_state.attributes[ATTR_SPEED_TEST_ISP] == "Atlantic Broadband"
     assert speedtest_state.attributes[ATTR_SPEED_TEST_PUBLIC_IP] == "23.245.207.179"
     assert speedtest_state.attributes[ATTR_SPEED_TEST_UPLOAD] == 49.001976013183594
@@ -451,6 +454,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert system_state is not None
     assert system_state.state == STATE_ON
     assert system_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS
+    assert system_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert system_state.attributes[ATTR_SYSTEM_BOOT_COMPLETE] is False
     assert system_state.attributes[ATTR_SYSTEM_BOX_IMAGE_CODENAME] == "bionic"
     assert (
@@ -488,6 +492,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert speedtest_state.state == "unknown"
     assert speedtest_state.name == "Firewalla Speed Test"
     assert speedtest_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SPEED_TEST
+    assert speedtest_state.attributes[ATTR_INTEGRATION] == DOMAIN
 
 
 async def test_sensor_setup_exposes_watched_user_usage_sensor(
@@ -604,6 +609,7 @@ async def test_sensor_setup_exposes_watched_user_usage_sensor(
         watched_user_state.attributes[ATTR_PURPOSE]
         == TRANS_KEY_PURPOSE_WATCHED_USER_USAGE
     )
+    assert watched_user_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert (
         watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP]
         == "KADEN"

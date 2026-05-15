@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import ATTR_INTEGRATION, ATTR_PURPOSE, DOMAIN
 from .coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from .managers import (
     FirewallaHostManager,
@@ -82,3 +83,15 @@ class FirewallaEntity(CoordinatorEntity[FirewallaDataUpdateCoordinator]):
     def available(self) -> bool:
         """Return coordinator-backed availability for Firewalla entities."""
         return super().available and self.coordinator.data is not None
+
+    def build_state_attributes(
+        self,
+        purpose: str,
+        *,
+        purpose_key: str = ATTR_PURPOSE,
+    ) -> dict[str, object]:
+        """Return the common identifying state attributes for one entity."""
+        return {
+            purpose_key: purpose,
+            ATTR_INTEGRATION: DOMAIN,
+        }

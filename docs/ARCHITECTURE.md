@@ -87,6 +87,7 @@ Identity presentation rule:
 - when Firewalla exposes both an app-visible user identity and a backing group or tag used only to model assignment, Home Assistant-facing surfaces must prefer the user-facing identity
 - backing group names are implementation details unless the surface is explicitly diagnostic or inventory-oriented
 - this rule applies to normalized rule applicability, watched-user associations, and host-backed entity attributes derived from group membership
+- when normalized rule applicability uses an affiliated user identity in place of a backing group name, the accompanying applicability kind must also be `user` so label and kind stay aligned on Home Assistant-facing surfaces
 
 ## Protocol baseline
 

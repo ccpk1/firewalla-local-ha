@@ -56,6 +56,7 @@ User-facing identity rule:
 - when local payloads expose both a user-facing identity and an affiliated backing group or tag, prefer the user-facing identity for Home Assistant names and attributes
 - treat backing group names as implementation detail unless the current surface is explicitly diagnostic, inventory-oriented, or otherwise intended to expose raw Firewalla structure
 - do not concatenate backing group names into entity or attribute labels just because the raw payload links the user through that group
+- when a rule `applies_to` label is intentionally rewritten from a backing group to the affiliated user identity, `applies_to_kind` must also be rewritten to `user` rather than preserving the raw backing-group kind
 
 ## Constants taxonomy
 

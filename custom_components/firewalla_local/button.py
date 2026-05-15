@@ -11,6 +11,7 @@ from .const import (
     ENTITY_SUFFIX_BUTTON,
     LOGGER,
     TRANS_KEY_ENTITY_BUTTON_SYNC_RUNTIME,
+    TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON,
 )
 from .coordinator import FirewallaConfigEntry
 from .entity import FirewallaEntity
@@ -47,6 +48,11 @@ class FirewallaSyncRuntimeButton(FirewallaEntity, ButtonEntity):
             object_id=_SYNC_RUNTIME_OBJECT_ID,
             suffix=ENTITY_SUFFIX_BUTTON,
         )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return bounded button metadata attributes."""
+        return self.build_state_attributes(TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON)
 
     async def async_press(self) -> None:
         """Request an immediate coordinator refresh."""

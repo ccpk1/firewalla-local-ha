@@ -115,6 +115,9 @@
       "system_status": {
         "name": "System Status",
         "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
           "boot_complete": {
             "name": "Boot complete"
           },
@@ -186,6 +189,9 @@
       "watched_device": {
         "name": "{host_name}",
         "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
           "purpose": {
             "name": "Purpose",
             "state": {
@@ -218,13 +224,27 @@
     },
     "button": {
       "sync_runtime": {
-        "name": "Sync runtime"
+        "name": "Sync runtime",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_runtime_sync_button": "Requests an immediate refresh of the Firewalla runtime snapshot"
+            }
+          }
+        }
       }
     },
     "device_tracker": {
       "presence": {
         "name": "Presence",
         "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
           "purpose": {
             "name": "Purpose",
             "state": {
@@ -253,6 +273,9 @@
       "latest_speed_test_download": {
         "name": "Speed Test",
         "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
           "purpose": {
             "name": "Purpose",
             "state": {
@@ -315,6 +338,9 @@
       "watched_user_today_usage": {
         "name": "{user_name} Usage",
         "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
           "purpose": {
             "name": "Purpose",
             "state": {
@@ -346,11 +372,23 @@
       "allow_rule": {
         "name": "{rule_name}",
         "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
           "purpose": {
             "name": "Purpose",
             "state": {
               "purpose_rule_control": "Pauses or resumes the firewall rule"
             }
+          },
+          "applies_to": {
+            "name": "Applies to"
+          },
+          "applies_to_kind": {
+            "name": "Applies to kind"
+          },
+          "category": {
+            "name": "Category"
           },
           "rule_name": {
             "name": "Rule name"
@@ -423,11 +461,23 @@
       "block_rule": {
         "name": "{rule_name}",
         "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
           "purpose": {
             "name": "Purpose",
             "state": {
               "purpose_rule_control": "Pauses or resumes the firewall rule"
             }
+          },
+          "applies_to": {
+            "name": "Applies to"
+          },
+          "applies_to_kind": {
+            "name": "Applies to kind"
+          },
+          "category": {
+            "name": "Category"
           },
           "rule_name": {
             "name": "Rule name"

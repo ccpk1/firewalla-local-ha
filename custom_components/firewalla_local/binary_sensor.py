@@ -12,7 +12,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
-    ATTR_PURPOSE,
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_BOX_IMAGE_CODENAME,
     ATTR_SYSTEM_BOX_IMAGE_VERSION,
@@ -104,7 +103,7 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
         """Return stable system-status metadata attributes."""
         system_status = self.system_status
         return {
-            ATTR_PURPOSE: TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS,
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS),
             ATTR_SYSTEM_UPTIME: (
                 self._format_uptime(system_status.uptime_seconds)
                 if system_status is not None
@@ -260,7 +259,9 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
         """Return bounded watched-device metadata attributes."""
         host = self._host
         return {
-            ATTR_PURPOSE: TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY,
+            **self.build_state_attributes(
+                TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
+            ),
             ATTR_WATCHED_DEVICE_IP_ADDRESS: (
                 host.ip_address if host is not None else None
             ),
