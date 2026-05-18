@@ -231,7 +231,12 @@ time.
 ## Watched-device monitoring
 
 Watched devices are opt-in. After selecting devices in the options flow, the
-integration creates one watched-device binary sensor per selected MAC address.
+integration creates one watched-device binary sensor per selected Firewalla
+host identity.
+
+- watched-device selection can include MAC-backed hosts and standalone VPN peer
+  identities such as `wg_peer:*` when the local runtime exposes them as host
+  records
 
 - each watched-device entity exposes a connectivity-style online or offline
   state

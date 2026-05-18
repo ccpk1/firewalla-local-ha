@@ -146,9 +146,11 @@ _RAW_HOST_LOCAL_DOMAIN_KEY: Final = "localDomain"
 _RAW_HOST_USER_LOCAL_DOMAIN_KEY: Final = "userLocalDomain"
 _RAW_HOST_IP_KEY: Final = "ip"
 _RAW_HOST_LAST_ACTIVE_KEY: Final = "lastActive"
+_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY: Final = "lastActiveTimestamp"
 _RAW_HOST_FLOWSUMMARY_KEY: Final = "flowsummary"
 _RAW_HOST_STALE_KEY: Final = "stale"
 _RAW_HOST_POLICY_KEY: Final = "policy"
+_RAW_HOST_ALLOWED_IPS_KEY: Final = "allowedIPs"
 _RAW_HOST_DETECT_KEY: Final = "detect"
 _RAW_HOST_FEEDBACK_KEY: Final = "feedback"
 _RAW_HOST_TYPE_KEY: Final = "type"
@@ -166,6 +168,7 @@ _RAW_USER_UID_KEY: Final = "uid"
 _RAW_USER_TYPE_KEY: Final = "type"
 _RAW_EXCEPTION_RULES_KEY: Final = "exceptionRules"
 _RAW_POLICY_RULES_KEY: Final = "policyRules"
+_RAW_WG_PEERS_KEY: Final = "wgPeers"
 _RAW_SPEED_TEST_RESULTS_KEY: Final = "internetSpeedtestResults"
 _RAW_SPEED_TEST_CLIENT_KEY: Final = "client"
 _RAW_SPEED_TEST_RESULT_KEY: Final = "result"
@@ -1231,30 +1234,60 @@ class FirewallaApiClient:
         return None
 
     def _merge_network_config_lookup(
-        self, raw_interfaces: object, network_lookup: dict[str, str]
+        self,
+        raw_interfaces: object,
+        network_lookup: dict[str, str],
+        interface_name: str | None = None,
     ) -> None:
         """Merge readable network names from networkConfig.interface metadata."""
         if isinstance(raw_interfaces, dict):
             meta = raw_interfaces.get(_RAW_META_KEY)
             if isinstance(meta, dict):
                 network_id = meta.get(_RAW_UUID_KEY)
-                if isinstance(network_id, str) and network_id:
-                    for candidate in (
-                        meta.get(_RAW_NAME_KEY),
-                        raw_interfaces.get(_RAW_DESC_KEY),
-                        raw_interfaces.get(_RAW_NAME_KEY),
-                    ):
-                        if isinstance(candidate, str) and candidate:
-                            network_lookup[network_id] = candidate
-                            break
+                for candidate in (
+                    meta.get(_RAW_NAME_KEY),
+                    raw_interfaces.get(_RAW_DESC_KEY),
+                    raw_interfaces.get(_RAW_NAME_KEY),
+                ):
+                    if not isinstance(candidate, str) or not candidate:
+                        continue
+                    if isinstance(network_id, str) and network_id:
+                        network_lookup[network_id] = candidate
+                    if interface_name is not None:
+                        network_lookup[interface_name] = candidate
+                    break
 
-            for value in raw_interfaces.values():
-                self._merge_network_config_lookup(value, network_lookup)
+            for key, value in raw_interfaces.items():
+                if key == _RAW_META_KEY:
+                    continue
+                self._merge_network_config_lookup(
+                    value,
+                    network_lookup,
+                    key if isinstance(value, dict) else interface_name,
+                )
             return
 
         if isinstance(raw_interfaces, list):
             for value in raw_interfaces:
-                self._merge_network_config_lookup(value, network_lookup)
+                self._merge_network_config_lookup(
+                    value,
+                    network_lookup,
+                    interface_name,
+                )
+
+    def _extract_allowed_ip_address(self, raw_allowed_ips: object) -> str | None:
+        """Return the first peer address from one allowed-IPs list."""
+        if not isinstance(raw_allowed_ips, list):
+            return None
+
+        for raw_allowed_ip in raw_allowed_ips:
+            if not (allowed_ip := self._normalized_optional_string(raw_allowed_ip)):
+                continue
+            host_ip, _, _ = allowed_ip.partition("/")
+            if host_ip:
+                return host_ip
+
+        return None
 
     def _build_named_lookup(self, data: dict[str, object], key: str) -> dict[str, str]:
         """Build a uid-to-name lookup for Firewalla tag collections."""
@@ -1366,6 +1399,9 @@ class FirewallaApiClient:
     ) -> tuple[str, str | None, str | None, str | None, str | None]:
         """Resolve user-facing and DNS-oriented identity fields for a host."""
         raw_name = self._normalized_optional_string(raw_host.get(_RAW_NAME_KEY))
+        raw_backup_name = self._normalized_optional_string(
+            raw_host.get(_RAW_HOST_BACKUP_NAME_KEY)
+        )
         dhcp_name = self._normalized_optional_string(
             raw_host.get(_RAW_HOST_DHCP_NAME_KEY)
         )
@@ -1387,6 +1423,7 @@ class FirewallaApiClient:
 
         raw_candidates = (
             raw_name,
+            raw_backup_name,
             dhcp_name,
             bonjour_name,
             dns_fqdn,
@@ -1506,13 +1543,95 @@ class FirewallaApiClient:
 
         return FirewallaHostVpnClient(profile_id=profile_id, state=state)
 
+    def _normalize_wireguard_peer_inventory(
+        self,
+        data: dict[str, object],
+        *,
+        network_lookup: dict[str, str],
+        tags: dict[str, str],
+        affiliated_users: dict[str, tuple[str, ...]],
+    ) -> tuple[FirewallaHostRuntime, ...]:
+        """Normalize standalone WireGuard peers into watched-device hosts."""
+        raw_wg_peers = data.get(_RAW_WG_PEERS_KEY)
+        if not isinstance(raw_wg_peers, list):
+            return ()
+
+        normalized_peers: list[FirewallaHostRuntime] = []
+        for raw_wg_peer in raw_wg_peers:
+            if not isinstance(raw_wg_peer, dict):
+                continue
+
+            peer_uid = self._normalized_optional_string(
+                raw_wg_peer.get(_RAW_USER_UID_KEY)
+            )
+            if peer_uid is None:
+                continue
+
+            raw_policy = raw_wg_peer.get(_RAW_HOST_POLICY_KEY)
+            raw_tags = raw_policy.get("tags") if isinstance(raw_policy, dict) else None
+            peer_ip_address = self._extract_allowed_ip_address(
+                raw_wg_peer.get(_RAW_HOST_ALLOWED_IPS_KEY)
+            )
+            interface_id = self._normalized_optional_string(
+                raw_wg_peer.get(_RAW_INTF_KEY)
+            )
+            flowsummary = raw_wg_peer.get(_RAW_HOST_FLOWSUMMARY_KEY)
+
+            normalized_peers.append(
+                FirewallaHostRuntime(
+                    mac=f"wg_peer:{peer_uid}",
+                    host_name=(
+                        self._normalized_optional_string(raw_wg_peer.get(_RAW_NAME_KEY))
+                        or peer_ip_address
+                        or f"wg_peer:{peer_uid}"
+                    ),
+                    ip_address=peer_ip_address,
+                    group_name=self._resolve_host_group_name(
+                        {"tags": raw_tags} if isinstance(raw_tags, list) else {},
+                        tags=tags,
+                        affiliated_users=affiliated_users,
+                    ),
+                    network_name=(
+                        network_lookup.get(interface_id)
+                        if interface_id is not None
+                        else None
+                    ),
+                    connection_type="vpn",
+                    last_active=self._coerce_float(
+                        raw_wg_peer.get(_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY)
+                    ),
+                    download_bytes=(
+                        self._coerce_int(flowsummary.get("inbytes"))
+                        if isinstance(flowsummary, dict)
+                        else None
+                    ),
+                    upload_bytes=(
+                        self._coerce_int(flowsummary.get("outbytes"))
+                        if isinstance(flowsummary, dict)
+                        else None
+                    ),
+                    stale=None,
+                    group_ids=tuple(
+                        sorted(
+                            raw_group_id
+                            for raw_group_id in raw_tags
+                            if isinstance(raw_group_id, str) and raw_group_id
+                        )
+                    )
+                    if isinstance(raw_tags, list)
+                    else (),
+                )
+            )
+
+        return tuple(normalized_peers)
+
     def _normalize_host_inventory(
         self, data: dict[str, object]
     ) -> tuple[FirewallaHostRuntime, ...]:
         """Normalize the minimal host inventory used by watched-device surfaces."""
         raw_hosts = data.get(_RAW_HOSTS_KEY)
         if not isinstance(raw_hosts, list):
-            return ()
+            raw_hosts = []
 
         network_lookup = self._build_network_lookup(data)
         host_domain_lookup = self._build_host_domain_lookup(data)
@@ -1604,6 +1723,16 @@ class FirewallaApiClient:
                     )
                     if isinstance(raw_host.get(_RAW_USER_TAGS_KEY), list)
                     else (),
+                )
+            )
+
+        if not any(host.mac.startswith("wg_peer:") for host in normalized_hosts):
+            normalized_hosts.extend(
+                self._normalize_wireguard_peer_inventory(
+                    data,
+                    network_lookup=network_lookup,
+                    tags=tag_lookup,
+                    affiliated_users=affiliated_user_lookup,
                 )
             )
 
