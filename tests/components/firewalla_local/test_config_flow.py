@@ -1469,10 +1469,20 @@ async def test_options_flow_updates_watched_devices(hass) -> None:
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "edit_watched_devices"
+    field = result["data_schema"].schema[CONF_WATCHED_DEVICES]
+    assert field.options == {
+        "AA:BB:CC:DD:EE:FF": "Kaden Phone (192.168.200.25)",
+        "wg_peer:test-peer": "WireGuard Kaden (10.42.0.2)",
+    }
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"]},
+        user_input={
+            CONF_WATCHED_DEVICES: [
+                "AA:BB:CC:DD:EE:FF",
+                "wg_peer:test-peer",
+            ]
+        },
     )
 
     assert result["type"] is FlowResultType.MENU
@@ -1480,7 +1490,7 @@ async def test_options_flow_updates_watched_devices(hass) -> None:
     assert entry.options == _expected_options(
         {
             CONF_UPDATE_INTERVAL: 5,
-            CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"],
+            CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF", "wg_peer:test-peer"],
         }
     )
 

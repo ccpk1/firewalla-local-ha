@@ -600,7 +600,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
         ),
         FirewallaHostRuntime(
             mac="wg_peer:test-peer",
-            host_name="10.42.0.2",
+            host_name="WireGuard Kaden",
             dns_domain="int.ccpk.us",
             ip_address="10.42.0.2",
             group_name=None,
@@ -802,6 +802,81 @@ async def test_get_runtime_snapshot_prefers_name_over_bname() -> None:
             upload_bytes=None,
             stale=False,
             vpn_client=None,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_snapshot_normalizes_wg_peers_into_host_inventory() -> None:
+    """Test WireGuard peers outside hosts[] become watched-device host records."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "model": "gold",
+                    "cpuid": "serial-123",
+                    "longVersion": "1.0.0",
+                    "networkConfig": {
+                        "interface": {
+                            "wireguard": {
+                                "wg0": {
+                                    "meta": {
+                                        "name": "WireGuard",
+                                        "uuid": "2c30793a-f9ce-43c0-9e9e-c30115366b76",
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "tags": {
+                        "60": {"name": "CHADS_PHONE"},
+                    },
+                    "hosts": [],
+                    "wgPeers": [
+                        {
+                            "allowedIPs": ["192.168.250.199/32"],
+                            "flowsummary": {
+                                "inbytes": 41981924,
+                                "outbytes": 5574375,
+                            },
+                            "intf": "wg0",
+                            "lastActiveTimestamp": 1778687590,
+                            "name": "chads-phone-wgvpn",
+                            "policy": {"tags": ["60"]},
+                            "uid": "peer-123",
+                        }
+                    ],
+                    "policyRules": [],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    assert snapshot.hosts == (
+        FirewallaHostRuntime(
+            mac="wg_peer:peer-123",
+            host_name="chads-phone-wgvpn",
+            ip_address="192.168.250.199",
+            group_name="CHADS_PHONE",
+            network_name="WireGuard",
+            connection_type="vpn",
+            last_active=1778687590.0,
+            download_bytes=41981924,
+            upload_bytes=5574375,
+            stale=None,
+            group_ids=("60",),
         ),
     )
 
