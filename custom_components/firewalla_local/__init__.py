@@ -80,6 +80,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     await integration_manager.async_reconcile_device_tracker_entities(
         host_manager.configured_device_tracker_macs
     )
+    await integration_manager.async_reconcile_speed_test_sensor_entities(
+        tuple(wan.uuid for wan in integration_manager.get_available_wans())
+    )
     integration_manager.async_reconcile_tracked_client_devices(
         host_manager.configured_device_tracker_macs,
         host_manager.get_hosts(),

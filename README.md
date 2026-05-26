@@ -174,6 +174,8 @@ While I have put a significant amount of time and effort into engineering this i
 
 Please proceed with caution, review your system often, and always keep a backup of your Home Assistant configuration.
 
+AI-Assisted Development: In today’s age, leveraging AI is one of the few ways a maintainer can realistically build, thoroughly test, and actively support a truly complex, high-quality open-source project. But to be clear, this integration isn't just blindly "vibe coded." While AI acts as a significant force multiplier for the workflow, human oversight dictates the architecture. Every commit is strictly audited, backed by extensive tests, and measured against rigorous Home Assistant development standards to ensure long-term stability.
+
 ## 📄 **License**
 
 This project is licensed under the GPL-3.0 license. See `LICENSE`.

@@ -31,6 +31,8 @@ from custom_components.firewalla_local.const import (
     ATTR_SPEED_TEST_UPLOAD,
     ATTR_SPEED_TEST_UPLOAD_MBYTES,
     ATTR_SPEED_TEST_VENDOR,
+    ATTR_SPEED_TEST_WAN_NAME,
+    ATTR_SPEED_TEST_WAN_UUID,
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_BOX_IMAGE_CODENAME,
     ATTR_SYSTEM_BOX_IMAGE_VERSION,
@@ -257,6 +259,28 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
                     manual=True,
                     success=True,
                     vendor="ookla",
+                    wan_uuid="wan-1",
+                ),
+                FirewallaSpeedTestRecord(
+                    tested_at_timestamp=1774293000.0,
+                    download_mbps=301.5,
+                    upload_mbps=35.25,
+                    latency_ms=18.75,
+                    jitter_ms=0.95,
+                    packet_loss_percent=0,
+                    download_megabytes=180.0,
+                    upload_megabytes=40.0,
+                    isp="Atlantic Broadband",
+                    public_ip="23.245.207.180",
+                    server_country="United States",
+                    server_host="speedtest-alt.example.com:8080",
+                    server_id="53972",
+                    server_location="Cleveland, OH",
+                    server_sponsor="Alt Carrier",
+                    manual=False,
+                    success=True,
+                    vendor="ookla",
+                    wan_uuid="wan-2",
                 ),
             )
             if with_speed_test
@@ -265,10 +289,10 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
     )
 
 
-async def test_sensor_setup_exposes_system_status_and_speed_test(
+async def test_sensor_setup_exposes_system_status_and_wan_speed_test_entities(
     hass: HomeAssistant,
 ) -> None:
-    """Test the sensor platform exposes the planned monitoring entities."""
+    """Test the sensor platform exposes WAN-scoped speed-test entities."""
     refresh_timestamp = datetime(2026, 4, 2, 12, 0, tzinfo=UTC)
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -306,8 +330,17 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     system_state = _state_for_unique_suffix(
         hass, "binary_sensor", "_system_status_binary_sensor"
     )
-    speedtest_state = _state_for_unique_suffix(
-        hass, "sensor", "_latest_speed_test_download_sensor"
+    download_state = _state_for_unique_suffix(
+        hass, "sensor", "_speed_test_download_wan-1_sensor"
+    )
+    upload_state = _state_for_unique_suffix(
+        hass, "sensor", "_speed_test_upload_wan-1_sensor"
+    )
+    latency_state = _state_for_unique_suffix(
+        hass, "sensor", "_speed_test_latency_wan-1_sensor"
+    )
+    secondary_download_state = _state_for_unique_suffix(
+        hass, "sensor", "_speed_test_download_wan-2_sensor"
     )
 
     assert system_state is not None
@@ -364,53 +397,70 @@ async def test_sensor_setup_exposes_system_status_and_speed_test(
     assert system_entry is not None
     assert system_entry.unique_id.endswith("_system_status_binary_sensor")
 
-    assert speedtest_state is not None
-    assert speedtest_state.name == "Firewalla Speed Test"
-    assert float(speedtest_state.state) == pytest.approx(507.17651748657227)
-    assert speedtest_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SPEED_TEST
-    assert speedtest_state.attributes[ATTR_INTEGRATION] == DOMAIN
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_ISP] == "Atlantic Broadband"
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_PUBLIC_IP] == "23.245.207.179"
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_UPLOAD] == 49.001976013183594
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_LATENCY] == 29.107863
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_JITTER] == 1.703425
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_PACKET_LOSS] == -1
+    assert download_state is not None
+    assert download_state.name == "Firewalla WAN-ONE Speed test download"
+    assert float(download_state.state) == pytest.approx(507.17651748657227)
+    assert download_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SPEED_TEST
+    assert download_state.attributes[ATTR_INTEGRATION] == DOMAIN
+    assert download_state.attributes[ATTR_SPEED_TEST_ISP] == "Atlantic Broadband"
+    assert download_state.attributes[ATTR_SPEED_TEST_PUBLIC_IP] == "23.245.207.179"
+    assert download_state.attributes[ATTR_SPEED_TEST_UPLOAD] == 49.001976013183594
+    assert download_state.attributes[ATTR_SPEED_TEST_LATENCY] == 29.107863
+    assert download_state.attributes[ATTR_SPEED_TEST_JITTER] == 1.703425
+    assert download_state.attributes[ATTR_SPEED_TEST_PACKET_LOSS] == -1
     assert (
-        speedtest_state.attributes[ATTR_SPEED_TEST_DOWNLOAD_MBYTES]
-        == 276.21396827697754
+        download_state.attributes[ATTR_SPEED_TEST_DOWNLOAD_MBYTES] == 276.21396827697754
     )
     assert (
-        speedtest_state.attributes[ATTR_SPEED_TEST_UPLOAD_MBYTES] == 60.733930587768555
+        download_state.attributes[ATTR_SPEED_TEST_UPLOAD_MBYTES] == 60.733930587768555
     )
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_SERVER_COUNTRY] == "United States"
+    assert download_state.attributes[ATTR_SPEED_TEST_SERVER_COUNTRY] == "United States"
     assert (
-        speedtest_state.attributes[ATTR_SPEED_TEST_SERVER_HOST]
+        download_state.attributes[ATTR_SPEED_TEST_SERVER_HOST]
         == "speedtest-cmh.dish-wireless.com:8080"
     )
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_SERVER_ID] == "53971"
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_SERVER_LOCATION] == "Columbus, OH"
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_SERVER_SPONSOR] == "Boost Mobile"
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_MANUAL] is True
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_SUCCESS] is True
-    assert speedtest_state.attributes[ATTR_SPEED_TEST_VENDOR] == "ookla"
+    assert download_state.attributes[ATTR_SPEED_TEST_SERVER_ID] == "53971"
+    assert download_state.attributes[ATTR_SPEED_TEST_SERVER_LOCATION] == "Columbus, OH"
+    assert download_state.attributes[ATTR_SPEED_TEST_SERVER_SPONSOR] == "Boost Mobile"
+    assert download_state.attributes[ATTR_SPEED_TEST_MANUAL] is True
+    assert download_state.attributes[ATTR_SPEED_TEST_SUCCESS] is True
+    assert download_state.attributes[ATTR_SPEED_TEST_VENDOR] == "ookla"
+    assert download_state.attributes[ATTR_SPEED_TEST_WAN_NAME] == "WAN-ONE"
+    assert download_state.attributes[ATTR_SPEED_TEST_WAN_UUID] == "wan-1"
     assert (
-        speedtest_state.attributes[ATTR_SPEED_TEST_TESTED_AT]
+        download_state.attributes[ATTR_SPEED_TEST_TESTED_AT]
         == datetime.fromtimestamp(1774293094.481, UTC).isoformat()
     )
 
-    speedtest_entry = next(
+    assert upload_state.name == "Firewalla WAN-ONE Speed test upload"
+    assert float(upload_state.state) == pytest.approx(49.001976013183594)
+    assert upload_state.attributes[ATTR_SPEED_TEST_WAN_NAME] == "WAN-ONE"
+
+    assert latency_state.name == "Firewalla WAN-ONE Speed test latency"
+    assert float(latency_state.state) == pytest.approx(29.107863)
+    assert latency_state.attributes[ATTR_SPEED_TEST_WAN_UUID] == "wan-1"
+
+    assert secondary_download_state.name == "Firewalla WAN-TWO Speed test download"
+    assert float(secondary_download_state.state) == pytest.approx(301.5)
+    assert secondary_download_state.attributes[ATTR_SPEED_TEST_WAN_NAME] == "WAN-TWO"
+    assert secondary_download_state.attributes[ATTR_SPEED_TEST_WAN_UUID] == "wan-2"
+
+    speed_test_entries = [
         entry
         for entry in registry.entities.values()
-        if entry.unique_id.endswith("_latest_speed_test_download_sensor")
+        if entry.domain == "sensor" and "_speed_test_" in entry.unique_id
+    ]
+    assert len(speed_test_entries) == 6
+    assert all(
+        "latest_speed_test_download" not in entry.unique_id
+        for entry in speed_test_entries
     )
-    assert speedtest_entry is not None
-    assert speedtest_entry.unique_id.endswith("_latest_speed_test_download_sensor")
 
 
-async def test_sensor_setup_handles_missing_speed_test_history(
+async def test_sensor_setup_handles_missing_wan_speed_test_history(
     hass: HomeAssistant,
 ) -> None:
-    """Test the speed-test sensor stays present with no data history."""
+    """Test WAN-scoped speed-test sensors stay present with no data history."""
     refresh_timestamp = datetime(2026, 4, 2, 12, 5, tzinfo=UTC)
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -434,7 +484,7 @@ async def test_sensor_setup_handles_missing_speed_test_history(
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value={"policyRules": []}),
+            new=AsyncMock(return_value=_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -447,8 +497,14 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     system_state = _state_for_unique_suffix(
         hass, "binary_sensor", "_system_status_binary_sensor"
     )
-    speedtest_state = _state_for_unique_suffix(
-        hass, "sensor", "_latest_speed_test_download_sensor"
+    download_state = _state_for_unique_suffix(
+        hass, "sensor", "_speed_test_download_wan-1_sensor"
+    )
+    upload_state = _state_for_unique_suffix(
+        hass, "sensor", "_speed_test_upload_wan-1_sensor"
+    )
+    latency_state = _state_for_unique_suffix(
+        hass, "sensor", "_speed_test_latency_wan-1_sensor"
     )
 
     assert system_state is not None
@@ -463,7 +519,10 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     )
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] is None
     assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] is None
-    assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {}
+    assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {
+        "WAN-ONE": {"download_bytes": 3072, "upload_bytes": 1280},
+        "WAN-TWO": {"download_bytes": 900, "upload_bytes": 450},
+    }
     assert system_state.attributes[ATTR_SYSTEM_CPU_USAGE_1M] == 22.5
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_USAGE_PERCENT] == 25.0
     assert system_state.attributes[ATTR_SYSTEM_MEMORY_FREE_MB] == 750.0
@@ -489,10 +548,14 @@ async def test_sensor_setup_handles_missing_speed_test_history(
     assert system_state.attributes[ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE] is None
     assert system_state.attributes[ATTR_SYSTEM_SOFTWARE_VERSION] == "1.0.0"
 
-    assert speedtest_state.state == "unknown"
-    assert speedtest_state.name == "Firewalla Speed Test"
-    assert speedtest_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SPEED_TEST
-    assert speedtest_state.attributes[ATTR_INTEGRATION] == DOMAIN
+    assert download_state.state == "unknown"
+    assert download_state.name == "Firewalla WAN-ONE Speed test download"
+    assert download_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_SPEED_TEST
+    assert download_state.attributes[ATTR_INTEGRATION] == DOMAIN
+    assert download_state.attributes[ATTR_SPEED_TEST_WAN_NAME] == "WAN-ONE"
+    assert download_state.attributes[ATTR_SPEED_TEST_WAN_UUID] == "wan-1"
+    assert upload_state.state == "unknown"
+    assert latency_state.state == "unknown"
 
 
 async def test_sensor_setup_exposes_watched_user_usage_sensor(

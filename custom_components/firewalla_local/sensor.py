@@ -31,6 +31,8 @@ from .const import (
     ATTR_SPEED_TEST_UPLOAD,
     ATTR_SPEED_TEST_UPLOAD_MBYTES,
     ATTR_SPEED_TEST_VENDOR,
+    ATTR_SPEED_TEST_WAN_NAME,
+    ATTR_SPEED_TEST_WAN_UUID,
     ATTR_WATCHED_USER_APP_USAGE_BY_APP,
     ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT,
     ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP,
@@ -38,18 +40,19 @@ from .const import (
     ATTR_WATCHED_USER_LAST_ACTIVE,
     ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     ENTITY_SUFFIX_SENSOR,
-    TRANS_KEY_ENTITY_SENSOR_LATEST_SPEED_TEST_DOWNLOAD,
+    TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_DOWNLOAD,
+    TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_LATENCY,
+    TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_UPLOAD,
     TRANS_KEY_ENTITY_SENSOR_WATCHED_USER_TODAY_USAGE,
     TRANS_KEY_PURPOSE_SPEED_TEST,
     TRANS_KEY_PURPOSE_WATCHED_USER_USAGE,
+    TRANS_PLACEHOLDER_WAN_NAME,
 )
 from .coordinator import FirewallaConfigEntry
 from .entity import FirewallaEntity
-from .models import FirewallaWatchedUser
+from .models import FirewallaSpeedTestResult, FirewallaWatchedUser
 
 PARALLEL_UPDATES = 0
-
-_LATEST_SPEED_TEST_OBJECT_ID = "latest_speed_test_download"
 
 
 async def async_setup_entry(
@@ -59,9 +62,20 @@ async def async_setup_entry(
 ) -> None:
     """Set up Firewalla Local sensors from a config entry."""
     del _hass
+
+    speed_test_entities: list[SensorEntity] = []
+    for wan in entry.runtime_data.integration_manager.get_available_wans():
+        speed_test_entities.extend(
+            (
+                FirewallaWanSpeedTestDownloadSensor(entry, wan.uuid),
+                FirewallaWanSpeedTestUploadSensor(entry, wan.uuid),
+                FirewallaWanSpeedTestLatencySensor(entry, wan.uuid),
+            )
+        )
+
     async_add_entities(
         [
-            FirewallaLatestSpeedTestDownloadSensor(entry),
+            *speed_test_entities,
             *[
                 FirewallaWatchedUserTodayUsageSensor(entry, user_id)
                 for user_id in (
@@ -72,32 +86,69 @@ async def async_setup_entry(
     )
 
 
-class FirewallaLatestSpeedTestDownloadSensor(FirewallaEntity, SensorEntity):
-    """Expose the latest successful speed-test download result."""
+class FirewallaWanSpeedTestSensor(FirewallaEntity, SensorEntity):
+    """Expose one WAN-scoped speed-test surface."""
 
-    _attr_device_class = SensorDeviceClass.DATA_RATE
-    _attr_native_unit_of_measurement = UnitOfDataRate.MEGABITS_PER_SECOND
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_translation_key = TRANS_KEY_ENTITY_SENSOR_LATEST_SPEED_TEST_DOWNLOAD
 
-    def __init__(self, entry: FirewallaConfigEntry) -> None:
-        """Initialize the latest-speed-test download sensor."""
+    def __init__(
+        self,
+        entry: FirewallaConfigEntry,
+        wan_uuid: str,
+        *,
+        metric: str,
+        translation_key: str,
+    ) -> None:
+        """Initialize one WAN-scoped speed-test sensor."""
         super().__init__(entry, entry.runtime_data.coordinator)
+        self._wan_uuid = wan_uuid
+        self._attr_translation_key = translation_key
+        self._update_translation_placeholders()
         self._attr_unique_id = self.integration_manager.build_entity_unique_id(
-            object_id=_LATEST_SPEED_TEST_OBJECT_ID,
+            object_id=f"speed_test_{metric}_{wan_uuid}",
             suffix=ENTITY_SUFFIX_SENSOR,
         )
 
     @property
-    def native_value(self) -> float | None:
-        """Return the latest successful download speed in Mbps."""
-        speed_test = self.latest_speed_test
-        return speed_test.download_mbps if speed_test is not None else None
+    def _speed_test_result(self) -> FirewallaSpeedTestResult | None:
+        """Return the latest speed-test result for this WAN."""
+        results = self.integration_manager.get_speed_test_results(
+            wan_uuid=self._wan_uuid,
+            limit=1,
+        )
+        return results[0] if results else None
+
+    def _resolve_wan_name(self) -> str:
+        """Return the current user-facing WAN label for this sensor."""
+        for wan in self.integration_manager.get_available_wans():
+            if wan.uuid == self._wan_uuid:
+                return wan.name
+        return self._wan_uuid
+
+    def _update_translation_placeholders(self) -> None:
+        """Refresh WAN placeholders from the latest runtime inventory."""
+        self._attr_translation_placeholders = {
+            TRANS_PLACEHOLDER_WAN_NAME: self._resolve_wan_name()
+        }
+        self.__dict__.pop("name", None)
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh dynamic placeholders before writing updated state."""
+        self._update_translation_placeholders()
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the sensor's WAN still exists in the runtime inventory."""
+        return super().available and any(
+            wan.uuid == self._wan_uuid
+            for wan in self.integration_manager.get_available_wans()
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:
-        """Return stable attributes describing the latest speed test."""
-        speed_test = self.latest_speed_test
+        """Return stable attributes describing the latest WAN speed test."""
+        speed_test = self._speed_test_result
         return {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_SPEED_TEST),
             ATTR_SPEED_TEST_TESTED_AT: (
@@ -151,7 +202,79 @@ class FirewallaLatestSpeedTestDownloadSensor(FirewallaEntity, SensorEntity):
             ATTR_SPEED_TEST_VENDOR: (
                 speed_test.vendor if speed_test is not None else None
             ),
+            ATTR_SPEED_TEST_WAN_NAME: (
+                speed_test.wan_name
+                if speed_test is not None
+                else self._resolve_wan_name()
+            ),
+            ATTR_SPEED_TEST_WAN_UUID: self._wan_uuid,
         }
+
+
+class FirewallaWanSpeedTestDownloadSensor(FirewallaWanSpeedTestSensor):
+    """Expose the latest WAN-scoped speed-test download result."""
+
+    _attr_device_class = SensorDeviceClass.DATA_RATE
+    _attr_native_unit_of_measurement = UnitOfDataRate.MEGABITS_PER_SECOND
+
+    def __init__(self, entry: FirewallaConfigEntry, wan_uuid: str) -> None:
+        """Initialize one WAN-scoped download speed-test sensor."""
+        super().__init__(
+            entry,
+            wan_uuid,
+            metric="download",
+            translation_key=TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_DOWNLOAD,
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest WAN download speed in Mbps."""
+        speed_test = self._speed_test_result
+        return speed_test.download_mbps if speed_test is not None else None
+
+
+class FirewallaWanSpeedTestUploadSensor(FirewallaWanSpeedTestSensor):
+    """Expose the latest WAN-scoped speed-test upload result."""
+
+    _attr_device_class = SensorDeviceClass.DATA_RATE
+    _attr_native_unit_of_measurement = UnitOfDataRate.MEGABITS_PER_SECOND
+
+    def __init__(self, entry: FirewallaConfigEntry, wan_uuid: str) -> None:
+        """Initialize one WAN-scoped upload speed-test sensor."""
+        super().__init__(
+            entry,
+            wan_uuid,
+            metric="upload",
+            translation_key=TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_UPLOAD,
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest WAN upload speed in Mbps."""
+        speed_test = self._speed_test_result
+        return speed_test.upload_mbps if speed_test is not None else None
+
+
+class FirewallaWanSpeedTestLatencySensor(FirewallaWanSpeedTestSensor):
+    """Expose the latest WAN-scoped speed-test latency result."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MILLISECONDS
+
+    def __init__(self, entry: FirewallaConfigEntry, wan_uuid: str) -> None:
+        """Initialize one WAN-scoped latency speed-test sensor."""
+        super().__init__(
+            entry,
+            wan_uuid,
+            metric="latency",
+            translation_key=TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_LATENCY,
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest WAN latency in milliseconds."""
+        speed_test = self._speed_test_result
+        return speed_test.latency_ms if speed_test is not None else None
 
 
 class FirewallaWatchedUserTodayUsageSensor(FirewallaEntity, SensorEntity):
