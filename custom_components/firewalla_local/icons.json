@@ -1,8 +1,14 @@
 {
   "entity": {
     "sensor": {
-      "latest_speed_test_download": {
-        "default": "mdi:speedometer"
+      "wan_speed_test_download": {
+        "default": "mdi:download-network"
+      },
+      "wan_speed_test_upload": {
+        "default": "mdi:upload-network"
+      },
+      "wan_speed_test_latency": {
+        "default": "mdi:timer-outline"
       },
       "system_status": {
         "default": "mdi:router-network"

@@ -270,8 +270,8 @@
       }
     },
     "sensor": {
-      "latest_speed_test_download": {
-        "name": "Speed Test",
+      "wan_speed_test_download": {
+        "name": "{wan_name} Speed test download",
         "state_attributes": {
           "integration": {
             "name": "Integration"
@@ -279,7 +279,7 @@
           "purpose": {
             "name": "Purpose",
             "state": {
-              "purpose_speed_test": "Shows the latest successful speed test result reported by the Firewalla box"
+              "purpose_speed_test": "Shows the latest successful speed test result for this WAN reported by the Firewalla box"
             }
           },
           "download_megabytes": {
@@ -329,6 +329,154 @@
           },
           "upload_speed": {
             "name": "Upload speed"
+          },
+          "wan_name": {
+            "name": "WAN name"
+          },
+          "wan_uuid": {
+            "name": "WAN UUID"
+          },
+          "vendor": {
+            "name": "Vendor"
+          }
+        }
+      },
+      "wan_speed_test_upload": {
+        "name": "{wan_name} Speed test upload",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_speed_test": "Shows the latest successful speed test result for this WAN reported by the Firewalla box"
+            }
+          },
+          "download_megabytes": {
+            "name": "Download megabytes"
+          },
+          "isp": {
+            "name": "ISP"
+          },
+          "jitter": {
+            "name": "Jitter"
+          },
+          "latency": {
+            "name": "Latency (ms)"
+          },
+          "manual": {
+            "name": "Manual"
+          },
+          "packet_loss": {
+            "name": "Packet loss"
+          },
+          "public_ip": {
+            "name": "Public IP"
+          },
+          "server_country": {
+            "name": "Server country"
+          },
+          "server_host": {
+            "name": "Server host"
+          },
+          "server_id": {
+            "name": "Server ID"
+          },
+          "server_location": {
+            "name": "Server location"
+          },
+          "server_sponsor": {
+            "name": "Server sponsor"
+          },
+          "success": {
+            "name": "Success"
+          },
+          "tested_at": {
+            "name": "Tested at"
+          },
+          "upload_megabytes": {
+            "name": "Upload megabytes"
+          },
+          "upload_speed": {
+            "name": "Upload speed"
+          },
+          "wan_name": {
+            "name": "WAN name"
+          },
+          "wan_uuid": {
+            "name": "WAN UUID"
+          },
+          "vendor": {
+            "name": "Vendor"
+          }
+        }
+      },
+      "wan_speed_test_latency": {
+        "name": "{wan_name} Speed test latency",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_speed_test": "Shows the latest successful speed test result for this WAN reported by the Firewalla box"
+            }
+          },
+          "download_megabytes": {
+            "name": "Download megabytes"
+          },
+          "isp": {
+            "name": "ISP"
+          },
+          "jitter": {
+            "name": "Jitter"
+          },
+          "latency": {
+            "name": "Latency (ms)"
+          },
+          "manual": {
+            "name": "Manual"
+          },
+          "packet_loss": {
+            "name": "Packet loss"
+          },
+          "public_ip": {
+            "name": "Public IP"
+          },
+          "server_country": {
+            "name": "Server country"
+          },
+          "server_host": {
+            "name": "Server host"
+          },
+          "server_id": {
+            "name": "Server ID"
+          },
+          "server_location": {
+            "name": "Server location"
+          },
+          "server_sponsor": {
+            "name": "Server sponsor"
+          },
+          "success": {
+            "name": "Success"
+          },
+          "tested_at": {
+            "name": "Tested at"
+          },
+          "upload_megabytes": {
+            "name": "Upload megabytes"
+          },
+          "upload_speed": {
+            "name": "Upload speed"
+          },
+          "wan_name": {
+            "name": "WAN name"
+          },
+          "wan_uuid": {
+            "name": "WAN UUID"
           },
           "vendor": {
             "name": "Vendor"

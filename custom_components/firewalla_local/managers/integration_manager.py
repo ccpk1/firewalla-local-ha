@@ -15,9 +15,11 @@ from ..const import (
     CONF_LICENSE,
     DOMAIN,
     ENTITY_SUFFIX_DEVICE_TRACKER,
+    ENTITY_SUFFIX_SENSOR,
     ENTITY_SUFFIX_SWITCH,
     MANUFACTURER,
     PLATFORM_DEVICE_TRACKER,
+    PLATFORM_SENSOR,
     PLATFORM_SWITCH,
 )
 from ..models import (
@@ -2389,6 +2391,38 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             ):
                 continue
             if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_DEVICE_TRACKER}"):
+                continue
+            if entity_entry.unique_id in expected_unique_ids:
+                continue
+
+            entity_registry.async_remove(entity_entry.entity_id)
+
+    async def async_reconcile_speed_test_sensor_entities(
+        self, wan_uuids: tuple[str, ...]
+    ) -> None:
+        """Remove stale speed-test sensor entries for this config entry."""
+        entity_registry = er.async_get(self.coordinator.hass)
+        expected_unique_ids = {
+            self.build_entity_unique_id(
+                object_id=f"speed_test_{metric}_{wan_uuid}",
+                suffix=ENTITY_SUFFIX_SENSOR,
+            )
+            for wan_uuid in wan_uuids
+            for metric in ("download", "upload", "latency")
+        }
+
+        for entity_entry in er.async_entries_for_config_entry(
+            entity_registry,
+            self.entry.entry_id,
+        ):
+            if (
+                entity_entry.domain != PLATFORM_SENSOR
+                or entity_entry.platform != DOMAIN
+            ):
+                continue
+            if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_SENSOR}"):
+                continue
+            if "_speed_test_" not in entity_entry.unique_id:
                 continue
             if entity_entry.unique_id in expected_unique_ids:
                 continue

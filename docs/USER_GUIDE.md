@@ -194,7 +194,7 @@ and management surfaces.
 It currently exposes:
 
 - a system-status binary sensor
-- a latest-speed-test sensor
+- WAN-scoped speed-test download, upload, and latency sensors
 - a diagnostic `Sync runtime` button
 
 ### System-status binary sensor
@@ -214,11 +214,16 @@ The system-status entity exposes stable attributes such as:
 Use this entity when you want a quick appliance-health view plus a stable set
 of status attributes for automations or dashboards.
 
-### Latest speed-test sensor
+### WAN-scoped speed-test sensors
 
-The latest-speed-test sensor exposes the latest successful speed test result
-from the local payload, including download speed as the primary state and the
-remaining test details as attributes.
+Each discovered WAN gets three speed-test sensors: download, upload, and
+latency. Each sensor exposes the latest successful speed test result from the
+local payload for that WAN.
+
+The sensor state is the metric named by the entity, and every speed-test sensor
+also includes the full speed-test metadata in its attributes, including upload
+speed, latency, jitter, packet loss, server details, timestamp, WAN name, and
+WAN UUID.
 
 ### Sync runtime button
 
@@ -443,7 +448,7 @@ Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
 - the service returns an acknowledgement and does not wait for the completed
   measurement
 - if you want completed results, use `firewalla_local.get_speed_test_results`
-  or the latest-speed-test sensor
+  or the WAN-scoped speed-test sensors
 
 ### Wake host
 
