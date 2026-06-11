@@ -87,6 +87,27 @@ This section documents the reverse-engineered pairing protocol end-to-end. It
 is the most critical finding in this repository. Without it, there is no
 integration.
 
+> **Critical timeline fact — read this first**
+>
+> The pairing protocol works identically for **every client** (iPhone, Home
+> Assistant, etc.). The symmetric key it produces is **per-box, not per-client**.
+> All clients that pair with the same box receive the same AES key.
+>
+> We did not need the iPhone's symmetric key. The actual order of events was:
+>
+> 1. **We paired ourselves first.** We scanned the box's QR code, ran the
+>    cloud provisioning flow (Steps 1–6 below), and obtained **our own**
+>    `symmetric_key`. The proof is in `.artifacts/poc/20260323-174620/`.
+> 2. **We captured the iPhone separately.** While the iPhone performed
+>    actions, we SSH'd into the box and ran `tcpdump` on port 8833.
+> 3. **We decrypted the iPhone's traffic with our key.** Because the key is
+>    box-level, the same AES material that our integration uses also decrypts
+>    every other client's traffic to that box.
+>
+> This is why `utils/analyze_capture.py` can decrypt any pcap from your
+> paired box without re-pairing — it loads *your* key from the Home Assistant
+> config entry, and that key works for all traffic to that box.
+
 ### What the QR code contains
 
 The Firewalla box displays a QR code on its screen containing JSON with these
@@ -214,6 +235,12 @@ key material encrypted with the public key sent in Step 3. The matching
 group is identified by comparing the group `_id` field against the QR
 `gid`.
 
+**Key fact: this symmetric key is per-box.** Every client (iPhone, Home
+Assistant, etc.) that successfully pairs with this box receives the same
+AES key material. This is why `utils/analyze_capture.py` can decrypt
+any client's traffic using the key stored in the Home Assistant config
+entry — the phone and HA share the same box-level key.
+
 ### Step 6 — Decrypt the symmetric key
 
 Decrypt the `key` field with the RSA private key:
@@ -327,6 +354,12 @@ Inner appInfo:
   eid:        X4fp-7w651edXhvxCX53tg
   ios:        26.3-1
 ```
+
+**How we decoded this:** We paired our own Home Assistant integration first
+(Steps 1–6 above), which gave us the box-level symmetric key. Then we
+captured the iPhone's traffic via remote `tcpdump` on the Firewalla box and
+decrypted it using `utils/analyze_capture.py` with *our* key. Because the
+symmetric key is per-box, it worked.
 
 The integration uses the same `appID` (`com.rottiesoft.circle`) but identifies
 itself transparently as the integration rather than as an iPhone. This was an
