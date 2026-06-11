@@ -51,7 +51,8 @@ async def async_setup_entry(
 
 
 class FirewallaDeviceTracker(
-    CoordinatorEntity[FirewallaDataUpdateCoordinator], ScannerEntity
+    CoordinatorEntity[FirewallaDataUpdateCoordinator],
+    ScannerEntity,  # type: ignore[misc]  # ScannerEntity type varies by HA version
 ):
     """Expose one selected Firewalla host as a router-backed device tracker."""
 

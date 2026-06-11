@@ -3,19 +3,25 @@
 This support tool is intentionally narrow:
 
 - prompt for router IP address or hostname and SSH password
+- optionally, accept QR JSON and email for cloud provisioning
 - SSH to the Firewalla box as user ``pi`` on port ``22``
 - start a remote tcpdump capture in the background
 - wait for the user to reproduce the behavior they want to capture
 - stop the capture, download the pcap, and clean up remote files
 - build a local safe report from cleartext HTTP metadata only
+- when provisioning was used, write a sidecar key file alongside the pcap
+  so the capture can be decrypted later
 
-It does not perform any payload decryption and does not include the raw pcap in
-the safe report archive.
+It does not include the raw pcap or key in the safe report archive.
 """
+
+# pylint: disable=too-many-lines
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import base64
 import getpass
 import ipaddress
 import json
@@ -28,7 +34,7 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 try:
     import paramiko
@@ -49,9 +55,35 @@ except ImportError:  # pragma: no cover - environment-specific dependency
     TCP = None
     rdpcap = None
 
+try:
+    import aiohttp
+except ImportError:  # pragma: no cover - environment-specific dependency
+    aiohttp = None
+
+try:
+    from cryptography.hazmat.primitives import hashes, padding, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    CRYPTOGRAPHY_AVAILABLE = True
+except ImportError:  # pragma: no cover - environment-specific dependency
+    CRYPTOGRAPHY_AVAILABLE = False
+
 if TYPE_CHECKING:
     from paramiko import SSHClient
 
+
+PROVISIONING_APP_API_BASE: Final = "https://firewalla.encipher.io/app/api/v2"
+PROVISIONING_APP_ID: Final = "com.rottiesoft.circle"
+PROVISIONING_APP_SECRET: Final = "fbb05afa-9145-41f1-8076-9de8be56f104"
+PROVISIONING_GROUP_POLL_ATTEMPTS: Final = 20
+PROVISIONING_GROUP_POLL_INTERVAL: Final = 3.0
+PROVISIONING_REQUEST_TIMEOUT: Final = 15.0
+PROVISIONING_REQUIRED_QR_FIELDS: Final = ("gid", "seed", "license", "ek", "ipaddress")
+PROVISIONING_ENDPOINT_LOGIN: Final = "/login/eptoken"
+PROVISIONING_ENDPOINT_RENDEZVOUS: Final = "/ept/rendezvous/me"
+PROVISIONING_ENDPOINT_GROUP_CANDIDATES: Final = ("/ept/group/me", "/ept/groups/me")
 
 SSH_PORT: Final = 22
 SSH_USER: Final = "pi"
@@ -80,6 +112,7 @@ class HttpMessage:
     first_line: str
     headers: dict[str, str]
     content_length: int
+    body: bytes = b""
 
 
 @dataclass(slots=True)
@@ -96,6 +129,299 @@ class SafeReportEvent:
     content_type: str | None = None
     latency_seconds: float | None = None
     status_code: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class _ProvisioningQrData:
+    """Validated QR fields needed for cloud provisioning."""
+
+    gid: str
+    seed: str
+    license: str
+    ek: str
+    ipaddress: str
+
+    @classmethod
+    def from_raw_json(cls, raw_json: str) -> _ProvisioningQrData:
+        """Parse and validate raw QR JSON."""
+        try:
+            payload = json.loads(raw_json)
+        except json.JSONDecodeError as err:
+            raise ValueError("QR JSON is not valid JSON") from err
+        if not isinstance(payload, dict):
+            raise ValueError("QR JSON root must be an object")
+        missing = [f for f in PROVISIONING_REQUIRED_QR_FIELDS if f not in payload]
+        if missing:
+            raise ValueError(f"QR JSON missing required fields: {', '.join(missing)}")
+        normalized: dict[str, str] = {}
+        for field in PROVISIONING_REQUIRED_QR_FIELDS:
+            value = payload[field]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"QR field {field!r} must be a non-empty string")
+            normalized[field] = value.strip()
+        return cls(
+            gid=normalized["gid"],
+            seed=normalized["seed"],
+            license=normalized["license"],
+            ek=normalized["ek"],
+            ipaddress=normalized["ipaddress"],
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class _ProvisioningResult:
+    """Result of one cloud provisioning run."""
+
+    symmetric_key: str
+    gid: str
+    eid: str
+    aid: str
+
+
+def _derive_qr_key(license_value: str, seed: str) -> str:
+    """Derive the pre-pairing AES key material from QR fields."""
+    return f"{license_value[:8]}{seed}"
+
+
+def _derive_aes256_key(key_material: str) -> bytes:
+    """Derive AES-256 key matching NodeJS SecureUtil behavior."""
+    key = key_material[:32].encode("utf-8")
+    if len(key) != 32:
+        raise ValueError(
+            "Derived AES key material must be at least 32 UTF-8 bytes long"
+        )
+    return key
+
+
+def _aes256_cbc_decrypt_from_base64(ciphertext: str, key_material: str) -> str:
+    """Decrypt a base64 AES-256-CBC payload."""
+    key = _derive_aes256_key(key_material)
+    iv = bytes(16)
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+    decryptor = cipher.decryptor()
+    padded = decryptor.update(base64.b64decode(ciphertext)) + decryptor.finalize()
+    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    return (unpadder.update(padded) + unpadder.finalize()).decode("utf-8")
+
+
+def _generate_firewalla_keys() -> tuple[str, str]:
+    """Generate RSA keypair and return (private_pem, public_pem)."""
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    public_pem = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
+    return private_pem, public_pem
+
+
+def _rsa_decrypt_base64(ciphertext: str, private_pem: str) -> str:
+    """Decrypt base64 RSA ciphertext using OAEP/SHA-1."""
+    private_key = serialization.load_pem_private_key(
+        private_pem.encode("utf-8"), password=None
+    )
+    plaintext = private_key.decrypt(
+        base64.b64decode(ciphertext),
+        asym_padding.OAEP(
+            mgf=asym_padding.MGF1(algorithm=hashes.SHA1()),
+            algorithm=hashes.SHA1(),
+            label=None,
+        ),
+    )
+    return plaintext.decode("utf-8")
+
+
+def _decrypt_pairing_code(qr_data: _ProvisioningQrData) -> dict[str, object]:
+    """Decrypt the QR ek field and return the pairing rendezvous data."""
+    plaintext = _aes256_cbc_decrypt_from_base64(
+        qr_data.ek,
+        _derive_qr_key(qr_data.license, qr_data.seed),
+    )
+    try:
+        parsed = json.loads(plaintext)
+    except json.JSONDecodeError:
+        return {"r": plaintext, "evalue": {"license": qr_data.license}}
+    if not isinstance(parsed, dict):
+        raise ValueError("QR pairing payload did not decode to an object")
+    return parsed
+
+
+async def _provision_symmetric_key(
+    qr_data: _ProvisioningQrData,
+    private_pem: str,
+    public_pem: str,
+    email: str,
+) -> _ProvisioningResult:
+    """Run the cloud provisioning flow and return the symmetric key."""
+    pairing_code = _decrypt_pairing_code(qr_data)
+    rendezvous_id = pairing_code.get("r") or pairing_code.get("rid")
+    evalue = pairing_code.get("evalue")
+    if not isinstance(rendezvous_id, str) or not isinstance(evalue, dict):
+        raise ValueError("QR pairing code missing rendezvous data")
+
+    timeout = aiohttp.ClientTimeout(total=PROVISIONING_REQUEST_TIMEOUT)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        # Step 1: login/eptoken
+        login_payload = {
+            "assertion": {
+                "name": email,
+                "info": {"name": "circle"},
+                "publicKey": public_pem,
+                "appId": PROVISIONING_APP_ID,
+                "appSecret": PROVISIONING_APP_SECRET,
+                "signature": "",
+            }
+        }
+        async with session.post(
+            f"{PROVISIONING_APP_API_BASE}{PROVISIONING_ENDPOINT_LOGIN}",
+            json=login_payload,
+            headers={"Content-Type": "application/json"},
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"login/eptoken returned HTTP {resp.status}")
+            login_data: dict[str, object] = await resp.json()
+        access_token = login_data.get("access_token")
+        eid = login_data.get("eid")
+        aid = login_data.get("aid")
+        if not isinstance(access_token, str) or not access_token:
+            raise RuntimeError("login/eptoken response missing access_token")
+        if not isinstance(eid, str) or not eid:
+            raise RuntimeError("login/eptoken response missing eid")
+        if not isinstance(aid, str) or not aid:
+            raise RuntimeError("login/eptoken response missing aid")
+
+        # Step 2: cloud rendezvous link
+        rendezvous_payload = {
+            "rid": rendezvous_id,
+            "evalue": json.dumps(evalue, separators=(",", ":")),
+        }
+        async with session.post(
+            f"{PROVISIONING_APP_API_BASE}{PROVISIONING_ENDPOINT_RENDEZVOUS}",
+            json=rendezvous_payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Cloud rendezvous returned HTTP {resp.status}")
+
+        # Step 3: poll for group with symmetric key
+        gid = qr_data.gid
+        current_access_token: str = access_token
+        for attempt in range(PROVISIONING_GROUP_POLL_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(PROVISIONING_GROUP_POLL_INTERVAL)
+
+            for endpoint in PROVISIONING_ENDPOINT_GROUP_CANDIDATES:
+                async with session.get(
+                    f"{PROVISIONING_APP_API_BASE}{endpoint}",
+                    headers={"Authorization": f"Bearer {current_access_token}"},
+                ) as resp:
+                    if resp.status == 401:
+                        break
+                    if resp.status != 200:
+                        continue
+                    groups_data: object = await resp.json()
+
+                groups: list[dict[str, Any]] = []
+                if isinstance(groups_data, list):
+                    groups = [g for g in groups_data if isinstance(g, dict)]
+                elif isinstance(groups_data, dict):
+                    raw = groups_data.get("groups")
+                    if isinstance(raw, list):
+                        groups = [g for g in raw if isinstance(g, dict)]
+
+                for group in groups:
+                    if group.get("_id") != gid:
+                        continue
+                    group_eid = group.get("eid")
+                    group_aid = group.get("aid")
+                    sym_keys = group.get("symmetricKeys")
+                    if not isinstance(group_eid, str) or not group_eid:
+                        continue
+                    if not isinstance(group_aid, str) or not group_aid:
+                        continue
+                    if not isinstance(sym_keys, list) or not sym_keys:
+                        continue
+                    first_key = sym_keys[0]
+                    if not isinstance(first_key, dict):
+                        continue
+                    key_cipher = first_key.get("key")
+                    if not isinstance(key_cipher, str) or not key_cipher:
+                        continue
+                    symmetric_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                    return _ProvisioningResult(
+                        symmetric_key=symmetric_key,
+                        gid=gid,
+                        eid=group_eid,
+                        aid=group_aid,
+                    )
+
+            # Refresh identity on miss — login response includes groups
+            async with session.post(
+                f"{PROVISIONING_APP_API_BASE}{PROVISIONING_ENDPOINT_LOGIN}",
+                json={
+                    "assertion": {
+                        "name": email,
+                        "info": {"name": "circle"},
+                        "publicKey": public_pem,
+                        "appId": PROVISIONING_APP_ID,
+                        "appSecret": PROVISIONING_APP_SECRET,
+                        "signature": "",
+                    }
+                },
+                headers={"Content-Type": "application/json"},
+            ) as resp:
+                if resp.status != 200:
+                    continue
+                refresh: dict[str, object] = await resp.json()
+                token = refresh.get("access_token")
+                if isinstance(token, str) and token:
+                    current_access_token = token
+                # Also check groups from the login response itself
+                login_groups_raw = refresh.get("groups")
+                if isinstance(login_groups_raw, list):
+                    for group in login_groups_raw:
+                        if not isinstance(group, dict):
+                            continue
+                        if group.get("_id") != gid:
+                            continue
+                        group_eid = group.get("eid")
+                        group_aid = group.get("aid")
+                        sym_keys = group.get("symmetricKeys")
+                        if not isinstance(group_eid, str) or not group_eid:
+                            continue
+                        if not isinstance(group_aid, str) or not group_aid:
+                            continue
+                        if not isinstance(sym_keys, list) or not sym_keys:
+                            continue
+                        first_key = sym_keys[0]
+                        if not isinstance(first_key, dict):
+                            continue
+                        key_cipher = first_key.get("key")
+                        if not isinstance(key_cipher, str) or not key_cipher:
+                            continue
+                        symmetric_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                        return _ProvisioningResult(
+                            symmetric_key=symmetric_key,
+                            gid=gid,
+                            eid=group_eid,
+                            aid=group_aid,
+                        )
+
+        raise RuntimeError(
+            "Cloud provisioning did not produce a visible group before "
+            f"timing out after {PROVISIONING_GROUP_POLL_ATTEMPTS} attempts"
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,6 +461,46 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_CONNECT_TIMEOUT,
         help="SSH connection timeout in seconds",
+    )
+    parser.add_argument(
+        "--qr-json",
+        help=(
+            "Raw QR JSON string from the Firewalla app. "
+            "On Windows, use --qr-file instead to avoid shell quoting issues."
+        ),
+    )
+    parser.add_argument(
+        "--qr-file",
+        type=Path,
+        help=(
+            "Path to a file containing the raw QR JSON. "
+            "Recommended over --qr-json on Windows to avoid quoting issues."
+        ),
+    )
+    parser.add_argument(
+        "--email",
+        help=(
+            "Email or label for the cloud provisioning identity (required when "
+            "--qr-json or --qr-file is provided)"
+        ),
+    )
+    parser.add_argument(
+        "--decode",
+        type=Path,
+        help="Path to a pcap file to decode using a provisioning key file",
+    )
+    parser.add_argument(
+        "--key-file",
+        type=Path,
+        help="Path to a .key file (produced by --qr-json during capture)",
+    )
+    parser.add_argument(
+        "--redacted-report",
+        type=Path,
+        help=(
+            "Path to write a JSON report with credential values redacted. "
+            "Use with --decode to share message structures without exposing keys."
+        ),
     )
     return parser
 
@@ -311,6 +677,7 @@ def parse_http_messages(
                 first_line=first_line,
                 headers=headers,
                 content_length=len(body),
+                body=body,
             )
         )
         index = body_end
@@ -756,10 +1123,148 @@ def download_capture(client: SSHClient, local_path: Path) -> None:
         scp.get(REMOTE_PCAP_PATH, str(local_path))
 
 
+_REDACT_LABEL: Final = "<redacted>"
+
+
+def _redact_credentials(value: object) -> object:
+    """Replace credential values with a redacted label, keeping structure intact."""
+    if isinstance(value, dict):
+        redacted: dict[str, object] = {}
+        for k, v in value.items():
+            if k.lower() in (
+                "eid",
+                "aid",
+                "gid",
+                "symmetric_key",
+                "accesstoken",
+                "access_token",
+                "token",
+                "password",
+                "secret",
+            ) or (isinstance(v, str) and len(v) == 36 and v.count("-") == 4):
+                redacted[k] = _REDACT_LABEL
+            else:
+                redacted[k] = _redact_credentials(v)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_credentials(item) for item in value]
+    return value
+
+
+def _decode_capture(
+    pcap_path: Path, key_path: Path, redacted_report: Path | None = None
+) -> int:
+    """Decode a captured pcap using the sidecar key file and print message contents."""
+    if not pcap_path.is_file():
+        print(f"Error: pcap file not found: {pcap_path}", file=sys.stderr)
+        return 1
+    if not key_path.is_file():
+        print(f"Error: key file not found: {key_path}", file=sys.stderr)
+        return 1
+    if IP is None or TCP is None or rdpcap is None:
+        print("Error: scapy is required for decoding", file=sys.stderr)
+        return 1
+
+    key_data = json.loads(key_path.read_text(encoding="utf-8"))
+    symmetric_key = key_data.get("symmetric_key")
+    if not isinstance(symmetric_key, str) or not symmetric_key:
+        print("Error: key file does not contain a valid symmetric_key", file=sys.stderr)
+        return 1
+
+    decoded_messages: list[dict[str, object]] = []
+    flows_data: dict[tuple, list[Segment]] = defaultdict(list)
+    for packet in rdpcap(str(pcap_path)):
+        if IP not in packet or TCP not in packet:
+            continue
+        ip = packet[IP]
+        tcp = packet[TCP]
+        if tcp.sport != SERVER_PORT and tcp.dport != SERVER_PORT:
+            continue
+        payload = bytes(tcp.payload)
+        if not payload:
+            continue
+        flows_data[(ip.src, tcp.sport, ip.dst, tcp.dport)].append(
+            Segment(seq=int(tcp.seq), data=payload, ts=float(packet.time))
+        )
+
+    for flow, segments in sorted(flows_data.items()):
+        is_request = flow[3] == SERVER_PORT
+        direction = "REQUEST" if is_request else "RESPONSE"
+        blob, offsets = reassemble(segments)
+        messages = parse_http_messages(blob, offsets, request=is_request)
+        for msg in messages:
+            entry: dict[str, object] = {
+                "direction": direction,
+                "first_line": msg.first_line,
+                "content_length": msg.content_length,
+            }
+            if msg.body:
+                try:
+                    body = json.loads(msg.body.decode("utf-8", errors="ignore"))
+                except json.JSONDecodeError:
+                    entry["raw_body"] = msg.body[:200].decode(
+                        "latin1", errors="replace"
+                    )
+                    decoded_messages.append(entry)
+                    continue
+                encrypted = body.get("message") if isinstance(body, dict) else None
+                if isinstance(encrypted, str):
+                    try:
+                        decrypted = _aes256_cbc_decrypt_from_base64(
+                            encrypted, symmetric_key
+                        )
+                        parsed = json.loads(decrypted)
+                        entry["decrypted"] = parsed
+                    except Exception as exc:
+                        entry["decrypt_error"] = str(exc)
+                else:
+                    entry["body"] = body
+            decoded_messages.append(entry)
+
+    # Print full output
+    for entry in decoded_messages:
+        print(f"\n{'=' * 60}")
+        print(f"[{entry['direction']}] {entry['first_line']}")
+        print(f"  content_length: {entry.get('content_length', '')}")
+        if "decrypted" in entry:
+            print(f"  decrypted: {json.dumps(entry['decrypted'], indent=2)}")
+        elif "body" in entry:
+            print(f"  body: {json.dumps(entry['body'], indent=2)}")
+        elif "raw_body" in entry:
+            print(f"  body (raw): {entry['raw_body']}")
+
+    # Write redacted report if requested
+    if redacted_report:
+        redacted_entries = _redact_credentials(decoded_messages)
+        assert isinstance(redacted_entries, list)
+        redacted_report.write_text(
+            json.dumps(redacted_entries, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\nRedacted report saved to: {redacted_report}")
+        print(
+            "This report can be shared — credential values have been replaced "
+            "with <redacted>."
+        )
+    return 0
+
+
 def main() -> int:
     """Run the Windows Firewalla packet capture workflow."""
     parser = build_parser()
     args = parser.parse_args()
+
+    # Decode mode: skip capture and just decode an existing pcap
+    if args.decode:
+        if not args.key_file:
+            print(
+                "Error: --key-file is required when --decode is provided",
+                file=sys.stderr,
+            )
+            return 1
+        return _decode_capture(
+            args.decode, args.key_file, redacted_report=args.redacted_report
+        )
 
     try:
         require_dependencies()
@@ -769,6 +1274,60 @@ def main() -> int:
 
     assert paramiko is not None
     assert SCPException is not None
+
+    # Optional: run cloud provisioning to capture the symmetric key
+    key_path: Path | None = None
+    qr_raw: str | None = args.qr_json
+    if qr_raw is None and args.qr_file is not None:
+        try:
+            qr_raw = args.qr_file.read_text(encoding="utf-8").strip()
+        except OSError as err:
+            print(f"Error: could not read QR file: {err}", file=sys.stderr)
+            return 1
+    if qr_raw is not None:
+        if not args.email:
+            print(
+                "Error: --email is required when --qr-json or --qr-file is provided",
+                file=sys.stderr,
+            )
+            return 1
+        if aiohttp is None or not CRYPTOGRAPHY_AVAILABLE:
+            print(
+                "Error: aiohttp and cryptography are required for provisioning. "
+                "Install them with: pip install aiohttp cryptography",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            qr_data = _ProvisioningQrData.from_raw_json(qr_raw)
+            private_pem, public_pem = _generate_firewalla_keys()
+            print("Starting cloud provisioning to capture the symmetric key...")
+            result = asyncio.run(
+                _provision_symmetric_key(qr_data, private_pem, public_pem, args.email)
+            )
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            key_path = Path(args.output_dir) / f"provisioning_key_{ts}.key"
+            key_path.write_text(
+                json.dumps(
+                    {
+                        "symmetric_key": result.symmetric_key,
+                        "gid": result.gid,
+                        "eid": result.eid,
+                        "aid": result.aid,
+                        "provisioned_at_utc": datetime.utcnow().isoformat() + "Z",
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            print(f"Symmetric key captured and saved to: {key_path}")
+            print(
+                "This key can decrypt the pcap from this session. "
+                "Keep it private — do not share publicly or include in safe reports."
+            )
+        except (ValueError, RuntimeError, OSError, aiohttp.ClientError) as err:
+            print(f"Cloud provisioning failed: {err}", file=sys.stderr)
+            return 1
 
     host = prompt_host(args.host)
     password = getpass.getpass(f"SSH password for {SSH_USER}@{host}: ")
@@ -818,6 +1377,12 @@ def main() -> int:
 
         print()
         print(f"Success. Capture saved to: {local_capture_path}")
+        if key_path is not None:
+            print(f"Provisioning key saved to: {key_path}")
+            print(
+                "Keep the key file private — it can decrypt this pcap. "
+                "Only share alongside the raw pcap privately."
+            )
         if report_path is not None:
             print(f"Safe report saved to: {report_path}")
             print("Share the safe report first and keep the raw pcap private.")

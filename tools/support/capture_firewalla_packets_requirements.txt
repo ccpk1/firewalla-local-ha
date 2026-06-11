@@ -1,3 +1,5 @@
 paramiko>=3.5.0
 scp>=0.15.0
 scapy>=2.6.1
+aiohttp>=3.9.0
+cryptography>=42.0.0

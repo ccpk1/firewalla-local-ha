@@ -67,6 +67,13 @@ by whichever local fields were easiest to capture first.
 
 This workflow covers:
 
+- the full first-time pairing protocol (QR → cloud → local runtime)
+
+  *(This was the most critical reverse-engineering finding. The pairing
+  protocol is not published by Firewalla and was discovered entirely through
+  live capture and trial. Do not treat it as a prerequisite — it is preserved
+  here because nowhere else in the repo documents it end-to-end.)*
+
 - reuse of a working Home Assistant config entry for live local protocol access
 - direct runtime pulls for current-value comparison without re-pairing
 - runtime inventory capture before and after user actions
@@ -74,8 +81,292 @@ This workflow covers:
 - decryption and inspection of local port `8833` traffic
 - comparison of mutation payloads across rule families
 
-This workflow does not cover first-time pairing design in detail. Pairing is
-already documented elsewhere and treated here as a prerequisite.
+## Pairing protocol (full sequence)
+
+This section documents the reverse-engineered pairing protocol end-to-end. It
+is the most critical finding in this repository. Without it, there is no
+integration.
+
+> **Critical timeline fact — read this first**
+>
+> The pairing protocol works identically for **every client** (iPhone, Home
+> Assistant, etc.). The symmetric key it produces is **per-box, not per-client**.
+> All clients that pair with the same box receive the same AES key.
+>
+> We did not need the iPhone's symmetric key. The actual order of events was:
+>
+> 1. **We paired ourselves first.** We scanned the box's QR code, ran the
+>    cloud provisioning flow (Steps 1–6 below), and obtained **our own**
+>    `symmetric_key`. The proof is in `.artifacts/poc/20260323-174620/`.
+> 2. **We captured the iPhone separately.** While the iPhone performed
+>    actions, we SSH'd into the box and ran `tcpdump` on port 8833.
+> 3. **We decrypted the iPhone's traffic with our key.** Because the key is
+>    box-level, the same AES material that our integration uses also decrypts
+>    every other client's traffic to that box.
+>
+> This is why `utils/analyze_capture.py` can decrypt any pcap from your
+> paired box without re-pairing — it loads *your* key from the Home Assistant
+> config entry, and that key works for all traffic to that box.
+
+### What the QR code contains
+
+The Firewalla box displays a QR code on its screen containing JSON with these
+fields:
+
+| Field | Type | Example | Purpose |
+| --- | --- | --- | --- |
+| `gid` | string | `e4734492-...` | Group ID identifying the box |
+| `license` | string | `b56208b3-...` | Device license key |
+| `seed` | string | `rev4872430275...` | Random seed for pre-pairing crypto |
+| `ek` | string | `9DAKEbaxhP7M...` | Encrypted pairing code (base64) |
+| `ipaddress` | string | `23.245.207.179` | Public WAN IP |
+| `model` | string | `gold` | Box model |
+| `type` | string | `fb` | Always `fb` |
+| `deviceName` | string | `Firewalla` | Box display name |
+| `licensemode` | string | `1` | License mode |
+| `rr` | string | `e767` | Short rendezvous reference |
+
+Reference: `.artifacts/poc/20260323-174620/qr.json`
+
+### Step 1 — Decrypt the QR pairing code
+
+The `ek` field is AES-256-CBC encrypted with IV = 16 zero bytes. The
+encryption key is derived from the QR data:
+
+```
+bootstrap_key = license[:8] + seed
+plaintext = AES-256-CBC-decrypt(ek, bootstrap_key, iv=0..0)
+```
+
+The decrypted plaintext reveals a rendezvous object:
+
+```json
+{"r": "e7679e89-...", "evalue": {"license": "b56208b3-..."}}
+```
+
+The `r` value is the rendezvous ID (`rid`). The `evalue` is the license
+assertion that will be sent to the Firewalla cloud.
+
+Reference: `.artifacts/poc/20260323-174620/pairing_code.json`
+
+### Step 2 — Generate an RSA keypair
+
+Generate a 2048-bit RSA keypair formatted for Firewalla ETP:
+
+- public key: SPKI PEM (`SubjectPublicKeyInfo`)
+- private key: PKCS#8 PEM
+
+The private key never leaves the client. The public key is sent to the cloud.
+
+Code reference: `api/crypto.py::generate_firewalla_keys()`
+
+### Step 3 — Cloud login (`POST /login/eptoken`)
+
+Send to `https://firewalla.encipher.io/app/api/v2/login/eptoken`:
+
+```json
+{
+  "assertion": {
+    "name": "<device name>",
+    "info": {"name": "circle"},
+    "publicKey": "<SPKI public PEM>",
+    "appId": "com.rottiesoft.circle",
+    "appSecret": "fbb05afa-...",
+    "signature": ""
+  }
+}
+```
+
+The response contains:
+
+| Field | Purpose |
+| --- | --- |
+| `access_token` | Bearer token for subsequent cloud API calls |
+| `eid` | Encryption endpoint ID (identifies this pairing session) |
+| `aid` | Account ID (the provisioning identity on the cloud side) |
+| `groups` | Group records (initially empty) |
+
+The `appId` and `appSecret` constants were determined by capturing the
+Firewalla mobile app's cloud traffic. They are the same values the official
+app uses.
+
+Code reference: `api/auth.py::build_login_payload()`
+
+### Step 4 — Cloud rendezvous (`POST /ept/rendezvous/me`)
+
+Use the access token to link this pairing to the box:
+
+```json
+{
+  "rid": "<rendezvous_id from QR>",
+  "evalue": "{\"license\":\"<license>\"}"
+}
+```
+
+The `evalue` must be compact JSON (no whitespace), matching the NodeJS
+`JSON.stringify` serialization.
+
+This tells the Firewalla cloud "this client is pairing with box X". The cloud
+relays the rendezvous, and the Firewalla box generates a symmetric key for
+local communication, storing it in a cloud group record under the client's
+identity.
+
+Code reference: `api/auth.py::build_cloud_link_payload()`
+
+### Step 5 — Poll for the group record
+
+The box does not return the symmetric key immediately. The integration polls
+the cloud endpoints in this order:
+
+1. `GET /ept/group/me` — first candidate endpoint
+2. `GET /ept/groups/me` — second candidate endpoint
+3. `POST /login/eptoken` — fallback if neither group endpoint returned data;
+   this refreshes the cloud identity and the fresh response includes a
+   `groups` array
+
+The first two are GET requests using the existing access token. The third is
+a full POST re-login that produces a new identity with candidate groups.
+Steps 1-2 are repeated across multiple poll attempts with a 3-second
+interval between attempts.
+
+The group record contains `symmetricKeys`, an array of RSA-encrypted
+symmetric key objects. Each object has a `key` field that is the symmetric
+key material encrypted with the public key sent in Step 3. The matching
+group is identified by comparing the group `_id` field against the QR
+`gid`.
+
+**Key fact: this symmetric key is per-box.** Every client (iPhone, Home
+Assistant, etc.) that successfully pairs with this box receives the same
+AES key material. This is why `utils/analyze_capture.py` can decrypt
+any client's traffic using the key stored in the Home Assistant config
+entry — the phone and HA share the same box-level key.
+
+### Step 6 — Decrypt the symmetric key
+
+Decrypt the `key` field with the RSA private key:
+
+```
+symmetric_key_plain = RSA-decrypt(symmetric_key_cipher, private_pem)
+```
+
+This yields the 32-byte raw AES key material used for all subsequent local
+communication. The first 32 UTF-8 bytes of this material form the AES-256
+key.
+
+### Summary of what you get out of pairing
+
+| Credential | Source | Purpose |
+| --- | --- | --- |
+| `gid` | QR code | Identifies the box group for local endpoints |
+| `eid` | Cloud login response | Identifies this pairing session |
+| `aid` | Cloud login response | Account ID |
+| `host` | User-supplied IP or `fire.walla` | Where to reach the box |
+| `license` | QR code | Device license (stored for reauth) |
+| `symmetric_key` | RSA-decrypted from group record | AES-256 key for local traffic |
+
+These six values are stored in the Home Assistant config entry and are all
+that is needed for local runtime access. Pairing is never repeated unless the
+entry is removed.
+
+Reference: `.artifacts/poc/20260323-174620/bootstrap.json`
+Reference: `.artifacts/poc/20260323-174620/identity.json`
+
+### Crypto chain summary
+
+```
+QR ek ──AES-256-CBC──> rendezvous ID
+       key = license[:8] + seed
+       iv  = 16 zero bytes
+
+Cloud login ──> access_token + eid + aid
+Cloud rendezvous ──> box generates symmetric key, stores in cloud group
+Group poll ──> RSA-encrypted symmetric key
+RSA decrypt (2048-bit private key) ──> raw symmetric key material
+
+Every local POST:
+  build Firewalla envelope (mtype + message with from/obj/appInfo)
+  json.dumps(envelope, separators=(",", ":")) ──> AES-256-CBC(key) ──> base64
+  payload = {"message": base64_ciphertext, "timestamp": <now>}
+  POST http://{host}:8833/v1/encipher/message/{gid}
+```
+
+### POC artifacts
+
+The repository preserves three successive successful pairing runs under
+`.artifacts/poc/`:
+
+- `20260323-174620` — First successful full pairing
+- `20260323-175103` — Second run (timing test)
+- `20260323-175408` — Third run (full validation)
+
+Each directory contains the complete artifact set:
+
+| File | Contains |
+| --- | --- |
+| `qr.json` | Raw QR data from the box screen |
+| `pairing_code.json` | Decrypted QR `ek` → rendezvous ID and license evalue |
+| `bootstrap.json` | Cloud login results (aid, eid, gid, encrypted symmetric key) |
+| `identity.json` | Final provisioning identity (aid, eid) |
+| `cloud_link_response.txt` | Cloud rendezvous response confirming the link |
+| `group_fetch.json` | Group record polling metadata |
+| `local_init_message.json` | The encrypted init request sent to the box |
+| `local_payload.json` | The raw encrypted local response |
+| `local_response_decrypted.json` | Decrypted init response — the full runtime payload |
+| `local_response.txt` | Raw HTTP response text |
+| `summary.json` | End-to-end success for cloud + local steps |
+
+### Live pairing in the integration code
+
+The pairing protocol is implemented in:
+
+- `api/auth.py` — Cloud provisioning helpers (`async_provision_firewalla_credentials`)
+- `api/crypto.py` — Key generation, AES encryption, RSA encryption
+- `config_flow.py` — Home Assistant config flow that calls the provisioning
+  helpers
+
+### Confirmed identity values
+
+The captured iPhone pairing request revealed the outer HTTP fingerprint and
+inner appInfo identity used by the official app. These are documented for
+reference because they confirm the protocol family, not because the
+integration should impersonate them.
+
+Captured iPhone init request (from
+`.captures/pairing_other_device_8833.pcap`, decrypted via
+`utils/analyze_capture.py`):
+
+```
+Outer HTTP headers:
+  User-Agent: Firewalla/89 CFNetwork/3860.400.51 Darwin/25.3.0
+  Accept: application/json
+  Accept-Language: en-US,en;q=0.9
+
+Outer envelope fields:
+  from:       iPhone
+
+Inner appInfo:
+  appID:      com.rottiesoft.circle
+  deviceName: iPhone
+  platform:   ios
+  timezone:   America/New_York
+  version:    1.68-89
+  language:   en
+  eid:        X4fp-7w651edXhvxCX53tg
+  ios:        26.3-1
+```
+
+**How we decoded this:** We paired our own Home Assistant integration first
+(Steps 1–6 above), which gave us the box-level symmetric key. Then we
+captured the iPhone's traffic via remote `tcpdump` on the Firewalla box and
+decrypted it using `utils/analyze_capture.py` with *our* key. Because the
+symmetric key is per-box, it worked.
+
+The integration uses the same `appID` (`com.rottiesoft.circle`) but identifies
+itself transparently as the integration rather than as an iPhone. This was an
+intentional design choice: spoofing the exact iPhone identity would be brittle
+(maintenance cost on version changes), would not prevent backend blocking on
+its own, and creates a sharper failure mode if the vendor ever inspects
+traffic.
 
 ## Preconditions
 

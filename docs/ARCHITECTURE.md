@@ -95,9 +95,17 @@ The repository assumes the following protocol facts:
 
 - first-time pairing begins from the Firewalla QR JSON payload
 - provisioning uses the required cloud-assisted bootstrap sequence
-- local runtime communication uses encrypted HTTP POST requests to `http://{local_ip}:8833/v1/encipher/message/{gid}`
-- local runtime credentials include `gid`, `eid`, `aid`, and the decrypted symmetric key
-- key generation and signing require SPKI public PEM and PKCS#8 private PEM handling
+
+  *(The full pairing protocol from QR through cloud login, rendezvous, group
+  polling, and symmetric key decryption is documented in
+  `docs/REVERSE_ENGINEERING_WORKFLOW.md#pairing-protocol-full-sequence`.)*
+
+- local runtime communication uses encrypted HTTP POST requests to
+  `http://{local_ip}:8833/v1/encipher/message/{gid}`
+- local runtime credentials include `gid`, `eid`, `aid`, and the decrypted
+  symmetric key
+- key generation and signing require SPKI public PEM and PKCS#8 private PEM
+  handling
 
 Transport questions and mutation-surface questions are separate concerns. Unverified mutation details do not justify weakening the protocol boundary.
 
