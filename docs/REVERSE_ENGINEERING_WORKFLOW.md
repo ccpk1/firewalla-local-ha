@@ -286,7 +286,7 @@ RSA decrypt (2048-bit private key) ──> raw symmetric key material
 Every local POST:
   build Firewalla envelope (mtype + message with from/obj/appInfo)
   json.dumps(envelope, separators=(",", ":")) ──> AES-256-CBC(key) ──> base64
-  payload = {"message": base64_ciphertext, "timestamp": <now>}
+  payload = {"message": base64_ciphertext, "timestamp": <now>, "mtype": "msg"}
   POST http://{host}:8833/v1/encipher/message/{gid}
 ```
 
@@ -1896,3 +1896,139 @@ When a new capture is completed:
 - record the implementation impact if the new family changes switch behavior
 
 Do not summarize away payload fields that may later matter for the protocol.
+
+## Appendix: APK reverse engineering
+
+This section documents how the Firewalla Android APK was obtained and
+decompiled during the Gold SE 412 investigation (Issue 14). It is preserved
+here so the process can be reproduced when a newer app version needs analysis.
+
+### Downloading the APK
+
+1. **Find the APK on a third-party APK mirror.** The Firewalla app (package
+   `com.firewalla.chancellor`) is available from sites such as APKMirror or
+   APKPure. Search for `Firewalla` and download the variant matching the
+   target version.
+
+2. **Extract the APK.** If the download is an `.apkm` (APK Mirror bundle),
+   extract it — the main APK file is the one with the package name, e.g.
+   `com.firewalla.chancellor.apk`.
+
+3. **Verify the manifest.** The APK metadata (package, version, SDK levels)
+   can be read without decompilation:
+   ```bash
+   unzip -p com.firewalla.chancellor.apk AndroidManifest.xml | strings | head -30
+   ```
+   The confirmed identifiers are `com.firewalla.chancellor`, version
+   `1.69.1 (27)`, min SDK 29, target SDK 36.
+
+### Decompiling with JADX
+
+[JADX](https://github.com/skylot/jadx) is a DEX-to-Java decompiler that
+handles most ProGuard / R8 obfuscation.
+
+1. **Install JADX** (if not already present):
+
+   ```bash
+   # Download the latest release
+   curl -L -o jadx.zip https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip
+   unzip jadx.zip -d /tmp/jadx
+   ```
+
+2. **Run JADX:**
+
+   ```bash
+   /tmp/jadx/bin/jadx -d /tmp/jadx_src --show-bad-code -j 8 \
+     /path/to/com.firewalla.chancellor.apk
+   ```
+
+   - `-d` — output directory for decompiled Java sources
+   - `--show-bad-code` — emit decompilation attempts even for methods JADX
+     cannot fully recover (due to R8 control-flow flattening)
+   - `-j 8` — use 8 parallel threads
+
+3. **Expected outcome.** The majority of the codebase decompiles into readable
+   Java under `/tmp/jadx_src/sources/defpackage/`. Some methods in classes
+   like `fy3`, `s73`, and `a93` will fail to decompile due to R8 control-flow
+   flattening — their bodies emit as error stubs or bad-code blocks. These
+   methods can still be inspected at the Smali level if needed (see below).
+
+### Key files in the decompiled source
+
+| File | Purpose |
+| --- | --- |
+| `wx3.java` | Message envelope builder. `d()` constructs the inner encrypted JSON; `c()` builds the outer HTTP payload with `timestamp` and `message` keys. |
+| `y2.java` | Message sending coroutine. Case 2 handles local encipher messages — it calls `wx3.c()` then adds `"mtype":"msg"` to the outer payload. |
+| `s73.java` | HTTP client for local communication. The `U()` method (heavily obfuscated) orchestrates message sending. |
+| `n73.java` | Network model / box descriptor. Contains model sets including `gse` (Gold SE) alongside `gold`, `gold_plus`, etc. |
+| `fy3.java` | Main message hub / router — sends messages via cloud (`a()`) and local (`b()`) paths. Contains obfuscated methods. |
+
+### Confirmed outer payload format (Android app v1.69.1)
+
+From `y2.java` case 2 and `wx3.java`:
+
+```java
+// wx3.c() builds:
+JSONObject outer = new JSONObject();
+outer.put("timestamp", System.currentTimeMillis() / 1000);
+outer.put("message", encrypted_payload);
+
+// y2.java caller then adds:
+outer.put("mtype", "msg");       // ← confirms mtype in outer envelope
+outer.put("rkeyts", 1);          // ← added when no ts in box metadata
+```
+
+The final HTTP body sent to `POST /v1/encipher/message/{gid}`:
+
+```json
+{"timestamp": 1234567890, "message": "<encrypted>", "mtype": "msg"}
+```
+
+This confirmed that the phone app sends **both** `timestamp` and `mtype: msg`
+in the outer payload — the integration was missing only `mtype`.
+
+### Inner encrypted envelope format (for reference)
+
+From `wx3.d()`:
+
+```java
+String inner = "{\"message\":{\"mtype\":\"msg\",\"type\":\"jsondata\",\"msg\":\"\",\"from\":\"Android\""
+    + ",\"obj\":" + serialized_obj
+    + ",\"appInfo\":" + app_info_json
+    + ",\"compressMode\":1}, \"mtype\":\"msg\"}";
+```
+
+This produces a nested JSON that gets encrypted and placed in the outer
+`"message"` field. The integration uses the equivalent structure directly
+(without the redundant outer `"message"` wrapper) by building the inner
+envelope as a flat object.
+
+### Alternative: Smali extraction via Apktool
+
+For methods that JADX cannot decompile (R8 control-flow flattening), the
+Smali assembly is always recoverable:
+
+```bash
+# Install Apktool
+curl -L -o /tmp/apktool.jar https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.10.0.jar
+
+# Decompile to Smali
+java -jar /tmp/apktool.jar d com.firewalla.chancellor.apk -o /tmp/apktool_out
+
+# Search for specific method
+grep -rn ".method.*sendMessage\|.method.*encrypt\|.method.*buildPayload" /tmp/apktool_out/
+```
+
+Smali preserves all instructions including those lost to control-flow
+flattening, at the cost of readability.
+
+### Reproducibility notes
+
+- JADX output is deterministic for a given APK and version — re-running
+  produces the same decompiled source.
+- The obfuscated class names (e.g., `wx3`, `y2`, `s73`, `fy3`) are assigned
+  by ProGuard/R8 and will differ between app versions. Search by string
+  constants (`"mtype"`, `"compressMode"`, `"com.rottiesoft.circle"`) to
+  locate the equivalent classes in a newer APK.
+- The APK used for this analysis was `com.firewalla.chancellor` version
+  `1.69.1 (27)`. Later versions may change the message format.
