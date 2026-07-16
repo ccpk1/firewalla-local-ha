@@ -54,6 +54,7 @@ _RAW_MESSAGE_ERROR_KEY: Final = "error"
 _RAW_MESSAGE_DATA_KEY: Final = "data"
 _RAW_MESSAGE_CODE_KEY: Final = "code"
 _RAW_MESSAGE_TIMESTAMP_KEY: Final = "timestamp"
+_RAW_MESSAGE_MTYPE_KEY: Final = "mtype"
 
 _COMMAND_MESSAGE_TYPE: Final = "cmd"
 _GET_MESSAGE_TYPE: Final = "get"
@@ -365,6 +366,7 @@ class FirewallaApiClient:
         payload = {
             _RAW_MESSAGE_KEY: encrypted_message,
             _RAW_MESSAGE_TIMESTAMP_KEY: int(time.time()),
+            _RAW_MESSAGE_MTYPE_KEY: "msg",
         }
 
         response_status, response_text = await self._async_post_local_payload(

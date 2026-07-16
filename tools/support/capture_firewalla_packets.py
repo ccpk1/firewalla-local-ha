@@ -1217,6 +1217,12 @@ def _decode_capture(
                         entry["decrypted"] = parsed
                     except Exception as exc:
                         entry["decrypt_error"] = str(exc)
+                    # Preserve outer envelope keys (everything except the
+                    # encrypted message blob) so users can inspect fields like
+                    # mtype, timestamp, rkeyts, etc.
+                    outer = {k: v for k, v in body.items() if k != "message"}
+                    if outer:
+                        entry["outer_envelope"] = outer
                 else:
                     entry["body"] = body
             decoded_messages.append(entry)
@@ -1226,6 +1232,8 @@ def _decode_capture(
         print(f"\n{'=' * 60}")
         print(f"[{entry['direction']}] {entry['first_line']}")
         print(f"  content_length: {entry.get('content_length', '')}")
+        if outer := entry.get("outer_envelope"):
+            print(f"  outer_envelope: {json.dumps(outer)}")
         if "decrypted" in entry:
             print(f"  decrypted: {json.dumps(entry['decrypted'], indent=2)}")
         elif "body" in entry:
