@@ -569,7 +569,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
             usage_by_mount[disk_usage.mount] = round(usage_ratio * 100)
 
-        filtered_usage = {
+        filtered_usage: dict[str, int] = {
             mount: usage_by_mount[mount]
             for mount in _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS
             if mount in usage_by_mount

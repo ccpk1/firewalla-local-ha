@@ -2032,3 +2032,202 @@ flattening, at the cost of readability.
   locate the equivalent classes in a newer APK.
 - The APK used for this analysis was `com.firewalla.chancellor` version
   `1.69.1 (27)`. Later versions may change the message format.
+
+## Appendix: Runtime data model (`xz2.java`)
+
+The decompiled `xz2.java` class is the app's central runtime model. It
+receives the init response JSON and parses every field with its expected
+type. This class IS the schema that was previously reverse-engineered by
+trial and error from packet captures.
+
+### How to extract the current schema
+
+To regenerate the field map for a newer APK version:
+
+```bash
+grep -oP '"[a-zA-Z]+"' /tmp/jadx_src/sources/defpackage/xz2.java | sort -u
+```
+
+This lists every JSON key string referenced in the model class. To get the
+expected type for each key, search the `i()` method (the JSON parser):
+
+```bash
+grep -n 'optJSONObject\|optString\|optInt\|optLong\|optBoolean\|optJSONArray' \
+  /tmp/jadx_src/sources/defpackage/xz2.java
+```
+
+### Confirmed runtime data fields (v1.69.1)
+
+Every key below is parsed from the init response by `xz2.java` lines ~3190-3400.
+The type column shows how the app reads the field.
+
+| Key | APK type | Used by integration |
+| --- | --- | --- |
+| `id` | `optString` | No |
+| `jwtToken` | `optString` | No |
+| `mspData` | `optJSONObject` → sub-fields | No |
+| `alarm` | `optJSONObject` (profiles.alarm) | No |
+| `version` | `optString` | No |
+| `jwt` | `optString` | No |
+| `fwapcCountry` | `optJSONObject` | No |
+| `distCodename` | `optString` | No |
+| `sysMetrics` | `optJSONObject` | Yes |
+| `totalMem` | `optInt` | Yes |
+| `wlan` | `optJSONObject` → channels | No |
+| `apController` | `optJSONObject` → version | No |
+| `mspData.plan` | `optString` | No |
+| `mspData.version` | `optString` | No |
+| `mspData.channel` | `optString` | No |
+| `mspData.mobileAccess` | `optJSONObject` | No |
+| `mspData.targetlists` | `optJSONArray` | **Partial** — see below |
+| `profiles` | `optJSONObject` (system alarm profiles) | No |
+| `userConfig` | `optJSONObject` → user profiles | No |
+| `model` | `optString` | Yes |
+| `mode` | `optString` | Yes |
+| `localDomainSuffix` | `optString` | No |
+| `dapInfo` | `optJSONObject` | Yes |
+| `switchTopology` | `optJSONObject` | No |
+| `switchInfo` | `optJSONObject` | No |
+| `versionUpdate` | `optJSONObject` → time | No |
+| `releaseType` | `optString` | Yes |
+| `cpuid` | `optString` | Yes |
+| `btMac` | `optString` | No |
+| `publicIps` | `optJSONObject` | Yes |
+| `longVersion` | `optString` | Yes |
+| `updateTime` | `optLong` | No |
+| `networkProfiles` | `optJSONObject` | Yes |
+| `nicStates` | `optJSONObject` | No |
+| `hosts` | `optJSONArray` | Yes |
+| `tags` | `optJSONObject` | Yes |
+| `userTags` | `optJSONObject` | Yes |
+| `deviceTags` | `optJSONObject` | Yes |
+| `wgPeers` | `optJSONArray` | Yes |
+| `extension` | `optJSONObject` (family) | No |
+| `guardianBiz` | `optJSONObject` | No |
+| `ddnsToken` | `optString` | No |
+| `monthlyDataUsageOnWans` | `optJSONObject` | Yes |
+| `internetSpeedtestResults` | `optJSONObject` | Yes |
+
+### Target list data model
+
+Target lists are a complex subsystem in the Firewalla runtime. They are the
+primary mechanism for grouping devices, networks, and categories so rules can
+reference them by ID.
+
+#### Where target lists live
+
+Target list metadata comes from **`mspData.targetlists`** in the init
+response — not from the rule inventory directly. The `mspData` block is a
+cloud MSP subscription data structure that includes:
+
+- `plan` — subscription plan identifier
+- `features` — feature flag object
+- `targetlists` — array of target list item objects
+- `mobileAccess` — mobile access configuration
+- `channel` — software update channel
+- `version` — MSP data version
+
+The `xz2.java` init parser reads this at line ~3235:
+
+```java
+JSONObject optJSONObject16 = jSONObject2.optJSONObject("mspData");
+if (optJSONObject16 != null) {
+    JSONArray optJSONArray = optJSONObject16.optJSONArray("targetlists");
+    // each element parsed into a08 (TargetListItem)
+}
+```
+
+#### Target list ID prefixes
+
+| Prefix | Meaning | Source |
+| --- | --- | --- |
+| `TLX-fw-*` | Firewalla-managed (predefined) | `gc3.r1` set |
+| `TLX-rt-*` | Route target list | `gc3.r1` set |
+| `TLX-dt-*` | Disturb (time/pause) target list | `gc3.r1` set |
+| `TL-*` | User-created target list | UUID-based |
+
+#### Target list item structure (class `a08`)
+
+Each target list item has these fields from its `toString()`:
+
+```
+TargetListItem(
+  id              // e.g. "TLX-fw-xxx" or "TL-<uuid>"
+  type            // "category", "mac", "network", "TAG"
+  name            // display name / friendly name
+  scope           // scope identifier
+  owner           // owner ID (if applicable)
+  category        // category name
+  beta            // whether this is a beta feature
+  disabled        // whether the list is disabled
+  notes           // description text
+  count           // member count (devices, IPs, etc.)
+  boxMinVersion   // minimum box firmware version
+  models          // supported device models
+  actions         // allowed action identifiers
+  dnsmasqOnly     // whether DNS-only
+  lastUpdated     // epoch seconds
+  parent          // parent list ID (for hierarchy)
+  access          // access level
+  rules           // array of rule references (b08 objects)
+)
+```
+
+#### Rule reference structure (class `b08`)
+
+Each rule reference within a target list contains:
+
+```
+b08(
+  id       // rule ID (pid)
+  disabled // whether the rule is disabled in this context
+  type     // rule type
+  schedule // schedule reference (cd0)
+  scope    // scope
+)
+```
+
+#### How rules reference target lists
+
+Rules reference target lists in two ways:
+
+1. **`target` field** — The rule's target begins with a target list prefix
+   (`TLX-fw-`, `TL-`, etc.) or is a raw category/type string.
+
+2. **`targetList` field** — The rule value JSON contains a `targetList` key:
+   - `"targetList": "1"` — boolean shorthand for category-based rules
+   - `"targetList": <json object>` — full target specification for
+     rules that contain embedded target definitions rather than references
+
+#### How the app resolves friendly names
+
+The app displays target list friendly names by:
+1. Loading `mspData.targetlists` from the init response into `a08` objects
+2. Looking up each rule's target prefix in the `a08` list by `id`
+3. Falling back to the raw ID if no matching target list is found
+
+#### Why our integration has limited target list data
+
+Our integration builds target list references by scanning rule `target`
+fields for the `TL-` prefix (`_build_target_list_references` in
+`helpers/runtime_inventory.py`). This gives us the rule-to-target-list
+relationship, but we **never request or parse `mspData.targetlists`** from
+the init response.
+
+This means we can see which rules reference which target lists, but we
+cannot resolve the friendly names, types, member counts, or any of the
+metadata that the app shows. The raw IDs (like `TLX-fw-block-torrent`)
+are opaque without the `mspData.targetlists` lookup table.
+
+#### How to fix this
+
+To get full target list metadata, the init request would need an
+additional `dapOp` or equivalent operation to retrieve the `mspData`
+block. Alternatively, since `mspData` is part of the existing init
+response (it's embedded in the massive `dapInfo` / `fwapcOps` response),
+the integration may already be receiving it but discarding it because
+our parser doesn't extract `mspData` from the init payload.
+
+Once available, the target list metadata can be stored as a lookup:
+`{id: "TLX-fw-xxx" → {name: "Torrents", type: "category", count: 5}}`,
+which would let all rule-target-list references resolve to display names.
