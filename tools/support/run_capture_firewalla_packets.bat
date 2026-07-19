@@ -44,6 +44,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Starting Firewalla packet capture helper...
+set "ARGS=%*"
+set "HAS_DECODE=0"
+echo %* | findstr /i "\-\-decode" >nul
+if not errorlevel 1 set "HAS_DECODE=1"
+
+if "%HAS_DECODE%"=="1" (
+  echo Running Firewalla packet decode helper...
+) else (
+  echo Starting Firewalla packet capture helper...
+)
 "%PYTHON_EXE%" "%SCRIPT_DIR%capture_firewalla_packets.py" %*
 exit /b %errorlevel%

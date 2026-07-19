@@ -61,18 +61,19 @@ The script stops tcpdump, downloads the pcap, and creates:
 Decrypt the pcap using the saved key to see what the phone sent:
 
 ```bat
-python capture_firewalla_packets.py --decode firewalla_capture_...pcap --key-file provisioning_key_....key
+run_capture_firewalla_packets.bat --decode firewalla_capture_...pcap --key-file provisioning_key_....key
 ```
 
-This prints every decrypted HTTP request and response — the full message
-structure the phone used during pairing.
+The batch file handles all Python dependency setup automatically. It will
+create a virtual environment, install `scapy`, `cryptography`, and other
+required packages, then run the decode.
 
 ### Step 6 — Share a redacted report (no sensitive data)
 
 To share the analysis without exposing credential values:
 
 ```bat
-python capture_firewalla_packets.py --decode firewalla_capture_...pcap --key-file provisioning_key_....key --redacted-report analysis.json
+run_capture_firewalla_packets.bat --decode firewalla_capture_...pcap --key-file provisioning_key_....key --redacted-report analysis.json
 ```
 
 This replaces credential fields (`eid`, `aid`, `gid`, tokens, UUIDs) with
