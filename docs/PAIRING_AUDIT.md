@@ -308,8 +308,8 @@ an `n73` object via `n73.m15460I()`:
 
 ```java
 // n73.m15460I() — parses group JSON from cloud
-this.f22533K = jSONObject.getString("info");      // encrypted box info
-this.f22534X = jSONObject.getString("xname");     // RSA-encrypted symmetric key
+this.f22533K = jSONObject.getString("info");      // AES-encrypted box metadata
+this.f22534X = jSONObject.getString("xname");     // AES-encrypted box name
 
 // Parse symmetricKeys array
 JSONArray jSONArray = jSONObject.getJSONArray("symmetricKeys");
@@ -329,18 +329,53 @@ JSONObject jSONObject2 = new JSONObject(
 
 Each `symmetricKeys` array entry has:
 - `key` (`f33132a`) — the RSA-encrypted symmetric key
-- `rkey` (`f33133b`) — a rotation key reference
+- `rkey` (`f33133b`) — a rotation key JSON string
 - `gid`, `expires`, `effective`, `createdAt`, `name`, `eid`, `inb`
 
-### `m15456E()` — get decryption key
+### `m15455D()` — parse `rkey` into box metadata
+
+```java
+public JSONObject m15455D() {
+    ue3 ue3Var = (ue3) arrayList.get(0);
+    if (ue3Var.f33133b.length() != 0) {  // rkey is non-empty
+        return new JSONObject(ue3Var.f33133b);  // parse rkey as JSON → n73.y0
+    }
+    return null;
+}
+```
+
+The `rkey` field is a JSON string containing at minimum:
+```json
+{"key": "<RSA-encrypted-rotation-key>", "ts": <timestamp>, "ttl": <seconds>}
+```
+
+This gets parsed into `n73.y0` (box metadata). The `ts` value from this JSON
+is what appears as `rkeyts` in the outer envelope.
+
+### `m15454C()` — get the rotation key
+
+```java
+public String m15454C() {
+    if (this.f22531I0.length() > 0) return this.f22531I0;  // cached
+    JSONObject jSONObject = this.f22542y0;  // n73.y0 = parsed rkey JSON
+    if (jSONObject == null) return Strings.EMPTY;
+    String optString = jSONObject.optString("key");  // rkey.key
+    return s97.m18106q(optString, s97.f29914K);  // RSA-decrypt
+}
+```
+
+This RSA-decrypts the `key` field from the `rkey` JSON. The result is the
+**rotation key** — a different symmetric key than `symmetricKeys[0].key`.
+
+### `m15456E()` — get the fallback symmetric key
 
 ```java
 public String m15456E() {
-    if (this.f22530H0.length() > 0) return this.f22530H0;
+    if (this.f22530H0.length() > 0) return this.f22530H0;  // cached
     ArrayList arrayList = this.f22541x0;  // symmetricKeys array
     if (arrayList.isEmpty()) return Strings.EMPTY;
     String m18106q = s97.m18106q(
-        ((ue3) arrayList.get(0)).f33132a,  // first symmetricKey's "key" field
+        ((ue3) arrayList.get(0)).f33132a,  // symmetricKeys[0].key
         s97.f29914K                         // RSA private key
     );
     this.f22530H0 = m18106q;
@@ -348,121 +383,91 @@ public String m15456E() {
 }
 ```
 
-This RSA-decrypts the first `symmetricKeys[0].key` using the app's RSA private
-key (`s97.f29914K`).
+This RSA-decrypts `symmetricKeys[0].key` — the fallback key.
 
-### `m15457F()` — get the symmetric key for local communication
+### `m15464y()` — the actual key used for local Encipher encryption
 
 ```java
-public String m15457F() {
-    String str = this.f22535Y;
-    if (str != null) return str;                    // cached value
-
-    qc3 qc3Var = this.f22536Z;
-    if (qc3Var != null) {
-        // PATH A: use locally stored box config key
-        this.f22535Y = qc3Var.f27093b;
-    } else {
-        // PATH B: decrypt xname using the RSA-decrypted symmetric key
-        this.f22535Y = s97.m18101c(
-            this.f22534X,              // xname (AES-encrypted symmetric key)
-            m15456E().substring(0, 32) // first 32 bytes of RSA-decrypted key
-        );
+public String m15464y() {
+    String m15454C = m15454C();  // try rkey.key first
+    if (m15454C.length() == 0) {
+        m15454C = m15456E();     // fall back to symmetricKeys[0].key
     }
-    return this.f22535Y;
+    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
 }
 ```
 
-### Two key derivation paths
+**This is the method called by `wx3.c()` to get the encryption key.**
+It tries the rotation key (`rkey.key`) first, and only falls back to
+`symmetricKeys[0].key` if `rkey` is absent.
 
-**PATH A** (`qc3` exists): The key comes from a locally stored box config
-object (`qc3.f27093b`). This is used when the box has already been paired and
-the key is cached locally.
+### Key priority
 
-**PATH B** (`qc3` is null): The key is derived by:
-1. RSA-decrypting `symmetricKeys[0].key` → get the intermediate key
-2. Taking the first 32 bytes of that intermediate key
-3. AES-decrypting `xname` using that 32-byte key with zero IV
+1. **`rkey.key`** (RSA-decrypted) — used when `symmetricKeys[0].rkey` is
+   a non-empty JSON string containing a `key` field
+2. **`symmetricKeys[0].key`** (RSA-decrypted) — fallback when `rkey` is absent
 
-### Our HA integration's approach
+### Our HA integration's approach — MISSING `rkey` support
 
-Our HA code does:
-1. RSA-decrypt `symmetricKeys[0].key` → get the symmetric key
-2. Use that key directly for AES encryption
+Our HA code only implements the fallback path:
+1. RSA-decrypt `symmetricKeys[0].key` → use directly
 
-**The difference:** Our code uses the RSA-decrypted `symmetricKeys[0].key`
-directly as the AES key. The APK uses it as an **intermediate key** — it takes
-only the first 32 bytes and then uses that to AES-decrypt `xname`, which yields
-the actual symmetric key.
-
-### This could be the root cause
-
-If `symmetricKeys[0].key` and `xname` are both present in the cloud response,
-the APK uses `xname` (PATH B) to derive the actual key. Our code uses
-`symmetricKeys[0].key` directly. On Gold, these might produce the same result
-(if `xname` is absent or the key is short enough). On Gold Plus, they might
-differ.
+On boxes where `rkey` is present (Gold Plus, based on `rkeyts` evidence),
+the APK uses the rotation key from `rkey.key`, which is a different value.
+Our code uses the wrong key, producing HTTP 412.
 
 ### What about `rkeyts`?
 
-The `rkeyts` field comes from `n73.f22542y0` (the box metadata JSON object).
-This is populated from the init response, not from the cloud login. The
-presence of `rkeyts` in the GP-failing capture suggests the box has a `ts`
-value in its metadata that the Gold box doesn't have. This is a box state
-difference, not a provisioning difference.
+The `rkeyts` field in the outer envelope comes from `n73.y0.optLong("ts")`,
+which is the `ts` value from the `rkey` JSON. Its presence in the GP-failing
+capture and absence in the Gold-working capture confirms that `rkey` is
+present on Gold Plus but absent on Gold.
 
 ### Cloud-brokered pairing scenarios
 
 The APK shows multiple pairing paths:
 
 1. **Standard pairing** (`ProgressDialog.pairing()`): cloud login → rendezvous →
-   group poll → extract key from `symmetricKeys`/`xname`
+   group poll → extract key from `symmetricKeys`
 
 2. **Migration pairing** (`ProgressDialog.migrate()`): used when upgrading from
-   an older box. Copies settings from source box to target box. The key may
-   come from the source box's local config (`qc3`) rather than from the cloud.
+   an older box. Copies settings from source box to target box.
 
 3. **Bluetooth pairing** (`PairingHelper.tryBindBluetooth`): uses Bluetooth to
    establish initial connection. May bypass cloud rendezvous entirely.
 
 4. **Simple mode pairing** (`RestoreFromBackupDialog`): restores from cloud
-   backup. May use a different key derivation path.
+   backup.
 
-The standard pairing path (path 1) is what our HA code implements. If some
-boxes require a different path (e.g., migration), the key derivation would
-differ.
+The standard pairing path (path 1) is what our HA code implements.
 
 ---
 
 ## 9. Fixes applied in 1.1.8-alpha.1
 
-### 9.1 Two-tier key derivation (`xname` support)
+### 9.1 `rkey` rotation key support
 
-**Root cause:** The cloud provisioning response contains a `symmetricKeys` array
-where each entry's `key` field is RSA-encrypted. On older boxes (Gold), the
-RSA-decrypted key IS the final symmetric key. On newer boxes (Gold Plus, Gold
-SE), the RSA-decrypted key is a **Key-Encryption Key (KEK)** — the actual
-symmetric key is AES-CBC encrypted inside a separate `xname` field in the group
-JSON.
+**Root cause:** The APK's `n73.m15464y()` tries `symmetricKeys[0].rkey.key`
+first (RSA-decrypted), then falls back to `symmetricKeys[0].key`. Our code
+only used the fallback. On boxes with `rkey` present (Gold Plus, Gold SE),
+the actual encryption key is the rotation key from `rkey.key`, not
+`symmetricKeys[0].key`.
 
-**Fix:** `extract_group_credentials()` in `auth.py` now checks for `xname`:
-- If present: RSA-decrypt `symmetricKeys[0].key` → take first 32 bytes →
-  AES-decrypt `xname` → that's the actual symmetric key
-- If absent: use the RSA-decrypted key directly (unchanged Gold behavior)
-- Falls back gracefully on decryption errors
+**Fix:** `extract_group_credentials()` in `auth.py` now checks for `rkey`:
+- If `symmetricKeys[0].rkey` is a non-empty string: parse as JSON, extract
+  `key` field, RSA-decrypt it → that's the symmetric key
+- If `rkey` is absent or parsing fails: use `symmetricKeys[0].key` directly
+  (unchanged Gold behavior)
 
-**Same fix applied to:** `capture_firewalla_packets.py` — the capture tool's
-`_provision_symmetric_key()` function had the same bug. This was likely the
-cause of the Issue 22 user's 3 failed decode attempts (the tool was deriving
-the wrong key on their Gold Plus).
+**Same fix applied to:** `capture_firewalla_packets.py` — both group-poll
+paths now check for `rkey`.
 
 ### 9.2 Reverted `mtype` from outer envelope
 
 **Finding:** The `mtype: "msg"` field was added in 1.1.7-beta.1 based on APK
 string analysis of `wx3.d()`. However, that string is the **inner** encrypted
 message structure, not the outer envelope. Neither captured phone trace shows
-`mtype` in the outer envelope. The APK's `y2.java` does add it via
-`c.put("mtype", "msg")`, but the box accepts messages without it.
+`mtype` in the outer envelope.
 
 **Fix:** Removed `_RAW_MESSAGE_MTYPE_KEY` and the `"mtype": "msg"` field from
 the outer payload in `client.py`.
@@ -479,11 +484,11 @@ include:
 - `embeddedOps`: `latest24MainNetworkEvents` with event filters for
   `system_reboot`, `dualwan_state`, `wan_state`
 
-### 9.4 Debug logging for group JSON
+### 9.4 Diagnostic output in capture tool
 
-**Fix:** Added debug logging in `auth.py` that logs whether each group has
-`xname` and how many `symmetricKeys` entries it has. Also logs when two-tier
-key wrapping is activated and when fallback occurs.
+**Fix:** Added diagnostic output to `capture_firewalla_packets.py` that
+reports group fields (including `rkey` presence), key derivation path, and
+derived key length/prefix.
 
 ---
 
@@ -495,8 +500,5 @@ key wrapping is activated and when fallback occurs.
    Gold-working box returns 192KB (full runtime data) on the first POST?
 3. Why does the GP-failing phone send 7 POSTs before SSE while the
    Gold-working phone sends 1?
-4. Does the `rkeyts` field matter for message acceptance?
-5. Are there cloud-brokered pairing paths that use a different key derivation
+4. Are there cloud-brokered pairing paths that use a different key derivation
    than the standard path?
-6. Does the Gold box's cloud response contain `xname`? (Debug logging added
-   in 1.1.8-alpha.1 will answer this on next pairing.)

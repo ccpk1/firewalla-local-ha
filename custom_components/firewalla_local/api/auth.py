@@ -61,8 +61,8 @@ _GROUP_FIELD_ID: Final = "_id"
 _GROUP_FIELD_AID: Final = "aid"
 _GROUP_FIELD_EID: Final = "eid"
 _GROUP_FIELD_SYMMETRIC_KEYS: Final = "symmetricKeys"
-_GROUP_FIELD_XNAME: Final = "xname"
 _SYMMETRIC_KEY_FIELD_KEY: Final = "key"
+_SYMMETRIC_KEY_FIELD_RKEY: Final = "rkey"
 
 _ENDPOINT_LOGIN_EPTOKEN: Final = "/login/eptoken"
 _ENDPOINT_CLOUD_RENDEZVOUS: Final = "/ept/rendezvous/me"
@@ -306,16 +306,6 @@ async def fetch_groups(
                 "Firewalla cloud groups became visible from %s",
                 endpoint,
             )
-            for group in groups:
-                has_xname = bool(group.get(_GROUP_FIELD_XNAME))
-                LOGGER.debug(
-                    "Group %s: xname=%s, symmetricKeys=%d",
-                    group.get(_GROUP_FIELD_ID, "?"),
-                    "present" if has_xname else "absent",
-                    len(group.get(_GROUP_FIELD_SYMMETRIC_KEYS, []))
-                    if isinstance(group.get(_GROUP_FIELD_SYMMETRIC_KEYS), list)
-                    else 0,
-                )
             return (
                 GroupFetchResult(source=endpoint, status=status, groups=groups),
                 identity,
@@ -379,33 +369,23 @@ def extract_group_credentials(
     if not isinstance(symmetric_key_cipher, str) or not symmetric_key_cipher:
         return None
 
-    # Step 1: RSA-decrypt the symmetric key entry to get the intermediate key
-    intermediate_key = rsa_decrypt_base64(symmetric_key_cipher, private_pem)
+    symmetric_key_plain = rsa_decrypt_base64(symmetric_key_cipher, private_pem)
 
-    # Step 2: If the group has an "xname" field, the intermediate key is a
-    # Key-Encryption Key (KEK). The actual symmetric key is AES-CBC encrypted
-    # inside xname using the first 32 bytes of the intermediate key with a
-    # zero IV. This two-tier wrapping is used by newer Firewalla models.
-    xname_cipher = matching_group.get(_GROUP_FIELD_XNAME)
-    if isinstance(xname_cipher, str) and xname_cipher:
-        LOGGER.info(
-            "Group contains xname field; deriving symmetric key via "
-            "two-tier key wrapping"
-        )
+    # rkey (rotation key) check: the APK's n73.m15464y() tries
+    # symmetricKeys[0].rkey.key first, then falls back to
+    # symmetricKeys[0].key. See docs/PAIRING_AUDIT.md section 8.
+    rkey_raw = first_symmetric_key.get(_SYMMETRIC_KEY_FIELD_RKEY)
+    if isinstance(rkey_raw, str) and rkey_raw:
         try:
-            symmetric_key_plain = aes256_cbc_decrypt_from_base64(
-                xname_cipher,
-                intermediate_key[:32],
-            )
-        except (ValueError, UnicodeDecodeError) as err:
-            LOGGER.warning(
-                "xname decryption failed (%s); falling back to direct key",
-                err,
-            )
-            symmetric_key_plain = intermediate_key
-    else:
-        # No xname field — the intermediate key IS the final key (older models)
-        symmetric_key_plain = intermediate_key
+            rkey_payload = json.loads(rkey_raw)
+            rkey_cipher = rkey_payload.get("key")
+            if isinstance(rkey_cipher, str) and rkey_cipher:
+                LOGGER.info(
+                    "Group has rkey rotation key; deriving symmetric key from rkey"
+                )
+                symmetric_key_plain = rsa_decrypt_base64(rkey_cipher, private_pem)
+        except (ValueError, TypeError, json.JSONDecodeError) as err:
+            LOGGER.debug("rkey parsing failed (%s); using direct symmetric key", err)
 
     return FirewallaProvisionedCredentials(
         license=qr_data.license,
