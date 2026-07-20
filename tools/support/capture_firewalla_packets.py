@@ -346,6 +346,14 @@ async def _provision_symmetric_key(
                     group_eid = group.get("eid")
                     group_aid = group.get("aid")
                     sym_keys = group.get("symmetricKeys")
+                    has_xname = bool(group.get("xname"))
+                    print(
+                        f"  Found matching group: gid={gid}, "
+                        f"eid={'present' if group_eid else 'absent'}, "
+                        f"aid={'present' if group_aid else 'absent'}, "
+                        f"symmetricKeys={len(sym_keys) if isinstance(sym_keys, list) else 0}, "
+                        f"xname={'present' if has_xname else 'absent'}"
+                    )
                     if not isinstance(group_eid, str) or not group_eid:
                         continue
                     if not isinstance(group_aid, str) or not group_aid:
@@ -358,7 +366,29 @@ async def _provision_symmetric_key(
                     key_cipher = first_key.get("key")
                     if not isinstance(key_cipher, str) or not key_cipher:
                         continue
-                    symmetric_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                    intermediate_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                    # Two-tier key wrapping: if xname is present, the
+                    # intermediate key is a KEK used to AES-decrypt xname
+                    xname = group.get("xname")
+                    if isinstance(xname, str) and xname:
+                        print(
+                            "  Group has xname field; deriving key via "
+                            "two-tier wrapping"
+                        )
+                        try:
+                            symmetric_key = _aes256_cbc_decrypt_from_base64(
+                                xname, intermediate_key[:32]
+                            )
+                        except ValueError, UnicodeDecodeError:
+                            print("  xname decryption failed; using direct key")
+                            symmetric_key = intermediate_key
+                    else:
+                        print("  No xname field; using direct RSA-decrypted key")
+                        symmetric_key = intermediate_key
+                    print(
+                        f"  Derived symmetric key: {len(symmetric_key)} chars, "
+                        f"prefix={symmetric_key[:8]}..."
+                    )
                     return _ProvisioningResult(
                         symmetric_key=symmetric_key,
                         gid=gid,
@@ -398,6 +428,13 @@ async def _provision_symmetric_key(
                         group_eid = group.get("eid")
                         group_aid = group.get("aid")
                         sym_keys = group.get("symmetricKeys")
+                        has_xname = bool(group.get("xname"))
+                        print(
+                            f"  Found matching group (login fallback): "
+                            f"gid={gid}, "
+                            f"symmetricKeys={len(sym_keys) if isinstance(sym_keys, list) else 0}, "
+                            f"xname={'present' if has_xname else 'absent'}"
+                        )
                         if not isinstance(group_eid, str) or not group_eid:
                             continue
                         if not isinstance(group_aid, str) or not group_aid:
@@ -410,7 +447,27 @@ async def _provision_symmetric_key(
                         key_cipher = first_key.get("key")
                         if not isinstance(key_cipher, str) or not key_cipher:
                             continue
-                        symmetric_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                        intermediate_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                        xname = group.get("xname")
+                        if isinstance(xname, str) and xname:
+                            print(
+                                "  Group has xname field; deriving key via "
+                                "two-tier wrapping"
+                            )
+                            try:
+                                symmetric_key = _aes256_cbc_decrypt_from_base64(
+                                    xname, intermediate_key[:32]
+                                )
+                            except ValueError, UnicodeDecodeError:
+                                print("  xname decryption failed; using direct key")
+                                symmetric_key = intermediate_key
+                        else:
+                            print("  No xname field; using direct RSA-decrypted key")
+                            symmetric_key = intermediate_key
+                        print(
+                            f"  Derived symmetric key: {len(symmetric_key)} chars, "
+                            f"prefix={symmetric_key[:8]}..."
+                        )
                         return _ProvisioningResult(
                             symmetric_key=symmetric_key,
                             gid=gid,
