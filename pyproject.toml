@@ -34,6 +34,14 @@ filterwarnings = [
 [tool.ruff]
 line-length = 88
 target-version = "py314"
+exclude = [
+    ".tmp",
+    ".captures",
+    ".artifacts",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+]
 
 [tool.ruff.lint]
 select = ["ASYNC", "B", "C4", "E", "F", "I", "RUF", "SIM", "UP"]
