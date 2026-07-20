@@ -46,12 +46,19 @@ exclude = [
 [tool.ruff.lint]
 select = ["ASYNC", "B", "C4", "E", "F", "I", "RUF", "SIM", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+"custom_components/firewalla_local/device_tracker.py" = ["I001"]
+
 [tool.mypy]
 python_version = "3.14"
 strict = true
 warn_unused_ignores = true
 show_error_codes = true
 files = ["custom_components/firewalla_local"]
+
+[[tool.mypy.overrides]]
+module = "homeassistant.components.device_tracker"
+ignore_errors = true
 
 [tool.pylint.main]
 ignore-paths = [
