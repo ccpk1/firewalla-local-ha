@@ -62,6 +62,7 @@ _GROUP_FIELD_AID: Final = "aid"
 _GROUP_FIELD_EID: Final = "eid"
 _GROUP_FIELD_SYMMETRIC_KEYS: Final = "symmetricKeys"
 _SYMMETRIC_KEY_FIELD_KEY: Final = "key"
+_SYMMETRIC_KEY_FIELD_RKEY: Final = "rkey"
 
 _ENDPOINT_LOGIN_EPTOKEN: Final = "/login/eptoken"
 _ENDPOINT_CLOUD_RENDEZVOUS: Final = "/ept/rendezvous/me"
@@ -369,6 +370,23 @@ def extract_group_credentials(
         return None
 
     symmetric_key_plain = rsa_decrypt_base64(symmetric_key_cipher, private_pem)
+
+    # rkey (rotation key) check: the APK's n73.m15464y() tries
+    # symmetricKeys[0].rkey.key first, then falls back to
+    # symmetricKeys[0].key. See docs/PAIRING_AUDIT.md section 8.
+    rkey_raw = first_symmetric_key.get(_SYMMETRIC_KEY_FIELD_RKEY)
+    if isinstance(rkey_raw, str) and rkey_raw:
+        try:
+            rkey_payload = json.loads(rkey_raw)
+            rkey_cipher = rkey_payload.get("key")
+            if isinstance(rkey_cipher, str) and rkey_cipher:
+                LOGGER.info(
+                    "Group has rkey rotation key; deriving symmetric key from rkey"
+                )
+                symmetric_key_plain = rsa_decrypt_base64(rkey_cipher, private_pem)
+        except (ValueError, TypeError, json.JSONDecodeError) as err:
+            LOGGER.debug("rkey parsing failed (%s); using direct symmetric key", err)
+
     return FirewallaProvisionedCredentials(
         license=qr_data.license,
         host=host,

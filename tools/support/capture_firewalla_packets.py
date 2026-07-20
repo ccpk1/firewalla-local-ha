@@ -346,6 +346,21 @@ async def _provision_symmetric_key(
                     group_eid = group.get("eid")
                     group_aid = group.get("aid")
                     sym_keys = group.get("symmetricKeys")
+                    has_rkey = bool(
+                        sym_keys
+                        and isinstance(sym_keys, list)
+                        and len(sym_keys) > 0
+                        and isinstance(sym_keys[0], dict)
+                        and sym_keys[0].get("rkey")
+                    )
+                    print(
+                        f"  Found matching group: gid={gid}, "
+                        f"eid={'present' if group_eid else 'absent'}, "
+                        f"aid={'present' if group_aid else 'absent'}, "
+                        f"symmetricKeys="
+                        f"{len(sym_keys) if isinstance(sym_keys, list) else 0}, "
+                        f"rkey={'present' if has_rkey else 'absent'}"
+                    )
                     if not isinstance(group_eid, str) or not group_eid:
                         continue
                     if not isinstance(group_aid, str) or not group_aid:
@@ -359,6 +374,28 @@ async def _provision_symmetric_key(
                     if not isinstance(key_cipher, str) or not key_cipher:
                         continue
                     symmetric_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                    # rkey rotation key: APK's n73.m15464y() tries
+                    # symmetricKeys[0].rkey.key first, then falls back
+                    rkey_raw = first_key.get("rkey")
+                    if isinstance(rkey_raw, str) and rkey_raw:
+                        try:
+                            rkey_payload = json.loads(rkey_raw)
+                            rkey_cipher = rkey_payload.get("key")
+                            if isinstance(rkey_cipher, str) and rkey_cipher:
+                                print(
+                                    "  Group has rkey rotation key; "
+                                    "deriving key from rkey"
+                                )
+                                symmetric_key = _rsa_decrypt_base64(
+                                    rkey_cipher, private_pem
+                                )
+                        except ValueError, TypeError, json.JSONDecodeError:
+                            print("  rkey parsing failed; using direct key")
+                    print(
+                        f"  Derived symmetric key: "
+                        f"{len(symmetric_key)} chars, "
+                        f"prefix={symmetric_key[:8]}..."
+                    )
                     return _ProvisioningResult(
                         symmetric_key=symmetric_key,
                         gid=gid,
@@ -398,6 +435,20 @@ async def _provision_symmetric_key(
                         group_eid = group.get("eid")
                         group_aid = group.get("aid")
                         sym_keys = group.get("symmetricKeys")
+                        has_rkey = bool(
+                            sym_keys
+                            and isinstance(sym_keys, list)
+                            and len(sym_keys) > 0
+                            and isinstance(sym_keys[0], dict)
+                            and sym_keys[0].get("rkey")
+                        )
+                        print(
+                            f"  Found matching group (login fallback): "
+                            f"gid={gid}, "
+                            f"symmetricKeys="
+                            f"{len(sym_keys) if isinstance(sym_keys, list) else 0}, "
+                            f"rkey={'present' if has_rkey else 'absent'}"
+                        )
                         if not isinstance(group_eid, str) or not group_eid:
                             continue
                         if not isinstance(group_aid, str) or not group_aid:
@@ -411,6 +462,26 @@ async def _provision_symmetric_key(
                         if not isinstance(key_cipher, str) or not key_cipher:
                             continue
                         symmetric_key = _rsa_decrypt_base64(key_cipher, private_pem)
+                        rkey_raw = first_key.get("rkey")
+                        if isinstance(rkey_raw, str) and rkey_raw:
+                            try:
+                                rkey_payload = json.loads(rkey_raw)
+                                rkey_cipher = rkey_payload.get("key")
+                                if isinstance(rkey_cipher, str) and rkey_cipher:
+                                    print(
+                                        "  Group has rkey rotation key; "
+                                        "deriving key from rkey"
+                                    )
+                                    symmetric_key = _rsa_decrypt_base64(
+                                        rkey_cipher, private_pem
+                                    )
+                            except ValueError, TypeError, json.JSONDecodeError:
+                                print("  rkey parsing failed; using direct key")
+                        print(
+                            f"  Derived symmetric key: "
+                            f"{len(symmetric_key)} chars, "
+                            f"prefix={symmetric_key[:8]}..."
+                        )
                         return _ProvisioningResult(
                             symmetric_key=symmetric_key,
                             gid=gid,

@@ -54,7 +54,6 @@ _RAW_MESSAGE_ERROR_KEY: Final = "error"
 _RAW_MESSAGE_DATA_KEY: Final = "data"
 _RAW_MESSAGE_CODE_KEY: Final = "code"
 _RAW_MESSAGE_TIMESTAMP_KEY: Final = "timestamp"
-_RAW_MESSAGE_MTYPE_KEY: Final = "mtype"
 
 _COMMAND_MESSAGE_TYPE: Final = "cmd"
 _GET_MESSAGE_TYPE: Final = "get"
@@ -63,12 +62,20 @@ _SET_MESSAGE_TYPE: Final = "set"
 _PAIRING_COMMAND_TIMEOUT_KEY: Final = "COMMAND_TIMEOUT"
 _PAIRING_DAP_OPS_KEY: Final = "dapOps"
 _PAIRING_FWAPC_OPS_KEY: Final = "fwapcOps"
+_PAIRING_EMBEDDED_OPS_KEY: Final = "embeddedOps"
 _PAIRING_HTTP_METHOD_KEY: Final = "method"
 _PAIRING_HTTP_PATH_KEY: Final = "path"
 _PAIRING_HTTP_BODY_KEY: Final = "body"
 _PAIRING_HTTP_RESULT_KEY: Final = "key"
 _PAIRING_VALUE_KEY: Final = "value"
 _PAIRING_TIMEOUT_SECONDS: Final = 15
+_PAIRING_EMBEDDED_OPS_ITEM_EVENTS: Final = "events"
+_PAIRING_EMBEDDED_OPS_KEY_EVENTS: Final = "latest24MainNetworkEvents"
+_PAIRING_EMBEDDED_OPS_EVENT_TYPE_ACTION: Final = "action"
+_PAIRING_EMBEDDED_OPS_EVENT_TYPE_STATE: Final = "state"
+_PAIRING_EMBEDDED_OPS_SUB_TYPE_SYSTEM_REBOOT: Final = "system_reboot"
+_PAIRING_EMBEDDED_OPS_SUB_TYPE_DUALWAN_STATE: Final = "dualwan_state"
+_PAIRING_EMBEDDED_OPS_SUB_TYPE_WAN_STATE: Final = "wan_state"
 _HTTP_CONNECTION_HEADER: Final = "Connection"
 _HTTP_CONNECTION_CLOSE_VALUE: Final = "close"
 _COMMAND_ITEM_KEY: Final = "item"
@@ -366,7 +373,6 @@ class FirewallaApiClient:
         payload = {
             _RAW_MESSAGE_KEY: encrypted_message,
             _RAW_MESSAGE_TIMESTAMP_KEY: int(time.time()),
-            _RAW_MESSAGE_MTYPE_KEY: "msg",
         }
 
         response_status, response_text = await self._async_post_local_payload(
@@ -519,6 +525,54 @@ class FirewallaApiClient:
                     _PAIRING_HTTP_RESULT_KEY: "stationControls",
                     _PAIRING_HTTP_METHOD_KEY: "GET",
                     _PAIRING_HTTP_PATH_KEY: "/config/stations",
+                },
+                {
+                    _PAIRING_HTTP_BODY_KEY: {},
+                    _PAIRING_HTTP_RESULT_KEY: "switchTopology",
+                    _PAIRING_HTTP_METHOD_KEY: "GET",
+                    _PAIRING_HTTP_PATH_KEY: "/status/wired_station",
+                },
+                {
+                    _PAIRING_HTTP_BODY_KEY: {},
+                    _PAIRING_HTTP_RESULT_KEY: "switchInfo",
+                    _PAIRING_HTTP_METHOD_KEY: "GET",
+                    _PAIRING_HTTP_PATH_KEY: "/status/switch",
+                },
+                {
+                    _PAIRING_HTTP_BODY_KEY: {},
+                    _PAIRING_HTTP_RESULT_KEY: "fwapcCountry",
+                    _PAIRING_HTTP_METHOD_KEY: "GET",
+                    _PAIRING_HTTP_PATH_KEY: "/config/country",
+                },
+            ],
+            _PAIRING_EMBEDDED_OPS_KEY: [
+                {
+                    "item": _PAIRING_EMBEDDED_OPS_ITEM_EVENTS,
+                    _PAIRING_HTTP_RESULT_KEY: (_PAIRING_EMBEDDED_OPS_KEY_EVENTS),
+                    "target": DEFAULT_INIT_TARGET,
+                    _PAIRING_VALUE_KEY: {
+                        "min": int(time.time() * 1000) - 86400000,
+                        "reverse": True,
+                        "parse_json": True,
+                        "filters": [
+                            {
+                                "event_type": (_PAIRING_EMBEDDED_OPS_EVENT_TYPE_ACTION),
+                                "sub_type": (
+                                    _PAIRING_EMBEDDED_OPS_SUB_TYPE_SYSTEM_REBOOT
+                                ),
+                            },
+                            {
+                                "event_type": (_PAIRING_EMBEDDED_OPS_EVENT_TYPE_STATE),
+                                "sub_type": (
+                                    _PAIRING_EMBEDDED_OPS_SUB_TYPE_DUALWAN_STATE
+                                ),
+                            },
+                            {
+                                "event_type": (_PAIRING_EMBEDDED_OPS_EVENT_TYPE_STATE),
+                                "sub_type": (_PAIRING_EMBEDDED_OPS_SUB_TYPE_WAN_STATE),
+                            },
+                        ],
+                    },
                 }
             ],
             _COMMAND_GET_KEY: DEFAULT_INIT_TARGET,
