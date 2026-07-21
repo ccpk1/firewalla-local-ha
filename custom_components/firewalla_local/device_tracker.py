@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from homeassistant.components.device_tracker import ScannerEntity
+from homeassistant.components.device_tracker import ScannerEntity  # type: ignore[attr-defined]
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
