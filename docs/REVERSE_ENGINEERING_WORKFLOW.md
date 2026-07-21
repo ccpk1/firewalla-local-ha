@@ -235,23 +235,52 @@ key material encrypted with the public key sent in Step 3. The matching
 group is identified by comparing the group `_id` field against the QR
 `gid`.
 
-**Key fact: this symmetric key is per-box.** Every client (iPhone, Home
-Assistant, etc.) that successfully pairs with this box receives the same
-AES key material. This is why `utils/analyze_capture.py` can decrypt
-any client's traffic using the key stored in the Home Assistant config
-entry — the phone and HA share the same box-level key.
+**Key observation: some boxes return an `rkey` rotation key, others don't.**
 
 ### Step 6 — Decrypt the symmetric key
 
-Decrypt the `key` field with the RSA private key:
+The symmetric key is stored in the group record's `symmetricKeys` array.
+There are two possible derivation paths. Some boxes return an `rkey` rotation
+key — those that don't use the direct key:
+
+**Path A — Direct key:** Decrypt the `key` field of the first symmetric key
+entry with the RSA private key:
 
 ```
-symmetric_key_plain = RSA-decrypt(symmetric_key_cipher, private_pem)
+symmetric_key_plain = RSA-decrypt(symmetricKeys[0].key, private_pem)
 ```
 
 This yields the 32-byte raw AES key material used for all subsequent local
 communication. The first 32 UTF-8 bytes of this material form the AES-256
 key.
+
+**Path B — Rotation key:** If `symmetricKeys[0].rkey` is a non-empty JSON
+string, it takes priority over the direct key. Parse it as JSON, extract
+its `"key"` field, and RSA-decrypt it:
+
+```
+intermediate_key = RSA-decrypt(symmetricKeys[0].key, private_pem)
+rkey_payload = JSON.parse(symmetricKeys[0].rkey)
+symmetric_key_plain = RSA-decrypt(rkey_payload.key, private_pem)
+```
+
+The presence of `rkey` is indicated by the `rkeyts` field in the outer
+envelope of encipher messages (the `ts` value from the `rkey` JSON).
+
+The APK method `n73.m15464y()` implements this priority:
+
+```java
+public String m15464y() {
+    String m15454C = m15454C();  // try rkey.key first
+    if (m15454C.length() == 0) {
+        m15454C = m15456E();     // fall back to symmetricKeys[0].key
+    }
+    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
+}
+```
+
+The `xname` field in the group JSON is AES-encrypted box metadata (box name,
+model), not an encrypted key. It is decrypted using the same intermediate key.
 
 ### Summary of what you get out of pairing
 
@@ -286,8 +315,61 @@ RSA decrypt (2048-bit private key) ──> raw symmetric key material
 Every local POST:
   build Firewalla envelope (mtype + message with from/obj/appInfo)
   json.dumps(envelope, separators=(",", ":")) ──> AES-256-CBC(key) ──> base64
-  payload = {"message": base64_ciphertext, "timestamp": <now>, "mtype": "msg"}
+  outer payload = {"message": base64_ciphertext, "timestamp": <now>}
   POST http://{host}:8833/v1/encipher/message/{gid}
+
+### Key derivation (two paths)
+
+The symmetric key used for AES-256-CBC encryption comes from one of two
+sources depending on what the cloud returns during provisioning:
+
+1. **`rkey` (rotation key, preferred):** If the first `symmetricKeys[0]`
+   entry contains a non-empty `rkey` field, it is parsed as JSON and its `key`
+   field is RSA-decrypted. The result is the actual encryption key.
+
+2. **Direct key (fallback):** If `rkey` is absent, `symmetricKeys[0].key`
+   is RSA-decrypted directly.
+
+The APK's `n73.m15464y()` method implements this priority:
+
+```java
+public String m15464y() {
+    String m15454C = m15454C();  // try rkey.key first
+    if (m15454C.length() == 0) {
+        m15454C = m15456E();     // fall back to symmetricKeys[0].key
+    }
+    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
+}
+```
+
+The `rkey` field is a JSON string from `symmetricKeys[0].rkey`. The app
+parses it into box metadata (`n73.y0`) via `ue3.m18976a()` → `m15455D()`:
+
+| `rkey` JSON field | Maps to | Used as |
+| --- | --- | --- |
+| `key` | RSA-decrypted → encryption key | `m15454C()` → `m15464y()` |
+| `ts` | `n73.y0.ts` | `rkeyts` in outer envelope |
+| `ttl` | `n73.y0.ttl` | Key rotation interval |
+
+The full chain from cloud response to encrypted message is:
+
+```
+symmetricKeys[0] ──> ue3.m18976a() ──> {key, rkey}
+    │                                    │
+    │ rkey present?                      │
+    ├── yes ──> JSON.parse(rkey)         │
+    │           └── .key ──> RSA-decrypt ─┤
+    │                                     │
+    └── no  ──> symmetricKeys[0].key      │
+                └── RSA-decrypt ──────────┤
+                                          ▼
+                              m15464y() ──> AES key (32 bytes)
+                                          │
+                                          ▼
+                              wx3.c() ──> AES-256-CBC encrypt
+                                          │
+                                          ▼
+                              POST /v1/encipher/message/{gid}
 ```
 
 ### POC artifacts
@@ -1958,10 +2040,12 @@ handles most ProGuard / R8 obfuscation.
 | File | Purpose |
 | --- | --- |
 | `wx3.java` | Message envelope builder. `d()` constructs the inner encrypted JSON; `c()` builds the outer HTTP payload with `timestamp` and `message` keys. |
-| `y2.java` | Message sending coroutine. Case 2 handles local encipher messages — it calls `wx3.c()` then adds `"mtype":"msg"` to the outer payload. |
+| `y2.java` | Message sending coroutine. Case 2 handles local encipher messages — it calls `wx3.c()` then adds `"mtype":"msg"` to the outer payload (though captured traffic does not show this field). |
 | `s73.java` | HTTP client for local communication. The `U()` method (heavily obfuscated) orchestrates message sending. |
-| `n73.java` | Network model / box descriptor. Contains model sets including `gse` (Gold SE) alongside `gold`, `gold_plus`, etc. |
+| `n73.java` | Box descriptor model. `m15464y()` resolves the encryption key with `rkey` priority. Contains model sets including `gse` (Gold SE) alongside `gold`, `gold_plus`, etc. |
 | `fy3.java` | Main message hub / router — sends messages via cloud (`a()`) and local (`b()`) paths. Contains obfuscated methods. |
+| `ue3.java` | Symmetric key entry parser — extracts `key` (RSA-encrypted) and `rkey` (rotation key JSON) from the cloud group response. |
+| `s97.java` | Crypto utilities — AES-256-CBC encrypt/decrypt, RSA decrypt, and the `m18101c()` / `m18106q()` helpers used by the key derivation chain. |
 
 ### Confirmed outer payload format (Android app v1.69.1)
 
@@ -1973,19 +2057,121 @@ JSONObject outer = new JSONObject();
 outer.put("timestamp", System.currentTimeMillis() / 1000);
 outer.put("message", encrypted_payload);
 
+// If the box metadata (n73.y0) has a "ts" value, send it as rkeyts:
+long optLong = jSONObject2 != null ? jSONObject2.optLong("ts") : 0L;
+if (optLong > 0) {
+    outer.put("rkeyts", optLong);
+}
+
 // y2.java caller then adds:
-outer.put("mtype", "msg");       // ← confirms mtype in outer envelope
-outer.put("rkeyts", 1);          // ← added when no ts in box metadata
+c.put("mtype", "msg");       // mtype added to outer by the message sender
+c.put("rkeyts", 1);          // fallback: rkeyts=1 when box has no ts
 ```
+
+The APK source confirms the app sends both `timestamp` and `mtype"msg"` in
+the outer envelope, plus `rkeyts` when available. **However, captured phone
+traffic does not show `mtype` in the outer envelope** — neither the working
+Gold capture nor the Gold Plus capture. The box accepts messages both with
+and without it. The integration does not send `mtype` in the outer envelope.
 
 The final HTTP body sent to `POST /v1/encipher/message/{gid}`:
 
 ```json
-{"timestamp": 1234567890, "message": "<encrypted>", "mtype": "msg"}
+{"timestamp": 1234567890, "message": "<encrypted>"}
 ```
 
-This confirmed that the phone app sends **both** `timestamp` and `mtype: msg`
-in the outer payload — the integration was missing only `mtype`.
+When `rkeyts` is present (box has rotation key metadata):
+
+```json
+{"timestamp": 1234567890, "message": "<encrypted>", "rkeyts": 1765640872536}
+```
+
+### Captured init message structure
+
+The phone's full init sequence (captured from v1.69.1-71 on iOS) uses a
+multi-stage approach. The first init is a simple handshake:
+
+```json
+{
+  "from": "iPhone",
+  "obj": {
+    "mtype": "init",
+    "id": "<uuid>",
+    "data": {
+      "get": "0.0.0.0",
+      "COMMAND_TIMEOUT": 15
+    },
+    "type": "jsonmsg",
+    "target": "0.0.0.0"
+  },
+  "appInfo": {
+    "deviceName": "iPhone",
+    "appID": "com.rottiesoft.circle",
+    "platform": "ios",
+    "timezone": "America/New_York",
+    "language": "en",
+    "version": "1.69.1-71",
+    "eid": "<eid>",
+    "ios": "26.5-0"
+  },
+  "msg": "",
+  "type": "jsondata",
+  "compressMode": 1,
+  "mtype": "msg"
+}
+```
+
+The second init requests multiple back-end data sources:
+
+```json
+{
+  "from": "iPhone",
+  "obj": {
+    "mtype": "init",
+    "id": "<uuid>",
+    "data": {
+      "value": {},
+      "get": "0.0.0.0",
+      "fwapcOps": [
+        {"key": "stationControls", "method": "GET", "path": "/config/stations"},
+        {"key": "switchTopology", "method": "GET", "path": "/status/wired_station"},
+        {"key": "switchInfo", "method": "GET", "path": "/status/switch"},
+        {"key": "fwapcCountry", "method": "GET", "path": "/config/country"}
+      ],
+      "embeddedOps": [
+        {
+          "item": "events",
+          "key": "latest24MainNetworkEvents",
+          "target": "0.0.0.0",
+          "value": {
+            "min": <24h_ago_ms>,
+            "reverse": true,
+            "parse_json": true,
+            "filters": [
+              {"event_type": "action", "sub_type": "system_reboot"},
+              {"event_type": "state", "sub_type": "dualwan_state"},
+              {"event_type": "state", "sub_type": "wan_state"}
+            ]
+          }
+        }
+      ],
+      "dapOps": [
+        {"key": "dapInfo", "method": "GET", "path": "/info"}
+      ]
+    },
+    "type": "jsonmsg",
+    "target": "0.0.0.0"
+  },
+  "appInfo": {"<same as above>"},
+  "msg": "",
+  "type": "jsondata",
+  "compressMode": 1,
+  "mtype": "msg"
+}
+```
+
+The phone repeats the second init up to 3 times, interleaved with SSE/GET
+polling for live stats, before the box returns the full runtime payload.
 
 ### Inner encrypted envelope format (for reference)
 

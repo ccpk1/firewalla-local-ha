@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from aiohttp import ClientSession
@@ -134,6 +134,50 @@ async def test_get_pairing_runtime_init_payload_uses_phone_like_sequence() -> No
                 "key": "stationControls",
                 "method": "GET",
                 "path": "/config/stations",
+            },
+            {
+                "body": {},
+                "key": "switchTopology",
+                "method": "GET",
+                "path": "/status/wired_station",
+            },
+            {
+                "body": {},
+                "key": "switchInfo",
+                "method": "GET",
+                "path": "/status/switch",
+            },
+            {
+                "body": {},
+                "key": "fwapcCountry",
+                "method": "GET",
+                "path": "/config/country",
+            },
+        ],
+        "embeddedOps": [
+            {
+                "item": "events",
+                "key": "latest24MainNetworkEvents",
+                "target": "0.0.0.0",
+                "value": {
+                    "min": ANY,
+                    "reverse": True,
+                    "parse_json": True,
+                    "filters": [
+                        {
+                            "event_type": "action",
+                            "sub_type": "system_reboot",
+                        },
+                        {
+                            "event_type": "state",
+                            "sub_type": "dualwan_state",
+                        },
+                        {
+                            "event_type": "state",
+                            "sub_type": "wan_state",
+                        },
+                    ],
+                },
             }
         ],
         "get": "0.0.0.0",

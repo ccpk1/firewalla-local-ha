@@ -99,6 +99,124 @@ def test_extract_group_credentials_returns_credentials() -> None:
     )
 
 
+def test_extract_group_credentials_uses_rkey_when_present() -> None:
+    """Test rkey.key takes priority over symmetricKeys[0].key."""
+    qr_data = load_qr_json(
+        '{"gid":"gid-123","seed":"seed-123","license":"license-123",'
+        '"ek":"ciphertext","ipaddress":"192.168.200.1"}'
+    )
+
+    with patch(
+        "custom_components.firewalla_local.api.auth.rsa_decrypt_base64",
+        side_effect=["intermediate-key", "rkey-derived-key"],
+    ):
+        credentials = extract_group_credentials(
+            groups=[
+                {
+                    "_id": "gid-123",
+                    "eid": "eid-123",
+                    "aid": "aid-123",
+                    "symmetricKeys": [
+                        {
+                            "key": "encrypted-key",
+                            "rkey": '{"key":"encrypted-rkey","ts":1765640872}',
+                        }
+                    ],
+                }
+            ],
+            qr_data=qr_data,
+            host="192.168.200.1",
+            private_pem="private-pem",
+        )
+
+    assert credentials == FirewallaProvisionedCredentials(
+        license="license-123",
+        host="192.168.200.1",
+        gid="gid-123",
+        eid="eid-123",
+        aid="aid-123",
+        symmetric_key="rkey-derived-key",
+        box_name=None,
+    )
+
+
+def test_extract_group_credentials_falls_back_when_rkey_absent() -> None:
+    """Test direct symmetricKeys[0].key is used when rkey is absent."""
+    qr_data = load_qr_json(
+        '{"gid":"gid-123","seed":"seed-123","license":"license-123",'
+        '"ek":"ciphertext","ipaddress":"192.168.200.1"}'
+    )
+
+    with patch(
+        "custom_components.firewalla_local.api.auth.rsa_decrypt_base64",
+        return_value="direct-key",
+    ):
+        credentials = extract_group_credentials(
+            groups=[
+                {
+                    "_id": "gid-123",
+                    "eid": "eid-123",
+                    "aid": "aid-123",
+                    "symmetricKeys": [{"key": "encrypted-key"}],
+                }
+            ],
+            qr_data=qr_data,
+            host="192.168.200.1",
+            private_pem="private-pem",
+        )
+
+    assert credentials == FirewallaProvisionedCredentials(
+        license="license-123",
+        host="192.168.200.1",
+        gid="gid-123",
+        eid="eid-123",
+        aid="aid-123",
+        symmetric_key="direct-key",
+        box_name=None,
+    )
+
+
+def test_extract_group_credentials_falls_back_on_rkey_parse_failure() -> None:
+    """Test extract falls back to direct key when rkey JSON is malformed."""
+    qr_data = load_qr_json(
+        '{"gid":"gid-123","seed":"seed-123","license":"license-123",'
+        '"ek":"ciphertext","ipaddress":"192.168.200.1"}'
+    )
+
+    with patch(
+        "custom_components.firewalla_local.api.auth.rsa_decrypt_base64",
+        return_value="direct-key",
+    ):
+        credentials = extract_group_credentials(
+            groups=[
+                {
+                    "_id": "gid-123",
+                    "eid": "eid-123",
+                    "aid": "aid-123",
+                    "symmetricKeys": [
+                        {
+                            "key": "encrypted-key",
+                            "rkey": "not-valid-json{",
+                        }
+                    ],
+                }
+            ],
+            qr_data=qr_data,
+            host="192.168.200.1",
+            private_pem="private-pem",
+        )
+
+    assert credentials == FirewallaProvisionedCredentials(
+        license="license-123",
+        host="192.168.200.1",
+        gid="gid-123",
+        eid="eid-123",
+        aid="aid-123",
+        symmetric_key="direct-key",
+        box_name=None,
+    )
+
+
 def test_default_group_poll_attempts_extended_for_slower_cloud_link() -> None:
     """Test the default polling window allows slower cloud group visibility."""
     assert DEFAULT_GROUP_POLL_ATTEMPTS == 20

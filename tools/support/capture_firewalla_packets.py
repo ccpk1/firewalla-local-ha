@@ -36,7 +36,6 @@ import getpass
 import ipaddress
 import json
 import re
-import sys
 import time
 import zipfile
 from collections import Counter, defaultdict
@@ -1408,11 +1407,9 @@ def main() -> int:
                         "eid": result.eid,
                         "aid": result.aid,
                         "provisioned_at_utc": (
-                            datetime.now(datetime.UTC)
+                            datetime.now(datetime.UTC)  # pylint: disable=no-member
                             .isoformat()
-                            .replace(  # pylint: disable=no-member
-                                "+00:00", "Z"
-                            )
+                            .replace("+00:00", "Z")
                         ),
                     },
                     indent=2,
