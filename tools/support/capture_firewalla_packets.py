@@ -17,6 +17,16 @@ It does not include the raw pcap or key in the safe report archive.
 
 # pylint: disable=too-many-lines
 
+import sys
+
+if sys.version_info < (3, 11):
+    print(
+        "Error: Python 3.11 or newer is required for this script. "
+        f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 from __future__ import annotations
 
 import argparse
@@ -635,7 +645,7 @@ def build_capture_filter(client_ip: str | None) -> str:
 
 def format_ts(ts: float) -> str:
     """Render one timestamp in a stable UTC format."""
-    return datetime.utcfromtimestamp(ts).isoformat() + "Z"
+    return datetime.fromtimestamp(ts, datetime.UTC).isoformat().replace("+00:00", "Z")  # pylint: disable=no-member
 
 
 def reassemble(segments: list[Segment]) -> tuple[bytes, list[tuple[int, float]]]:
@@ -947,7 +957,7 @@ def build_safe_report(
 
     summary: dict[str, object] = {
         "report_version": 1,
-        "created_at_utc": datetime.utcnow().isoformat() + "Z",
+        "created_at_utc": datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),  # pylint: disable=no-member
         "capture_file_name": capture_path.name,
         "capture_label": capture_label,
         "capture_filter": capture_filter,
@@ -1286,7 +1296,11 @@ def _decode_capture(
                         )
                         parsed = json.loads(decrypted)
                         entry["decrypted"] = parsed
-                    except Exception as exc:
+                    except (
+                        ValueError,
+                        UnicodeDecodeError,
+                        json.JSONDecodeError,
+                    ) as exc:
                         entry["decrypt_error"] = str(exc)
                     # Preserve outer envelope keys (everything except the
                     # encrypted message blob) so users can inspect fields like
@@ -1393,7 +1407,13 @@ def main() -> int:
                         "gid": result.gid,
                         "eid": result.eid,
                         "aid": result.aid,
-                        "provisioned_at_utc": datetime.utcnow().isoformat() + "Z",
+                        "provisioned_at_utc": (
+                            datetime.now(datetime.UTC)
+                            .isoformat()
+                            .replace(  # pylint: disable=no-member
+                                "+00:00", "Z"
+                            )
+                        ),
                     },
                     indent=2,
                 ),
