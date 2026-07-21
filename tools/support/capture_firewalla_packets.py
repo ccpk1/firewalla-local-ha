@@ -17,17 +17,17 @@ It does not include the raw pcap or key in the safe report archive.
 
 # pylint: disable=too-many-lines
 
+from __future__ import annotations
+
 import sys
 
-if sys.version_info < (3, 11):
+if sys.version_info < (3, 11):  # noqa: UP036
     print(
         "Error: Python 3.11 or newer is required for this script. "
         f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
         file=sys.stderr,
     )
     sys.exit(1)
-
-from __future__ import annotations
 
 import argparse
 import asyncio
