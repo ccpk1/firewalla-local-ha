@@ -323,8 +323,7 @@ rule into a switch.
 
 In practice:
 
-- user-managed persistent rules from the supported rule families may appear in
-  the options flow
+- user-managed persistent rules from the supported rule families (allow, block, disturb, QoS, and **route**) may appear in the options flow
 - Firewalla-managed or automatically generated rules are excluded
 - temporary or auto-expiring rule shapes are excluded from switch selection
 - if a previously selected rule later disappears, Home Assistant can still show

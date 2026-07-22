@@ -65,10 +65,11 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
 
 ## **Supported Hardware & Prerequisites**
 * **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. It should be compatible with the Purple, Gold Pro, and any other series running the Firewalla Box software that supports the local API.
-    * 🗣️ Community Feedback Needed: If you successfully run this on a non-Gold model, please drop a note in the Discussions tab so I can officially update this supported list!
-    * Updated April 20th, 2026 - User reports confirm working for models:
+    * 🗣️ Community Feedback Needed: If you successfully run this on a model not listed below, please drop a note in the Discussions tab so I can officially update this supported list!
+    * Updated July 22nd, 2026 - User reports confirm working for models:
        * Gold
        * Gold Plus
+       * Gold SE
        * Purple
 * **Home Assistant:** Requires Home Assistant Core version 2026.3.0 or newer.
 * **Network:** Your Home Assistant instance must be able to reach the Firewalla's local LAN IP.
@@ -125,7 +126,7 @@ It covers:
 
 - installation and removal
 - pairing expectations
-- options-flow management for rule switches, watched devices, device trackers, watched users, and polling
+- options-flow management for rule switches (allow, block, disturb, QoS, and route), watched devices, device trackers, watched users, and polling
 - refresh behavior
 - appliance monitoring, watched-device monitoring, device-tracker monitoring, and watched-user monitoring
 - runtime inventory, network, time-usage, speed-test, and WAN report services
