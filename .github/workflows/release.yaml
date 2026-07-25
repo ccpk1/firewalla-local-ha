@@ -1,4 +1,4 @@
-name: Release
+name: Build release artifacts
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,6 +24,12 @@ jobs:
         run: |
           cat <<< "$(jq --arg ver "${{ steps.tag.outputs.version }}" '.version = $ver' custom_components/firewalla_local/manifest.json)" > custom_components/firewalla_local/manifest.json
 
+      - name: Upload stamped manifest.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest.json
+          path: custom_components/firewalla_local/manifest.json
+
       - name: Create release archive
         run: |
           mkdir -p dist
@@ -31,25 +37,8 @@ jobs:
           cd dist
           zip -r "firewalla_local-${{ steps.tag.outputs.version }}.zip" firewalla_local/
 
-      - name: Check for prerelease
-        id: prerelease
-        run: |
-          if [[ "${{ steps.tag.outputs.version }}" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          PRERELEASE_FLAG=""
-          if [[ "${{ steps.prerelease.outputs.prerelease }}" == "true" ]]; then
-            PRERELEASE_FLAG="--prerelease"
-          fi
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            $PRERELEASE_FLAG \
-            "dist/firewalla_local-${{ steps.tag.outputs.version }}.zip"
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: firewalla_local-${{ steps.tag.outputs.version }}
+          path: dist/firewalla_local-${{ steps.tag.outputs.version }}.zip
