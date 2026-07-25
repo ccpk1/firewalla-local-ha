@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=69", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-firewalla-local"
-version = "1.1.8"
+dynamic = ["version"]
 description = "Local-first Home Assistant custom integration for Firewalla"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -21,6 +21,12 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["custom_components*"]
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+write_to = "custom_components/firewalla_local/_version.py"
+fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 addopts = "-ra"
