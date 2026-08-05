@@ -93,7 +93,17 @@ async def test_get_config_entry_diagnostics_redacts_entry_data(
                     }
                 ],
             },
-            runtime_data=SimpleNamespace(coordinator=SimpleNamespace(data=_snapshot())),
+            runtime_data=SimpleNamespace(
+                coordinator=SimpleNamespace(
+                    data=_snapshot(),
+                    last_init_payload={
+                        "networkProfiles": {
+                            "net-1": {"name": "Universe", "intf": "eth0"}
+                        },
+                        "hosts": [],
+                    },
+                )
+            ),
         ),
     )
 
@@ -125,6 +135,10 @@ async def test_get_config_entry_diagnostics_redacts_entry_data(
         ],
     }
     assert diagnostics["runtime_snapshot"] is not None
+    assert diagnostics["runtime_init_payload"] == {
+        "networkProfiles": {"net-1": {"name": "Universe", "intf": "eth0"}},
+        "hosts": [],
+    }
 
 
 async def test_get_config_entry_diagnostics_handles_missing_snapshot(
@@ -138,7 +152,9 @@ async def test_get_config_entry_diagnostics_handles_missing_snapshot(
             title="Firewalla",
             data={CONF_LICENSE: "license-123"},
             options={},
-            runtime_data=SimpleNamespace(coordinator=SimpleNamespace(data=None)),
+            runtime_data=SimpleNamespace(
+                coordinator=SimpleNamespace(data=None, last_init_payload=None)
+            ),
         ),
     )
 
@@ -148,3 +164,4 @@ async def test_get_config_entry_diagnostics_handles_missing_snapshot(
     assert entry_data[CONF_LICENSE] == "**REDACTED**"
     assert diagnostics["entry_options"] == {}
     assert diagnostics["runtime_snapshot"] is None
+    assert diagnostics["runtime_init_payload"] is None

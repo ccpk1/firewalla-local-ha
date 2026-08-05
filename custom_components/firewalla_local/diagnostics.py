@@ -32,12 +32,16 @@ async def async_get_config_entry_diagnostics(
     _hass: HomeAssistant, entry: FirewallaConfigEntry
 ) -> dict[str, object]:
     """Return diagnostics for a config entry."""
+    coordinator = entry.runtime_data.coordinator
     return {
         "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
         "entry_options": dict(getattr(entry, "options", {})),
         "runtime_snapshot": (
-            asdict(entry.runtime_data.coordinator.data)
-            if entry.runtime_data.coordinator.data is not None
+            asdict(coordinator.data) if coordinator.data is not None else None
+        ),
+        "runtime_init_payload": (
+            async_redact_data(coordinator.last_init_payload, TO_REDACT)
+            if coordinator.last_init_payload is not None
             else None
         ),
     }
