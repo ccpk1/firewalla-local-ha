@@ -114,10 +114,31 @@ either:
       reporter can now capture the full runtime (including `networkProfiles` /
       `networkConfig`) with the same diagnostic download they already use — no
       repo, venv, or CLI needed.
+- [x] **Implemented:** Best-effort redaction for the raw init payload
+      (`helpers/init_payload_redaction.py`). Verified against a real full-pull
+      diagnostic: **0 emails, 0 MACs, 0 IPs, 0 JWTs remain** after redaction.
+      Covers `jwt`, `ddnsToken`, `btMac`, `cpuid`, `publicIp`, `ddns`,
+      `localDomainSuffix`, host identifying fields, WireGuard peer keys/names,
+      the AP controller mesh key/SSID, and MAC/IP/email patterns in values and
+      dict keys.
+- [x] **Implemented:** Exclusion of large non-wireless sections to preserve
+      traceability while reducing sensitivity. Dropped: `userTags`,
+      `internetSpeedtestResults`, `systemFlows`, usage history (`last60`/
+      `last30`/`newLast24`/`last12Months`), event/health sections, `customized
+      Categories`, `deviceTags`/`tags`, `sysMetrics`, `monthlyDataUsage*`,
+      `networkMetrics`, `newAlarms`. Kept: `networkConfig` (wireless core),
+      `hosts` (for AP7 `ssidTags`), `policyRules`, `exceptionRules`, `appConfs`,
+      `policy`, `runtimeFeatures`, `runtimeDynamicFeatures`, `apController`.
+      Added internal-domain redaction (`*.ccpk.us` and subdomains). Verified:
+      personal names and internal domains gone; size ~930 KB → ~580 KB.
+- [ ] **Safe transfer (proposed):** Work with the reporter to provide the
+      diagnostic files through a **private channel** (email or private upload)
+      rather than posting publicly on the issue, since the raw payload is large
+      and redaction is best-effort.
 - [ ] Ask the reporter to re-capture with the new diagnostic: (1) hit
       **"Sync Runtime"**, wait, (2) download diagnostic, (3) make the wireless
       change in the app, (4) hit **"Sync Runtime"** again, wait, (5) download a
-      second diagnostic, and post both.
+      second diagnostic, and send both privately.
 - [ ] Re-run the wireless-key scan on the raw `runtime_init_payload` once
       captured.
 - [ ] Only then proceed to Phase 2 (protocol discovery) with confirmed evidence.

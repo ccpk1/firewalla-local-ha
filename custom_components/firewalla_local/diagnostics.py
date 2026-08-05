@@ -17,6 +17,7 @@ from .const import (
     CONF_SYMMETRIC_KEY,
 )
 from .coordinator import FirewallaConfigEntry
+from .helpers.init_payload_redaction import redact_runtime_init_payload
 
 TO_REDACT: Final = {
     CONF_AID,
@@ -40,7 +41,7 @@ async def async_get_config_entry_diagnostics(
             asdict(coordinator.data) if coordinator.data is not None else None
         ),
         "runtime_init_payload": (
-            async_redact_data(coordinator.last_init_payload, TO_REDACT)
+            redact_runtime_init_payload(coordinator.last_init_payload)
             if coordinator.last_init_payload is not None
             else None
         ),
