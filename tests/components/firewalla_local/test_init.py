@@ -49,6 +49,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WIRELESS_STATUS,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -58,6 +59,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+    SERVICE_SET_SSID_PAUSED,
     SERVICE_WAKE_HOST,
     TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON,
 )
@@ -1048,6 +1050,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_GET_TIME_USAGE_REPORT),
             (DOMAIN, SERVICE_GET_WAN_EVENTS),
             (DOMAIN, SERVICE_GET_WAN_DATA_USAGE),
+            (DOMAIN, SERVICE_GET_WIRELESS_STATUS),
             (DOMAIN, SERVICE_PAUSE_RULE),
             (DOMAIN, SERVICE_RESUME_RULE),
             (DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST),
@@ -1057,6 +1060,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION),
             (DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE),
             (DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE),
+            (DOMAIN, SERVICE_SET_SSID_PAUSED),
             (DOMAIN, SERVICE_WAKE_HOST),
         ]
     )
@@ -1069,6 +1073,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_GET_TIME_USAGE_REPORT,
         SERVICE_GET_WAN_EVENTS,
         SERVICE_GET_WAN_DATA_USAGE,
+        SERVICE_GET_WIRELESS_STATUS,
         SERVICE_PAUSE_RULE,
         SERVICE_RESUME_RULE,
         SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -1078,6 +1083,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_SET_HOST_DHCP_RESERVATION,
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+        SERVICE_SET_SSID_PAUSED,
         SERVICE_WAKE_HOST,
     }
 

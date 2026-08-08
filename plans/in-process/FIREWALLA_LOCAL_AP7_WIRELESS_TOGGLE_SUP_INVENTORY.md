@@ -1,8 +1,9 @@
 # Support note: AP7 wireless inventory evidence (Phase 1)
 
 Source: `ccpk1/firewalla-local-ha` issue #21 — *"[Feature]: Wireless Network Toggle for AP7"*.
-Artifacts: `.artifacts/ap7-wireless-discovery/base_line_guest_wifi_off.json` and
-`.artifacts/ap7-wireless-discovery/guest_wifi_on.json`.
+Artifacts: `.artifacts/ap7-wireless-discovery/` — `base_line_guest_wifi_off.json`,
+`guest_wifi_on.json` (initial, normalized-only), and `ap7_wifi_on.json`,
+`ap7_wifi_off.json` (comprehensive, with raw `networkConfig.apc`).
 
 ## 1. What the reporter submitted
 
@@ -56,21 +57,23 @@ require a Firewalla device (here a Purple) for control. The theory is that since
 the AP7 requires a Firewalla device, some of the AP7 config must be stored on the
 Firewalla.
 
-### 2.5 The AP7 access points appear as hosts
+### 2.5 The earlier "5 APs" were NOT Firewalla AP7s (corrected)
 
-Five hosts have `connection_type == "ap"` and `host_device_type == "ap"`, all on
-the "Universe" network:
+The initial assumption that the user had 5 Firewalla AP7s was **wrong**. The
+reporter clarified that those 5 APs (UPSTAIRS-AP, MAIN-FLOOR-AP, KITCHEN-AP,
+GARAGE-AP, BASEMENT-AP) were **Aruba InstantOn AP22** units, managed outside of
+Firewalla, broadcasting SSIDs tagged for the appropriate VLAN. They were left
+over in the config and have since been removed.
+
+The user actually has **2 Firewalla AP7s** (both `fwap-D` model):
 
 | Host | MAC | IP |
 | --- | --- | --- |
-| UPSTAIRS-AP | `34:3A:20:C3:FC:A0` | 192.168.1.9 |
-| MAIN-FLOOR-AP | `34:3A:20:C4:03:CE` | 192.168.1.8 |
-| KITCHEN-AP | `34:8A:12:C4:06:36` | 192.168.1.5 |
-| GARAGE-AP | `34:8A:12:C4:06:06` | 192.168.1.6 |
-| BASEMENT-AP | `34:3A:20:C3:FB:8A` | 192.168.1.7 |
+| Main Floor | `20:6D:31:71:1D:D0` | 192.168.1.3 |
+| Upstairs | `20:6D:31:71:55:5C` | 192.168.1.4 |
 
-These normalized host records contain **no wireless/SSID config** — only MAC,
-name, IP, network, connection type, and flow counters.
+These are connected via `wg_ap` mesh backhaul peers (10.132.101.116/.124) and
+are fully managed through Firewalla.
 
 ### 2.6 "Guest" appears only as firewall policy rules
 
@@ -83,32 +86,49 @@ These are firewall rules, **not** wireless/SSID broadcast config.
 
 | Published concept | Local raw field / location | Normalized field | HA-derived field | Confidence / evidence |
 | --- | --- | --- | --- | --- |
-| AP7 device presence | `hosts[]` with `connection_type=ap`, `host_device_type=ap` | `FirewallaHostRuntime` | watched-device / device tracker | **High** — 5 AP7 hosts confirmed in diagnostic |
-| Wireless / SSID broadcast state | **Not present** in normalized snapshot or diagnostic | — | — | **None** — no wireless keys found |
-| Guest network (as rule scope) | `policy_rules[]` `tag_refs=intf:...`, `applies_to="Universe Guest"` | `FirewallaPolicyRule` | rule-backed switches | **High** — confirmed rules |
-| Raw `networkProfiles` / `networkConfig` | raw init payload (not in diagnostic) | not normalized | network lookup | **Present in raw payload, absent from diagnostic** |
+| AP7 device presence | `networkConfig.apc.assets.<id>` (name, model `fwap-D`, channel, txPower, meshMode, led, pauseWifi) | — | per-AP device | **High** — confirmed in comprehensive captures |
+| Wireless / SSID config | `networkConfig.apc.profile.<uuid>` (ssid, key, band, encryption, wpa3, paused) | — | SSID switch/sensor | **High** — confirmed structure |
+| Wireless toggle control | `networkConfig.apc.profile.<uuid>/paused` (true when off, absent when on) | — | SSID switch state | **High** — the only diff between on/off captures |
+| SSID → network mapping | `networkConfig.apc.assets_template.ap_default.wifiNetworks` (intf, vlan, ssidProfiles) | — | network association | **High** — confirmed |
+| AP mesh backhaul | `wgPeers` with `intf=wg_ap` | — | — | **High** — 2 AP7 peers confirmed |
+| Raw `networkProfiles` / `networkConfig` | raw init payload | not normalized | network lookup | **Present in raw payload** |
 
 ## 4. Conclusion and decision
 
-- The **normalized runtime snapshot does not carry wireless/SSID state**, and the
-  diagnostic export does not include the raw `networkProfiles`/`networkConfig`
-  payload where such state might live.
-- The AP7s are visible as hosts, but with no wireless config.
-- Because the two files are identical **and** the sync caveat is unresolved, we
-  **cannot yet conclude** that wireless state is absent from the Firewalla
-  runtime. It may simply not be captured by the current snapshot/diagnostic.
+- The **wireless config lives in `networkConfig.apc`** of the raw init payload,
+  **not** in the normalized `FirewallaRuntimeSnapshot`.
+- The **toggle control is the `paused` field** on an SSID profile — the only
+  difference between the wifi-on and wifi-off captures.
+- The user has **2 Firewalla AP7s** (`fwap-D`), not 5 (the 5 were Aruba AP22).
+- The **read path is confirmed**; the **write path is the key assumption** for
+  alpha.7 (see the alpha.7 implementation plan).
 
-**Decision gate outcome:** Phase 1 is **blocked on the reporter** confirming the
-"Sync Runtime" step. Before proceeding to Phase 2 (protocol discovery), we should
-either:
-1. Get the reporter to re-capture with a forced sync before the second download,
-   **and/or**
-2. Capture the **raw init payload** (which includes `networkProfiles` /
-   `networkConfig`) rather than only the normalized snapshot, so we can inspect
-   the actual wireless config location.
+**Decision gate outcome:** Phase 1 is **complete**. The wireless config and
+toggle control are confirmed. Proceed to Phase 2 (protocol discovery) and the
+alpha.7 implementation with the confirmed read path and assumed write path.
 
 ## 5. Next steps
 
+- [x] **AP7 wireless config located (2026-08-07):** The reporter submitted two
+      comprehensive captures (`ap7_wifi_on.json`, `ap7_wifi_off.json`) with the
+      extended diagnostic. The wireless config lives in
+      `networkConfig.apc` (the AP controller section). The **only** difference
+      between wifi-on and wifi-off is the `paused` field on one SSID profile:
+      `networkConfig.apc.profile.<uuid>/paused: true` when off, absent when on.
+      This is the wireless toggle control.
+- [x] **AP7 device model understood:** The reporter clarified the earlier
+      assumption was wrong — the 5 APs were **Aruba InstantOn AP22** (managed
+      outside Firewalla, now removed). They now have **2 Firewalla AP7s**:
+      "Main Floor" (`20:6D:31:71:1D:D0` @ 192.168.1.3) and "Upstairs"
+      (`20:6D:31:71:55:5C` @ 192.168.1.4), both `fwap-D` model, connected via
+      `wg_ap` mesh backhaul peers (10.132.101.116/.124).
+- [x] **Wireless config structure mapped:** `networkConfig.apc` contains:
+      `assets` (per-AP device config: name, model, channel, txPower, country,
+      meshMode, led, pauseWifi, disableAcl), `assets_template.ap_default`
+      (wifiNetworks → ssidProfiles → VLANs, mesh key/ssid), `profile`
+      (per-SSID: ssid, key, band, encryption, wpa3, paused), and
+      `globalSysConfig` (stp, lldpd, autoSteer, maxComp, useDfsChannels).
+      The toggled SSID is on `br1` / `vlan=100`.
 - [x] **Implemented:** Extended the integration diagnostic (`diagnostics.py`) to
       include the raw init payload (`runtime_init_payload`, redacted). The
       reporter can now capture the full runtime (including `networkProfiles` /

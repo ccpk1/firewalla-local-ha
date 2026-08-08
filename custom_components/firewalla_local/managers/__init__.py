@@ -5,6 +5,7 @@ from .host_manager import FirewallaHostManager
 from .integration_manager import FirewallaIntegrationManager
 from .rule_manager import FirewallaRuleManager
 from .user_manager import FirewallaUserManager
+from .wireless_manager import FirewallaWirelessManager
 
 __all__ = [
     "FirewallaBaseManager",
@@ -12,4 +13,5 @@ __all__ = [
     "FirewallaIntegrationManager",
     "FirewallaRuleManager",
     "FirewallaUserManager",
+    "FirewallaWirelessManager",
 ]

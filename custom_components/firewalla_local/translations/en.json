@@ -800,6 +800,9 @@
     "rule_target_not_found": {
       "message": "The rule target \"{rule_target}\" does not match a managed live rule."
     },
+    "ssid_profile_not_found": {
+      "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network."
+    },
     "set_host_dhcp_reservation_failed": {
       "message": "The integration could not update the host DHCP reservation. Check the Firewalla connection and try again."
     },
@@ -1454,6 +1457,46 @@
           "name": "Rule target",
           "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
         },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "set_ssid_paused": {
+      "name": "Set SSID paused",
+      "description": "Pause or resume one AP7 wireless network (SSID profile). This is a PoC service for the unconfirmed wireless write contract.",
+      "fields": {
+        "ssid_profile_id": {
+          "name": "SSID profile ID",
+          "description": "The UUID of the SSID profile to toggle. Get the list from the get_wireless_status service."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Set to true to enable (unpause) the wireless network, or false to pause it."
+        },
+        "write_pattern": {
+          "name": "Write pattern",
+          "description": "The write pattern to use for the unconfirmed wireless write contract. Defaults to set_apc. Try the alternatives if the default does not work."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_wireless_status": {
+      "name": "Get wireless status",
+      "description": "Return the current AP7 wireless configuration (SSID profiles and access points) as structured data.",
+      "fields": {
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
           "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."

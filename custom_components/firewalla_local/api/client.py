@@ -793,6 +793,49 @@ class FirewallaApiClient:
             return data_payload
         raise FirewallaProtocolError(error_message)
 
+    async def async_set_ssid_paused(
+        self,
+        *,
+        write_pattern: str,
+        apc_payload: dict[str, object],
+    ) -> dict[str, object]:
+        """Write the paused state for one SSID profile using a selected pattern.
+
+        The write contract for the AP controller config is not yet confirmed
+        from packet captures, so this supports multiple candidate patterns that
+        can be tested against a live box. ``apc_payload`` is the current
+        ``networkConfig.apc`` value with the target profile's ``paused`` field
+        already applied.
+        """
+        if write_pattern == "set_apc":
+            return await self._async_send_local_message(
+                message_type=_SET_MESSAGE_TYPE,
+                data={
+                    _COMMAND_ITEM_KEY: "apc",
+                    _COMMAND_VALUE_KEY: apc_payload,
+                },
+                target=DEFAULT_INIT_TARGET,
+            )
+        if write_pattern == "cmd_apc":
+            return await self._async_send_local_message(
+                message_type=_COMMAND_MESSAGE_TYPE,
+                data={
+                    _COMMAND_ITEM_KEY: "apc",
+                    _COMMAND_VALUE_KEY: apc_payload,
+                },
+                target=DEFAULT_INIT_TARGET,
+            )
+        if write_pattern == "set_networkconfig":
+            return await self._async_send_local_message(
+                message_type=_SET_MESSAGE_TYPE,
+                data={
+                    _COMMAND_ITEM_KEY: "networkConfig",
+                    _COMMAND_VALUE_KEY: {"apc": apc_payload},
+                },
+                target=DEFAULT_INIT_TARGET,
+            )
+        raise FirewallaProtocolError(f"Unknown wireless write pattern: {write_pattern}")
+
     async def async_get_monthly_wan_usage_payload(self) -> dict[str, object]:
         """Fetch the current-month WAN usage payload from the local runtime."""
         return await self._async_send_local_message(

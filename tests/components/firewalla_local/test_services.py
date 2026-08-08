@@ -51,6 +51,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SECTIONS,
+    SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
@@ -61,6 +62,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_FIELD_WRITE_PATTERN,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -68,6 +70,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WIRELESS_STATUS,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -77,8 +80,11 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+    SERVICE_SET_SSID_PAUSED,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
+    WRITE_PATTERN_CMD_APC,
+    WRITE_PATTERN_SET_APC,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
 from custom_components.firewalla_local.models import (
@@ -5353,3 +5359,274 @@ async def test_get_wan_events_service_returns_normalized_timeline(
     assert response["results"][2]["family"] == "dns"
     assert response["results"][2]["name_server"] == "172.64.36.2"
     assert response["results"][2]["wan_interface_address"] == "23.245.207.179"
+
+
+def _wireless_runtime_payload() -> dict[str, object]:
+    """Return a raw init payload with an AP7 wireless config."""
+    return {
+        "timezone": "America/New_York",
+        "policyRules": [],
+        "networkConfig": {
+            "apc": {
+                "assets": {
+                    "ap-1": {
+                        "sysConfig": {
+                            "name": "Upstairs",
+                            "channel": {"5g": "36", "2g": "11"},
+                            "led": "off",
+                        },
+                        "model": "fwap-D",
+                    }
+                },
+                "assets_template": {
+                    "ap_default": {
+                        "wifiNetworks": [
+                            {
+                                "intf": "br0",
+                                "ssidProfiles": [
+                                    "cca57d09-34dd-41b0-a128-320c8ed7f126"
+                                ],
+                            },
+                            {
+                                "intf": "br1",
+                                "vlan": 100,
+                                "ssidProfiles": [
+                                    "f185dc47-2730-48a8-844c-b57aa31af4ba"
+                                ],
+                            },
+                        ]
+                    }
+                },
+                "profile": {
+                    "cca57d09-34dd-41b0-a128-320c8ed7f126": {
+                        "ssid": "Castle",
+                        "band": "2.4g+5g+6g",
+                        "encryption": "psk2+ccmp",
+                        "wpa3": False,
+                    },
+                    "f185dc47-2730-48a8-844c-b57aa31af4ba": {
+                        "ssid": "Castle Guest",
+                        "band": "2.4g+5g+6g",
+                        "encryption": "psk2+ccmp",
+                        "wpa3": False,
+                    },
+                },
+            }
+        },
+    }
+
+
+async def test_set_ssid_paused_service_toggles_profile(
+    hass: HomeAssistant,
+) -> None:
+    """Test set_ssid_paused sends the paused write for the target profile."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_wireless_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_set_ssid_paused",
+            new=AsyncMock(return_value={}),
+        ) as mock_set_paused,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_SSID_PAUSED,
+            {
+                SERVICE_FIELD_SSID_PROFILE_ID: "f185dc47-2730-48a8-844c-b57aa31af4ba",
+                SERVICE_FIELD_ENABLED: False,
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    assert mock_set_paused.await_args is not None
+    assert mock_set_paused.await_count == 1
+    assert mock_set_paused.await_args.kwargs["write_pattern"] == WRITE_PATTERN_SET_APC
+    apc_payload = mock_set_paused.await_args.kwargs["apc_payload"]
+    profile = apc_payload["profile"]["f185dc47-2730-48a8-844c-b57aa31af4ba"]
+    assert profile["paused"] is True
+
+
+async def test_set_ssid_paused_service_supports_alternative_write_pattern(
+    hass: HomeAssistant,
+) -> None:
+    """Test set_ssid_paused passes through the selected write pattern."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_wireless_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_set_ssid_paused",
+            new=AsyncMock(return_value={}),
+        ) as mock_set_paused,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_SSID_PAUSED,
+            {
+                SERVICE_FIELD_SSID_PROFILE_ID: "f185dc47-2730-48a8-844c-b57aa31af4ba",
+                SERVICE_FIELD_ENABLED: True,
+                SERVICE_FIELD_WRITE_PATTERN: WRITE_PATTERN_CMD_APC,
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+    assert mock_set_paused.await_args is not None
+    assert mock_set_paused.await_args.kwargs["write_pattern"] == WRITE_PATTERN_CMD_APC
+    apc_payload = mock_set_paused.await_args.kwargs["apc_payload"]
+    profile = apc_payload["profile"]["f185dc47-2730-48a8-844c-b57aa31af4ba"]
+    assert "paused" not in profile
+
+
+async def test_set_ssid_paused_service_rejects_unknown_profile(
+    hass: HomeAssistant,
+) -> None:
+    """Test set_ssid_paused raises for an unknown SSID profile."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_wireless_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_SSID_PAUSED,
+                {
+                    SERVICE_FIELD_SSID_PROFILE_ID: "unknown-profile",
+                    SERVICE_FIELD_ENABLED: False,
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                },
+                blocking=True,
+            )
+        await hass.async_block_till_done()
+
+
+async def test_get_wireless_status_service_returns_profiles(
+    hass: HomeAssistant,
+) -> None:
+    """Test get_wireless_status returns the SSID profiles and access points."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_wireless_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WIRELESS_STATUS,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+        await hass.async_block_till_done()
+
+    assert response is not None
+    profiles = response["ssid_profiles"]
+    assert len(profiles) == 2
+    by_uuid = {profile["profile_uuid"]: profile for profile in profiles}
+    assert by_uuid["cca57d09-34dd-41b0-a128-320c8ed7f126"]["ssid"] == "Castle"
+    guest = by_uuid["f185dc47-2730-48a8-844c-b57aa31af4ba"]
+    assert guest["ssid"] == "Castle Guest"
+    assert guest["vlan"] == 100
+    assert guest["interface"] == "br1"
+    assert response["access_points"][0]["name"] == "Upstairs"
+    assert response["access_points"][0]["model"] == "fwap-D"

@@ -4,10 +4,10 @@
 
 - **Source:** `ccpk1/firewalla-local-ha` issue #21 — *"[Feature]: Wireless Network Toggle for AP7"* (label: `enhancement`).
 - **Requested capability:** A Home Assistant frontend switch to enable/disable a wireless network (e.g. guest SSID) on a Firewalla AP7D / AP7C, plus optional wireless status/diagnostics sensors.
-- **Current state:** The reporter (`squirtbrnr`) has now submitted the requested diagnostic inventory (two files), which is the first concrete evidence we have for the wireless mapping. This plan captures that evidence and turns it into an executable reverse-engineering + buildout path.
-- **Branch context:** `release-1.2.0`; manifest version `1.2.0-alpha.4`.
-- **Latest thread state (2026-08-05):** The maintainer (`ccpk1`) posted a follow-up question to the reporter asking whether they used the **"Sync Runtime"** button and waited before the second download, since runtime data is polled on an interval and only updates on the next polling cycle or a forced sync. This caveat is central to interpreting the two submitted files (see §3).
-- **Architecture clarification (2026-08-05):** **AP7 is the name of the access points**, not the Firewalla box. The AP7 access points require a Firewalla device (here a **Firewalla Purple**, `model: "purple"`) for control. The working theory is that since the AP7 requires a Firewalla device, some of the AP7 config must be stored on the Firewalla. The Firewalla model itself does not matter — if you have a Firewalla device, you can add AP7 access points.
+- **Current state (2026-08-07):** The reporter (`squirtbrnr`) submitted two **comprehensive** diagnostic captures (`ap7_wifi_on.json`, `ap7_wifi_off.json`) using the extended diagnostic. These **confirmed** the wireless config location and the toggle control. See §3 and the supporting note.
+- **Branch context:** `release-1.2.0`; manifest version `1.2.0-alpha.6`.
+- **Architecture clarification (2026-08-05):** **AP7 is the name of the access points**, not the Firewalla box. The AP7 access points require a Firewalla device (here a **Firewalla Purple**, `model: "purple"`) for control. The Firewalla model itself does not matter — if you have a Firewalla device, you can add AP7 access points.
+- **Correction (2026-08-07):** The earlier assumption that the user had **5 Firewalla AP7s** was **wrong**. Those 5 APs were **Aruba InstantOn AP22** (managed outside Firewalla, now removed from config). The user actually has **2 Firewalla AP7s**: "Main Floor" and "Upstairs" (both `fwap-D`).
 
 ## 2. Scope and non-goals
 
@@ -24,47 +24,51 @@
 
 ## 3. Open questions / external dependencies
 
-- **Where does wireless config live?** The submitted diagnostics contain *only rules* for the guest network, with **no SSID broadcast / config parameters** visible. The AP7 access points appear as hosts (`connection_type=ap`, `host_device_type=ap`) but with no wireless config. This *suggests* the wireless config is **not** in the current normalized runtime snapshot — **but this is not yet conclusive** (see the sync caveat below).
-- **Sync caveat (critical):** The two submitted files are **byte-for-byte identical** (same MD5, zero diff). The maintainer's follow-up question asks whether the reporter forced a **"Sync Runtime"** before the second download. Because runtime data is polled on an interval, a second download taken without a forced sync can capture a **stale snapshot** — meaning the identical files may reflect a capture-timing problem, **not** the absence of wireless state. The "identical files" finding is therefore **inconclusive** until the reporter confirms they synced before the second capture.
-- **Diagnostic coverage gap:** The diagnostic export captures only the **normalized** `FirewallaRuntimeSnapshot`. It does **not** include the raw init payload, `networkProfiles`, or `networkConfig` — the very keys where wireless config might live. To inspect wireless state, we need the raw payload (via `utils/pull_runtime.py` or an extended diagnostic), not just the normalized snapshot.
-- **Is the wireless state readable via the same local `encipher/message` endpoint, or a different one?** Unknown — must be confirmed by capture, not assumed.
-- **Is there a write contract?** Unknown. Enabling/disabling an SSID may be a distinct mutation (not a rule update).
-- **Do the two submitted files differ at all?** The reporter states a file compare showed them *identical*. This has been re-verified against the raw files: they are byte-identical (same MD5, zero diff). The reporter sanitized them for PII, but the byte-identical result is independent of redaction.
-- **AP7 model variance:** AP7D vs AP7C may expose different wireless surfaces. The reporter has 5 AP7 access points (UPSTAIRS-AP, MAIN-FLOOR-AP, KITCHEN-AP, GARAGE-AP, BASEMENT-AP), all on the "Universe" network.
+### Confirmed findings (2026-08-07)
+
+- **Wireless config location (CONFIRMED):** The wireless config lives in `networkConfig.apc` (the AP controller section) of the raw init payload. This is **not** in the normalized `FirewallaRuntimeSnapshot` — it requires the raw payload.
+- **Toggle control (CONFIRMED):** The **only** difference between wifi-on and wifi-off is the `paused` field on one SSID profile: `networkConfig.apc.profile.<uuid>/paused: true` when off, absent when on. This is the wireless toggle.
+- **AP7 device model (CONFIRMED):** The user has **2 Firewalla AP7s** (`fwap-D`): "Main Floor" (`20:6D:31:71:1D:D0` @ 192.168.1.3) and "Upstairs" (`20:6D:31:71:55:5C` @ 192.168.1.4), connected via `wg_ap` mesh backhaul peers.
+- **Wireless config structure (CONFIRMED):** `networkConfig.apc` contains `assets` (per-AP config), `assets_template.ap_default` (wifiNetworks → ssidProfiles → VLANs, mesh), `profile` (per-SSID: ssid, key, band, encryption, wpa3, paused), and `globalSysConfig`. The user has **3 SSID profiles** on `br0` (main), `br1`/VLAN 100 (guest — the toggled one), and `br2`/VLAN 200.
+
+### Open questions / assumptions
+
+- **Write contract (UNKNOWN — the key assumption):** We have confirmed the **read** path (the `paused` field) but **not** the **write** command. The existing mutations use `cmd` (`policy:update`) or `set` (`policy`) message types. The wireless config is under `networkConfig`, so the write command is unknown. This is the primary assumption for alpha.7 (see the alpha.7 plan).
+- **SSID display names (REDACTED in captures):** The actual SSID strings are redacted in the diagnostic (our redaction masks the `ssid` key). The SSID **profile UUIDs** are stable identifiers we can use for selection regardless of display name. At runtime (unredacted), we can read the actual SSID names.
+- **AP7 model variance:** AP7D vs AP7C may expose different wireless surfaces. The user has `fwap-D` units.
+- **Safe transfer:** The raw payload is large and redaction is best-effort; consider a private channel for future captures.
 
 ## 4. Phase summary table
 
 | Phase | Goal | Key output |
 | --- | --- | --- |
-| 1 | Inventory evidence review | Confirmed mapping (or confirmed absence) of wireless state in current snapshot |
-| 2 | Protocol discovery | Confirmed read/write contract for wireless state |
+| 1 | Inventory evidence review | **Complete** — wireless config located in `networkConfig.apc`; toggle = `paused` field |
+| 2 | Protocol discovery | Confirm read/write contract (read confirmed; write is the key assumption) |
 | 3 | Runtime model + read surface | Normalized wireless model + read-only sensors/report |
-| 4 | Write surface + switch | Confirmed enable/disable switch + tests + quality-scale update |
+| 4 | Write surface + switch | Enable/disable switch + tests + quality-scale update |
 
 ## 5. Per-phase details
 
 ### Phase 1 — Inventory evidence review
 
 - [x] Download and store the two submitted diagnostics under `.artifacts/` following the established artifact conventions (see `docs/REVERSE_ENGINEERING_WORKFLOW.md` → "Artifact conventions"). Stored in `.artifacts/ap7-wireless-discovery/` with the reporter's original filenames preserved (`base_line_guest_wifi_off.json`, `guest_wifi_on.json`).
-- [x] Re-run a structural diff on the raw files to confirm whether they are truly identical. **Result:** both files are byte-for-byte identical (same MD5 `22b5055f...`, zero diff, 9,657 lines each).
-- [x] Search both files for wireless-relevant keys: `ssid`, `wifi`, `wireless`, `ap7`, `guest`, `broadcast`, `radio`, `band`, `channel`, `networkProfiles`, `networkConfig`. **Result:** zero wireless/SSID keys found; `guest` appears only as firewall policy rules scoped to the "Universe Guest" network; the 5 AP7 access points appear as hosts (`connection_type=ap`) with no wireless config.
-- [x] Map findings against the current snapshot model (`FirewallaRuntimeSnapshot` in `models.py`) and the existing `networkProfiles` / `networkConfig` parsing in `api/client.py` and `managers/integration_manager.py`. **Result:** the diagnostic captures only the normalized snapshot; the raw `networkProfiles`/`networkConfig` payload is not exported, so wireless state (if any) is not visible in the diagnostic.
-- [x] Record the finding in a supporting note (`FIREWALLA_LOCAL_AP7_WIRELESS_TOGGLE_SUP_INVENTORY.md`): which fields are present, which are absent, and the confidence level.
-- [ ] **Blocked on reporter:** Confirm whether the reporter used the **"Sync Runtime"** button and waited before the second download. Until confirmed, the identical-files result is inconclusive (may be a stale snapshot rather than absence of wireless state).
-- [x] **Simple capture path (implemented):** Extended the integration diagnostic (`diagnostics.py`) to include the **raw init payload** (`runtime_init_payload`, redacted) alongside the normalized snapshot. This means the reporter can now get a full runtime pull with the **same diagnostic download they already know how to do** — no repo, venv, or CLI required. The raw payload includes `networkProfiles` / `networkConfig`, where wireless config may live.
-- [x] **Best-effort init payload redaction (implemented):** Added `helpers/init_payload_redaction.py` which walks the raw init payload and redacts known sensitive keys plus common sensitive value patterns (JWTs, MAC addresses, IPv4 addresses, emails). Verified against a real full-pull diagnostic: **0 emails, 0 MACs, 0 IPs, 0 JWTs remain** after redaction. Covered fields include `jwt`, `ddnsToken`, `btMac`, `cpuid`, `publicIp`, `ddns`, `localDomainSuffix`, host identifying fields, WireGuard peer keys/names, the AP controller mesh key/SSID, and MAC/IP/email patterns in both values and dict keys.
-- [x] **Exclusion of non-wireless sections (implemented):** To preserve traceability while reducing sensitivity, large non-wireless sections are now **dropped entirely** from the export rather than redacted. Excluded: `userTags`, `internetSpeedtestResults`, `systemFlows`, `last60`/`last30`/`newLast24`/`last12Months`, `latestAllStateEvents`/`latestStateEventsError`/`networkMonitorEvents`, `customizedCategories`, `deviceTags`/`tags`, `sysMetrics`, `monthlyDataUsage*`, `networkMetrics`, `newAlarms`. Kept (wireless-relevant): `networkConfig` (the AP controller `apc`/`mesh`/`ssid` core), `hosts` (kept because an AP7 environment populates `ssidTags`), `policyRules`, `exceptionRules`, `appConfs`, `policy`, `runtimeFeatures`, `runtimeDynamicFeatures`, `apController`. Also added internal-domain redaction (`*.ccpk.us` and subdomains) in the retained sections. Verified: personal names and internal domains are gone; size drops from ~930 KB to ~580 KB.
-- [ ] **Safe transfer approach (proposed):** Because the raw payload is large and the redaction is best-effort, work with the reporter directly to provide the diagnostic files through a **private channel** (e.g. email or a private upload) rather than posting them publicly on the issue. This avoids any residual risk from unredacted data and removes the burden of manual review on the reporter.
-- [ ] **Blocked on reporter (re-capture):** Ask the reporter to (1) hit **"Sync Runtime"**, wait a few seconds, (2) download the diagnostic, (3) make the wireless change in the app, (4) hit **"Sync Runtime"** again, wait, (5) download a second diagnostic, and post both (or send privately). The new `runtime_init_payload` field will expose the raw wireless config for comparison.
-- [ ] **Decision gate:** If wireless config is genuinely absent from the raw payload (and the sync caveat is resolved), proceed to Phase 2. If it is present but unmodeled, skip to Phase 3. If the sync caveat is unresolved, request a re-capture from the reporter before concluding absence.
+- [x] Re-run a structural diff on the raw files to confirm whether they are truly identical. **Result:** both files are byte-for-byte identical (same MD5 `22b5055f...`, zero diff, 9,657 lines each). **Note:** this was later explained — the reporter forgot to sync before the second capture.
+- [x] Search both files for wireless-relevant keys. **Result:** zero wireless/SSID keys found in the normalized snapshot; the raw `networkConfig`/`networkProfiles` was not yet exported.
+- [x] Map findings against the current snapshot model. **Result:** the diagnostic captured only the normalized snapshot; the raw payload was not exported.
+- [x] **Simple capture path (implemented):** Extended the integration diagnostic (`diagnostics.py`) to include the **raw init payload** (`runtime_init_payload`, redacted) alongside the normalized snapshot.
+- [x] **Best-effort init payload redaction (implemented):** Added `helpers/init_payload_redaction.py` (see supporting note for details).
+- [x] **Exclusion of non-wireless sections (implemented):** Large non-wireless sections are dropped from the export (see supporting note for details).
+- [x] **Comprehensive captures received (2026-08-07):** The reporter submitted `ap7_wifi_on.json` and `ap7_wifi_off.json` with the extended diagnostic. **This confirmed the wireless config location and the toggle control** (see §3 and supporting note).
+- [x] **Correction applied (2026-08-07):** The earlier "5 AP7" assumption was wrong — those were Aruba InstantOn AP22. The user has **2 Firewalla AP7s**.
+- [ ] **Safe transfer approach (proposed):** Because the raw payload is large and the redaction is best-effort, work with the reporter directly to provide the diagnostic files through a **private channel** (e.g. email or a private upload) rather than posting them publicly on the issue.
+- [x] **Decision gate (Phase 1 complete):** Wireless config is confirmed present in the raw `networkConfig.apc` payload. Proceed to Phase 2 (protocol discovery) and the alpha.7 implementation.
 
 ### Phase 2 — Protocol discovery
 
-- [ ] Identify which local endpoint(s) the integration currently polls (`async_get_runtime_init_payload` in `api/client.py`) and confirm whether wireless state is part of that payload.
-- [ ] If absent, use the reverse-engineering workflow (`docs/REVERSE_ENGINEERING_WORKFLOW.md`) to capture the wireless read path: pair/authenticate, then probe candidate local endpoints for SSID/broadcast state.
-- [ ] Confirm the write contract for enabling/disabling a wireless network (payload shape, target identifier, auth scope). Do **not** invent it — capture it.
-- [ ] Record the confirmed read/write contract in the supporting note with a field-mapping table (published field → local raw field → normalized field → HA-derived field → confidence/evidence).
-- [ ] **Decision gate:** Only proceed to Phase 3 once the read path is confirmed; only proceed to Phase 4 once the write path is confirmed.
+- [x] **Read path confirmed:** The wireless config is part of the raw init payload (`networkConfig.apc`), fetched via `async_get_runtime_init_payload` in `api/client.py`. No separate endpoint needed for reading.
+- [ ] **Write contract (UNKNOWN — key assumption):** Confirm the write command for toggling `paused` on an SSID profile. This is the primary unknown for alpha.7. See the alpha.7 implementation plan for the assumption and alternative patterns.
+- [ ] Record the confirmed read/write contract in the supporting note with a field-mapping table.
+- [ ] **Decision gate:** Proceed to Phase 3/alpha.7 with the confirmed read path and the assumed write path (PoC risk accepted).
 
 ### Phase 3 — Runtime model + read surface
 
@@ -96,7 +100,8 @@
 ## 7. References
 
 - Issue: `ccpk1/firewalla-local-ha#21` — Wireless Network Toggle for AP7.
-- Submitted diagnostics: `base_line_guest_wifi_off.json`, `guest_wifi_on.json` (attached to issue #21).
+- **alpha.7 implementation plan:** `plans/in-process/FIREWALLA_LOCAL_AP7_WIRELESS_TOGGLE_ALPHA7_IN-PROCESS.md`.
+- Submitted diagnostics: `base_line_guest_wifi_off.json`, `guest_wifi_on.json`, `ap7_wifi_on.json`, `ap7_wifi_off.json` (attached to issue #21).
 - `docs/REVERSE_ENGINEERING_WORKFLOW.md` — field-mapping table and capture workflow.
 - `custom_components/firewalla_local/api/client.py` — `networkProfiles` / `networkConfig` parsing and runtime init payload.
 - `custom_components/firewalla_local/models.py` — `FirewallaRuntimeSnapshot`.

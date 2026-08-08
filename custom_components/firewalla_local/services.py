@@ -51,6 +51,7 @@ from .const import (
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SECTIONS,
+    SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
@@ -61,6 +62,7 @@ from .const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_FIELD_WRITE_PATTERN,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -69,6 +71,7 @@ from .const import (
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WIRELESS_STATUS,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -78,6 +81,7 @@ from .const import (
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+    SERVICE_SET_SSID_PAUSED,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
@@ -117,6 +121,7 @@ from .const import (
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT,
+    TRANS_KEY_EXCEPTION_SSID_PROFILE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN,
     TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED,
     TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
@@ -135,8 +140,11 @@ from .const import (
     TRANS_PLACEHOLDER_RULE_TARGET,
     TRANS_PLACEHOLDER_SCOPE_KIND,
     TRANS_PLACEHOLDER_SCOPE_TARGET,
+    TRANS_PLACEHOLDER_SSID_PROFILE_ID,
     TRANS_PLACEHOLDER_WAN_NAME,
     TRANS_PLACEHOLDER_WAN_UUID,
+    WRITE_PATTERN_OPTIONS,
+    WRITE_PATTERN_SET_APC,
 )
 from .coordinator import FirewallaConfigEntry
 from .models import (
@@ -286,6 +294,25 @@ SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA = vol.Schema(
     {
         **_HOST_TARGET_SCHEMA_FIELDS,
         vol.Required(SERVICE_FIELD_ENABLED): cv.boolean,
+    }
+)
+
+SET_SSID_PAUSED_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_SSID_PROFILE_ID): cv.string,
+        vol.Required(SERVICE_FIELD_ENABLED): cv.boolean,
+        vol.Optional(
+            SERVICE_FIELD_WRITE_PATTERN, default=WRITE_PATTERN_SET_APC
+        ): vol.In(WRITE_PATTERN_OPTIONS),
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_WIRELESS_STATUS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
 )
 
@@ -3926,6 +3953,49 @@ async def _async_handle_resume_rule(call: ServiceCall) -> None:
     await entry.runtime_data.rule_manager.async_resume_rule(rule_target)
 
 
+async def _async_handle_set_ssid_paused(call: ServiceCall) -> None:
+    """Pause or resume one AP7 SSID profile.
+
+    This is a PoC service for the unconfirmed wireless write contract. The
+    ``write_pattern`` field lets the user try alternative write patterns
+    without a code change.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    await _async_refresh_runtime_state(entry)
+
+    profile_uuid = call.data[SERVICE_FIELD_SSID_PROFILE_ID]
+    enabled = call.data[SERVICE_FIELD_ENABLED]
+    write_pattern = call.data.get(SERVICE_FIELD_WRITE_PATTERN, WRITE_PATTERN_SET_APC)
+
+    wireless_manager = entry.runtime_data.wireless_manager
+    if not wireless_manager.has_ssid_profile(profile_uuid):
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_SSID_PROFILE_NOT_FOUND,
+            translation_placeholders={TRANS_PLACEHOLDER_SSID_PROFILE_ID: profile_uuid},
+        )
+
+    await wireless_manager.async_set_ssid_paused(
+        profile_uuid,
+        paused=not enabled,
+        write_pattern=write_pattern,
+    )
+
+
+async def _async_handle_get_wireless_status(call: ServiceCall) -> JsonObjectType:
+    """Return the current AP7 wireless configuration as structured data."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    await _async_refresh_runtime_state(entry)
+    return entry.runtime_data.wireless_manager.get_wireless_status()
+
+
 type FirewallaServiceHandler = Callable[
     [ServiceCall],
     Coroutine[Any, Any, ServiceResponse | EntityServiceResponse]
@@ -4049,6 +4119,18 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         _async_handle_resume_rule,
         RESUME_RULE_SCHEMA,
         SupportsResponse.NONE,
+    ),
+    (
+        SERVICE_SET_SSID_PAUSED,
+        _async_handle_set_ssid_paused,
+        SET_SSID_PAUSED_SCHEMA,
+        SupportsResponse.NONE,
+    ),
+    (
+        SERVICE_GET_WIRELESS_STATUS,
+        _async_handle_get_wireless_status,
+        GET_WIRELESS_STATUS_SCHEMA,
+        SupportsResponse.ONLY,
     ),
 )
 

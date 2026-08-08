@@ -928,3 +928,58 @@ resume_rule:
         text:
       name: Rule target
       description: Use the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
+
+set_ssid_paused:
+  name: Set SSID paused
+  description: Pause or resume one AP7 wireless network (SSID profile). This is a PoC service for the unconfirmed wireless write contract.
+  fields:
+    ssid_profile_id:
+      required: true
+      example: "f185dc47-2730-48a8-844c-b57aa31af4ba"
+      selector:
+        text:
+      name: SSID profile ID
+      description: The UUID of the SSID profile to toggle. Get the list from the get_wireless_status service.
+    enabled:
+      required: true
+      example: true
+      selector:
+        boolean:
+      name: Enabled
+      description: Set to true to enable (unpause) the wireless network, or false to pause it.
+    write_pattern:
+      required: false
+      example: "set_apc"
+      selector:
+        select:
+          options:
+            - "set_apc"
+            - "cmd_apc"
+            - "set_networkconfig"
+      name: Write pattern
+      description: The write pattern to use for the unconfirmed wireless write contract. Defaults to set_apc. Try the alternatives if the default does not work.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+
+get_wireless_status:
+  name: Get wireless status
+  description: Return the current AP7 wireless configuration (SSID profiles and access points) as structured data.
+  fields:
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
