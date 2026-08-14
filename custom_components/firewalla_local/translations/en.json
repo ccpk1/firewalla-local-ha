@@ -1495,7 +1495,7 @@
     },
     "get_wireless_status": {
       "name": "Get wireless status",
-      "description": "Return the current AP7 wireless configuration (SSID profiles and access points) as structured data.",
+      "description": "Returns the current wireless configuration (SSID profiles and access points) as structured data. SSID profiles include the SSID, band, encryption, paused state, VLAN, and interface. Access points include the name, model, channels, and LED state. For Firewalla boxes without AP7 access points, the returned sections are empty.",
       "fields": {
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

@@ -3986,7 +3986,13 @@ async def _async_handle_set_ssid_paused(call: ServiceCall) -> None:
 
 
 async def _async_handle_get_wireless_status(call: ServiceCall) -> JsonObjectType:
-    """Return the current AP7 wireless configuration as structured data."""
+    """Return the current Firewalla wireless configuration as structured data.
+
+    For Firewalla boxes with AP7 access points, this returns the per-SSID
+    profiles (SSID, band, encryption, paused state, VLAN, interface) and
+    the per-access-point assets (name, model, channels, LED). For boxes
+    without AP7s, the returned sections are empty.
+    """
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),

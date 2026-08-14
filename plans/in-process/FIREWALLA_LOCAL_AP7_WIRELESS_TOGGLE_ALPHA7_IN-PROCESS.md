@@ -86,18 +86,21 @@ To let the user test multiple patterns without code changes, we'll make the writ
 
 ### Phase 3 — Validation + user test
 
-- [ ] Release alpha.7 with the services.
-- [ ] Ask the reporter to test `set_ssid_paused` on the guest SSID (profile `f185dc47-...`).
-- [ ] If Assumption A fails, have the reporter retry with write_pattern B or C (no code change needed).
-- [ ] Confirm the write contract from the live test result.
-- [ ] Update the supporting note with the confirmed write contract.
+- [x] Release alpha.7 with the services.
+- [x] Ask the reporter to test `set_ssid_paused` on the guest SSID (profile `f185dc47-...`).
+- [x] All three write patterns tested; all rejected with code 500.
+- [x] Read path (`get_wireless_status`) confirmed: returned 3 SSID profiles with
+      real names ("Universe", "Universe Guest", "Universe IoT") and 2 AP7
+      access points ("Main Floor", "Upstairs").
+- [ ] **Write contract UNCONFIRMED** — requires packet capture of the app-to-box
+      traffic. See the updated REVERSE_ENGINEERING_WORKFLOW.md for the protocol
+      details and capture requirements.
 
 ### Phase 4 — Promote to switch entities
 
-- [ ] Once the write contract is confirmed, convert the services into `switch` platform entities (`FirewallaWirelessSwitch`).
-- [ ] Wire the switch into the options flow / selection surface.
-- [ ] Add tests for the switch (state read, toggle, optimistic update, failure handling).
-- [ ] Update `quality_scale.yaml` and release notes.
+- [ ] **BLOCKED** on write contract — cannot promote until packet capture
+      confirms the write command. See the next-capture section below for what
+      to request from the reporter.
 
 ## 6. Validation strategy
 
@@ -123,3 +126,75 @@ To let the user test multiple patterns without code changes, we'll make the writ
 - `custom_components/firewalla_local/managers/rule_manager.py` — optimistic-update pattern.
 - `custom_components/firewalla_local/switch.py` — existing switch platform.
 - `plans/in-process/FIREWALLA_LOCAL_AP7_WIRELESS_TOGGLE_SUP_INVENTORY.md` — evidence.
+
+## 9. Expanded proposal: what is "leveraged" vs. what is AP7-unique
+
+This section clarifies the boundary between reusing existing integration
+concepts and adding AP7-specific surfaces. It answers: how does this fit with
+the existing device / tracked-device model, and how do we guarantee zero impact
+on users who only have a Firewalla (no AP7s)?
+
+### 9.1 What we are NOT adding (reuse of existing concepts)
+
+The following are **already supported** and will be **reused as-is**, not
+duplicated:
+
+| Existing concept | Where it lives today | How AP7 fits in |
+| --- | --- | --- |
+| **Devices / tracked devices** | `device_tracker.py`, host inventory (`hosts`) | AP7s are already hosts in the runtime payload. They appear as tracked devices today (e.g. "Main Floor", "Upstairs"). We do **not** create a parallel device model. |
+| **Sensors** | `sensor.py` | Per-AP read-only attributes (channel, meshMode, model) surface as **attributes on the existing device tracker / sensor entities**, not new entity types. |
+| **Switches** | `switch.py` | The SSID pause toggle, once the write contract is confirmed, becomes a **switch entity** following the existing `FirewallaSwitch` pattern. |
+| **Services/actions** | `services.py` | `get_wireless_status` / `set_ssid_paused` are services, consistent with the existing service surface. |
+| **Coordinator / manager pattern** | `coordinator.py`, `managers/` | `wireless_manager` follows the same manager pattern as `rule_manager`. |
+
+**Key point:** AP7 support does **not** introduce a new entity platform or a new
+device-tracking paradigm. It layers a small, optional read/write surface on top
+of concepts that already exist.
+
+### 9.2 What IS new / AP7-unique
+
+Only these are genuinely new, and each is scoped to the `networkConfig.apc`
+section that only exists when AP7s are present:
+
+| New surface | What it is | Why it's AP7-unique |
+| --- | --- | --- |
+| **SSID profile model** | `FirewallaSsidProfile` (ssid, band, encryption, wpa3, paused, vlan, intf) | Derived from `networkConfig.apc.profile` — only present with AP7s. |
+| **Access point model** | `FirewallaAccessPoint` (name, model, channel, meshMode, led, pauseWifi) | Derived from `networkConfig.apc.assets` — only present with AP7s. |
+| **SSID pause switch** | A switch per SSID profile toggling `paused` | The core feature request; only meaningful when AP7s broadcast SSIDs. |
+| **Wireless status service** | `get_wireless_status` returning the structured wireless view | Read-only verification surface for the wireless config. |
+
+### 9.3 How it fits with devices / tracked devices
+
+- The **AP7 access points are already tracked devices** (they are hosts with
+  MACs in the runtime payload). We do **not** create separate "AP" entities.
+- The **SSID profiles are NOT devices** — they are wireless network configs.
+  Each SSID becomes a **switch** (pause/resume), not a device.
+- The **wireless manager** reads from the same raw init payload the coordinator
+  already holds; it does not add a new polling loop or a new connection.
+
+### 9.4 Guaranteeing zero impact on non-AP7 users
+
+- **Conditional presence:** `networkConfig.apc` only exists in the raw payload
+  when AP7s are present. If the section is absent, `wireless_manager` reports an
+  empty surface and no wireless entities/services are created.
+- **No new polling:** the wireless manager reads from the existing coordinator
+  refresh; it adds no network traffic.
+- **No entity churn:** non-AP7 users see no new entities, no new services in
+  their UI, and no change to existing device/sensor/switch behavior.
+- **Graceful degradation:** if the section is present but malformed, the manager
+  returns an empty surface rather than raising, so a partial/odd payload cannot
+  break setup.
+- **Feature-gated services:** `set_ssid_paused` validates the profile exists and
+  raises a clear `ServiceValidationError` if the target SSID is not present —
+  it cannot affect a non-AP7 setup because there are no profiles to target.
+
+### 9.5 Summary table
+
+| Concern | Leveraged (existing) | New (AP7-unique) |
+| --- | --- | --- |
+| Device tracking | AP7s are already tracked devices | — |
+| Read-only status | sensor attributes | SSID profile + AP model |
+| Control surface | switch platform pattern | SSID pause switch |
+| Services | service pattern | get_wireless_status, set_ssid_paused |
+| Data source | existing coordinator payload | `networkConfig.apc` parsing |
+| Non-AP7 impact | — | none (conditional presence) |

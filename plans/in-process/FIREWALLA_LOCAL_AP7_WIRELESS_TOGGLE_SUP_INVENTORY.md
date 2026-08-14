@@ -162,3 +162,44 @@ alpha.7 implementation with the confirmed read path and assumed write path.
 - [ ] Re-run the wireless-key scan on the raw `runtime_init_payload` once
       captured.
 - [ ] Only then proceed to Phase 2 (protocol discovery) with confirmed evidence.
+
+## 6. alpha.7 service test results (2026-08-14)
+
+The reporter tested the alpha.7 wireless services. Files stored in
+`.artifacts/ap7-wireless-discovery/`:
+`baseline_wifi_off_alpha7.json`, `after_calls_failed_alpha7.json`,
+`get_wireless_status_alpha7.txt`, `service_runs_error_log_full.txt`,
+`service_runs_error_log.txt`.
+
+### Success — read path fully confirmed
+
+`get_wireless_status` worked and returned the live (unredacted) runtime data:
+
+- **3 SSID profiles with real names:** "Universe" (br0, no VLAN),
+  "Universe Guest" (br1, VLAN 100, `paused=true` at capture time), and
+  "Universe IoT" (br2, VLAN 200).
+- **2 access points:** "Main Floor" (`20:6D:31:71:1D:D0`, channel 5g=149/2g=1)
+  and "Upstairs" (`20:6D:31:71:55:5C`, channel 5g=36/2g=11), both `fwap-D`.
+- This confirms our read model: `networkConfig.apc.profile` for SSIDs and
+  `networkConfig.apc.assets` for APs, with the `paused` field as the state.
+
+### Failure — write path (all 3 write patterns rejected)
+
+`set_ssid_paused` failed with **"Firewalla local runtime returned code 500"**
+for all three write patterns (`set_apc`, `cmd_apc`, `set_networkconfig`). The
+Firewalla box rejected each write at the protocol level (decrypted payload code
+500). None of the guessed write patterns is correct. The apc section is
+**unchanged** between baseline and after-calls diagnostics (zero diffs), so the
+failed writes had no side effects.
+
+**Conclusion:** The write contract requires **packet captures** of the actual
+app-to-box traffic when toggling a wireless network. Guessing is not viable.
+
+### New finding — redaction collapses MAC-keyed dict entries
+
+The diagnostics show only **1 asset** ("Upstairs") while the live
+`get_wireless_status` shows **2 APs**. Root cause: the redaction helper
+(`helpers/init_payload_redaction.py`) redacts MAC-pattern dict keys to
+`**REDACTED**`, and since both AP asset IDs are MACs, they collide and the dict
+collapses to one entry. This is a **redaction fidelity bug** that hides data in
+diagnostics (reproduced with a unit check). The live service is unaffected.

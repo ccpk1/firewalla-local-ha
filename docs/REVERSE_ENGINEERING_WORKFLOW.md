@@ -786,6 +786,7 @@ The following are confirmed by repository code and live captures.
 | Category rule block, persistent | `policy:create` without expiry fields | not yet fully confirmed | not yet captured | Example: `Always block` on `social` for `AV_SMART_TV` |
 | Internet block | `policy:create` when absent | `policy:update` with `disabled: 1` or `policy:delete` | `policy:update` with `disabled: 0` | Example: `Traffic from & to Internet` for `AV_SMART_TV` |
 | Direct DNS allow, device-scoped | existing rule observed only | `policy:update` with `disabled: 1` and `idleTs` for timed pause | inventory confirms same-rule re-enable with cleared `idleTs`; payload not captured in this run | Example: `allow dns dns.google` for Kaden's Chromebook |
+| AP7 wireless SSID pause | read via `networkConfig.apc.profile.<uuid>.paused` | **unconfirmed** — three candidate write patterns rejected with code 500 | not applicable until write contract is confirmed | Example: pause/resume "Universe Guest" on VLAN 100 |
 
 ## Inventory-confirmed durable rule findings
 
@@ -1611,6 +1612,8 @@ Implementation note:
 
 ## Next capture targets
 
+### Direct DNS rules
+
 The next protocol family to confirm is direct DNS rules.
 
 Priority order:
@@ -1634,6 +1637,20 @@ Questions to answer for this family:
 - capture the exact re-enable payload for a timed-paused direct DNS rule
 - capture the exact delete payload for a device-scoped direct DNS allow rule
 
+### AP7 wireless SSID pause
+
+The write contract for the `paused` field on an SSID profile is unconfirmed.
+All three candidate write patterns (set_apc, cmd_apc, set_networkconfig) were
+rejected with code 500. The correct write command must be determined from a
+packet capture of the Firewalla app toggling a wireless network.
+
+Required capture:
+
+- toggle a wireless network (enable → disable) in the Firewalla app
+- capture the decrypted `set` or `cmd` message directed at the AP controller
+- the target SSID profile UUID is `f185dc47-2730-48a8-844c-b57aa31af4ba`
+  (Universe Guest, VLAN 100) for the reporter's setup
+
 ## Open questions
 
 These items remain unconfirmed and should stay visible.
@@ -1653,6 +1670,90 @@ These items remain unconfirmed and should stay visible.
   delete payload shape
 - whether re-enabling a timed-paused direct DNS rule uses the same payload shape
   as internet-block re-enable, in addition to clearing `idleTs`
+- the exact AP7 wireless SSID pause write command (all three alpha.7
+  candidates rejected — requires a fresh packet capture; see §"Next capture
+  targets" above)
+
+## AP7 wireless controller findings
+
+The following findings were derived from live diagnostic captures submitted by
+a reporter with two Firewalla AP7 access points and confirmed by a live
+`get_wireless_status` service readback.
+
+### Finding 19: AP7 wireless config lives in `networkConfig.apc`
+
+**Scenario:**
+
+- reporter with 2 Firewalla AP7s (both `fwap-D`, "Main Floor" and "Upstairs")
+  submitted two extended diagnostic captures — one with the guest SSID enabled,
+  one with it disabled — using the integration's extended diagnostic download.
+- A full recursive diff of the `networkConfig.apc` section between the two
+  captures showed **exactly one change**: the `paused` field on the guest SSID
+  profile (`f185dc47-2730-48a8-844c-b57aa31af4ba`) was `true` when off and
+  absent when on.
+- The live `get_wireless_status` service (alpha.7) confirmed the read model
+  against the reporter's box.
+
+**Artifacts:**
+
+- `.artifacts/ap7-wireless-discovery/ap7_wifi_on.json`
+- `.artifacts/ap7-wireless-discovery/ap7_wifi_off.json`
+- `.artifacts/ap7-wireless-discovery/get_wireless_status_alpha7.txt`
+
+**Confirmed `networkConfig.apc` structure:**
+
+| Section | Contents | Confirmation level |
+| --- | --- | --- |
+| `assets` | Per-AP config: `name`, `model` (`fwap-D`), `channel.5g`, `channel.2g`, `txPower`, `country`, `meshMode`, `led`, `pauseWifi`, `disableAcl`, `timezone`, `publicKey` | **High** — from live readback |
+| `assets_template.ap_default.wifiNetworks` | SSID-to-network mapping: `intf`, `vlan`, `ssidProfiles` (UUID list), `dhcp`, `isolate` | **High** — from live readback |
+| `assets_template.ap_default.mesh` | Mesh backhaul: `ssid`, `key`, `encryption` | **High** — from capture |
+| `profile` | Per-SSID config keyed by UUID: `ssid`, `key`, `band`, `encryption`, `wpa3`, `paused` | **High** — toggle confirmed by on/off diff |
+| `globalSysConfig` | Global AP settings: `autoSteer`, `maxComp`, `stormControl`, `useDfsChannels`, `stp`, `lldpd`, `flowControl` | **Medium** — observed but untoggled |
+
+**Observed field values from live readback:**
+
+| Profile UUID | SSID | VLAN | Interface | Band | Paused state |
+| --- | --- | --- | --- | --- | --- |
+| `cca57d09-...` | Universe | — | br0 | 2.4g+5g+6g | false |
+| `f185dc47-...` | Universe Guest | 100 | br1 | 2.4g+5g+6g | **toggled** |
+| `6510fea4-...` | Universe IoT | 200 | br2 | 2.4g+5g+6g | false |
+
+| AP asset ID | Name | Model | 5g channel | 2g channel | LED |
+| --- | --- | --- | --- | --- | --- |
+| `20:6D:31:71:1D:D0` | Main Floor | fwap-D | 149 | 1 | off |
+| `20:6D:31:71:55:5C` | Upstairs | fwap-D | 36 | 11 | off |
+
+**Toggle control:**
+
+The wireless on/off toggle for one SSID is the `paused` field on its profile
+entry. When `paused` is `true` (or present), the SSID is disabled. When the
+field is absent (or `false`), the SSID is enabled.
+
+**Write contract — unconfirmed:**
+
+Three candidate write patterns were tested in alpha.7 (`set_apc`, `cmd_apc`,
+`set_networkconfig`). All three were rejected by the Firewalla box with
+protocol code 500. The correct write command remains unknown and requires
+packet capture of the app-to-box traffic during a wireless toggle.
+
+**Redaction fidelity note:**
+
+The `assets` dict in `networkConfig.apc` is keyed by MAC address. Because the
+diagnostic redaction helper replaces MAC-pattern dict keys with `**REDACTED**`,
+multiple AP entries are collapsed into one in the redacted diagnostic. The live
+service is unaffected. See `helpers/init_payload_redaction.py`.
+
+### Finding 20: AP7 devices are not `connection_type=ap` hosts in the normalized snapshot
+
+The reporter's Firewalla AP7s ("Main Floor" at 192.168.1.3, "Upstairs" at
+192.168.1.4) appeared in the normalized `runtime_snapshot.hosts` with
+`connection_type=None` and `host_device_type=None`, not with `connection_type
+= "ap"` as previously assumed. The earlier `connection_type=ap` entries were
+Aruba InstantOn AP22 units that have since been removed.
+
+The AP7s also appear as `wg_peer` hosts with `intf=wg_ap` for their mesh
+backhaul connection, and have dedicated entries in `networkConfig.apc.assets`
+identified by their MAC address key.
 
 ## Additional host-settings findings
 
