@@ -177,6 +177,7 @@ _RAW_USER_TYPE_KEY: Final = "type"
 _RAW_EXCEPTION_RULES_KEY: Final = "exceptionRules"
 _RAW_POLICY_RULES_KEY: Final = "policyRules"
 _RAW_WG_PEERS_KEY: Final = "wgPeers"
+_RAW_AWG_PEERS_KEY: Final = "awgPeers"
 _RAW_SPEED_TEST_RESULTS_KEY: Final = "internetSpeedtestResults"
 _RAW_SPEED_TEST_CLIENT_KEY: Final = "client"
 _RAW_SPEED_TEST_RESULT_KEY: Final = "result"
@@ -1651,38 +1652,72 @@ class FirewallaApiClient:
         affiliated_users: dict[str, tuple[str, ...]],
     ) -> tuple[FirewallaHostRuntime, ...]:
         """Normalize standalone WireGuard peers into watched-device hosts."""
-        raw_wg_peers = data.get(_RAW_WG_PEERS_KEY)
-        if not isinstance(raw_wg_peers, list):
+        return self._normalize_vpn_peer_inventory(
+            data,
+            raw_key=_RAW_WG_PEERS_KEY,
+            mac_prefix="wg_peer",
+            network_lookup=network_lookup,
+            tags=tags,
+            affiliated_users=affiliated_users,
+        )
+
+    def _normalize_amnezia_peer_inventory(
+        self,
+        data: dict[str, object],
+        *,
+        network_lookup: dict[str, str],
+        tags: dict[str, str],
+        affiliated_users: dict[str, tuple[str, ...]],
+    ) -> tuple[FirewallaHostRuntime, ...]:
+        """Normalize standalone Amnezia WG peers into watched-device hosts."""
+        return self._normalize_vpn_peer_inventory(
+            data,
+            raw_key=_RAW_AWG_PEERS_KEY,
+            mac_prefix="awg_peer",
+            network_lookup=network_lookup,
+            tags=tags,
+            affiliated_users=affiliated_users,
+        )
+
+    def _normalize_vpn_peer_inventory(
+        self,
+        data: dict[str, object],
+        *,
+        raw_key: str,
+        mac_prefix: str,
+        network_lookup: dict[str, str],
+        tags: dict[str, str],
+        affiliated_users: dict[str, tuple[str, ...]],
+    ) -> tuple[FirewallaHostRuntime, ...]:
+        """Normalize standalone VPN peers into watched-device hosts."""
+        raw_peers = data.get(raw_key)
+        if not isinstance(raw_peers, list):
             return ()
 
         normalized_peers: list[FirewallaHostRuntime] = []
-        for raw_wg_peer in raw_wg_peers:
-            if not isinstance(raw_wg_peer, dict):
+        for raw_peer in raw_peers:
+            if not isinstance(raw_peer, dict):
                 continue
 
-            peer_uid = self._normalized_optional_string(
-                raw_wg_peer.get(_RAW_USER_UID_KEY)
-            )
+            peer_uid = self._normalized_optional_string(raw_peer.get(_RAW_USER_UID_KEY))
             if peer_uid is None:
                 continue
 
-            raw_policy = raw_wg_peer.get(_RAW_HOST_POLICY_KEY)
+            raw_policy = raw_peer.get(_RAW_HOST_POLICY_KEY)
             raw_tags = raw_policy.get("tags") if isinstance(raw_policy, dict) else None
             peer_ip_address = self._extract_allowed_ip_address(
-                raw_wg_peer.get(_RAW_HOST_ALLOWED_IPS_KEY)
+                raw_peer.get(_RAW_HOST_ALLOWED_IPS_KEY)
             )
-            interface_id = self._normalized_optional_string(
-                raw_wg_peer.get(_RAW_INTF_KEY)
-            )
-            flowsummary = raw_wg_peer.get(_RAW_HOST_FLOWSUMMARY_KEY)
+            interface_id = self._normalized_optional_string(raw_peer.get(_RAW_INTF_KEY))
+            flowsummary = raw_peer.get(_RAW_HOST_FLOWSUMMARY_KEY)
 
             normalized_peers.append(
                 FirewallaHostRuntime(
-                    mac=f"wg_peer:{peer_uid}",
+                    mac=f"{mac_prefix}:{peer_uid}",
                     host_name=(
-                        self._normalized_optional_string(raw_wg_peer.get(_RAW_NAME_KEY))
+                        self._normalized_optional_string(raw_peer.get(_RAW_NAME_KEY))
                         or peer_ip_address
-                        or f"wg_peer:{peer_uid}"
+                        or f"{mac_prefix}:{peer_uid}"
                     ),
                     ip_address=peer_ip_address,
                     group_name=self._resolve_host_group_name(
@@ -1697,7 +1732,7 @@ class FirewallaApiClient:
                     ),
                     connection_type="vpn",
                     last_active=self._coerce_float(
-                        raw_wg_peer.get(_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY)
+                        raw_peer.get(_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY)
                     ),
                     download_bytes=(
                         self._coerce_int(flowsummary.get("inbytes"))
@@ -1828,6 +1863,16 @@ class FirewallaApiClient:
         if not any(host.mac.startswith("wg_peer:") for host in normalized_hosts):
             normalized_hosts.extend(
                 self._normalize_wireguard_peer_inventory(
+                    data,
+                    network_lookup=network_lookup,
+                    tags=tag_lookup,
+                    affiliated_users=affiliated_user_lookup,
+                )
+            )
+
+        if not any(host.mac.startswith("awg_peer:") for host in normalized_hosts):
+            normalized_hosts.extend(
+                self._normalize_amnezia_peer_inventory(
                     data,
                     network_lookup=network_lookup,
                     tags=tag_lookup,

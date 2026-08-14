@@ -296,6 +296,12 @@ def redact_runtime_init_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
                 for peer in value
             ]
             continue
+        if key_lower == "awgpeers":
+            redacted[key] = [
+                _redact_wg_peer(peer) if isinstance(peer, Mapping) else peer
+                for peer in value
+            ]
+            continue
         if key_lower == "internetspeedtestresults":
             redacted[key] = [
                 _redact_speedtest(record) if isinstance(record, Mapping) else record

@@ -98,6 +98,32 @@ def test_redact_wg_peer_sensitive_fields() -> None:
     assert peer["rxBytes"] == 100
 
 
+def test_redact_awg_peer_sensitive_fields() -> None:
+    """Test Amnezia WG peer records redact keys and names."""
+    payload = {
+        "awgPeers": [
+            {
+                "publicKey": "cQpHszs0f0pYLeXZz2Bx4H/vddz55sqQBA1TpZsNnUU=",
+                "name": "chads-phone-amvpn",
+                "allowedIPs": ["10.190.68.226/32"],
+                "uid": "peer-1",
+                "devId": "awg:peer-1",
+                "rxBytes": 100,
+            }
+        ]
+    }
+
+    redacted = redact_runtime_init_payload(payload)
+    peer = redacted["awgPeers"][0]
+
+    assert peer["publicKey"] == "**REDACTED**"
+    assert peer["name"] == "**REDACTED**"
+    assert peer["allowedIPs"] == "**REDACTED**"
+    assert peer["uid"] == "**REDACTED**"
+    assert peer["devId"] == "**REDACTED**"
+    assert peer["rxBytes"] == 100
+
+
 def test_redact_wireless_mesh_key() -> None:
     """Test the AP controller mesh key and SSID are redacted."""
     payload = {
