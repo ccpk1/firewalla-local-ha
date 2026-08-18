@@ -2095,6 +2095,55 @@ Normalized characteristics:
 - the integration always sends `includeInactiveHosts: true` so its host
   inventory matches the full set rather than only recently-active devices
 
+### Finding 22: Host deletion uses a `cmd` message with `item=host:delete`
+
+Scenario:
+
+- deleted one host device from the Firewalla mobile app (iOS) while mobile data
+  was disabled so the phone's traffic was confined to the local WiFi
+
+Artifacts:
+
+- `.tmp/delete_host_capture.pcap` — packet capture of the iOS app deleting a
+  host on port 8833
+
+Observed mutation:
+
+```json
+{
+  "mtype": "cmd",
+  "target": "0.0.0.0",
+  "data": {
+    "value": {
+      "mac": "12:A9:78:EB:EA:02"
+    },
+    "item": "host:delete"
+  }
+}
+```
+
+Result:
+
+- the host with the given MAC (`12:A9:78:EB:EA:02` in the capture) was removed
+  from the device inventory
+
+Normalized characteristics:
+
+- `host:delete` is a `cmd` message (not `set`), matching the mutation pattern
+  used by other host commands such as `wol:wake`
+- the outer `target` is `0.0.0.0` (box-level), like other `cmd` mutations
+- `value` carries only the host `mac` to delete; no IP, hostname, or device type
+  is included
+- the delete is a single message; the `batchAction` and `init` requests the app
+  sends afterward are data refreshes for usage/inventory, not part of the
+  deletion mutation
+
+Implementation impact:
+
+- a host-delete service should send a `cmd` message with
+  `item: "host:delete"` and `value: {"mac": "<host-mac>"}` targeting
+  `0.0.0.0`, matching the existing manager-owned mutation pattern
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
