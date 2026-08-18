@@ -232,6 +232,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Send one Wake-on-LAN command to the requested host."""
         return await self.client.async_wake_host(host_mac)
 
+    async def async_delete_host(self, host_mac: str) -> dict[str, object]:
+        """Delete one MAC-identified host device from the Firewalla inventory."""
+        await self.client.async_delete_host(host_mac)
+        if host_manager := getattr(self.coordinator, "host_manager", None):
+            host_manager.remove_host_from_index(host_mac)
+        return {"deleted": host_mac}
+
     async def async_set_host_policy(
         self, host_mac: str, policy_value: dict[str, object]
     ) -> dict[str, object]:

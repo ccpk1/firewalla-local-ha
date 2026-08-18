@@ -88,6 +88,7 @@ _COMMAND_POLICY_DELETE: Final = "policy:delete"
 _COMMAND_POLICY_UPDATE: Final = "policy:update"
 _COMMAND_RUN_INTERNET_SPEED_TEST: Final = "runInternetSpeedtest"
 _COMMAND_WAKE_HOST: Final = "wol:wake"
+_COMMAND_DELETE_HOST: Final = "host:delete"
 _COMMAND_SET_HOST: Final = "host"
 _COMMAND_SET_HOST_DOMAIN: Final = "hostDomain"
 _COMMAND_SET_FEEDBACK: Final = "feedback"
@@ -704,6 +705,17 @@ class FirewallaApiClient:
                 _COMMAND_ITEM_KEY: _COMMAND_WAKE_HOST,
             },
             target=host_mac,
+        )
+
+    async def async_delete_host(self, host_mac: str) -> dict[str, object]:
+        """Delete one MAC-identified host device from the Firewalla inventory."""
+        return await self._async_send_local_message(
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _COMMAND_DELETE_HOST,
+                _COMMAND_VALUE_KEY: {_RAW_HOST_MAC_KEY: host_mac},
+            },
+            target=DEFAULT_INIT_TARGET,
         )
 
     async def async_set_host_policy(

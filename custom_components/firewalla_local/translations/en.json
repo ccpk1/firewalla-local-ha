@@ -845,6 +845,12 @@
     "wake_host_failed": {
       "message": "The integration could not wake the host. Check the Firewalla connection and try again."
     },
+    "delete_host_failed": {
+      "message": "The integration could not delete the host. Check the Firewalla connection and try again."
+    },
+    "delete_host_confirm_required": {
+      "message": "Deleting a host is destructive. Set confirm to true to proceed."
+    },
     "wan_data_usage_failed": {
       "message": "The integration could not read WAN data usage. Check the Firewalla connection and try again."
     },
@@ -1004,6 +1010,32 @@
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the Wake-on-LAN command."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "delete_host": {
+      "name": "Delete host",
+      "description": "Permanently delete one or more Firewalla host devices identified by MAC.",
+      "fields": {
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Required. One or more Firewalla host MACs to permanently delete. Provide multiple values as a comma-separated list."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Required. Must be set to true to acknowledge this destructive action permanently removes the device."
+        },
+        "refresh": {
+          "name": "Refresh",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before deleting the hosts."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

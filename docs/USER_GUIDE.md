@@ -41,6 +41,7 @@ Services added after 1.0.0:
 - `firewalla_local.get_network_segment_usage`
 - `firewalla_local.run_internet_speed_test`
 - `firewalla_local.wake_host`
+- `firewalla_local.delete_host`
 - `firewalla_local.set_host_name`
 - `firewalla_local.set_host_dns_hostname`
 - `firewalla_local.set_host_device_type`
@@ -399,6 +400,7 @@ Host and network operator actions:
 
 - `firewalla_local.run_internet_speed_test`
 - `firewalla_local.wake_host`
+- `firewalla_local.delete_host`
 - `firewalla_local.set_host_name`
 - `firewalla_local.set_host_dns_hostname`
 - `firewalla_local.set_host_device_type`
@@ -472,6 +474,27 @@ Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
 - `refresh` defaults to `true`
 - the service returns an acknowledgement with the resolved host and command
   details
+
+### Delete host
+
+Use `firewalla_local.delete_host` to permanently remove one or more host
+devices from the Firewalla box. It is a destructive action and requires
+explicit acknowledgement.
+
+- **destructive confirmation:** you must set `confirm: true`; without it the
+  service aborts. There is no undo — the device is permanently removed and
+  re-adding requires it coming back online
+- **one or many hosts:** provide `host_mac` as a comma-separated list of MAC
+  addresses
+- **skip on unmatched:** a MAC that does not resolve to a current host is
+  skipped (reported as `skipped`/`not_found`), not treated as a fatal error —
+  the remaining hosts are still processed
+- the service returns a per-host result envelope showing each MAC's status
+  (`success`, `failed`, or `skipped`/`not_found`)
+- `refresh` defaults to `true`
+- deleting a host that is also in your watched-device or device-tracker lists
+  simply stops appearing in those choices after the next refresh; the saved
+  option lists are not modified
 
 ### Host rename
 

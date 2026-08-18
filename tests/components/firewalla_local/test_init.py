@@ -40,6 +40,7 @@ from custom_components.firewalla_local.const import (
     DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
+    SERVICE_DELETE_HOST,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_GET_HOST_NAME_MAPPING,
@@ -1121,6 +1122,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE),
             (DOMAIN, SERVICE_SET_SSID_PAUSED),
             (DOMAIN, SERVICE_WAKE_HOST),
+            (DOMAIN, SERVICE_DELETE_HOST),
         ]
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
@@ -1144,6 +1146,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
         SERVICE_SET_SSID_PAUSED,
         SERVICE_WAKE_HOST,
+        SERVICE_DELETE_HOST,
     }
 
 

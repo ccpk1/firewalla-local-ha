@@ -26,8 +26,10 @@ from .const import (
     DOMAIN,
     HOST_DEVICE_TYPE_OPTIONS,
     LOGGER,
+    SERVICE_DELETE_HOST,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
+    SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_DNS_HOSTNAME,
@@ -87,6 +89,8 @@ from .const import (
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_LOADED,
+    TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
+    TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED,
     TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
     TRANS_KEY_EXCEPTION_HOST_REQUIRED,
@@ -282,6 +286,19 @@ _HOST_TARGET_SCHEMA_FIELDS: dict[object, object] = {
 }
 
 WAKE_HOST_SCHEMA = vol.Schema(_HOST_TARGET_SCHEMA_FIELDS)
+
+DELETE_HOST_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_HOST_MAC): vol.All(
+            cv.ensure_list_csv,
+            [cv.string],
+        ),
+        vol.Required(SERVICE_FIELD_CONFIRM): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
 
 SET_HOST_NOTIFY_WHEN_NEXT_ONLINE_SCHEMA = vol.Schema(
     {
@@ -2968,6 +2985,66 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
     }
 
 
+async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
+    """Delete one or more MAC-identified host devices from the Firewalla box."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    if not cast(bool, call.data[SERVICE_FIELD_CONFIRM]):
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
+        )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    host_manager = entry.runtime_data.host_manager
+    requested_macs = cast(list[str], call.data[SERVICE_FIELD_HOST_MAC])
+
+    results: list[JsonValueType] = []
+    for raw_mac in requested_macs:
+        normalized = normalize_mac_address(raw_mac)
+        mac = normalized or raw_mac.strip()
+        host = host_manager.get_host(mac)
+        if host is None:
+            results.append(
+                {
+                    "host_mac": raw_mac,
+                    "status": "skipped",
+                    "reason": "not_found",
+                }
+            )
+            continue
+
+        try:
+            await entry.runtime_data.integration_manager.async_delete_host(host.mac)
+        except FirewallaApiError as err:
+            _raise_runtime_service_error(
+                err,
+                log_message="Failed to delete host",
+                translation_key=TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED,
+            )
+        results.append(
+            {
+                "host_mac": raw_mac,
+                "status": "success",
+            }
+        )
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "command": {
+            "item": "host:delete",
+        },
+        "results": results,
+    }
+
+
 async def _async_handle_set_host_notification(
     call: ServiceCall,
     *,
@@ -4052,6 +4129,12 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_WAKE_HOST,
         _async_handle_wake_host,
         WAKE_HOST_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_DELETE_HOST,
+        _async_handle_delete_host,
+        DELETE_HOST_SCHEMA,
         SupportsResponse.ONLY,
     ),
     (

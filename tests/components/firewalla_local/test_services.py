@@ -26,8 +26,10 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DOMAIN,
+    SERVICE_DELETE_HOST,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
+    SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_DNS_HOSTNAME,
@@ -82,6 +84,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_SET_SSID_PAUSED,
     SERVICE_WAKE_HOST,
+    TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
     WRITE_PATTERN_CMD_APC,
     WRITE_PATTERN_SET_APC,
@@ -2403,6 +2406,190 @@ async def test_wake_host_service_raises_translated_runtime_error(
 
     assert exc_info.value.translation_domain == DOMAIN
     assert exc_info.value.translation_key == TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED
+
+
+async def test_delete_host_service_requires_confirmation_toggle(
+    hass: HomeAssistant,
+) -> None:
+    """Test delete_host raises a validation error without confirm: true."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_delete_host",
+            new=AsyncMock(return_value={"deleted": "00:AA:BB:CC:DD:26"}),
+        ) as mock_delete_host,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_DELETE_HOST,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                    SERVICE_FIELD_CONFIRM: False,
+                    SERVICE_FIELD_REFRESH: False,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert (
+        exc_info.value.translation_key
+        == TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED
+    )
+    mock_delete_host.assert_not_awaited()
+
+
+async def test_delete_host_service_deletes_single_host_and_returns_success(
+    hass: HomeAssistant,
+) -> None:
+    """Test delete_host deletes one resolved host and returns a success result."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_delete_host",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_delete_host,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_DELETE_HOST,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_MAC: "00:aa:bb:cc:dd:26",
+                SERVICE_FIELD_CONFIRM: True,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_delete_host.await_args is not None
+    assert mock_delete_host.await_args.args == ("00:AA:BB:CC:DD:26",)
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "command": {"item": "host:delete"},
+        "results": [{"host_mac": "00:aa:bb:cc:dd:26", "status": "success"}],
+    }
+
+
+async def test_delete_host_service_handles_multi_host_and_skips_unmatched(
+    hass: HomeAssistant,
+) -> None:
+    """Test delete_host processes multiple MACs and skips unmatched ones."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_delete_host",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_delete_host,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_DELETE_HOST,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_MAC: "00:aa:bb:cc:dd:26, 1E:2F:3A:4B:5C:6D",
+                SERVICE_FIELD_CONFIRM: True,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_delete_host.await_count == 1
+    assert mock_delete_host.await_args.args == ("00:AA:BB:CC:DD:26",)
+    assert response is not None
+    assert response == {
+        "config_entry_id": entry.entry_id,
+        "refreshed": False,
+        "command": {"item": "host:delete"},
+        "results": [
+            {"host_mac": "00:aa:bb:cc:dd:26", "status": "success"},
+            {
+                "host_mac": "1E:2F:3A:4B:5C:6D",
+                "status": "skipped",
+                "reason": "not_found",
+            },
+        ],
+    }
 
 
 async def test_set_host_notify_when_next_online_returns_acknowledgement(

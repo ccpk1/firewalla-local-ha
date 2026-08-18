@@ -1397,6 +1397,34 @@ async def test_async_wake_host_sends_host_targeted_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_delete_host_sends_box_targeted_delete_command() -> None:
+    """Test host delete sends the captured box-targeted host:delete shape."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"ok": True}),
+        ) as mock_send:
+            response = await client.async_delete_host("12:A9:78:EB:EA:02")
+
+    assert response == {"ok": True}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "cmd",
+        "data": {"item": "host:delete", "value": {"mac": "12:A9:78:EB:EA:02"}},
+        "target": "0.0.0.0",
+    }
+
+
+@pytest.mark.asyncio
 async def test_async_set_host_policy_sends_host_targeted_policy_write() -> None:
     """Test host policy writes use the captured host-targeted set shape."""
     async with ClientSession() as session:
