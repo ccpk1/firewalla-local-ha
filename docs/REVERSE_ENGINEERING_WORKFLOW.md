@@ -2045,6 +2045,56 @@ Conclusion:
 - host device type should continue to normalize from `detect.feedback.type`
   first, because `detect.type` may remain the vendor or classifier default
 
+### Finding 21: The init request can include inactive hosts via `includeInactiveHosts`
+
+Scenario:
+
+- user observed that devices configured in Firewalla but inactive for a period
+  were reported as unavailable by the Home Assistant device tracker, while the
+  Firewalla app only showed them after enabling the "Show past devices" toggle
+
+Artifacts:
+
+- `.tmp/show_past_devices.pcap` — packet capture of the iOS app toggling
+  "Show past devices" on port 8833
+- direct live probe against the box using the Home Assistant config entry
+  credentials
+
+Observed init request:
+
+- baseline init request (`get: "0.0.0.0"` only) returned 155 hosts and omitted
+  the inactive devices
+- with `"includeInactiveHosts": true` added to the init `data`, the box
+  returned 224 hosts and included the previously-missing inactive devices
+
+Confirmed:
+
+```json
+{
+  "get": "0.0.0.0",
+  "includeInactiveHosts": true
+}
+```
+
+Result:
+
+- the device-tracker hosts that had dropped out of the runtime inventory become
+  present in the snapshot so the integration can keep them associated with
+  their configured trackers and names
+- hosts that are present but inactive are still classified by the existing
+  `stale` and activity-window logic, so they report `not_home` rather than
+  `home`
+
+Normalized characteristics:
+
+- `includeInactiveHosts` is a top-level boolean field in the init `data`
+  object, set to `true` to request the full host inventory including devices
+  the Firewalla box otherwise filters out
+- the app surfaces this behavior as "Show past devices", which lists devices
+  that have not been online for the past 7 days
+- the integration always sends `includeInactiveHosts: true` so its host
+  inventory matches the full set rather than only recently-active devices
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
@@ -2273,6 +2323,25 @@ The second init requests multiple back-end data sources:
 
 The phone repeats the second init up to 3 times, interleaved with SSE/GET
 polling for live stats, before the box returns the full runtime payload.
+
+### Init request variants
+
+The init request supports a boolean `includeInactiveHosts` field that controls
+whether the returned `hosts` array includes devices that have not been online
+recently. The Firewalla app surfaces this as the "Show past devices" toggle
+(devices not seen online in the past 7 days).
+
+```json
+{
+  "get": "0.0.0.0",
+  "includeInactiveHosts": true
+}
+```
+
+- `false` or omitted: the box returns only recently-active hosts
+- `true`: the box returns the full host inventory including inactive devices
+- the integration always sends `includeInactiveHosts: true` so configured
+  device-tracker and watched-device hosts remain present even when inactive
 
 ### Inner encrypted envelope format (for reference)
 

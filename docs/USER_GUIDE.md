@@ -251,6 +251,13 @@ host identity.
   entity remains in Home Assistant and becomes unavailable instead of being
   silently removed
 
+The integration always requests the full host inventory, including devices the
+Firewalla app would only show with its "Show past devices" setting enabled
+(devices that have not been online in the past 7 days). A watched device that
+is present but inactive is therefore reported as offline rather than removed
+from the inventory, so it stays associated with its configured entity and
+name.
+
 ## Watched-user monitoring
 
 Watched users are opt-in. After selecting users in the options flow, the
@@ -303,6 +310,13 @@ selected MAC-backed LAN client.
 - this away window is separate from the watched-device online window
 - the integration does not invent richer presence states beyond `home`,
   `not_home`, and unavailable
+
+The integration always requests the full host inventory, including devices the
+Firewalla app would only show with its "Show past devices" setting enabled
+(devices that have not been online in the past 7 days). A tracked client that is
+present but inactive is still classified by the away window, so it reports
+`not_home` rather than unavailable. Because the host remains in the inventory,
+its tracker stays associated with the client device and keeps its name.
 
 ### Device-tracker lifecycle behavior
 

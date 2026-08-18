@@ -60,6 +60,35 @@ async def test_local_runtime_412_raises_not_ready_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_init_payload_requests_inactive_hosts() -> None:
+    """Test the runtime init request includes inactive hosts like the app."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={}),
+        ) as mock_send:
+            await client.async_get_runtime_init_payload()
+
+    assert mock_send.await_count == 1
+    assert mock_send.await_args_list[0].kwargs == {
+        "message_type": "init",
+        "data": {"get": "0.0.0.0", "includeInactiveHosts": True},
+        "target": "0.0.0.0",
+        "log_level": logging.DEBUG,
+    }
+
+
+@pytest.mark.asyncio
 async def test_local_runtime_init_logs_at_info_for_pairing(caplog) -> None:
     """Test pairing-time local init uses info-level request and response logs."""
     async with ClientSession() as session:

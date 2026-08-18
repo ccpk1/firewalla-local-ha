@@ -81,6 +81,7 @@ _HTTP_CONNECTION_CLOSE_VALUE: Final = "close"
 _COMMAND_ITEM_KEY: Final = "item"
 _COMMAND_VALUE_KEY: Final = "value"
 _COMMAND_GET_KEY: Final = "get"
+_COMMAND_INIT_INCLUDE_INACTIVE_HOSTS_KEY: Final = "includeInactiveHosts"
 _COMMAND_SET_POLICY: Final = "policy"
 _COMMAND_POLICY_CREATE: Final = "policy:create"
 _COMMAND_POLICY_DELETE: Final = "policy:delete"
@@ -475,7 +476,10 @@ class FirewallaApiClient:
             )
         return await self._async_send_local_message(
             message_type=_INIT_MESSAGE_TYPE,
-            data={_COMMAND_GET_KEY: DEFAULT_INIT_TARGET},
+            data={
+                _COMMAND_GET_KEY: DEFAULT_INIT_TARGET,
+                _COMMAND_INIT_INCLUDE_INACTIVE_HOSTS_KEY: True,
+            },
             target=DEFAULT_INIT_TARGET,
             log_level=log_level,
         )
