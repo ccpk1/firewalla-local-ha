@@ -49,10 +49,27 @@ from custom_components.firewalla_local.const import (
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
+    FirewallaHostRuntime,
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
 )
+
+
+def _box_host() -> FirewallaHostRuntime:
+    """Return the Firewalla box's own host record, always present in snapshots."""
+    return FirewallaHostRuntime(
+        mac="AA:BB:CC:DD:EE:00",
+        host_name="Firewalla",
+        ip_address="192.168.200.1",
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=None,
+        download_bytes=None,
+        upload_bytes=None,
+        stale=False,
+    )
 
 
 def _visible_attribute_keys(attributes: dict[str, object]) -> list[str]:
@@ -126,6 +143,7 @@ def _snapshot_with_rule(
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=policy_rules,
         exception_rule_count=0,
+        hosts=(_box_host(),),
     )
 
 
@@ -335,6 +353,7 @@ async def test_selected_rule_switch_uses_live_custom_name(
                 appliance_runtime=FirewallaApplianceRuntimeInput(),
                 policy_rules=(live_rule,),
                 exception_rule_count=0,
+                hosts=(_box_host(),),
             ),
         ),
     ):
@@ -451,6 +470,7 @@ async def test_selected_rule_switch_name_updates_after_rule_rename(
                     appliance_runtime=FirewallaApplianceRuntimeInput(),
                     policy_rules=(initial_rule,),
                     exception_rule_count=0,
+                    hosts=(_box_host(),),
                 ),
                 FirewallaRuntimeSnapshot(
                     appliance_identity=FirewallaApplianceIdentityInput(
@@ -464,6 +484,7 @@ async def test_selected_rule_switch_name_updates_after_rule_rename(
                     appliance_runtime=FirewallaApplianceRuntimeInput(),
                     policy_rules=(renamed_rule,),
                     exception_rule_count=0,
+                    hosts=(_box_host(),),
                 ),
             ],
         ),

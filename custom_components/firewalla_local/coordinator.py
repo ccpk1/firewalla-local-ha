@@ -208,6 +208,13 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
                 payload = await self.client.async_get_runtime_init_payload()
             self.last_init_payload = payload
             snapshot = self.client.build_runtime_snapshot(payload)
+
+            if not snapshot.hosts:
+                # The box always reports itself in the host inventory, so an
+                # empty host list means a degraded payload rather than a valid
+                # empty box. Treat it as a failed refresh so managers are not
+                # routed an empty index that would drop every configured host.
+                raise UpdateFailed("Firewalla Local returned an empty host inventory")
         except FirewallaAuthError as err:
             raise ConfigEntryAuthFailed(
                 "Firewalla local credentials were rejected"

@@ -74,6 +74,22 @@ def _snapshot_with_hosts(*hosts: FirewallaHostRuntime) -> FirewallaRuntimeSnapsh
     )
 
 
+def _box_host() -> FirewallaHostRuntime:
+    """Return the Firewalla box's own host record, always present in snapshots."""
+    return FirewallaHostRuntime(
+        mac="AA:BB:CC:DD:EE:00",
+        host_name="Firewalla",
+        ip_address="192.168.200.1",
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=None,
+        download_bytes=None,
+        upload_bytes=None,
+        stale=False,
+    )
+
+
 async def test_watched_device_binary_sensor_exposes_state_and_attributes(
     hass: HomeAssistant,
 ) -> None:
@@ -175,7 +191,7 @@ async def test_watched_device_binary_sensor_is_unavailable_when_host_missing(
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
-            return_value=_snapshot_with_hosts(),
+            return_value=_snapshot_with_hosts(_box_host()),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)

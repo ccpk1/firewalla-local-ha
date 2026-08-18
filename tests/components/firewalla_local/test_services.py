@@ -100,6 +100,22 @@ from custom_components.firewalla_local.models import (
 from custom_components.firewalla_local.services import _get_loaded_entry
 
 
+def _box_host() -> FirewallaHostRuntime:
+    """Return the Firewalla box's own host record, always present in snapshots."""
+    return FirewallaHostRuntime(
+        mac="AA:BB:CC:DD:EE:00",
+        host_name="Firewalla",
+        ip_address="192.168.200.1",
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=None,
+        download_bytes=None,
+        upload_bytes=None,
+        stale=False,
+    )
+
+
 def _snapshot(
     enabled: bool = True,
     *,
@@ -147,6 +163,7 @@ def _snapshot(
             ),
         ),
         exception_rule_count=0,
+        hosts=(_box_host(),),
     )
 
 
