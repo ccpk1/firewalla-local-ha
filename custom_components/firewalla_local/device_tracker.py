@@ -123,6 +123,16 @@ class FirewallaDeviceTracker(
             return
 
         entity_registry = er.async_get(self.hass)
+        device_entry = self.find_device_entry()
+        if (
+            device_entry is not None
+            and self.registry_entry.device_id != device_entry.id
+        ):
+            self.registry_entry = entity_registry.async_update_entity(
+                self.entity_id,
+                device_id=device_entry.id,
+            )
+
         new_entity_id = entity_registry.async_regenerate_entity_id(self.registry_entry)
 
         if new_entity_id == self.entity_id:
