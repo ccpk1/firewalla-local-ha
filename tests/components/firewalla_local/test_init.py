@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -39,6 +40,7 @@ from custom_components.firewalla_local.const import (
     DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
+    SERVICE_DELETE_HOST,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_GET_HOST_NAME_MAPPING,
@@ -49,6 +51,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WIRELESS_STATUS,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -58,6 +61,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+    SERVICE_SET_SSID_PAUSED,
     SERVICE_WAKE_HOST,
     TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON,
 )
@@ -137,6 +141,22 @@ def _mock_snapshot() -> FirewallaRuntimeSnapshot:
 def _mock_runtime_payload() -> dict[str, object]:
     """Return a representative raw init payload for setup and refresh tests."""
     return {"policyRules": []}
+
+
+def _box_host() -> FirewallaHostRuntime:
+    """Return the Firewalla box's own host record, always present in snapshots."""
+    return FirewallaHostRuntime(
+        mac="AA:BB:CC:DD:EE:00",
+        host_name="Firewalla",
+        ip_address="192.168.200.1",
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=None,
+        download_bytes=None,
+        upload_bytes=None,
+        stale=False,
+    )
 
 
 async def test_setup_entry(hass: HomeAssistant) -> None:
@@ -448,6 +468,20 @@ async def test_setup_uses_entry_scoped_update_interval_options(
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="AA:BB:CC:DD:EE:00",
+                host_name="Firewalla Upstairs",
+                ip_address="192.168.200.2",
+                group_name=None,
+                network_name=None,
+                connection_type=None,
+                last_active=None,
+                download_bytes=None,
+                upload_bytes=None,
+                stale=False,
+            ),
+        ),
     )
 
     with (
@@ -698,6 +732,20 @@ async def test_setup_multiple_entries_create_distinct_license_devices(
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="AA:BB:CC:DD:EE:00",
+                host_name="Firewalla Upstairs",
+                ip_address="192.168.200.2",
+                group_name=None,
+                network_name=None,
+                connection_type=None,
+                last_active=None,
+                download_bytes=None,
+                upload_bytes=None,
+                stale=False,
+            ),
+        ),
     )
 
     with (
@@ -1012,6 +1060,20 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="AA:BB:CC:DD:EE:00",
+                host_name="Firewalla Upstairs",
+                ip_address="192.168.200.2",
+                group_name=None,
+                network_name=None,
+                connection_type=None,
+                last_active=None,
+                download_bytes=None,
+                upload_bytes=None,
+                stale=False,
+            ),
+        ),
     )
     registered_events: list[dict[str, str]] = []
 
@@ -1048,6 +1110,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_GET_TIME_USAGE_REPORT),
             (DOMAIN, SERVICE_GET_WAN_EVENTS),
             (DOMAIN, SERVICE_GET_WAN_DATA_USAGE),
+            (DOMAIN, SERVICE_GET_WIRELESS_STATUS),
             (DOMAIN, SERVICE_PAUSE_RULE),
             (DOMAIN, SERVICE_RESUME_RULE),
             (DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST),
@@ -1057,7 +1120,9 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_SET_HOST_DHCP_RESERVATION),
             (DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE),
             (DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE),
+            (DOMAIN, SERVICE_SET_SSID_PAUSED),
             (DOMAIN, SERVICE_WAKE_HOST),
+            (DOMAIN, SERVICE_DELETE_HOST),
         ]
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
@@ -1069,6 +1134,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_GET_TIME_USAGE_REPORT,
         SERVICE_GET_WAN_EVENTS,
         SERVICE_GET_WAN_DATA_USAGE,
+        SERVICE_GET_WIRELESS_STATUS,
         SERVICE_PAUSE_RULE,
         SERVICE_RESUME_RULE,
         SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -1078,7 +1144,9 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_SET_HOST_DHCP_RESERVATION,
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
+        SERVICE_SET_SSID_PAUSED,
         SERVICE_WAKE_HOST,
+        SERVICE_DELETE_HOST,
     }
 
 
@@ -1138,6 +1206,43 @@ async def test_setup_entry_raises_auth_failed(hass: HomeAssistant) -> None:
         assert not await hass.config_entries.async_setup(entry.entry_id)
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
+async def test_setup_entry_fails_on_empty_host_inventory(
+    hass: HomeAssistant,
+) -> None:
+    """Test a degraded payload with an empty host inventory fails setup."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    empty_snapshot = replace(_mock_snapshot(), hosts=())
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=empty_snapshot,
+        ),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+
+    # UpdateFailed during first refresh maps to ConfigEntryNotReady, so the
+    # entry remains retryable rather than failing setup permanently.
+    assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
 async def test_coordinator_logs_unavailability_once_and_recovery(
@@ -1463,6 +1568,7 @@ async def test_setup_populates_raw_payload_for_live_rule_filtering(
             ),
         ),
         exception_rule_count=0,
+        hosts=(_box_host(),),
     )
 
     with (

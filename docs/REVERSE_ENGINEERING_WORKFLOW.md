@@ -786,6 +786,7 @@ The following are confirmed by repository code and live captures.
 | Category rule block, persistent | `policy:create` without expiry fields | not yet fully confirmed | not yet captured | Example: `Always block` on `social` for `AV_SMART_TV` |
 | Internet block | `policy:create` when absent | `policy:update` with `disabled: 1` or `policy:delete` | `policy:update` with `disabled: 0` | Example: `Traffic from & to Internet` for `AV_SMART_TV` |
 | Direct DNS allow, device-scoped | existing rule observed only | `policy:update` with `disabled: 1` and `idleTs` for timed pause | inventory confirms same-rule re-enable with cleared `idleTs`; payload not captured in this run | Example: `allow dns dns.google` for Kaden's Chromebook |
+| AP7 wireless SSID pause | read via `networkConfig.apc.profile.<uuid>.paused` | **unconfirmed** — three candidate write patterns rejected with code 500 | not applicable until write contract is confirmed | Example: pause/resume "Universe Guest" on VLAN 100 |
 
 ## Inventory-confirmed durable rule findings
 
@@ -1611,6 +1612,8 @@ Implementation note:
 
 ## Next capture targets
 
+### Direct DNS rules
+
 The next protocol family to confirm is direct DNS rules.
 
 Priority order:
@@ -1634,6 +1637,20 @@ Questions to answer for this family:
 - capture the exact re-enable payload for a timed-paused direct DNS rule
 - capture the exact delete payload for a device-scoped direct DNS allow rule
 
+### AP7 wireless SSID pause
+
+The write contract for the `paused` field on an SSID profile is unconfirmed.
+All three candidate write patterns (set_apc, cmd_apc, set_networkconfig) were
+rejected with code 500. The correct write command must be determined from a
+packet capture of the Firewalla app toggling a wireless network.
+
+Required capture:
+
+- toggle a wireless network (enable → disable) in the Firewalla app
+- capture the decrypted `set` or `cmd` message directed at the AP controller
+- the target SSID profile UUID is `f185dc47-2730-48a8-844c-b57aa31af4ba`
+  (Universe Guest, VLAN 100) for the reporter's setup
+
 ## Open questions
 
 These items remain unconfirmed and should stay visible.
@@ -1653,6 +1670,90 @@ These items remain unconfirmed and should stay visible.
   delete payload shape
 - whether re-enabling a timed-paused direct DNS rule uses the same payload shape
   as internet-block re-enable, in addition to clearing `idleTs`
+- the exact AP7 wireless SSID pause write command (all three alpha.7
+  candidates rejected — requires a fresh packet capture; see §"Next capture
+  targets" above)
+
+## AP7 wireless controller findings
+
+The following findings were derived from live diagnostic captures submitted by
+a reporter with two Firewalla AP7 access points and confirmed by a live
+`get_wireless_status` service readback.
+
+### Finding 19: AP7 wireless config lives in `networkConfig.apc`
+
+**Scenario:**
+
+- reporter with 2 Firewalla AP7s (both `fwap-D`, "Main Floor" and "Upstairs")
+  submitted two extended diagnostic captures — one with the guest SSID enabled,
+  one with it disabled — using the integration's extended diagnostic download.
+- A full recursive diff of the `networkConfig.apc` section between the two
+  captures showed **exactly one change**: the `paused` field on the guest SSID
+  profile (`f185dc47-2730-48a8-844c-b57aa31af4ba`) was `true` when off and
+  absent when on.
+- The live `get_wireless_status` service (alpha.7) confirmed the read model
+  against the reporter's box.
+
+**Artifacts:**
+
+- `.artifacts/ap7-wireless-discovery/ap7_wifi_on.json`
+- `.artifacts/ap7-wireless-discovery/ap7_wifi_off.json`
+- `.artifacts/ap7-wireless-discovery/get_wireless_status_alpha7.txt`
+
+**Confirmed `networkConfig.apc` structure:**
+
+| Section | Contents | Confirmation level |
+| --- | --- | --- |
+| `assets` | Per-AP config: `name`, `model` (`fwap-D`), `channel.5g`, `channel.2g`, `txPower`, `country`, `meshMode`, `led`, `pauseWifi`, `disableAcl`, `timezone`, `publicKey` | **High** — from live readback |
+| `assets_template.ap_default.wifiNetworks` | SSID-to-network mapping: `intf`, `vlan`, `ssidProfiles` (UUID list), `dhcp`, `isolate` | **High** — from live readback |
+| `assets_template.ap_default.mesh` | Mesh backhaul: `ssid`, `key`, `encryption` | **High** — from capture |
+| `profile` | Per-SSID config keyed by UUID: `ssid`, `key`, `band`, `encryption`, `wpa3`, `paused` | **High** — toggle confirmed by on/off diff |
+| `globalSysConfig` | Global AP settings: `autoSteer`, `maxComp`, `stormControl`, `useDfsChannels`, `stp`, `lldpd`, `flowControl` | **Medium** — observed but untoggled |
+
+**Observed field values from live readback:**
+
+| Profile UUID | SSID | VLAN | Interface | Band | Paused state |
+| --- | --- | --- | --- | --- | --- |
+| `cca57d09-...` | Universe | — | br0 | 2.4g+5g+6g | false |
+| `f185dc47-...` | Universe Guest | 100 | br1 | 2.4g+5g+6g | **toggled** |
+| `6510fea4-...` | Universe IoT | 200 | br2 | 2.4g+5g+6g | false |
+
+| AP asset ID | Name | Model | 5g channel | 2g channel | LED |
+| --- | --- | --- | --- | --- | --- |
+| `20:6D:31:71:1D:D0` | Main Floor | fwap-D | 149 | 1 | off |
+| `20:6D:31:71:55:5C` | Upstairs | fwap-D | 36 | 11 | off |
+
+**Toggle control:**
+
+The wireless on/off toggle for one SSID is the `paused` field on its profile
+entry. When `paused` is `true` (or present), the SSID is disabled. When the
+field is absent (or `false`), the SSID is enabled.
+
+**Write contract — unconfirmed:**
+
+Three candidate write patterns were tested in alpha.7 (`set_apc`, `cmd_apc`,
+`set_networkconfig`). All three were rejected by the Firewalla box with
+protocol code 500. The correct write command remains unknown and requires
+packet capture of the app-to-box traffic during a wireless toggle.
+
+**Redaction fidelity note:**
+
+The `assets` dict in `networkConfig.apc` is keyed by MAC address. Because the
+diagnostic redaction helper replaces MAC-pattern dict keys with `**REDACTED**`,
+multiple AP entries are collapsed into one in the redacted diagnostic. The live
+service is unaffected. See `helpers/init_payload_redaction.py`.
+
+### Finding 20: AP7 devices are not `connection_type=ap` hosts in the normalized snapshot
+
+The reporter's Firewalla AP7s ("Main Floor" at 192.168.1.3, "Upstairs" at
+192.168.1.4) appeared in the normalized `runtime_snapshot.hosts` with
+`connection_type=None` and `host_device_type=None`, not with `connection_type
+= "ap"` as previously assumed. The earlier `connection_type=ap` entries were
+Aruba InstantOn AP22 units that have since been removed.
+
+The AP7s also appear as `wg_peer` hosts with `intf=wg_ap` for their mesh
+backhaul connection, and have dedicated entries in `networkConfig.apc.assets`
+identified by their MAC address key.
 
 ## Additional host-settings findings
 
@@ -1944,6 +2045,105 @@ Conclusion:
 - host device type should continue to normalize from `detect.feedback.type`
   first, because `detect.type` may remain the vendor or classifier default
 
+### Finding 21: The init request can include inactive hosts via `includeInactiveHosts`
+
+Scenario:
+
+- user observed that devices configured in Firewalla but inactive for a period
+  were reported as unavailable by the Home Assistant device tracker, while the
+  Firewalla app only showed them after enabling the "Show past devices" toggle
+
+Artifacts:
+
+- `.tmp/show_past_devices.pcap` — packet capture of the iOS app toggling
+  "Show past devices" on port 8833
+- direct live probe against the box using the Home Assistant config entry
+  credentials
+
+Observed init request:
+
+- baseline init request (`get: "0.0.0.0"` only) returned 155 hosts and omitted
+  the inactive devices
+- with `"includeInactiveHosts": true` added to the init `data`, the box
+  returned 224 hosts and included the previously-missing inactive devices
+
+Confirmed:
+
+```json
+{
+  "get": "0.0.0.0",
+  "includeInactiveHosts": true
+}
+```
+
+Result:
+
+- the device-tracker hosts that had dropped out of the runtime inventory become
+  present in the snapshot so the integration can keep them associated with
+  their configured trackers and names
+- hosts that are present but inactive are still classified by the existing
+  `stale` and activity-window logic, so they report `not_home` rather than
+  `home`
+
+Normalized characteristics:
+
+- `includeInactiveHosts` is a top-level boolean field in the init `data`
+  object, set to `true` to request the full host inventory including devices
+  the Firewalla box otherwise filters out
+- the app surfaces this behavior as "Show past devices", which lists devices
+  that have not been online for the past 7 days
+- the integration always sends `includeInactiveHosts: true` so its host
+  inventory matches the full set rather than only recently-active devices
+
+### Finding 22: Host deletion uses a `cmd` message with `item=host:delete`
+
+Scenario:
+
+- deleted one host device from the Firewalla mobile app (iOS) while mobile data
+  was disabled so the phone's traffic was confined to the local WiFi
+
+Artifacts:
+
+- `.tmp/delete_host_capture.pcap` — packet capture of the iOS app deleting a
+  host on port 8833
+
+Observed mutation:
+
+```json
+{
+  "mtype": "cmd",
+  "target": "0.0.0.0",
+  "data": {
+    "value": {
+      "mac": "12:A9:78:EB:EA:02"
+    },
+    "item": "host:delete"
+  }
+}
+```
+
+Result:
+
+- the host with the given MAC (`12:A9:78:EB:EA:02` in the capture) was removed
+  from the device inventory
+
+Normalized characteristics:
+
+- `host:delete` is a `cmd` message (not `set`), matching the mutation pattern
+  used by other host commands such as `wol:wake`
+- the outer `target` is `0.0.0.0` (box-level), like other `cmd` mutations
+- `value` carries only the host `mac` to delete; no IP, hostname, or device type
+  is included
+- the delete is a single message; the `batchAction` and `init` requests the app
+  sends afterward are data refreshes for usage/inventory, not part of the
+  deletion mutation
+
+Implementation impact:
+
+- a host-delete service should send a `cmd` message with
+  `item: "host:delete"` and `value: {"mac": "<host-mac>"}` targeting
+  `0.0.0.0`, matching the existing manager-owned mutation pattern
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
@@ -2172,6 +2372,25 @@ The second init requests multiple back-end data sources:
 
 The phone repeats the second init up to 3 times, interleaved with SSE/GET
 polling for live stats, before the box returns the full runtime payload.
+
+### Init request variants
+
+The init request supports a boolean `includeInactiveHosts` field that controls
+whether the returned `hosts` array includes devices that have not been online
+recently. The Firewalla app surfaces this as the "Show past devices" toggle
+(devices not seen online in the past 7 days).
+
+```json
+{
+  "get": "0.0.0.0",
+  "includeInactiveHosts": true
+}
+```
+
+- `false` or omitted: the box returns only recently-active hosts
+- `true`: the box returns the full host inventory including inactive devices
+- the integration always sends `includeInactiveHosts: true` so configured
+  device-tracker and watched-device hosts remain present even when inactive
 
 ### Inner encrypted envelope format (for reference)
 

@@ -83,6 +83,22 @@ from custom_components.firewalla_local.models import (
 )
 
 
+def _box_host() -> FirewallaHostRuntime:
+    """Return the Firewalla box's own host record, always present in snapshots."""
+    return FirewallaHostRuntime(
+        mac="AA:BB:CC:DD:EE:00",
+        host_name="Firewalla",
+        ip_address="192.168.200.1",
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=None,
+        download_bytes=None,
+        upload_bytes=None,
+        stale=False,
+    )
+
+
 def _state_for_unique_suffix(hass: HomeAssistant, domain: str, unique_suffix: str):
     """Return the entity state matching one unique-ID suffix."""
     entity_entry = next(
@@ -725,6 +741,7 @@ async def test_watched_user_sensor_name_updates_after_user_rename(
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
+        hosts=(_box_host(),),
         users=(
             FirewallaUserRuntime(
                 user_id="21",
@@ -741,6 +758,7 @@ async def test_watched_user_sensor_name_updates_after_user_rename(
         appliance_runtime=initial_snapshot.appliance_runtime,
         policy_rules=(),
         exception_rule_count=0,
+        hosts=(_box_host(),),
         users=(
             FirewallaUserRuntime(
                 user_id="21",

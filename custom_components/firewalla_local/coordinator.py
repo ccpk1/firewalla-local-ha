@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         FirewallaIntegrationManager,
         FirewallaRuleManager,
         FirewallaUserManager,
+        FirewallaWirelessManager,
     )
 
 
@@ -173,6 +174,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self.integration_manager: FirewallaIntegrationManager | None = None
         self.rule_manager: FirewallaRuleManager | None = None
         self.user_manager: FirewallaUserManager | None = None
+        self.wireless_manager: FirewallaWirelessManager | None = None
         self._unavailable_logged = False
         super().__init__(
             hass,
@@ -189,12 +191,14 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         integration_manager: FirewallaIntegrationManager,
         rule_manager: FirewallaRuleManager,
         user_manager: FirewallaUserManager,
+        wireless_manager: FirewallaWirelessManager,
     ) -> None:
         """Attach the entry-scoped manager objects to refresh routing."""
         self.host_manager = host_manager
         self.integration_manager = integration_manager
         self.rule_manager = rule_manager
         self.user_manager = user_manager
+        self.wireless_manager = wireless_manager
 
     async def _async_update_data(self) -> FirewallaRuntimeSnapshot:
         """Fetch data from Firewalla Local."""
@@ -204,6 +208,13 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
                 payload = await self.client.async_get_runtime_init_payload()
             self.last_init_payload = payload
             snapshot = self.client.build_runtime_snapshot(payload)
+
+            if not snapshot.hosts:
+                # The box always reports itself in the host inventory, so an
+                # empty host list means a degraded payload rather than a valid
+                # empty box. Treat it as a failed refresh so managers are not
+                # routed an empty index that would drop every configured host.
+                raise UpdateFailed("Firewalla Local returned an empty host inventory")
         except FirewallaAuthError as err:
             raise ConfigEntryAuthFailed(
                 "Firewalla local credentials were rejected"
@@ -226,6 +237,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
             self.user_manager.handle_refresh(snapshot)
         if self.rule_manager is not None:
             self.rule_manager.handle_refresh(self.last_init_payload or {}, snapshot)
+        if self.wireless_manager is not None:
+            self.wireless_manager.handle_refresh(self.last_init_payload or {})
 
         self.last_runtime_data_updated_at = dt_util.utcnow()
 
@@ -292,6 +305,7 @@ class FirewallaRuntimeData:
     integration_manager: FirewallaIntegrationManager
     rule_manager: FirewallaRuleManager
     user_manager: FirewallaUserManager
+    wireless_manager: FirewallaWirelessManager
 
 
 type FirewallaConfigEntry = ConfigEntry[FirewallaRuntimeData]

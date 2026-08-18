@@ -407,6 +407,13 @@ Rules:
 
 The integration must normalize the Firewalla init payload once per refresh path and expose a shared indexed registry for consumers.
 
+The local init request always includes `includeInactiveHosts: true`, so the
+runtime snapshot covers the full host inventory the Firewalla box knows about,
+including devices that have not been online recently (what the Firewalla app
+surfaces as "Show past devices"). Hosts that are present but inactive remain in
+the inventory and are classified by the existing `stale` and activity-window
+logic rather than being dropped from the snapshot.
+
 Rules:
 
 - repeated per-platform parsing of the raw init payload is forbidden once a shared registry exists

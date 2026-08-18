@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import CONF_LICENSE, DOMAIN
+from custom_components.firewalla_local.managers.host_manager import (
+    FirewallaHostManager,
+)
 from custom_components.firewalla_local.managers.integration_manager import (
     FirewallaIntegrationManager,
 )
@@ -15,6 +19,7 @@ from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
+    FirewallaHostRuntime,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
 )
@@ -407,3 +412,73 @@ def test_get_available_wans_includes_speed_test_uuid_fallback() -> None:
     assert len(available_wans) == 1
     assert available_wans[0].uuid == "wan-3"
     assert available_wans[0].name == "wan-3"
+
+
+@pytest.mark.asyncio
+async def test_async_delete_host_forwards_to_client_and_evicts_index() -> None:
+    """Test host delete forwards the MAC and drops it from the host index."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="12:A9:78:EB:EA:02",
+                host_name="Test Device",
+                ip_address="192.168.200.25",
+                group_name=None,
+                network_name=None,
+                connection_type=None,
+                last_active=None,
+                download_bytes=None,
+                upload_bytes=None,
+                stale=False,
+            ),
+        ),
+    )
+    manager = _build_manager(snapshot)
+    host_manager = FirewallaHostManager(
+        manager.coordinator, manager.entry, manager.client
+    )
+    host_manager.handle_refresh(snapshot)
+    manager.coordinator.host_manager = host_manager
+    manager.client.async_delete_host = AsyncMock(return_value={"ok": True})
+
+    response = await manager.async_delete_host("12:A9:78:EB:EA:02")
+
+    assert response == {"deleted": "12:A9:78:EB:EA:02"}
+    manager.client.async_delete_host.assert_awaited_once_with("12:A9:78:EB:EA:02")
+    assert host_manager.get_host("12:A9:78:EB:EA:02") is None
+
+
+@pytest.mark.asyncio
+async def test_async_delete_host_skips_eviction_without_host_manager() -> None:
+    """Test delete still forwards the client when no host manager is attached."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.client.async_delete_host = AsyncMock(return_value={"ok": True})
+
+    response = await manager.async_delete_host("12:A9:78:EB:EA:02")
+
+    assert response == {"deleted": "12:A9:78:EB:EA:02"}
+    manager.client.async_delete_host.assert_awaited_once_with("12:A9:78:EB:EA:02")

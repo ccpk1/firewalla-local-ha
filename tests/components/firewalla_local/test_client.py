@@ -60,6 +60,35 @@ async def test_local_runtime_412_raises_not_ready_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_init_payload_requests_inactive_hosts() -> None:
+    """Test the runtime init request includes inactive hosts like the app."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={}),
+        ) as mock_send:
+            await client.async_get_runtime_init_payload()
+
+    assert mock_send.await_count == 1
+    assert mock_send.await_args_list[0].kwargs == {
+        "message_type": "init",
+        "data": {"get": "0.0.0.0", "includeInactiveHosts": True},
+        "target": "0.0.0.0",
+        "log_level": logging.DEBUG,
+    }
+
+
+@pytest.mark.asyncio
 async def test_local_runtime_init_logs_at_info_for_pairing(caplog) -> None:
     """Test pairing-time local init uses info-level request and response logs."""
     async with ClientSession() as session:
@@ -926,6 +955,81 @@ async def test_get_runtime_snapshot_normalizes_wg_peers_into_host_inventory() ->
 
 
 @pytest.mark.asyncio
+async def test_get_runtime_snapshot_normalizes_awg_peers_into_host_inventory() -> None:
+    """Test Amnezia WG peers outside hosts[] become watched-device host records."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "model": "gold",
+                    "cpuid": "serial-123",
+                    "longVersion": "1.0.0",
+                    "networkConfig": {
+                        "interface": {
+                            "amnezia": {
+                                "awg0": {
+                                    "meta": {
+                                        "name": "Amnezia",
+                                        "uuid": "2c30793a-f9ce-43c0-9e9e-c30115366b76",
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "tags": {
+                        "60": {"name": "CHADS_PHONE"},
+                    },
+                    "hosts": [],
+                    "awgPeers": [
+                        {
+                            "allowedIPs": ["10.190.68.226/32"],
+                            "flowsummary": {
+                                "inbytes": 2276685,
+                                "outbytes": 1243658,
+                            },
+                            "intf": "awg0",
+                            "lastActiveTimestamp": 1786738739,
+                            "name": "chads-phone-amvpn",
+                            "policy": {"tags": ["60"]},
+                            "uid": "peer-123",
+                        }
+                    ],
+                    "policyRules": [],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    assert snapshot.hosts == (
+        FirewallaHostRuntime(
+            mac="awg_peer:peer-123",
+            host_name="chads-phone-amvpn",
+            ip_address="10.190.68.226",
+            group_name="CHADS_PHONE",
+            network_name="Amnezia",
+            connection_type="vpn",
+            last_active=1786738739.0,
+            download_bytes=2276685,
+            upload_bytes=1243658,
+            stale=None,
+            group_ids=("60",),
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_runtime_snapshot_derives_user_totals_and_group_links() -> None:
     """Test user normalization derives aggregate totals and preserves group links."""
     async with ClientSession() as session:
@@ -1289,6 +1393,34 @@ async def test_async_wake_host_sends_host_targeted_command() -> None:
         "message_type": "cmd",
         "data": {"item": "wol:wake"},
         "target": "00:AA:BB:CC:DD:26",
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_delete_host_sends_box_targeted_delete_command() -> None:
+    """Test host delete sends the captured box-targeted host:delete shape."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"ok": True}),
+        ) as mock_send:
+            response = await client.async_delete_host("12:A9:78:EB:EA:02")
+
+    assert response == {"ok": True}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "cmd",
+        "data": {"item": "host:delete", "value": {"mac": "12:A9:78:EB:EA:02"}},
+        "target": "0.0.0.0",
     }
 
 

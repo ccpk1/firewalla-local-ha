@@ -28,6 +28,7 @@ from .managers import (
     FirewallaIntegrationManager,
     FirewallaRuleManager,
     FirewallaUserManager,
+    FirewallaWirelessManager,
 )
 from .services import async_remove_services, async_setup_services
 
@@ -66,11 +67,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     integration_manager = FirewallaIntegrationManager(coordinator, entry, client)
     rule_manager = FirewallaRuleManager(coordinator, entry, client)
     user_manager = FirewallaUserManager(coordinator, entry, client)
+    wireless_manager = FirewallaWirelessManager(coordinator, entry, client)
     coordinator.attach_managers(
         host_manager=host_manager,
         integration_manager=integration_manager,
         rule_manager=rule_manager,
         user_manager=user_manager,
+        wireless_manager=wireless_manager,
     )
 
     await coordinator.async_config_entry_first_refresh()
@@ -95,6 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         integration_manager=integration_manager,
         rule_manager=rule_manager,
         user_manager=user_manager,
+        wireless_manager=wireless_manager,
     )
     entry.async_on_unload(
         entry.add_update_listener(coordinator.async_handle_entry_reload_requested)

@@ -122,6 +122,7 @@ SERVICE_FIELD_HISTORY_PERIOD: Final = "history_period"
 SERVICE_FIELD_HOST_ID: Final = "host_id"
 SERVICE_FIELD_HOST_MAC: Final = "host_mac"
 SERVICE_FIELD_HOST_NAME: Final = "host_name"
+SERVICE_FIELD_CONFIRM: Final = "confirm"
 SERVICE_FIELD_DNS_HOSTNAME: Final = "dns_hostname"
 SERVICE_FIELD_MODE: Final = "mode"
 SERVICE_FIELD_NEW_NAME: Final = "new_name"
@@ -146,6 +147,8 @@ SERVICE_FIELD_TOP_N: Final = "top_n"
 SERVICE_FIELD_WAN_NAME: Final = "wan_name"
 SERVICE_FIELD_WAN_UUID: Final = "wan_uuid"
 SERVICE_FIELD_WINDOW: Final = "window"
+SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
+SERVICE_FIELD_WRITE_PATTERN: Final = "write_pattern"
 
 # Config entry data and options keys
 CONF_AID: Final = "aid"
@@ -240,9 +243,20 @@ SERVICE_SET_HOST_DHCP_RESERVATION: Final = "set_host_dhcp_reservation"
 SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE: Final = "set_host_notify_when_next_offline"
 SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE: Final = "set_host_notify_when_next_online"
 SERVICE_WAKE_HOST: Final = "wake_host"
+SERVICE_DELETE_HOST: Final = "delete_host"
 SERVICE_PAUSE_RULE: Final = "pause_rule"
 SERVICE_RESUME_RULE: Final = "resume_rule"
 SERVICE_RUN_INTERNET_SPEED_TEST: Final = "run_internet_speed_test"
+SERVICE_SET_SSID_PAUSED: Final = "set_ssid_paused"
+SERVICE_GET_WIRELESS_STATUS: Final = "get_wireless_status"
+WRITE_PATTERN_SET_APC: Final = "set_apc"
+WRITE_PATTERN_CMD_APC: Final = "cmd_apc"
+WRITE_PATTERN_SET_NETWORKCONFIG: Final = "set_networkconfig"
+WRITE_PATTERN_OPTIONS: Final = (
+    WRITE_PATTERN_SET_APC,
+    WRITE_PATTERN_CMD_APC,
+    WRITE_PATTERN_SET_NETWORKCONFIG,
+)
 HOST_DEVICE_TYPE_OPTIONS: Final = (
     "desktop",
     "phone",
@@ -315,6 +329,7 @@ TRANS_KEY_ENTITY_BUTTON_SYNC_RUNTIME: Final = "sync_runtime"
 TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT: Final = "pause_rule_timing_conflict"
 TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST: Final = "resume_at_in_past"
 TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND: Final = "rule_target_not_found"
+TRANS_KEY_EXCEPTION_SSID_PROFILE_NOT_FOUND: Final = "ssid_profile_not_found"
 TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED: Final = (
     "run_internet_speed_test_failed"
 )
@@ -344,6 +359,8 @@ TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND: Final = (
 )
 TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED: Final = "time_usage_report_failed"
 TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED: Final = "wake_host_failed"
+TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED: Final = "delete_host_failed"
+TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED: Final = "delete_host_confirm_required"
 TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED: Final = "wan_data_usage_failed"
 TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
     "wan_data_usage_history_period_required"
@@ -381,6 +398,7 @@ TRANS_PLACEHOLDER_NETWORK_UUID: Final = "network_uuid"
 TRANS_PLACEHOLDER_RESERVED_IPV4: Final = "reserved_ipv4"
 TRANS_PLACEHOLDER_RULE_NAME: Final = "rule_name"
 TRANS_PLACEHOLDER_RULE_TARGET: Final = "rule_target"
+TRANS_PLACEHOLDER_SSID_PROFILE_ID: Final = "ssid_profile_id"
 TRANS_PLACEHOLDER_SCOPE_KIND: Final = "scope_kind"
 TRANS_PLACEHOLDER_SCOPE_TARGET: Final = "scope_target"
 TRANS_PLACEHOLDER_WAN_NAME: Final = "wan_name"

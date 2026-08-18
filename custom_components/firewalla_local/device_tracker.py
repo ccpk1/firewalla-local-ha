@@ -95,6 +95,11 @@ class FirewallaDeviceTracker(
             ATTR_INTEGRATION: DOMAIN,
         }
 
+    @property
+    def entity_registry_enabled_default(self) -> bool:
+        """Device trackers are always enabled; device lifecycle is manager-owned."""
+        return True
+
     def find_device_entry(self) -> dr.DeviceEntry | None:
         """Return the tracked-client device entry for this tracker."""
         return dr.async_get(self.hass).async_get_device(
@@ -118,6 +123,16 @@ class FirewallaDeviceTracker(
             return
 
         entity_registry = er.async_get(self.hass)
+        device_entry = self.find_device_entry()
+        if (
+            device_entry is not None
+            and self.registry_entry.device_id != device_entry.id
+        ):
+            self.registry_entry = entity_registry.async_update_entity(
+                self.entity_id,
+                device_id=device_entry.id,
+            )
+
         new_entity_id = entity_registry.async_regenerate_entity_id(self.registry_entry)
 
         if new_entity_id == self.entity_id:

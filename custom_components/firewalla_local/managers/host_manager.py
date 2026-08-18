@@ -131,6 +131,11 @@ class FirewallaHostManager(FirewallaBaseManager):
             if (normalized_mac := normalize_mac_address(host.mac)) is not None
         }
 
+    def remove_host_from_index(self, mac: str) -> None:
+        """Drop one normalized MAC from the host index after a deletion."""
+        if normalized_mac := normalize_mac_address(mac):
+            self._host_index.pop(normalized_mac, None)
+
     @property
     def configured_watched_device_macs(self) -> tuple[str, ...]:
         """Return the watched-device MACs configured when this manager loaded."""

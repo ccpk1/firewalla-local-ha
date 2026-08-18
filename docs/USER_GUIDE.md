@@ -41,6 +41,7 @@ Services added after 1.0.0:
 - `firewalla_local.get_network_segment_usage`
 - `firewalla_local.run_internet_speed_test`
 - `firewalla_local.wake_host`
+- `firewalla_local.delete_host`
 - `firewalla_local.set_host_name`
 - `firewalla_local.set_host_dns_hostname`
 - `firewalla_local.set_host_device_type`
@@ -251,6 +252,13 @@ host identity.
   entity remains in Home Assistant and becomes unavailable instead of being
   silently removed
 
+The integration always requests the full host inventory, including devices the
+Firewalla app would only show with its "Show past devices" setting enabled
+(devices that have not been online in the past 7 days). A watched device that
+is present but inactive is therefore reported as offline rather than removed
+from the inventory, so it stays associated with its configured entity and
+name.
+
 ## Watched-user monitoring
 
 Watched users are opt-in. After selecting users in the options flow, the
@@ -303,6 +311,13 @@ selected MAC-backed LAN client.
 - this away window is separate from the watched-device online window
 - the integration does not invent richer presence states beyond `home`,
   `not_home`, and unavailable
+
+The integration always requests the full host inventory, including devices the
+Firewalla app would only show with its "Show past devices" setting enabled
+(devices that have not been online in the past 7 days). A tracked client that is
+present but inactive is still classified by the away window, so it reports
+`not_home` rather than unavailable. Because the host remains in the inventory,
+its tracker stays associated with the client device and keeps its name.
 
 ### Device-tracker lifecycle behavior
 
@@ -385,6 +400,7 @@ Host and network operator actions:
 
 - `firewalla_local.run_internet_speed_test`
 - `firewalla_local.wake_host`
+- `firewalla_local.delete_host`
 - `firewalla_local.set_host_name`
 - `firewalla_local.set_host_dns_hostname`
 - `firewalla_local.set_host_device_type`
@@ -458,6 +474,27 @@ Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
 - `refresh` defaults to `true`
 - the service returns an acknowledgement with the resolved host and command
   details
+
+### Delete host
+
+Use `firewalla_local.delete_host` to permanently remove one or more host
+devices from the Firewalla box. It is a destructive action and requires
+explicit acknowledgement.
+
+- **destructive confirmation:** you must set `confirm: true`; without it the
+  service aborts. There is no undo — the device is permanently removed and
+  re-adding requires it coming back online
+- **one or many hosts:** provide `host_mac` as a comma-separated list of MAC
+  addresses
+- **skip on unmatched:** a MAC that does not resolve to a current host is
+  skipped (reported as `skipped`/`not_found`), not treated as a fatal error —
+  the remaining hosts are still processed
+- the service returns a per-host result envelope showing each MAC's status
+  (`success`, `failed`, or `skipped`/`not_found`)
+- `refresh` defaults to `true`
+- deleting a host that is also in your watched-device or device-tracker lists
+  simply stops appearing in those choices after the next refresh; the saved
+  option lists are not modified
 
 ### Host rename
 

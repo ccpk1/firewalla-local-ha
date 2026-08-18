@@ -17,6 +17,7 @@ from .const import (
     CONF_SYMMETRIC_KEY,
 )
 from .coordinator import FirewallaConfigEntry
+from .helpers.init_payload_redaction import redact_runtime_init_payload
 
 TO_REDACT: Final = {
     CONF_AID,
@@ -32,12 +33,16 @@ async def async_get_config_entry_diagnostics(
     _hass: HomeAssistant, entry: FirewallaConfigEntry
 ) -> dict[str, object]:
     """Return diagnostics for a config entry."""
+    coordinator = entry.runtime_data.coordinator
     return {
         "entry_data": async_redact_data(dict(entry.data), TO_REDACT),
         "entry_options": dict(getattr(entry, "options", {})),
         "runtime_snapshot": (
-            asdict(entry.runtime_data.coordinator.data)
-            if entry.runtime_data.coordinator.data is not None
+            asdict(coordinator.data) if coordinator.data is not None else None
+        ),
+        "runtime_init_payload": (
+            redact_runtime_init_payload(coordinator.last_init_payload)
+            if coordinator.last_init_payload is not None
             else None
         ),
     }

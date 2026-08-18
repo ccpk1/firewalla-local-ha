@@ -800,6 +800,9 @@
     "rule_target_not_found": {
       "message": "The rule target \"{rule_target}\" does not match a managed live rule."
     },
+    "ssid_profile_not_found": {
+      "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network."
+    },
     "set_host_dhcp_reservation_failed": {
       "message": "The integration could not update the host DHCP reservation. Check the Firewalla connection and try again."
     },
@@ -841,6 +844,12 @@
     },
     "wake_host_failed": {
       "message": "The integration could not wake the host. Check the Firewalla connection and try again."
+    },
+    "delete_host_failed": {
+      "message": "The integration could not delete the host. Check the Firewalla connection and try again."
+    },
+    "delete_host_confirm_required": {
+      "message": "Deleting a host is destructive. Set confirm to true to proceed."
     },
     "wan_data_usage_failed": {
       "message": "The integration could not read WAN data usage. Check the Firewalla connection and try again."
@@ -1001,6 +1010,32 @@
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host selector and sending the Wake-on-LAN command."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "delete_host": {
+      "name": "Delete host",
+      "description": "Permanently delete one or more Firewalla host devices identified by MAC.",
+      "fields": {
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Required. One or more Firewalla host MACs to permanently delete. Provide multiple values as a comma-separated list."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Required. Must be set to true to acknowledge this destructive action permanently removes the device."
+        },
+        "refresh": {
+          "name": "Refresh",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before deleting the hosts."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -1454,6 +1489,46 @@
           "name": "Rule target",
           "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
         },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "set_ssid_paused": {
+      "name": "Set SSID paused",
+      "description": "Pause or resume one AP7 wireless network (SSID profile). This is a PoC service for the unconfirmed wireless write contract.",
+      "fields": {
+        "ssid_profile_id": {
+          "name": "SSID profile ID",
+          "description": "The UUID of the SSID profile to toggle. Get the list from the get_wireless_status service."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Set to true to enable (unpause) the wireless network, or false to pause it."
+        },
+        "write_pattern": {
+          "name": "Write pattern",
+          "description": "The write pattern to use for the unconfirmed wireless write contract. Defaults to set_apc. Try the alternatives if the default does not work."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_wireless_status": {
+      "name": "Get wireless status",
+      "description": "Returns the current wireless configuration (SSID profiles and access points) as structured data. SSID profiles include the SSID, band, encryption, paused state, VLAN, and interface. Access points include the name, model, channels, and LED state. For Firewalla boxes without AP7 access points, the returned sections are empty.",
+      "fields": {
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
           "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
