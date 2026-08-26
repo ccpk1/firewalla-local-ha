@@ -1,7 +1,7 @@
 # Supporting Note: Unified Network Model — Reverse-Engineering Field Mapping
 
-**Initiative:** `NETWORK_MODEL_IN-PROCESS.md` (issue #34)
-**Status:** Working reference — confirmed vs. intended field mappings. Update as protocol evidence lands.
+**Initiative:** `NETWORK_MODEL_COMPLETED.md` (issue #34)
+**Status:** Completed — confirmed vs. intended field mappings. Update as protocol evidence lands.
 
 ## Purpose
 

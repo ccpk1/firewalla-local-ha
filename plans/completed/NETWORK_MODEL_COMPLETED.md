@@ -4,8 +4,12 @@
 
 - **Source:** `ccpk1/firewalla-local-ha` issue #34 — *"[Feature]: LAN Interface Details"* (label: `enhancement`).
 - **Requested capability:** A Home Assistant dashboard surface showing per-interface detail for **every network kind on the box** — LAN, VLAN, VPN, and WAN — including type, associated ports/VLAN, IPv4/IPv6 addressing, DHCP, traffic/usage, and (once protocol-confirmed) advanced options (mDNS Relay, SSDP Relay, Block ICMP).
-- **Current state (2026-08-26):** Phases 1-4 and 5A committed (`c73b2f0`); Phase 5B implemented (uncommitted): `get_network_segment_report` now folds the unified `FirewallaNetwork` fields (kind, VLAN ID, ports, advanced options, device count, windowed usage) into one network-detail report. No separate `get_network_report`/`get_network_usage` services were added. Initiative complete pending commit + validation.
-- **Branch context:** `release-1.2.0`; manifest version `1.2.0-alpha.x`.
+- **Current state (2026-08-26):** Initiative **complete**. Delivered across three commits on `ccpk1/issue34`:
+  - `c73b2f0` — unified network inventory + model + per-network status entities (Phases 1-4 + 5A).
+  - `3ccb541` — `get_network_segment_report` folds the unified detail (kind, VLAN ID, ports, advanced options, device count, windowed usage) into one report (Phase 5B).
+  - `49b760d` — WAN network entities surface confirmed current-month usage under a distinct `monthly` key.
+  No separate `get_network_report`/`get_network_usage` services were added. Per-host windowed usage was investigated and intentionally **not** surfaced (the `item=intf`/`flowsummary` sources are raw scalars with an unspecified time basis; the app's per-device 30d/24h/60m windows come from an unconfirmed endpoint).
+- **Branch context:** `ccpk1/issue34`; manifest version `1.3.0-beta.1` (target release).
 
 ## 2. Scope and non-goals
 
@@ -205,4 +209,4 @@ folds in the remaining unified `FirewallaNetwork` fields so everything is in one
 - `custom_components/firewalla_local/api/client.py` — `async_get_network_interface_payload` (`item=intf`), `_build_network_lookup`, `async_get_monthly_wan_usage_payload`, `async_get_last12_monthly_wan_usage_payload`.
 - `custom_components/firewalla_local/services.py` — existing network-segment report/usage helpers (as reference for the usage surface); WAN/network service handlers + `_resolve_requested_wan`/`_resolve_requested_network` selectors (Phase 5 targets).
 - `custom_components/firewalla_local/config_flow.py` / `coordinator.py` — options flow + reconcile/orphan patterns (Phase 4).
-- `plans/in-process/NETWORK_MODEL_SUP_REVERSE_ENGINEERING.md` — supporting note for confirmed vs intended field mapping.
+- `plans/completed/NETWORK_MODEL_SUP_REVERSE_ENGINEERING.md` — supporting note for confirmed vs intended field mapping.
