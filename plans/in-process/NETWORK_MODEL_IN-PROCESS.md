@@ -4,7 +4,7 @@
 
 - **Source:** `ccpk1/firewalla-local-ha` issue #34 — *"[Feature]: LAN Interface Details"* (label: `enhancement`).
 - **Requested capability:** A Home Assistant dashboard surface showing per-interface detail for **every network kind on the box** — LAN, VLAN, VPN, and WAN — including type, associated ports/VLAN, IPv4/IPv6 addressing, DHCP, traffic/usage, and (once protocol-confirmed) advanced options (mDNS Relay, SSDP Relay, Block ICMP).
-- **Current state (2026-08-25):** Phases 1-2 implemented and live-validated (unified inventory, per-network binary sensors, addressing, ports, advanced options, SSDP toggle). Per-network data usage implemented for **non-WAN**; WAN windowed usage deliberately **not** surfaced (no confirmed per-WAN source). Remaining: Phase 3 doc section (REVERSE_ENGINEERING_WORKFLOW unified-mapping), Phase 4 (options toggle + reconcile/orphan), Phase 5 (service unification).
+- **Current state (2026-08-26):** Phases 1-4 and 5A committed (`c73b2f0`); Phase 5B implemented (uncommitted): `get_network_segment_report` now folds the unified `FirewallaNetwork` fields (kind, VLAN ID, ports, advanced options, device count, windowed usage) into one network-detail report. No separate `get_network_report`/`get_network_usage` services were added. Initiative complete pending commit + validation.
 - **Branch context:** `release-1.2.0`; manifest version `1.2.0-alpha.x`.
 
 ## 2. Scope and non-goals
@@ -144,22 +144,34 @@ Per-network compiled usage is **confirmed for non-WAN networks** and surfaced on
 - [x] **Raw-key constants triplicated** — **partially done**: removed orphaned `_RAW_INTERFACE_KEY`/`_RAW_META_KEY` from `api/client.py` after the lookup adapter (they had no remaining uses). The remaining raw-key literals are independently referenced by each file (not orphaned), so a full single-source move would add cross-module coupling with little behavioral gain; left as-is.
 - [x] **Verified NOT orphaned (no action):** `FirewallaNetworkSegment(View)`, `FirewallaNetworkUsageWindow/Summary` fields, speed-test fallback helpers (already removed), no unused imports, no dead model fields. **Phase 5A complete** — the one substantive parallel walker is eliminated; remaining private helpers are verified distinct (not duplicated) and left in place on purpose.
 
-**Phase 5B — Service unification + complementary services:**
+**Phase 5B — Service surface completes the unified network detail (implemented 2026-08-26):**
 
-- [ ] **Audit existing services** that expose WAN or network information and update them to consume the unified `FirewallaNetwork` model instead of the split WAN/network paths. Current candidates:
-  - `get_wan_data_usage` (`_async_handle_get_wan_data_usage`) — WAN-scoped compiled usage.
-  - `get_network_segment_report` / `get_network_segment_usage` (`_async_handle_get_network_segment_report` / `_async_handle_get_network_segment_usage`) — LAN/VLAN-scoped report/usage.
-  - `get_speed_test_results` — WAN-scoped speed tests.
-  - `get_wan_events` — WAN health timeline.
-- [ ] **Unify the WAN/network selectors:** `_resolve_requested_wan` and `_resolve_requested_network` are near-identical resolvers (uuid/name → identity, conflict/not-found/ambiguous errors). Fold them into one `_resolve_requested_network` that resolves any network kind (LAN/VLAN/VPN/WAN) from the unified `get_networks()`, so services can target any network kind uniformly.
-- [ ] **Evaluate complementary services** as an alternative surface to entities (mirroring how the app's network detail page exposes usage + related rules):
-  - A unified `get_network_report` (or extend `get_network_segment_report`) that returns the full network detail for any kind (LAN/VLAN/VPN/WAN) — addressing, DHCP, ports, device count, usage, related rules.
-  - A unified `get_network_usage` (or extend `get_network_segment_usage`) that returns compiled usage windows for any network kind, reusing the WAN usage pattern where the protocol confirms non-WAN compiled usage.
-  - Only add services where the protocol is confirmed (Phase 3); do not invent a service surface from guessed fields.
-- [ ] Keep existing service names/schemas backward-compatible where possible; add new unified services rather than breaking existing ones, unless a clean deprecation is warranted.
-- [ ] Add tests for the unified service resolution (any-kind targeting, conflict/ambiguous/not-found) and for the new complementary services.
-- [ ] Update `services.yaml` and `translations/en.json` for any new/changed services.
-- [ ] Update `quality_scale.yaml` and release notes for the service surface.
+The review decision was to **not** add separate `get_network_report`/`get_network_usage`
+services. `get_network_segment_report` is the single network-detail report; it now
+folds in the remaining unified `FirewallaNetwork` fields so everything is in one place.
+
+- [x] **Fold the unified network fields into `get_network_segment_report`** so one call
+  returns the full detail: `target.kind` now uses the granular `network.kind`, and the
+  `summary`/`configuration`/`usage` sections gain the fields the old report was missing —
+  `device_host_count`, `kind`, `vlan_id`, `ports`, `enabled`, `mdns_relay`, `ssdp_relay`,
+  `block_icmp`, and a compact `sections.usage` window summary (`last_24h`/`last_60m`/
+  `last_30d`/`last_12m`, from the same cached `FirewallaNetwork.usage` that feeds the
+  entity attribute). The handler already resolves a `FirewallaNetwork`, so no extra
+  protocol calls are added.
+- [x] **Do NOT add `get_network_report` / `get_network_usage`.** The segment report now
+  carries the overview + summary usage; `get_network_segment_usage` remains the deep
+  per-device/app/series drill-down. No new service names, schemas, or envelope shapes.
+- [x] **Honest protocol usage:** `sections.usage` stays empty (null windows) when the
+  poll has no per-network usage (e.g. WAN, or before `async_refresh_network_usage` runs),
+  with a provenance entry documenting the `item=intf` source. Fields are always present
+  (stable schema), never fabricated.
+- [x] **Tests:** updated `test_get_network_segment_report_service_returns_configuration_report`
+  to assert the new `kind`, `summary.device_host_count`, folded `configuration` fields,
+  the `sections.usage` shape, and the `usage` provenance entry.
+- [x] **Docs:** updated `USER_GUIDE.md` (report returns full detail; usage is the drill-down)
+  and `REVERSE_ENGINEERING_WORKFLOW.md` (single-logic-path now includes the report usage
+  section). `services.yaml` unchanged (input-field-focused).
+- [x] **Validated:** ruff, mypy, and full pytest pass.
 
 ## 6. Validation strategy
 
@@ -179,7 +191,7 @@ Per-network compiled usage is **confirmed for non-WAN networks** and surfaced on
 - **Trap — protocol unknowns:** non-WAN compiled usage and any unobserved `networkConfig.interface` categories (beyond `phy`/`bond`/`vlan`/`wireguard`/`amneziawg`/`openvpn`) remain. Do not expose these as entities/attributes/services until Phase 3 confirms them (per the repo's reverse-engineering workflow). mDNS Relay, SSDP Relay, Block ICMP, VPN networks, and port/LAG mapping are all confirmed (2026-08-25 live pulls).
 - **Trap — `policy` passthrough:** `FirewallaNetworkSegmentView.policy` is currently raw. If we expose it as an attribute before parsing, we leak unnormalized data. Parse confirmed fields (mDNS/SSDP/ICMP) in Phase 3 before surfacing.
 - **Opportunity — unified selector:** Folding `_resolve_requested_wan`/`_resolve_requested_network` into one resolver lets services target any network kind uniformly and removes duplicate code.
-- **Opportunity — complementary services:** A unified `get_network_report`/`get_network_usage` mirrors the app's network detail page (usage + device count + related rules) and gives non-dashboard users a service-based alternative to entities.
+- **Opportunity — complementary services (RESOLVED — not added):** A separate `get_network_report`/`get_network_usage` was considered and rejected. `get_network_segment_report` already covers the app's network-detail page (kind, ports, advanced options, device count, usage); adding parallel unified services would duplicate it. The overview + summary usage lives in the report; `get_network_segment_usage` stays the drill-down.
 - **Opportunity — reuse WAN usage pattern:** The existing `get_current_wan_usage_summaries`/`async_get_wan_data_usage_reports` pattern is the template for any confirmed non-WAN compiled usage; reuse it rather than inventing a new shape.
 - **Opportunity — reconcile pattern reuse:** The existing `async_reconcile_*_entities` (WAN speed-test, device-tracker, rule-switch) is the template for network-entity lifecycle; reuse it for the options toggle.
 

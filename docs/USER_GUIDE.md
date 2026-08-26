@@ -439,9 +439,13 @@ oriented report for a single network segment.
 
 - use `network_uuid` for deterministic automations or `network_name` for
   interactive use
-- preferred when you want DHCP and per-host configuration state
+- returns the full network detail in one call: kind, VLAN ID, ethernet ports,
+  IPv4/IPv6 + DHCP, DNS, advanced options (mDNS/SSDP Relay, Block ICMP), device
+  count, per-host configuration, and a compact windowed usage summary
 - uses the shared report envelope with `target`, `query`, `time_basis`,
   `summary`, `sections`, and `metadata`
+- for a deep per-device/app/series drill-down use
+  `firewalla_local.get_network_segment_usage` instead
 
 ### Get network segment usage
 

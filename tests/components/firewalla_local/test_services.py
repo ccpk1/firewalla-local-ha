@@ -4551,7 +4551,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is False
     assert response["target"] == {
-        "kind": "network_segment",
+        "kind": "lan",
         "id": "5799d896-5e0f-40a5-a776-38a5d7746204",
         "name": "VLAN10 CORE",
     }
@@ -4568,18 +4568,32 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     }
     assert response["summary"] == {
         "host_count": 2,
+        "device_host_count": 2,
         "has_dhcp_config": True,
         "has_ipv4_addressing": True,
         "has_ipv6_addressing": False,
     }
     assert response["sections"]["configuration"] == {
+        "kind": "lan",
         "interface_name": "bond0.10",
+        "vlan_id": None,
+        "ports": [],
+        "enabled": None,
+        "mdns_relay": None,
+        "ssdp_relay": False,
+        "block_icmp": None,
         "type": "lan",
         "monitoring": True,
         "active": None,
         "ready": None,
         "pending_test": None,
         "policy": {"state": True},
+    }
+    assert response["sections"]["usage"] == {
+        "last_24h": {"download_bytes": None, "upload_bytes": None},
+        "last_60m": {"download_bytes": None, "upload_bytes": None},
+        "last_30d": {"download_bytes": None, "upload_bytes": None},
+        "last_12m": {"download_bytes": None, "upload_bytes": None},
     }
     assert response["sections"]["dhcp"] == {
         "gateway": "192.168.10.1",
@@ -4660,6 +4674,14 @@ async def test_get_network_segment_report_service_returns_configuration_report(
                 "source": "derived",
                 "source_field": "hostManager",
                 "note": "Host rows are derived from runtime host inventory",
+            },
+            "usage": {
+                "source": "manager",
+                "source_field": "item=intf",
+                "note": (
+                    "Windowed usage comes from the cached per-network "
+                    "usage summary; WAN windowed usage is not available"
+                ),
             },
         },
     }

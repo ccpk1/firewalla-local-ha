@@ -847,9 +847,10 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 
 Per-network usage is surfaced via a **single logic path**: the integration
 manager fetches `item=intf` once per poll (resilient to per-network failures —
-OpenVPN returns a 500 for `item=intf`, all others work) and both the entity
-attribute and the `get_network_segment_usage` service consume the same manager
-views. WAN windowed usage is deliberately not surfaced because there is no
+OpenVPN returns a 500 for `item=intf`, all others work) and the entity
+`network_usage` attribute, the `get_network_segment_report` usage section, and
+the `get_network_segment_usage` service all consume the same manager views.
+WAN windowed usage is deliberately not surfaced because there is no
 confirmed per-WAN source. WAN monthly totals remain on the System Status
 `current_wan_usage` / `get_wan_data_usage` surface.
 
