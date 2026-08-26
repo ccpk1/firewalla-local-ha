@@ -1,12 +1,22 @@
 """Tests for Firewalla Local model helpers."""
 
 from custom_components.firewalla_local.models import (
+    FirewallaNetworkKind,
     FirewallaNetworkSegment,
     FirewallaNetworkSegmentView,
     FirewallaPolicyRule,
     format_policy_rule_name,
     supports_rule_switch,
 )
+
+
+def test_network_kind_display_name_uses_acronyms() -> None:
+    """Test the network-kind display name uses acronyms, not lowercased values."""
+    assert FirewallaNetworkKind.LAN.display_name == "LAN"
+    assert FirewallaNetworkKind.VLAN.display_name == "VLAN"
+    assert FirewallaNetworkKind.VPN.display_name == "VPN"
+    assert FirewallaNetworkKind.WAN.display_name == "WAN"
+    assert FirewallaNetworkKind.VLAN.value == "vlan"
 
 
 def test_format_policy_rule_name_for_global_internet_rule() -> None:

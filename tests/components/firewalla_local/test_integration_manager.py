@@ -20,6 +20,7 @@ from custom_components.firewalla_local.models import (
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
     FirewallaHostRuntime,
+    FirewallaNetworkKind,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
 )
@@ -366,8 +367,8 @@ def test_get_speed_test_results_reuses_shaped_speed_test_path() -> None:
     assert wan_filtered_results[0].wan_uuid == "wan-1"
 
 
-def test_get_available_wans_includes_speed_test_uuid_fallback() -> None:
-    """Test WAN discovery falls back to speed-test UUIDs when names are missing."""
+def test_get_available_wans_ignores_speed_test_uuid_fallback() -> None:
+    """Test WAN discovery does not fall back to speed-test-only UUIDs."""
     snapshot = FirewallaRuntimeSnapshot(
         appliance_identity=FirewallaApplianceIdentityInput(
             host="192.168.200.1",
@@ -400,7 +401,7 @@ def test_get_available_wans_includes_speed_test_uuid_fallback() -> None:
                 manual=False,
                 success=True,
                 vendor="ookla",
-                wan_uuid="wan-3",
+                wan_uuid="wan-extra",
             ),
         ),
     )
@@ -409,9 +410,588 @@ def test_get_available_wans_includes_speed_test_uuid_fallback() -> None:
 
     available_wans = manager.get_available_wans()
 
-    assert len(available_wans) == 1
-    assert available_wans[0].uuid == "wan-3"
-    assert available_wans[0].name == "wan-3"
+    assert available_wans == ()
+
+
+def test_get_networks_discovers_all_kinds_from_interface_registry() -> None:
+    """Test the unified collector classifies LAN, VLAN, VPN, and WAN networks."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkProfiles": {
+            "95169e6a-a7c9-4d6a-8e83-6061b4812bf2": {"intf": "bond0.10"},
+            "aff1d681-981f-4ae4-ba0c-d1620947097b": {"intf": "bond0"},
+            "876e3889-0199-45f3-aeb1-a49c3f38e96e": {"intf": "awg0"},
+        },
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    }
+                },
+                "bond": {
+                    "bond0": {
+                        "meta": {
+                            "name": "LAN-MGMT",
+                            "type": "lan",
+                            "uuid": "aff1d681-981f-4ae4-ba0c-d1620947097b",
+                        }
+                    }
+                },
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        },
+                        "vid": 10,
+                    }
+                },
+                "amneziawg": {
+                    "awg0": {
+                        "meta": {
+                            "name": "AmneziaWG",
+                            "type": "lan",
+                            "uuid": "876e3889-0199-45f3-aeb1-a49c3f38e96e",
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    networks = manager.get_networks()
+    by_uuid = {network.uuid: network for network in networks}
+
+    assert (
+        by_uuid["8d5a7f20-2923-49a3-8e2b-338f9428a632"].kind is FirewallaNetworkKind.WAN
+    )
+    assert by_uuid["8d5a7f20-2923-49a3-8e2b-338f9428a632"].name == "WAN-ONE"
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].kind is (
+        FirewallaNetworkKind.LAN
+    )
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].name == "LAN-MGMT"
+    assert by_uuid["95169e6a-a7c9-4d6a-8e83-6061b4812bf2"].kind is (
+        FirewallaNetworkKind.VLAN
+    )
+    assert by_uuid["95169e6a-a7c9-4d6a-8e83-6061b4812bf2"].name == "VLAN10 CORE"
+    assert by_uuid["876e3889-0199-45f3-aeb1-a49c3f38e96e"].kind is (
+        FirewallaNetworkKind.VPN
+    )
+    assert by_uuid["876e3889-0199-45f3-aeb1-a49c3f38e96e"].name == "AmneziaWG"
+
+
+def test_get_networks_excludes_unnamed_physical_ports() -> None:
+    """Test unnamed phy ports (eth1/2/3) are not surfaced as WAN networks."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    },
+                    "eth1": {"meta": {"uuid": "d2a5b1c5-31ca-4d42-8906-09b24e68c5d2"}},
+                    "eth2": {"meta": {"uuid": "27aa9b20-e679-4f78-8c76-791e02a7c2ca"}},
+                    "eth3": {"meta": {"uuid": "47f86e7a-c673-4374-a8a4-0c7b445f5c8d"}},
+                }
+            }
+        }
+    }
+
+    networks = manager.get_networks()
+
+    assert {network.uuid for network in networks} == {
+        "8d5a7f20-2923-49a3-8e2b-338f9428a632"
+    }
+
+
+def test_get_networks_addresses_are_bare_and_subnets_are_cidr() -> None:
+    """Test ipv4_addresses stay bare, ipv4_subnets hold CIDRs, and dhcp gateway."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkProfiles": {
+            "95169e6a-a7c9-4d6a-8e83-6061b4812bf2": {
+                "intf": "bond0.10",
+                "ipv4": "192.168.10.1",
+                "ipv4Subnet": "192.168.10.0/24",
+                "ipv4Subnets": ["192.168.10.0/24"],
+            }
+        },
+        "networkConfig": {
+            "interface": {
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        },
+                        "ipv4": "192.168.10.1/24",
+                    }
+                }
+            },
+            "dhcp": {
+                "bond0.10": {
+                    "gateway": "192.168.10.1",
+                    "subnetMask": "255.255.255.0",
+                }
+            },
+        },
+    }
+
+    network = next(network for network in manager.get_networks())
+
+    assert network.ipv4_addresses == ("192.168.10.1",)
+    assert network.ipv4_subnets == ("192.168.10.0/24",)
+    assert network.gateway == "192.168.10.1"
+
+
+def test_get_networks_resolves_physical_ports() -> None:
+    """Test ports resolve: WAN=own phy port, bond/VLAN=bond members, VPN=none."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    }
+                },
+                "bond": {
+                    "bond0": {
+                        "meta": {
+                            "name": "LAN-MGMT",
+                            "type": "lan",
+                            "uuid": "aff1d681-981f-4ae4-ba0c-d1620947097b",
+                        },
+                        "intf": ["eth2", "eth3"],
+                    }
+                },
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        },
+                        "intf": "bond0",
+                    }
+                },
+                "amneziawg": {
+                    "awg0": {
+                        "meta": {
+                            "name": "AmneziaWG",
+                            "type": "lan",
+                            "uuid": "876e3889-0199-45f3-aeb1-a49c3f38e96e",
+                        }
+                    }
+                },
+            }
+        }
+    }
+
+    by_uuid = {network.uuid: network for network in manager.get_networks()}
+
+    assert by_uuid["8d5a7f20-2923-49a3-8e2b-338f9428a632"].ports == ("eth0",)
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].ports == (
+        "eth2",
+        "eth3",
+    )
+    assert by_uuid["95169e6a-a7c9-4d6a-8e83-6061b4812bf2"].ports == (
+        "eth2",
+        "eth3",
+    )
+    assert by_uuid["876e3889-0199-45f3-aeb1-a49c3f38e96e"].ports == ()
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_network_usage_attaches_totals() -> None:
+    """Test usage refresh fetches item=intf and merges totals into networks."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        }
+                    }
+                },
+                "amneziawg": {
+                    "awg0": {
+                        "meta": {
+                            "name": "AmneziaWG",
+                            "type": "lan",
+                            "uuid": "876e3889-0199-45f3-aeb1-a49c3f38e96e",
+                        }
+                    }
+                },
+            }
+        }
+    }
+
+    usage_payloads = {
+        "95169e6a-a7c9-4d6a-8e83-6061b4812bf2": {
+            "newLast24": {
+                "totalDownload": 100,
+                "totalUpload": 50,
+            },
+            "last30": {
+                "totalDownload": 900,
+                "totalUpload": 450,
+            },
+        },
+        "876e3889-0199-45f3-aeb1-a49c3f38e96e": {
+            "newLast24": {
+                "totalDownload": 10,
+                "totalUpload": 5,
+            },
+        },
+    }
+
+    async def _fake_fetch(**kwargs):
+        payload = usage_payloads[kwargs["network_uuid"]]
+        return dict(payload)
+
+    manager.client.async_get_network_interface_payload = AsyncMock(
+        side_effect=_fake_fetch
+    )
+
+    await manager.async_refresh_network_usage()
+
+    by_uuid = {network.uuid: network for network in manager.get_networks()}
+    vlan_usage = by_uuid["95169e6a-a7c9-4d6a-8e83-6061b4812bf2"].usage
+    vpn_usage = by_uuid["876e3889-0199-45f3-aeb1-a49c3f38e96e"].usage
+
+    assert vlan_usage is not None
+    assert vlan_usage.last_24h is not None
+    assert vlan_usage.last_24h.download_bytes == 100
+    assert vlan_usage.last_24h.upload_bytes == 50
+    assert vlan_usage.last_30d is not None
+    assert vlan_usage.last_30d.download_bytes == 900
+    assert vpn_usage is not None
+    assert vpn_usage.last_24h is not None
+    assert vpn_usage.last_24h.download_bytes == 10
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_network_usage_survives_per_network_failure() -> None:
+    """Test one failing network fetch does not drop the others' usage."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async def _fake_fetch(**kwargs):
+        raise RuntimeError("intf unavailable")
+
+    manager.client.async_get_network_interface_payload = AsyncMock(
+        side_effect=_fake_fetch
+    )
+
+    await manager.async_refresh_network_usage()
+
+    network = next(iter(manager.get_networks()))
+    assert network.usage is None
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_network_usage_excludes_wan() -> None:
+    """Test WAN networks get no windowed usage (no per-WAN windowed source)."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    }
+                },
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        }
+                    }
+                },
+            }
+        },
+        "newLast24": {"totalDownload": 1000, "totalUpload": 500},
+    }
+
+    async def _fake_fetch(**kwargs):  # only non-WAN networks are fetched
+        return {"newLast24": {"totalDownload": 1000, "totalUpload": 500}}
+
+    manager.client.async_get_network_interface_payload = AsyncMock(
+        side_effect=_fake_fetch
+    )
+
+    await manager.async_refresh_network_usage()
+
+    by_uuid = {network.uuid: network for network in manager.get_networks()}
+    assert by_uuid["8d5a7f20-2923-49a3-8e2b-338f9428a632"].usage is None
+    vlan_usage = by_uuid["95169e6a-a7c9-4d6a-8e83-6061b4812bf2"].usage
+    assert vlan_usage is not None
+    assert vlan_usage.last_24h is not None
+    assert vlan_usage.last_24h.download_bytes == 1000
+
+
+def test_get_available_networks_filters_lan_and_vlan_kinds() -> None:
+    """Test LAN/VLAN subset wraps the unified collector without regressions."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkProfiles": {
+            "95169e6a-a7c9-4d6a-8e83-6061b4812bf2": {"intf": "bond0.10"},
+            "876e3889-0199-45f3-aeb1-a49c3f38e96e": {"intf": "awg0"},
+        },
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    }
+                },
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        }
+                    }
+                },
+                "amneziawg": {
+                    "awg0": {
+                        "meta": {
+                            "name": "AmneziaWG",
+                            "type": "lan",
+                            "uuid": "876e3889-0199-45f3-aeb1-a49c3f38e96e",
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    networks = manager.get_available_networks()
+    by_uuid = {network.uuid: network for network in networks}
+
+    assert set(by_uuid) == {"95169e6a-a7c9-4d6a-8e83-6061b4812bf2"}
+    assert by_uuid["95169e6a-a7c9-4d6a-8e83-6061b4812bf2"].name == "VLAN10 CORE"
+
+
+def test_get_available_wans_filters_wan_kind_without_speed_test_fallback() -> None:
+    """Test WAN subset wraps the unified collector without speed-test fallback."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        speed_test_results=(
+            FirewallaSpeedTestRecord(
+                tested_at_timestamp=1000,
+                download_mbps=100,
+                upload_mbps=20,
+                latency_ms=10,
+                jitter_ms=1,
+                packet_loss_percent=0,
+                download_megabytes=50,
+                upload_megabytes=10,
+                isp="ISP",
+                public_ip="23.245.207.179",
+                server_country="United States",
+                server_host="server-a",
+                server_id="1",
+                server_location="Columbus, OH",
+                server_sponsor="Boost Mobile",
+                manual=False,
+                success=True,
+                vendor="ookla",
+                wan_uuid="wan-extra",
+            ),
+        ),
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    }
+                },
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        }
+                    }
+                },
+            }
+        }
+    }
+
+    available_wans = manager.get_available_wans()
+
+    assert [wan.uuid for wan in available_wans] == [
+        "8d5a7f20-2923-49a3-8e2b-338f9428a632"
+    ]
 
 
 @pytest.mark.asyncio

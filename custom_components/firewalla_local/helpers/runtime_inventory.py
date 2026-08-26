@@ -14,6 +14,7 @@ from custom_components.firewalla_local.models import (
     format_policy_rule_label,
     format_policy_rule_name,
 )
+from custom_components.firewalla_local.utils.network import build_network_inventory
 
 _RAW_POLICY_STATE_KEY: Final = "state"
 _RAW_USERS_KEY: Final = "userTags"
@@ -25,7 +26,6 @@ _RAW_POLICY_RULES_KEY: Final = "policyRules"
 _RAW_RULE_ID_KEY: Final = "pid"
 _RAW_RULE_TAG_REFS_KEY: Final = "tag"
 _RAW_HOSTS_KEY: Final = "hosts"
-_RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
 _RAW_GROUP_USER_TAGS_KEY: Final = "userTags"
 _RAW_UPDATE_CUSTOM_NAME_KEY: Final = "_name"
 _RAW_UPDATE_NOTES_KEY: Final = "notes"
@@ -528,9 +528,9 @@ def build_runtime_inventory_report(
     groups = _build_group_inventory(payload)
     users = _build_user_inventory(payload)
     raw_hosts = payload.get(_RAW_HOSTS_KEY)
-    raw_networks = payload.get(_RAW_NETWORK_PROFILES_KEY)
+    networks = build_network_inventory(payload)
     host_count = len(raw_hosts) if isinstance(raw_hosts, list) else 0
-    network_count = len(raw_networks) if isinstance(raw_networks, dict) else 0
+    network_count = len(networks)
     switch_evaluations = build_switch_rule_evaluations(payload, policy_rules)
 
     rules: list[dict[str, object]] = []
@@ -606,6 +606,14 @@ def build_runtime_inventory_report(
         "group_policy_controls": group_policy_controls,
         "users": users,
         "rules": rules,
+        "networks": [
+            {
+                "uuid": network.uuid,
+                "name": network.name,
+                "kind": network.kind.value,
+            }
+            for network in networks
+        ],
         "user_managed_rules": user_managed_rules,
         "system_managed_rules": system_managed_rules,
         "rule_switch_candidates": rule_switch_candidates,
@@ -649,12 +657,24 @@ def render_runtime_inventory_markdown(report: dict[str, object]) -> str:
         ):
             lines.append(f"- {key}: {summary.get(key)}")
 
+    lines.extend(["", "## Networks", ""])
+    networks = report.get("networks")
+    if isinstance(networks, list) and networks:
+        for network in networks:
+            if not isinstance(network, dict):
+                continue
+            lines.append(
+                f"- {network.get('name')} ({network.get('kind')}) "
+                f"[id: {network.get('uuid')}]"
+            )
+    else:
+        lines.append("- none")
+
     lines.extend(["", "## Groups", ""])
     if isinstance(groups, list) and groups:
         for group in groups:
             if not isinstance(group, dict):
                 continue
-
             lines.append(
                 f"- {group.get('name') or group.get('id')} (id: {group.get('id')})"
             )

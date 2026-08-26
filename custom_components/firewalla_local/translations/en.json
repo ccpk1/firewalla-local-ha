@@ -101,11 +101,12 @@
       "system_settings": {
         "data": {
           "device_tracker_away_window": "Device-tracker away window (minutes)",
+          "enable_network_entities": "Enable network status entities",
           "return_to_main_menu": "Back to main menu without saving",
           "update_interval": "Update interval (minutes)",
           "watched_device_online_window": "Watched-device online window (minutes)"
         },
-        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more.",
+        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more. Network status entities expose one connectivity binary sensor per Firewalla network (LAN/VLAN/VPN/WAN) with addressing, advanced options, and usage details.",
         "title": "System settings"
       }
     }
@@ -183,6 +184,71 @@
           },
           "wan_ips": {
             "name": "WAN IPs"
+          },
+          "ports": {
+            "name": "Ports"
+          }
+        }
+      },
+      "network": {
+        "name": "{network_kind} {network_name} Status",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_network": "Shows whether the Firewalla network is configured and exposes its details"
+            }
+          },
+          "network_kind": {
+            "name": "Network kind"
+          },
+          "vlan_id": {
+            "name": "VLAN ID"
+          },
+          "ports": {
+            "name": "Ports"
+          },
+          "ipv4_addresses": {
+            "name": "IPv4 addresses"
+          },
+          "ipv4_subnets": {
+            "name": "IPv4 subnets"
+          },
+          "ipv6_addresses": {
+            "name": "IPv6 addresses"
+          },
+          "ipv6_subnets": {
+            "name": "IPv6 subnets"
+          },
+          "gateway": {
+            "name": "Gateway"
+          },
+          "dns_servers": {
+            "name": "DNS servers"
+          },
+          "dhcp": {
+            "name": "DHCP"
+          },
+          "device_count": {
+            "name": "Device count"
+          },
+          "network_usage": {
+            "name": "Network usage"
+          },
+          "enabled": {
+            "name": "Enabled"
+          },
+          "mdns_relay": {
+            "name": "mDNS relay"
+          },
+          "ssdp_relay": {
+            "name": "SSDP relay"
+          },
+          "block_icmp": {
+            "name": "Block ICMP"
           }
         }
       },

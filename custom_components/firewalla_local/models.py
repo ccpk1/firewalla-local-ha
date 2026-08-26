@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
+from enum import StrEnum
 from typing import Final, TypedDict
 
 from cronsim import CronSim, CronSimError
@@ -521,6 +522,63 @@ class FirewallaNetworkSegment:
 
     uuid: str
     name: str
+
+
+class FirewallaNetworkKind(StrEnum):
+    """Discriminator for the Firewalla unified Network concept."""
+
+    LAN = "lan"
+    VLAN = "vlan"
+    VPN = "vpn"
+    WAN = "wan"
+
+    @property
+    def display_name(self) -> str:
+        """Return the display-acronym form of the network kind."""
+        return self.name
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetwork:
+    """Normalized identity and geometry for one Firewalla unified network."""
+
+    uuid: str
+    name: str
+    kind: FirewallaNetworkKind
+    interface_name: str | None = None
+    vlan_id: int | None = None
+    ports: tuple[str, ...] = ()
+    ipv4_addresses: tuple[str, ...] = ()
+    ipv4_subnets: tuple[str, ...] = ()
+    ipv6_addresses: tuple[str, ...] = ()
+    ipv6_subnets: tuple[str, ...] = ()
+    gateway: str | None = None
+    dns_servers: tuple[str, ...] = ()
+    dhcp: FirewallaNetworkDhcpConfig | None = None
+    device_host_count: int | None = None
+    enabled: bool | None = None
+    mdns_relay: bool | None = None
+    ssdp_relay: bool | None = None
+    block_icmp: bool | None = None
+    usage: FirewallaNetworkUsageSummary | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkUsageWindow:
+    """One normalized per-network usage window (download/upload bytes)."""
+
+    download_bytes: int | None = None
+    upload_bytes: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaNetworkUsageSummary:
+    """Normalized per-network data-usage totals across time windows."""
+
+    last_24h: FirewallaNetworkUsageWindow | None = None
+    last_60m: FirewallaNetworkUsageWindow | None = None
+    last_30d: FirewallaNetworkUsageWindow | None = None
+    last_12m: FirewallaNetworkUsageWindow | None = None
 
 
 @dataclass(slots=True, frozen=True)

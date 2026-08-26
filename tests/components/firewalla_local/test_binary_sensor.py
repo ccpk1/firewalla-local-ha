@@ -13,7 +13,22 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
     ATTR_INTEGRATION,
+    ATTR_NETWORK_BLOCK_ICMP,
+    ATTR_NETWORK_DEVICE_COUNT,
+    ATTR_NETWORK_DHCP,
+    ATTR_NETWORK_DNS_SERVERS,
+    ATTR_NETWORK_ENABLED,
+    ATTR_NETWORK_GATEWAY,
+    ATTR_NETWORK_IPV4_ADDRESSES,
+    ATTR_NETWORK_IPV4_SUBNETS,
+    ATTR_NETWORK_KIND,
+    ATTR_NETWORK_MDNS_RELAY,
+    ATTR_NETWORK_PORTS,
+    ATTR_NETWORK_SSDP_RELAY,
+    ATTR_NETWORK_USAGE,
+    ATTR_NETWORK_VLAN_ID,
     ATTR_PURPOSE,
+    ATTR_SYSTEM_PORTS,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
@@ -23,6 +38,7 @@ from custom_components.firewalla_local.const import (
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
     CONF_AID,
     CONF_EID,
+    CONF_ENABLE_NETWORK_ENTITIES,
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
@@ -443,3 +459,347 @@ async def test_watched_device_binary_sensor_unique_ids_are_entry_scoped(
         hass.states.get(entity_entry.entity_id).state
         for entity_entry in watched_entries
     } == {STATE_OFF}
+
+
+def _network_payload() -> dict[str, object]:
+    """Return a raw init payload with one VLAN and one VPN network."""
+    return {
+        "policyRules": [],
+        "hosts": [
+            {
+                "mac": "AA:BB:CC:DD:EE:01",
+                "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                "macVendor": "Apple",
+            },
+            {
+                "mac": "AA:BB:CC:DD:EE:02",
+                "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                "macVendor": "Samsung",
+            },
+            # The Firewalla box must be excluded from client counts.
+            {
+                "mac": "20:6D:31:01:5E:DD",
+                "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                "macVendor": "FIREWALLA INC",
+            },
+        ],
+        "nicStates": {
+            "eth0": {"carrier": "1"},
+            "eth1": {"carrier": "0"},
+        },
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        },
+                        "enabled": True,
+                    }
+                },
+                "vlan": {
+                    "bond0.10": {
+                        "meta": {
+                            "name": "VLAN10 CORE",
+                            "type": "lan",
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        },
+                        "vid": 10,
+                        "enabled": True,
+                    }
+                },
+                "amneziawg": {
+                    "awg0": {
+                        "meta": {
+                            "name": "AmneziaWG",
+                            "type": "lan",
+                            "uuid": "876e3889-0199-45f3-aeb1-a49c3f38e96e",
+                        },
+                        "enabled": True,
+                    }
+                },
+            },
+            "dhcp": {
+                "bond0.10": {
+                    "gateway": "192.168.10.1",
+                    "subnetMask": "255.255.255.0",
+                    "lease": 86400,
+                    "range": {"from": "192.168.10.110", "to": "192.168.10.126"},
+                    "nameservers": ["192.168.10.1"],
+                    "searchDomain": ["int.ccpk.us"],
+                }
+            },
+            "mdns_reflector": {"bond0.10": {"enabled": True}},
+            "icmp": {"bond0.10": {"echoRequest": False}},
+        },
+        "networkProfiles": {
+            "95169e6a-a7c9-4d6a-8e83-6061b4812bf2": {
+                "intf": "bond0.10",
+                "ipv4": "192.168.10.1",
+                "ipv4Subnet": "192.168.10.0/24",
+                "ipv4Subnets": ["192.168.10.0/24"],
+                "gateway": "192.168.10.1",
+                "dns": ["192.168.10.1"],
+            },
+            "876e3889-0199-45f3-aeb1-a49c3f38e96e": {
+                "intf": "awg0",
+                "ipv4": "10.190.68.1",
+            },
+        },
+    }
+
+
+async def test_network_binary_sensor_exposes_state_and_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test each unified network becomes a connectivity binary sensor."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(
+                side_effect=lambda **kwargs: {
+                    "newLast24": {"totalDownload": 100, "totalUpload": 50},
+                    "last30": {"totalDownload": 900, "totalUpload": 450},
+                }
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    vlan_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_network_95169e6a-a7c9-4d6a-8e83-6061b4812bf2_binary_sensor"
+    )
+    vpn_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_network_876e3889-0199-45f3-aeb1-a49c3f38e96e_binary_sensor"
+    )
+    wan_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_network_8d5a7f20-2923-49a3-8e2b-338f9428a632_binary_sensor"
+    )
+
+    assert vlan_state is not None
+    assert vlan_state.state == STATE_ON
+    assert vlan_state.attributes[ATTR_NETWORK_KIND] == "vlan"
+    assert vlan_state.attributes[ATTR_NETWORK_VLAN_ID] == 10
+    assert vlan_state.attributes[ATTR_NETWORK_ENABLED] is True
+    assert vlan_state.attributes[ATTR_NETWORK_IPV4_ADDRESSES] == ["192.168.10.1"]
+    assert vlan_state.attributes[ATTR_NETWORK_IPV4_SUBNETS] == ["192.168.10.0/24"]
+    assert vlan_state.attributes[ATTR_NETWORK_GATEWAY] == "192.168.10.1"
+    assert vlan_state.attributes[ATTR_NETWORK_DNS_SERVERS] == ["192.168.10.1"]
+    assert vlan_state.attributes[ATTR_NETWORK_MDNS_RELAY] is True
+    assert vlan_state.attributes[ATTR_NETWORK_SSDP_RELAY] is False
+    assert vlan_state.attributes[ATTR_NETWORK_BLOCK_ICMP] is True
+    assert vlan_state.attributes[ATTR_NETWORK_DHCP]["gateway"] == "192.168.10.1"
+    assert vlan_state.attributes[ATTR_NETWORK_DEVICE_COUNT] == 2
+    assert vlan_state.attributes[ATTR_NETWORK_USAGE] == {
+        "last_24h": {"download_bytes": 100, "upload_bytes": 50},
+        "last_60m": {"download_bytes": None, "upload_bytes": None},
+        "last_30d": {"download_bytes": 900, "upload_bytes": 450},
+        "last_12m": {"download_bytes": None, "upload_bytes": None},
+    }
+
+    assert vpn_state is not None
+    assert vpn_state.state == STATE_ON
+    assert vpn_state.attributes[ATTR_NETWORK_KIND] == "vpn"
+    assert vpn_state.attributes[ATTR_NETWORK_PORTS] == []
+
+    assert wan_state is not None
+    assert wan_state.attributes[ATTR_NETWORK_KIND] == "wan"
+    assert wan_state.attributes[ATTR_NETWORK_PORTS] == ["eth0"]
+
+
+async def test_network_binary_sensor_name_uses_kind_and_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test the network binary sensor translation placeholders."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    vlan_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_network_95169e6a-a7c9-4d6a-8e83-6061b4812bf2_binary_sensor"
+    )
+
+    assert vlan_state.name is not None
+    assert vlan_state.name == "Firewalla VLAN VLAN10 CORE Status"
+
+
+async def test_system_status_exposes_ports_attribute(
+    hass: HomeAssistant,
+) -> None:
+    """Test the System Status binary sensor reports per-port link state."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    system_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_system_status_binary_sensor"
+    )
+
+    assert system_state is not None
+    assert system_state.attributes[ATTR_SYSTEM_PORTS] == {
+        "eth0": "up",
+        "eth1": "down",
+    }
+
+
+def _count_network_binary_sensors(hass: HomeAssistant) -> int:
+    """Return the number of per-network binary-sensor registry entries."""
+    return sum(
+        1
+        for entity_entry in er.async_get(hass).entities.values()
+        if entity_entry.platform == DOMAIN
+        and entity_entry.domain == "binary_sensor"
+        and "_network_" in entity_entry.unique_id
+    )
+
+
+async def _setup_network_entities_entry(
+    hass: HomeAssistant,
+    *,
+    enable_network_entities: bool,
+) -> MockConfigEntry:
+    """Set up one entry with the network-entities toggle set accordingly."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_ENABLE_NETWORK_ENTITIES: enable_network_entities},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    return entry
+
+
+async def test_network_entities_created_when_toggle_enabled(
+    hass: HomeAssistant,
+) -> None:
+    """Test network binary sensors are created when the toggle is on."""
+    await _setup_network_entities_entry(hass, enable_network_entities=True)
+
+    assert _count_network_binary_sensors(hass) == 3
+
+
+async def test_network_entities_not_created_when_toggle_disabled(
+    hass: HomeAssistant,
+) -> None:
+    """Test network binary sensors are not created when the toggle is off."""
+    await _setup_network_entities_entry(hass, enable_network_entities=False)
+
+    assert _count_network_binary_sensors(hass) == 0
+
+
+async def test_reconcile_network_entities_removes_stale_entries(
+    hass: HomeAssistant,
+) -> None:
+    """Test reconcile removes network entities no longer expected (toggle off)."""
+    entry = await _setup_network_entities_entry(hass, enable_network_entities=True)
+
+    assert _count_network_binary_sensors(hass) == 3
+
+    # Simulate the toggle being switched off: reconcile with no expected networks.
+    await entry.runtime_data.integration_manager.async_reconcile_network_entities(())
+
+    assert _count_network_binary_sensors(hass) == 0

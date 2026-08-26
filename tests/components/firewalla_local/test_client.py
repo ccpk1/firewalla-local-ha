@@ -978,10 +978,10 @@ async def test_get_runtime_snapshot_normalizes_awg_peers_into_host_inventory() -
                     "longVersion": "1.0.0",
                     "networkConfig": {
                         "interface": {
-                            "amnezia": {
+                            "amneziawg": {
                                 "awg0": {
                                     "meta": {
-                                        "name": "Amnezia",
+                                        "name": "AmneziaWG",
                                         "uuid": "2c30793a-f9ce-43c0-9e9e-c30115366b76",
                                     }
                                 }
@@ -1018,7 +1018,7 @@ async def test_get_runtime_snapshot_normalizes_awg_peers_into_host_inventory() -
             host_name="chads-phone-amvpn",
             ip_address="10.190.68.226",
             group_name="CHADS_PHONE",
-            network_name="Amnezia",
+            network_name="AmneziaWG",
             connection_type="vpn",
             last_active=1786738739.0,
             download_bytes=2276685,

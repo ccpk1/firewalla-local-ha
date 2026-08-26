@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from typing import TYPE_CHECKING, Final, cast
 
@@ -14,10 +15,12 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from ..const import (
     CONF_LICENSE,
     DOMAIN,
+    ENTITY_SUFFIX_BINARY_SENSOR,
     ENTITY_SUFFIX_DEVICE_TRACKER,
     ENTITY_SUFFIX_SENSOR,
     ENTITY_SUFFIX_SWITCH,
     MANUFACTURER,
+    PLATFORM_BINARY_SENSOR,
     PLATFORM_DEVICE_TRACKER,
     PLATFORM_SENSOR,
     PLATFORM_SWITCH,
@@ -28,13 +31,17 @@ from ..models import (
     FirewallaDiskUsageInput,
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
+    FirewallaNetwork,
     FirewallaNetworkHostRanking,
     FirewallaNetworkHostTotals,
+    FirewallaNetworkKind,
     FirewallaNetworkMetricSample,
     FirewallaNetworkMetricSeries,
     FirewallaNetworkSegment,
     FirewallaNetworkSegmentView,
     FirewallaNetworkUsageBucket,
+    FirewallaNetworkUsageSummary,
+    FirewallaNetworkUsageWindow,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
@@ -59,6 +66,7 @@ from ..models import (
     FirewallaWanInterface,
     FirewallaWanUsageSummary,
 )
+from ..utils.network import build_network_inventory
 from .base_manager import FirewallaBaseManager
 
 if TYPE_CHECKING:
@@ -70,16 +78,10 @@ ORPHAN_POLICY_RETAIN_UNAVAILABLE_UNTIL_DESELECTED: Final = (
 )
 _DEFAULT_BOX_NAME: Final = "Firewalla"
 _RAW_MONTHLY_WAN_USAGE_KEY: Final = "monthlyDataUsageOnWans"
-_RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
-_RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
-_RAW_INTERFACE_KEY: Final = "interface"
-_RAW_META_KEY: Final = "meta"
-_RAW_NAME_KEY: Final = "name"
-_RAW_DESC_KEY: Final = "desc"
-_RAW_INTF_KEY: Final = "intf"
-_RAW_UUID_KEY: Final = "uuid"
 _RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
 _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
+_RAW_NETWORK_USAGE_DOWNLOAD_KEY: Final = "totalDownload"
+_RAW_NETWORK_USAGE_UPLOAD_KEY: Final = "totalUpload"
 _WEEK_START_MONDAY: Final = 0
 _SUPPORTED_WAN_EVENT_STATE_FAMILIES: Final = frozenset(
     {"wan_state", "overall_wan_state", "dualwan_state", "dns"}
@@ -104,6 +106,38 @@ _UBUNTU_DIST_RELEASES: Final = {
 }
 
 
+def _extract_usage_window(
+    raw_window: object,
+) -> FirewallaNetworkUsageWindow | None:
+    """Extract download/upload totals from one raw usage window when present."""
+    if not isinstance(raw_window, dict):
+        return None
+    download = _normalized_int_value(raw_window.get(_RAW_NETWORK_USAGE_DOWNLOAD_KEY))
+    upload = _normalized_int_value(raw_window.get(_RAW_NETWORK_USAGE_UPLOAD_KEY))
+    if download is None and upload is None:
+        return None
+    return FirewallaNetworkUsageWindow(
+        download_bytes=download,
+        upload_bytes=upload,
+    )
+
+
+def _normalized_int_value(value: object) -> int | None:
+    """Return an integer when one can be safely derived."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 class FirewallaIntegrationManager(FirewallaBaseManager):
     """Own shared entry-scoped lifecycle and appliance behavior."""
 
@@ -120,6 +154,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self._system_info: FirewallaSystemInfo | None = None
         self._system_status: FirewallaSystemStatus | None = None
         self._latest_speed_test: FirewallaSpeedTestResult | None = None
+        self._network_usage_by_uuid: dict[str, FirewallaNetworkUsageSummary] = {}
 
     def handle_refresh(self, snapshot: FirewallaRuntimeSnapshot) -> None:
         """Shape manager-owned appliance views from one refresh snapshot."""
@@ -165,26 +200,22 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
     def get_available_wans(self) -> tuple[FirewallaWanInterface, ...]:
         """Return the available WAN interfaces discovered in the runtime payload."""
-        wan_by_uuid: dict[str, FirewallaWanInterface] = {}
-        self._collect_wan_interfaces(
-            self.coordinator.last_init_payload or {},
-            wan_by_uuid,
-        )
-
-        if self.coordinator.data is not None:
-            for speed_test in self.coordinator.data.speed_test_results:
-                if speed_test.wan_uuid is None or speed_test.wan_uuid in wan_by_uuid:
-                    continue
-                wan_by_uuid[speed_test.wan_uuid] = FirewallaWanInterface(
-                    uuid=speed_test.wan_uuid,
-                    name=speed_test.wan_uuid,
-                )
-
         return tuple(
             sorted(
-                wan_by_uuid.values(),
+                (
+                    FirewallaWanInterface(uuid=network.uuid, name=network.name)
+                    for network in self.get_networks()
+                    if network.kind is FirewallaNetworkKind.WAN
+                ),
                 key=lambda wan: (wan.name.casefold(), wan.uuid),
             )
+        )
+
+    def get_networks(self) -> tuple[FirewallaNetwork, ...]:
+        """Return the unified network identities discovered in the runtime payload."""
+        payload = self.coordinator.last_init_payload or {}
+        return tuple(
+            self._with_usage(network) for network in self._collect_networks(payload)
         )
 
     def get_speed_test_results(
@@ -211,14 +242,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
     def get_available_networks(self) -> tuple[FirewallaNetworkSegment, ...]:
         """Return the available network segments discovered in runtime metadata."""
-        network_lookup = self._build_network_lookup(
-            self.coordinator.last_init_payload or {}
-        )
         return tuple(
             sorted(
                 (
-                    FirewallaNetworkSegment(uuid=network_id, name=network_name)
-                    for network_id, network_name in network_lookup.items()
+                    FirewallaNetworkSegment(uuid=network.uuid, name=network.name)
+                    for network in self.get_networks()
+                    if network.kind
+                    in (FirewallaNetworkKind.LAN, FirewallaNetworkKind.VLAN)
                 ),
                 key=lambda network: (network.name.casefold(), network.uuid),
             )
@@ -460,6 +490,61 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             )
         )
 
+    async def async_refresh_network_usage(self) -> None:
+        """Refresh the cached per-network usage summaries for all networks.
+
+        Non-WAN networks use the ``item=intf`` window totals. WAN networks are
+        intentionally excluded: their ``item=intf`` windows are all zero, and the
+        box-wide init-payload windows aggregate all WAN traffic (not per-WAN
+        attribution), so there is no confirmed per-WAN windowed usage source.
+        Fetching is resilient to per-network failures (some VPN types, e.g.
+        OpenVPN, return an error for ``item=intf``); a failing network keeps its
+        previous usage.
+        """
+        networks = tuple(
+            network
+            for network in self.get_networks()
+            if network.kind is not FirewallaNetworkKind.WAN
+        )
+        if not networks:
+            return
+
+        results = await asyncio.gather(
+            *(
+                self.client.async_get_network_interface_payload(
+                    network_uuid=network.uuid,
+                )
+                for network in networks
+            ),
+            return_exceptions=True,
+        )
+
+        for network, result in zip(networks, results, strict=True):
+            if not isinstance(result, dict):
+                continue
+            self._network_usage_by_uuid[network.uuid] = self._build_network_usage(
+                result
+            )
+
+    @staticmethod
+    def _build_network_usage(
+        raw_payload: dict[str, object],
+    ) -> FirewallaNetworkUsageSummary:
+        """Build a bounded usage summary from one raw ``item=intf`` payload."""
+        return FirewallaNetworkUsageSummary(
+            last_24h=_extract_usage_window(raw_payload.get("newLast24")),
+            last_60m=_extract_usage_window(raw_payload.get("last60")),
+            last_30d=_extract_usage_window(raw_payload.get("last30")),
+            last_12m=_extract_usage_window(raw_payload.get("last12Months")),
+        )
+
+    def _with_usage(self, network: FirewallaNetwork) -> FirewallaNetwork:
+        """Return the network with its cached usage summary attached."""
+        usage = self._network_usage_by_uuid.get(network.uuid)
+        if usage is None:
+            return network
+        return replace(network, usage=usage)
+
     def _build_system_info(
         self, appliance_identity: FirewallaApplianceIdentityInput
     ) -> FirewallaSystemInfo:
@@ -602,65 +687,11 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             return {}
         return {host.mac: host for host in self.coordinator.data.hosts if host.mac}
 
-    def _build_network_lookup(self, data: dict[str, object]) -> dict[str, str]:
-        """Build a lookup of network UUIDs to readable network names."""
-        raw_network_profiles = data.get(_RAW_NETWORK_PROFILES_KEY)
-        network_lookup: dict[str, str] = {}
-
-        if isinstance(raw_network_profiles, dict):
-            for network_id, raw_profile in raw_network_profiles.items():
-                if not isinstance(network_id, str) or not network_id:
-                    continue
-                if not isinstance(raw_profile, dict):
-                    continue
-
-                if display_name := self._resolve_network_display_name(raw_profile):
-                    network_lookup[network_id] = display_name
-
-        raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
-        if isinstance(raw_network_config, dict):
-            self._merge_network_config_lookup(
-                raw_network_config.get(_RAW_INTERFACE_KEY),
-                network_lookup,
-            )
-
-        return network_lookup
-
-    def _resolve_network_display_name(
-        self, raw_profile: dict[str, object]
-    ) -> str | None:
-        """Resolve the best available display name from one network profile."""
-        for key in (_RAW_DESC_KEY, _RAW_NAME_KEY, _RAW_INTF_KEY):
-            value = raw_profile.get(key)
-            if isinstance(value, str) and value:
-                return value
-        return None
-
-    def _merge_network_config_lookup(
-        self, raw_interfaces: object, network_lookup: dict[str, str]
-    ) -> None:
-        """Merge readable network names from networkConfig interface metadata."""
-        if isinstance(raw_interfaces, dict):
-            meta = raw_interfaces.get(_RAW_META_KEY)
-            if isinstance(meta, dict):
-                network_id = meta.get(_RAW_UUID_KEY)
-                if isinstance(network_id, str) and network_id:
-                    for candidate in (
-                        meta.get(_RAW_NAME_KEY),
-                        raw_interfaces.get(_RAW_DESC_KEY),
-                        raw_interfaces.get(_RAW_NAME_KEY),
-                    ):
-                        if isinstance(candidate, str) and candidate:
-                            network_lookup[network_id] = candidate
-                            break
-
-            for value in raw_interfaces.values():
-                self._merge_network_config_lookup(value, network_lookup)
-            return
-
-        if isinstance(raw_interfaces, list):
-            for value in raw_interfaces:
-                self._merge_network_config_lookup(value, network_lookup)
+    def _collect_networks(
+        self, data: dict[str, object]
+    ) -> tuple[FirewallaNetwork, ...]:
+        """Return unified network identities from the raw init payload."""
+        return build_network_inventory(data)
 
     def _build_network_segment_view(
         self,
@@ -1224,34 +1255,6 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             wan_uuid=wan_uuid,
             wan_name=wan_name_by_uuid.get(wan_uuid) if wan_uuid is not None else None,
         )
-
-    def _collect_wan_interfaces(
-        self,
-        raw_value: object,
-        wan_by_uuid: dict[str, FirewallaWanInterface],
-    ) -> None:
-        """Collect WAN interface metadata from nested raw runtime structures."""
-        if isinstance(raw_value, dict):
-            wan_uuid = raw_value.get(_RAW_WAN_INTERFACE_UUID_KEY)
-            if isinstance(wan_uuid, str) and wan_uuid:
-                wan_name = raw_value.get(_RAW_WAN_INTERFACE_NAME_KEY)
-                resolved_name = (
-                    wan_name if isinstance(wan_name, str) and wan_name else wan_uuid
-                )
-                existing_wan = wan_by_uuid.get(wan_uuid)
-                if existing_wan is None or existing_wan.name == existing_wan.uuid:
-                    wan_by_uuid[wan_uuid] = FirewallaWanInterface(
-                        uuid=wan_uuid,
-                        name=resolved_name,
-                    )
-
-            for nested_value in raw_value.values():
-                self._collect_wan_interfaces(nested_value, wan_by_uuid)
-            return
-
-        if isinstance(raw_value, list):
-            for nested_value in raw_value:
-                self._collect_wan_interfaces(nested_value, wan_by_uuid)
 
     def _build_current_wan_usage_summaries(
         self,
@@ -2430,6 +2433,37 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_SENSOR}"):
                 continue
             if "_speed_test_" not in entity_entry.unique_id:
+                continue
+            if entity_entry.unique_id in expected_unique_ids:
+                continue
+
+            entity_registry.async_remove(entity_entry.entity_id)
+
+    async def async_reconcile_network_entities(
+        self, network_uuids: tuple[str, ...]
+    ) -> None:
+        """Remove stale network-status registry entries when networks are hidden."""
+        entity_registry = er.async_get(self.coordinator.hass)
+        expected_unique_ids = {
+            self.build_entity_unique_id(
+                object_id=f"network_{network_uuid}",
+                suffix=ENTITY_SUFFIX_BINARY_SENSOR,
+            )
+            for network_uuid in network_uuids
+        }
+
+        for entity_entry in er.async_entries_for_config_entry(
+            entity_registry,
+            self.entry.entry_id,
+        ):
+            if (
+                entity_entry.domain != PLATFORM_BINARY_SENSOR
+                or entity_entry.platform != DOMAIN
+            ):
+                continue
+            if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_BINARY_SENSOR}"):
+                continue
+            if "_network_" not in entity_entry.unique_id:
                 continue
             if entity_entry.unique_id in expected_unique_ids:
                 continue
