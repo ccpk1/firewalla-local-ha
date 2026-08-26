@@ -4594,6 +4594,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
         "last_60m": {"download_bytes": None, "upload_bytes": None},
         "last_30d": {"download_bytes": None, "upload_bytes": None},
         "last_12m": {"download_bytes": None, "upload_bytes": None},
+        "monthly": {"download_bytes": None, "upload_bytes": None},
     }
     assert response["sections"]["dhcp"] == {
         "gateway": "192.168.10.1",

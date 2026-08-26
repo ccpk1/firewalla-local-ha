@@ -843,16 +843,19 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 | Kind | Source | Normalized | Entity attribute |
 | --- | --- | --- | --- |
 | LAN / VLAN / VPN | `item=intf` (`async_get_network_interface_payload`) windows `newLast24`/`last60`/`last30`/`last12Months` `totalDownload`/`totalUpload` | `FirewallaNetwork.usage` | `network_usage` |
-| WAN | **none** — WAN `item=intf` windows are all zero; the box-wide init windows are aggregate (not per-WAN); the WAN usage screen only fetches `monthlyDataUsageOnWans` + `last12monthlyDataUsageOnWans` | — | WAN `network_usage` left empty |
+| WAN (monthly) | `monthlyDataUsageOnWans[<wan uuid>].totalDownload`/`totalUpload` | `FirewallaNetwork.usage.monthly` | `network_usage.monthly` |
 
 Per-network usage is surfaced via a **single logic path**: the integration
 manager fetches `item=intf` once per poll (resilient to per-network failures —
 OpenVPN returns a 500 for `item=intf`, all others work) and the entity
 `network_usage` attribute, the `get_network_segment_report` usage section, and
 the `get_network_segment_usage` service all consume the same manager views.
-WAN windowed usage is deliberately not surfaced because there is no
-confirmed per-WAN source. WAN monthly totals remain on the System Status
-`current_wan_usage` / `get_wan_data_usage` surface.
+WAN networks have **no windowed source** — a WAN's `item=intf` windows are all
+zero and the box-wide init windows are aggregate (not per-WAN) — so a WAN
+`network_usage` carries only the **`monthly`** key (current calendar month from
+`monthlyDataUsageOnWans`), never conflated with the rolling `last_30d` window.
+WAN monthly totals also remain on the System Status `current_wan_usage` /
+`get_wan_data_usage` surface.
 
 ### Design notes
 

@@ -539,11 +539,54 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         )
 
     def _with_usage(self, network: FirewallaNetwork) -> FirewallaNetwork:
-        """Return the network with its cached usage summary attached."""
+        """Return the network with its cached usage summary attached.
+
+        Non-WAN networks use the cached ``item=intf`` windowed summary. WAN
+        networks have no windowed source, so they carry only the confirmed
+        current-month total from ``monthlyDataUsageOnWans`` under the distinct
+        ``monthly`` key (never conflated with the rolling windows).
+        """
         usage = self._network_usage_by_uuid.get(network.uuid)
+        if network.kind is FirewallaNetworkKind.WAN:
+            monthly = self._build_wan_monthly_usage(network.uuid)
+            if monthly is not None:
+                return replace(network, usage=monthly)
+            return network
         if usage is None:
             return network
         return replace(network, usage=usage)
+
+    def _build_wan_monthly_usage(
+        self,
+        wan_uuid: str,
+    ) -> FirewallaNetworkUsageSummary | None:
+        """Build a monthly-only usage summary for one WAN network.
+
+        Reads ``monthlyDataUsageOnWans`` directly by WAN uuid to avoid the
+        name-resolution path in ``get_current_wan_usage_summaries`` (which would
+        recurse back into ``_with_usage``).
+        """
+        raw_usage = (self.coordinator.last_init_payload or {}).get(
+            _RAW_MONTHLY_WAN_USAGE_KEY
+        )
+        if not isinstance(raw_usage, dict):
+            return None
+
+        raw_period = raw_usage.get(wan_uuid)
+        if not isinstance(raw_period, dict):
+            return None
+
+        download_bytes = self._normalized_int(raw_period.get("totalDownload"))
+        upload_bytes = self._normalized_int(raw_period.get("totalUpload"))
+        if download_bytes is None and upload_bytes is None:
+            return None
+
+        return FirewallaNetworkUsageSummary(
+            monthly=FirewallaNetworkUsageWindow(
+                download_bytes=download_bytes,
+                upload_bytes=upload_bytes,
+            )
+        )
 
     def _build_system_info(
         self, appliance_identity: FirewallaApplianceIdentityInput

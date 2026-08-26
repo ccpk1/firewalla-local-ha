@@ -380,6 +380,7 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 ("last_60m", "last_60m"),
                 ("last_30d", "last_30d"),
                 ("last_12m", "last_12m"),
+                ("monthly", "monthly"),
             )
         }
 

@@ -573,12 +573,18 @@ class FirewallaNetworkUsageWindow:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaNetworkUsageSummary:
-    """Normalized per-network data-usage totals across time windows."""
+    """Normalized per-network data-usage totals across time windows.
+
+    ``monthly`` is the current calendar-month total (from the WAN monthly
+    usage source) and is distinct from the rolling ``last_30d`` window; the two
+    are never conflated.
+    """
 
     last_24h: FirewallaNetworkUsageWindow | None = None
     last_60m: FirewallaNetworkUsageWindow | None = None
     last_30d: FirewallaNetworkUsageWindow | None = None
     last_12m: FirewallaNetworkUsageWindow | None = None
+    monthly: FirewallaNetworkUsageWindow | None = None
 
 
 @dataclass(slots=True, frozen=True)

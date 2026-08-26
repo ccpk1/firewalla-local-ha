@@ -548,6 +548,12 @@ def _network_payload() -> dict[str, object]:
                 "ipv4": "10.190.68.1",
             },
         },
+        "monthlyDataUsageOnWans": {
+            "8d5a7f20-2923-49a3-8e2b-338f9428a632": {
+                "totalDownload": 2048,
+                "totalUpload": 512,
+            },
+        },
     }
 
 
@@ -621,6 +627,7 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
         "last_60m": {"download_bytes": None, "upload_bytes": None},
         "last_30d": {"download_bytes": 900, "upload_bytes": 450},
         "last_12m": {"download_bytes": None, "upload_bytes": None},
+        "monthly": {"download_bytes": None, "upload_bytes": None},
     }
 
     assert vpn_state is not None
@@ -629,8 +636,16 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
     assert vpn_state.attributes[ATTR_NETWORK_PORTS] == []
 
     assert wan_state is not None
+    assert wan_state.state == STATE_ON
     assert wan_state.attributes[ATTR_NETWORK_KIND] == "wan"
     assert wan_state.attributes[ATTR_NETWORK_PORTS] == ["eth0"]
+    assert wan_state.attributes[ATTR_NETWORK_USAGE] == {
+        "last_24h": {"download_bytes": None, "upload_bytes": None},
+        "last_60m": {"download_bytes": None, "upload_bytes": None},
+        "last_30d": {"download_bytes": None, "upload_bytes": None},
+        "last_12m": {"download_bytes": None, "upload_bytes": None},
+        "monthly": {"download_bytes": 2048, "upload_bytes": 512},
+    }
 
 
 async def test_network_binary_sensor_name_uses_kind_and_name(

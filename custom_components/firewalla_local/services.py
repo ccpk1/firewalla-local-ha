@@ -2241,6 +2241,11 @@ def _serialize_unified_usage_summary(
             if usage is not None
             else None
         ),
+        "monthly": (
+            _serialize_unified_usage_window(usage.monthly)
+            if usage is not None
+            else None
+        ),
     }
 
 
