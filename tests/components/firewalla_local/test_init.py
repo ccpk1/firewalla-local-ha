@@ -27,6 +27,7 @@ from custom_components.firewalla_local.const import (
     CONF_DEVICE_TRACKER_AWAY_WINDOW,
     CONF_DEVICE_TRACKERS,
     CONF_EID,
+    CONF_ENABLE_NETWORK_ENTITIES,
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
@@ -622,6 +623,66 @@ async def test_options_update_reloads_entry_when_watched_devices_change(
                 CONF_DEVICE_TRACKERS: [],
                 CONF_UPDATE_INTERVAL: 3,
                 CONF_WATCHED_DEVICES: ["wg_peer:test-peer"],
+            },
+        )
+        await hass.async_block_till_done()
+
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_options_update_reloads_entry_when_network_entities_toggle_changes(
+    hass: HomeAssistant,
+) -> None:
+    """Test toggling network-entities off/on triggers a config-entry reload."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: [],
+            CONF_DEVICE_TRACKERS: [],
+            CONF_UPDATE_INTERVAL: 3,
+            CONF_WATCHED_DEVICES: [],
+            CONF_ENABLE_NETWORK_ENTITIES: False,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        new=AsyncMock(),
+    ) as mock_reload:
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                CONF_SELECTED_RULE_IDS: [],
+                CONF_SELECTED_RULE_TEMPLATES: [],
+                CONF_DEVICE_TRACKERS: [],
+                CONF_UPDATE_INTERVAL: 3,
+                CONF_WATCHED_DEVICES: [],
+                CONF_ENABLE_NETWORK_ENTITIES: True,
             },
         )
         await hass.async_block_till_done()

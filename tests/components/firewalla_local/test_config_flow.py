@@ -33,6 +33,7 @@ from custom_components.firewalla_local.const import (
     CONF_DEVICE_TRACKER_AWAY_WINDOW,
     CONF_DEVICE_TRACKERS,
     CONF_EID,
+    CONF_ENABLE_NETWORK_ENTITIES,
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
@@ -45,6 +46,7 @@ from custom_components.firewalla_local.const import (
     CONF_WATCHED_DEVICES,
     CONF_WATCHED_USERS,
     DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
+    DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
@@ -91,6 +93,7 @@ def _expected_options(overrides: dict[str, object] | None = None) -> dict[str, o
             DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES
         ),
         CONF_WATCHED_USERS: [],
+        CONF_ENABLE_NETWORK_ENTITIES: DEFAULT_ENABLE_NETWORK_ENTITIES,
     }
     if overrides:
         payload.update(overrides)

@@ -22,6 +22,7 @@ from .coordinator import (
     FirewallaDataUpdateCoordinator,
     FirewallaRuntimeData,
     async_migrate_entry_host,
+    get_enabled_network_entities,
 )
 from .managers import (
     FirewallaHostManager,
@@ -86,6 +87,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     await integration_manager.async_reconcile_speed_test_sensor_entities(
         tuple(wan.uuid for wan in integration_manager.get_available_wans())
     )
+    if get_enabled_network_entities(entry.options):
+        await integration_manager.async_reconcile_network_entities(
+            tuple(network.uuid for network in integration_manager.get_networks())
+        )
+    else:
+        await integration_manager.async_reconcile_network_entities(())
     integration_manager.async_reconcile_tracked_client_devices(
         host_manager.configured_device_tracker_macs,
         host_manager.get_hosts(),

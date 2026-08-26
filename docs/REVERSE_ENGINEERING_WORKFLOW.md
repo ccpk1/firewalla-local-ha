@@ -788,6 +788,84 @@ The following are confirmed by repository code and live captures.
 | Direct DNS allow, device-scoped | existing rule observed only | `policy:update` with `disabled: 1` and `idleTs` for timed pause | inventory confirms same-rule re-enable with cleared `idleTs`; payload not captured in this run | Example: `allow dns dns.google` for Kaden's Chromebook |
 | AP7 wireless SSID pause | read via `networkConfig.apc.profile.<uuid>.paused` | **unconfirmed** — three candidate write patterns rejected with code 500 | not applicable until write contract is confirmed | Example: pause/resume "Universe Guest" on VLAN 100 |
 
+## Unified Network model
+
+The Firewalla app treats LAN, VLAN, VPN, and WAN as **one unified "Network"
+concept** with a shared detail page (name, type, VLAN ID, associated ports,
+IPv4/IPv6 + DHCP, mDNS Relay, SSDP Relay, Block ICMP, device count, data usage,
+related rules). The integration mirrors this with a single normalized
+`FirewallaNetwork` model plus a per-network binary sensor. All mappings below are
+**confirmed** by live box pulls (2026-08-25) and the APK runtime model.
+
+### Network identity and kind
+
+The unified registry is `networkConfig.interface`, keyed by **category**. The
+category key is the source of the granular `network_kind` discriminator
+(`lan`/`vlan`/`vpn`/`wan`) — it is **not** the box's coarse raw `type` field.
+
+| App screen | `networkConfig.interface` category | `network_kind` | Notes |
+| --- | --- | --- | --- |
+| LAN (`LAN-MGMT`) | `bond` | `lan` | bond of `eth2`+`eth3` |
+| VLAN (`VLAN60 IOT`, `VLAN90 GUEST/DMZ`, …) | `vlan` | `vlan` | entry `vid` = VLAN id; `intf` = parent bond |
+| VPN (`AmneziaWG`, `OpenVPN`, `WireGuard`) | `amneziawg` / `openvpn` / `wireguard` | `vpn` | `wgPeers`/`awgPeers` are per-peer hosts, **not** VPN networks |
+| WAN (`WAN-ONE`) | `phy` | `wan` | only a `phy` entry whose `meta.type == "wan"`; unnamed `phy` ports (eth1/2/3) are hardware, not networks |
+
+Each entry carries a `meta` block: `name` (display name), `type` (`lan`/`wan`
+only — coarse), `uuid`. The `network_kind` is derived from the category key so
+`vlan` and `vpn` are distinguishable despite all reporting `meta.type='lan'`.
+
+### Detail fields
+
+| App field | Raw path | Normalized | Entity attribute |
+| --- | --- | --- | --- |
+| Name | `networkConfig.interface.<cat>.<name>.meta.name` → `networkProfiles` display fields | `FirewallaNetwork.name` | (entity name) |
+| Kind | `networkConfig.interface` category key | `FirewallaNetwork.kind` | `network_kind` |
+| VLAN ID | `networkConfig.interface.vlan.<name>.vid` | `FirewallaNetwork.vlan_id` | `vlan_id` |
+| Ethernet ports | `phy` WAN = its device name; `bond` = `intf` members; `vlan` = dereference `intf` parent to members; VPN = none | `FirewallaNetwork.ports` | `ports` |
+| IPv4 address | `networkProfiles[uuid].ipv4` (bare) / `item=intf` `ipv4` | `FirewallaNetwork.ipv4_addresses` | `ipv4_addresses` |
+| IPv4 subnet | `networkProfiles[uuid].ipv4Subnet(s)` (CIDR) | `FirewallaNetwork.ipv4_subnets` | `ipv4_subnets` |
+| IPv6 address | `item=intf` → `ipv6` | `FirewallaNetwork.ipv6_addresses` | `ipv6_addresses` |
+| IPv6 subnet | `item=intf` → `ipv6Subnets` | `FirewallaNetwork.ipv6_subnets` | `ipv6_subnets` |
+| Gateway | `networkProfiles[uuid].gateway`, falls back to `networkConfig.dhcp[<intf>].gateway` | `FirewallaNetwork.gateway` | `gateway` |
+| DHCP | `networkConfig.dhcp[<intf>]` (gateway, subnetMask, lease, range, nameservers, searchDomain) | `FirewallaNetwork.dhcp` | `dhcp` |
+| Device count | `hosts[]` with `host.intf == <network uuid>`, excluding the Firewalla box (`macVendor` contains `firewalla`) | `FirewallaNetwork.device_host_count` | `device_count` |
+
+### Advanced options
+
+| App toggle | Raw path | Normalized | Entity attribute |
+| --- | --- | --- | --- |
+| mDNS Relay | `networkConfig.mdns_reflector[<intf>].enabled` | `FirewallaNetwork.mdns_relay` | `mdns_relay` |
+| SSDP Relay | `networkConfig.mroute[<intf>].routes[]` with `cidr: 239.255.255.250`; absent entry = off | `FirewallaNetwork.ssdp_relay` | `ssdp_relay` |
+| Block ICMP | `networkConfig.icmp[<intf>].echoRequest` — **inverted** (`block_icmp = not echoRequest`; the box clears `echoRequest` when Block ICMP is on) | `FirewallaNetwork.block_icmp` | `block_icmp` |
+
+### Data usage
+
+| Kind | Source | Normalized | Entity attribute |
+| --- | --- | --- | --- |
+| LAN / VLAN / VPN | `item=intf` (`async_get_network_interface_payload`) windows `newLast24`/`last60`/`last30`/`last12Months` `totalDownload`/`totalUpload` | `FirewallaNetwork.usage` | `network_usage` |
+| WAN (monthly) | `monthlyDataUsageOnWans[<wan uuid>].totalDownload`/`totalUpload` | `FirewallaNetwork.usage.monthly` | `network_usage.monthly` |
+
+Per-network usage is surfaced via a **single logic path**: the integration
+manager fetches `item=intf` once per poll (resilient to per-network failures —
+OpenVPN returns a 500 for `item=intf`, all others work) and the entity
+`network_usage` attribute, the `get_network_segment_report` usage section, and
+the `get_network_segment_usage` service all consume the same manager views.
+WAN networks have **no windowed source** — a WAN's `item=intf` windows are all
+zero and the box-wide init windows are aggregate (not per-WAN) — so a WAN
+`network_usage` carries only the **`monthly`** key (current calendar month from
+`monthlyDataUsageOnWans`), never conflated with the rolling `last_30d` window.
+WAN monthly totals also remain on the System Status `current_wan_usage` /
+`get_wan_data_usage` surface.
+
+### Design notes
+
+- `network_kind` (not `network_type`): the value is the derived granular
+  discriminator from the category key. The box's raw `type` field is only
+  `lan`/`wan` and is already modeled as `FirewallaNetworkSegmentView.network_type`.
+- Keep entity naming kind-agnostic (no `ipv4`/`ipv6` in the unique-id or
+  translation keys); the display name renders the kind acronym + network name
+  (`Firewalla VLAN VLAN10 CORE Status`).
+
 ## Inventory-confirmed durable rule findings
 
 This section records confirmed live runtime invariants derived from inventory

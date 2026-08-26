@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 from .api import FirewallaApiClient, FirewallaApiError, FirewallaAuthError
 from .const import (
     CONF_DEVICE_TRACKERS,
+    CONF_ENABLE_NETWORK_ENTITIES,
     CONF_HOST,
     CONF_LICENSE,
     CONF_LOCAL_IP,
@@ -23,6 +24,7 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_WATCHED_DEVICES,
     CONF_WATCHED_USERS,
+    DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
@@ -90,6 +92,14 @@ def _get_device_tracker_macs(options: Mapping[str, object]) -> tuple[str, ...]:
     return tuple(
         sorted(mac for mac in raw_device_trackers if isinstance(mac, str) and mac)
     )
+
+
+def get_enabled_network_entities(options: Mapping[str, object]) -> bool:
+    """Return whether per-network status entities should be created."""
+    raw_value = options.get(
+        CONF_ENABLE_NETWORK_ENTITIES, DEFAULT_ENABLE_NETWORK_ENTITIES
+    )
+    return raw_value if isinstance(raw_value, bool) else DEFAULT_ENABLE_NETWORK_ENTITIES
 
 
 def get_configured_update_interval(options: Mapping[str, object]) -> timedelta:
@@ -175,6 +185,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self.rule_manager: FirewallaRuleManager | None = None
         self.user_manager: FirewallaUserManager | None = None
         self.wireless_manager: FirewallaWirelessManager | None = None
+        self._enable_network_entities = get_enabled_network_entities(
+            config_entry.options
+        )
         self._unavailable_logged = False
         super().__init__(
             hass,
@@ -231,6 +244,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
 
         if self.integration_manager is not None:
             self.integration_manager.handle_refresh(snapshot)
+            await self.integration_manager.async_refresh_network_usage()
         if self.host_manager is not None:
             self.host_manager.handle_refresh(snapshot)
         if self.user_manager is not None:
@@ -265,15 +279,19 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         current_watched_user_ids = (
             entry.runtime_data.user_manager.configured_watched_user_ids
         )
+        current_enable_network_entities = self._enable_network_entities
+        enable_network_entities = get_enabled_network_entities(entry.options)
         if (
             current_selected_rule_ids == _get_selected_rule_ids(entry.options)
             and current_watched_device_macs == _get_watched_device_macs(entry.options)
             and current_device_tracker_macs == _get_device_tracker_macs(entry.options)
             and current_watched_user_ids == _get_watched_user_ids(entry.options)
+            and current_enable_network_entities == enable_network_entities
         ):
             self.async_update_listeners()
             return
 
+        self._enable_network_entities = enable_network_entities
         await hass.config_entries.async_reload(entry.entry_id)
 
     @callback

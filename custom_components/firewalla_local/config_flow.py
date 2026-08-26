@@ -37,6 +37,7 @@ from .const import (
     CONF_DEVICE_TRACKER_AWAY_WINDOW,
     CONF_DEVICE_TRACKERS,
     CONF_EID,
+    CONF_ENABLE_NETWORK_ENTITIES,
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
@@ -54,6 +55,7 @@ from .const import (
     CONFIG_ERROR_WRONG_ACCOUNT,
     DEFAULT_BOX_NAME,
     DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
+    DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_PAIRING_DEVICE_NAME,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
@@ -126,6 +128,7 @@ class SystemSettingsOptionsInput(TypedDict):
     update_interval: int
     return_to_main_menu: bool
     watched_device_online_window: int
+    enable_network_entities: bool
 
 
 class DeviceTrackersOptionsInput(TypedDict, total=False):
@@ -737,6 +740,15 @@ class FirewallaOptionsFlow(OptionsFlow):
             MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
         )
 
+    def _get_stored_enable_network_entities(self) -> bool:
+        """Return the persisted network-entities toggle or the default when unset."""
+        raw_value = self._config_entry.options.get(
+            CONF_ENABLE_NETWORK_ENTITIES, DEFAULT_ENABLE_NETWORK_ENTITIES
+        )
+        if isinstance(raw_value, bool):
+            return raw_value
+        return DEFAULT_ENABLE_NETWORK_ENTITIES
+
     def _get_stored_rule_selection(
         self,
     ) -> tuple[list[str], tuple[FirewallaRuleTemplate, ...]]:
@@ -871,6 +883,7 @@ class FirewallaOptionsFlow(OptionsFlow):
         *,
         device_trackers: list[str] | None = None,
         device_tracker_away_window: int | None = None,
+        enable_network_entities: bool | None = None,
         selected_rule_ids: list[str] | None = None,
         selected_rule_templates: tuple[FirewallaRuleTemplate, ...] | None = None,
         watched_devices: list[str] | None = None,
@@ -916,6 +929,11 @@ class FirewallaOptionsFlow(OptionsFlow):
                 self._get_stored_watched_device_online_window()
                 if watched_device_online_window is None
                 else watched_device_online_window
+            ),
+            CONF_ENABLE_NETWORK_ENTITIES: (
+                self._get_stored_enable_network_entities()
+                if enable_network_entities is None
+                else enable_network_entities
             ),
             CONF_UPDATE_INTERVAL: (
                 self._get_stored_update_interval()
@@ -1227,6 +1245,9 @@ class FirewallaOptionsFlow(OptionsFlow):
                 watched_device_online_window=cast(
                     int, user_input[CONF_WATCHED_DEVICE_ONLINE_WINDOW]
                 ),
+                enable_network_entities=cast(
+                    bool, user_input[CONF_ENABLE_NETWORK_ENTITIES]
+                ),
             )
             if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
                 return await self.async_step_init()
@@ -1241,6 +1262,9 @@ class FirewallaOptionsFlow(OptionsFlow):
                     update_interval=typed_user_input[CONF_UPDATE_INTERVAL],
                     watched_device_online_window=typed_user_input[
                         CONF_WATCHED_DEVICE_ONLINE_WINDOW
+                    ],
+                    enable_network_entities=typed_user_input[
+                        CONF_ENABLE_NETWORK_ENTITIES
                     ],
                 )
             )
@@ -1274,6 +1298,10 @@ class FirewallaOptionsFlow(OptionsFlow):
                             max=MAX_UPDATE_INTERVAL_MINUTES,
                         ),
                     ),
+                    vol.Required(
+                        CONF_ENABLE_NETWORK_ENTITIES,
+                        default=self._get_stored_enable_network_entities(),
+                    ): bool,
                     vol.Optional(
                         _OPTION_RETURN_TO_MAIN_MENU,
                         default=False,

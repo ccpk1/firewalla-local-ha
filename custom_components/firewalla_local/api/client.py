@@ -35,6 +35,7 @@ from ..models import (
     FirewallaUserAppUsage,
     FirewallaUserRuntime,
 )
+from ..utils.network import build_network_inventory
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
     FirewallaAuthError,
@@ -139,8 +140,6 @@ _RAW_SYSTEM_SYS_METRICS_DISK_SIZE_KEY: Final = "size"
 _RAW_CUSTOMIZED_CATEGORIES_KEY: Final = "customizedCategories"
 _RAW_NETWORK_PROFILES_KEY: Final = "networkProfiles"
 _RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
-_RAW_INTERFACE_KEY: Final = "interface"
-_RAW_META_KEY: Final = "meta"
 _RAW_UUID_KEY: Final = "uuid"
 _RAW_NAME_KEY: Final = "name"
 _RAW_DESC_KEY: Final = "desc"
@@ -1317,79 +1316,14 @@ class FirewallaApiClient:
         return app_category_lookup
 
     def _build_network_lookup(self, data: dict[str, object]) -> dict[str, str]:
-        """Build a lookup of network UUIDs to readable network names."""
-        raw_network_profiles = data.get(_RAW_NETWORK_PROFILES_KEY)
+        """Build a lookup of network UUIDs/interface names to readable names."""
         network_lookup: dict[str, str] = {}
-
-        if isinstance(raw_network_profiles, dict):
-            for network_id, raw_profile in raw_network_profiles.items():
-                if not isinstance(network_id, str) or not network_id:
-                    continue
-                if not isinstance(raw_profile, dict):
-                    continue
-
-                display_name = self._resolve_network_display_name(raw_profile)
-                if display_name is not None:
-                    network_lookup[network_id] = display_name
-
-        raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
-        if isinstance(raw_network_config, dict):
-            raw_interfaces = raw_network_config.get(_RAW_INTERFACE_KEY)
-            self._merge_network_config_lookup(raw_interfaces, network_lookup)
+        for network in build_network_inventory(data):
+            network_lookup[network.uuid] = network.name
+            if network.interface_name is not None:
+                network_lookup[network.interface_name] = network.name
 
         return network_lookup
-
-    def _resolve_network_display_name(
-        self, raw_profile: dict[str, object]
-    ) -> str | None:
-        """Resolve the best available display name from one network profile."""
-        for key in (_RAW_DESC_KEY, _RAW_NAME_KEY, _RAW_INTF_KEY):
-            value = raw_profile.get(key)
-            if isinstance(value, str) and value:
-                return value
-        return None
-
-    def _merge_network_config_lookup(
-        self,
-        raw_interfaces: object,
-        network_lookup: dict[str, str],
-        interface_name: str | None = None,
-    ) -> None:
-        """Merge readable network names from networkConfig.interface metadata."""
-        if isinstance(raw_interfaces, dict):
-            meta = raw_interfaces.get(_RAW_META_KEY)
-            if isinstance(meta, dict):
-                network_id = meta.get(_RAW_UUID_KEY)
-                for candidate in (
-                    meta.get(_RAW_NAME_KEY),
-                    raw_interfaces.get(_RAW_DESC_KEY),
-                    raw_interfaces.get(_RAW_NAME_KEY),
-                ):
-                    if not isinstance(candidate, str) or not candidate:
-                        continue
-                    if isinstance(network_id, str) and network_id:
-                        network_lookup[network_id] = candidate
-                    if interface_name is not None:
-                        network_lookup[interface_name] = candidate
-                    break
-
-            for key, value in raw_interfaces.items():
-                if key == _RAW_META_KEY:
-                    continue
-                self._merge_network_config_lookup(
-                    value,
-                    network_lookup,
-                    key if isinstance(value, dict) else interface_name,
-                )
-            return
-
-        if isinstance(raw_interfaces, list):
-            for value in raw_interfaces:
-                self._merge_network_config_lookup(
-                    value,
-                    network_lookup,
-                    interface_name,
-                )
 
     def _extract_allowed_ip_address(self, raw_allowed_ips: object) -> str | None:
         """Return the first peer address from one allowed-IPs list."""

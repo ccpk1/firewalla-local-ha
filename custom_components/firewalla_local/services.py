@@ -154,6 +154,7 @@ from .coordinator import FirewallaConfigEntry
 from .models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
+    FirewallaNetwork,
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkHostActions,
     FirewallaNetworkHostDetail,
@@ -166,6 +167,8 @@ from .models import (
     FirewallaNetworkSegment,
     FirewallaNetworkSegmentView,
     FirewallaNetworkUsageBucket,
+    FirewallaNetworkUsageSummary,
+    FirewallaNetworkUsageWindow,
     FirewallaReportProvenance,
     FirewallaReportTarget,
     FirewallaReportTimeBasis,
@@ -2203,10 +2206,54 @@ def _build_network_dhcp_config(
     )
 
 
+def _serialize_unified_usage_window(
+    window: FirewallaNetworkUsageWindow | None,
+) -> JsonObjectType:
+    """Serialize one unified network usage window."""
+    return {
+        "download_bytes": window.download_bytes if window is not None else None,
+        "upload_bytes": window.upload_bytes if window is not None else None,
+    }
+
+
+def _serialize_unified_usage_summary(
+    usage: FirewallaNetworkUsageSummary | None,
+) -> JsonObjectType:
+    """Serialize one unified network usage summary."""
+    return {
+        "last_24h": (
+            _serialize_unified_usage_window(usage.last_24h)
+            if usage is not None
+            else None
+        ),
+        "last_60m": (
+            _serialize_unified_usage_window(usage.last_60m)
+            if usage is not None
+            else None
+        ),
+        "last_30d": (
+            _serialize_unified_usage_window(usage.last_30d)
+            if usage is not None
+            else None
+        ),
+        "last_12m": (
+            _serialize_unified_usage_window(usage.last_12m)
+            if usage is not None
+            else None
+        ),
+        "monthly": (
+            _serialize_unified_usage_window(usage.monthly)
+            if usage is not None
+            else None
+        ),
+    }
+
+
 def _serialize_network_segment_report(
     entry: FirewallaConfigEntry,
     *,
     view: FirewallaNetworkSegmentView,
+    network: FirewallaNetwork,
     refresh_requested: bool,
 ) -> JsonObjectType:
     """Serialize one configuration-oriented network segment report."""
@@ -2217,7 +2264,7 @@ def _serialize_network_segment_report(
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="network_segment",
+                kind=network.kind.value,
                 id=view.target.uuid,
                 name=view.target.name,
             )
@@ -2232,13 +2279,21 @@ def _serialize_network_segment_report(
         ),
         "summary": {
             "host_count": len(host_details),
+            "device_host_count": network.device_host_count,
             "has_dhcp_config": dhcp_config is not None,
             "has_ipv4_addressing": bool(view.ipv4_addresses or view.ipv4_subnets),
             "has_ipv6_addressing": bool(view.ipv6_addresses or view.ipv6_subnets),
         },
         "sections": {
             "configuration": {
+                "kind": network.kind.value,
                 "interface_name": view.interface_name,
+                "vlan_id": network.vlan_id,
+                "ports": list(network.ports),
+                "enabled": network.enabled,
+                "mdns_relay": network.mdns_relay,
+                "ssdp_relay": network.ssdp_relay,
+                "block_icmp": network.block_icmp,
                 "type": view.network_type,
                 "monitoring": view.monitoring,
                 "active": view.active,
@@ -2246,6 +2301,7 @@ def _serialize_network_segment_report(
                 "pending_test": view.pending_test,
                 "policy": cast(JsonObjectType | None, view.policy),
             },
+            "usage": _serialize_unified_usage_summary(network.usage),
             "addressing": {
                 "gateway": view.gateway,
                 "gateway6": view.gateway6,
@@ -2307,6 +2363,15 @@ def _serialize_network_segment_report(
                     source="derived",
                     source_field="hostManager",
                     note="Host rows are derived from runtime host inventory",
+                ),
+                FirewallaReportProvenance(
+                    section="usage",
+                    source="manager",
+                    source_field="item=intf",
+                    note=(
+                        "Windowed usage comes from the cached per-network "
+                        "usage summary; WAN windowed usage is not available"
+                    ),
                 ),
             ),
         ),
@@ -3825,6 +3890,17 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
         network_name=call.data.get(SERVICE_FIELD_NETWORK_NAME),
     )
 
+    # The unified network model carries the geometry/usage/advanced-option
+    # fields surfaced alongside the item=intf segment view.
+    full_network = next(
+        (
+            candidate
+            for candidate in entry.runtime_data.integration_manager.get_networks()
+            if candidate.uuid == network.uuid
+        ),
+        None,
+    )
+
     try:
         network_views = (
             await entry.runtime_data.integration_manager.async_get_network_interfaces(
@@ -3844,9 +3920,16 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
             translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
         )
 
+    if full_network is None:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
+            translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
+        )
+
     return _serialize_network_segment_report(
         entry,
         view=network_views[0],
+        network=full_network,
         refresh_requested=refresh_requested,
     )
 
