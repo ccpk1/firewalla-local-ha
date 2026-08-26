@@ -20,6 +20,7 @@ Firewalla Local can expose these main surface areas:
 
 - Firewalla appliance monitoring on the main router device
 - a diagnostic `Sync runtime` button on the main router device
+- per-network status binary sensors for every LAN, VLAN, VPN, and WAN
 - watched-device binary sensors for selected endpoints
 - watched-user usage sensors for selected Firewalla users
 - router-based `device_tracker` entities for selected MAC-backed LAN clients
@@ -184,6 +185,8 @@ Home Assistant.
   watched-user daily-usage sensors.
 - **Manage device trackers:** Choose which MAC-backed LAN clients should appear
   as Home Assistant router-based device trackers.
+- **Manage network entities:** Toggle per-network status binary sensors for
+  every LAN, VLAN, VPN, and WAN.
 - **General options:** Adjust the local polling interval and timing settings
   without re-pairing the box.
 
@@ -233,6 +236,32 @@ Use it when you want to trigger an immediate refresh instead of waiting for the
 next polling interval. After a successful refresh, the system-status entity's
 `runtime_data_updated_at` attribute updates to the latest runtime snapshot
 time.
+
+## Per-network monitoring
+
+When enabled, the integration creates one status binary sensor per Firewalla
+network, mirroring the network list in the Firewalla app. This covers LAN,
+VLAN, VPN, and WAN surfaces.
+
+- enable or disable this surface in the options flow with **Enable network
+  status entities**
+- each entity's state reflects whether the network is currently configured and
+  enabled
+- each entity exposes a stable set of attributes describing the network
+
+The per-network attributes include:
+
+- network kind (LAN, VLAN, VPN, or WAN)
+- VLAN ID and ethernet ports when applicable
+- IPv4/IPv6 addresses and subnets, gateway, and DNS servers
+- DHCP configuration
+- device count
+- advanced options such as mDNS/SSDP Relay and Block ICMP
+- a compact usage summary, including current-month WAN usage where available
+
+Use these entities for a live, per-network health and usage view on your
+dashboards. For a deeper configuration or usage drill-down, use the
+`get_network_segment_report` and `get_network_segment_usage` services instead.
 
 ## Watched-device monitoring
 

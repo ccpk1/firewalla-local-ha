@@ -61,7 +61,8 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
 
 ### **Appliance & Data Visibility**
 * **Appliance Monitoring:** Track Firewalla system status, WAN IP details, uptime, memory/disk usage, and the latest successful Speed Test natively. Includes a diagnostic `Sync runtime` button to force an immediate local data refresh.
-* **Rich Local Reporting:** Leverage over a dozen native Home Assistant services to query host identity records, network segment usage, time usage history, WAN data, and WAN event timelines—all pulled directly from the local data plane without touching the cloud.
+* **Per-Network Entities:** Expose every Firewalla network (LAN, VLAN, VPN, WAN) as a native binary sensor carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, device count, advanced options (mDNS/SSDP Relay, Block ICMP), and usage — including current-month WAN usage.
+* **Rich Local Reporting:** Leverage over a dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, and WAN event timelines—all pulled directly from the local data plane without touching the cloud.
 
 ## **Supported Hardware & Prerequisites**
 * **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. It should be compatible with the Purple, Gold Pro, and any other series running the Firewalla Box software that supports the local API.
