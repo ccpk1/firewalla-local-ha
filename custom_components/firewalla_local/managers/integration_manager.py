@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final, cast
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 from ..const import (
     CONF_LICENSE,
@@ -2424,7 +2425,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
     async def async_reconcile_device_tracker_entities(
         self, selected_macs: tuple[str, ...]
     ) -> None:
-        """Remove stale device-tracker entity entries for deselected clients."""
+        """Remove stale and re-enable integration-disabled tracker entities."""
         entity_registry = er.async_get(self.coordinator.hass)
         expected_unique_ids = {
             self.build_entity_unique_id(
@@ -2446,6 +2447,10 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_DEVICE_TRACKER}"):
                 continue
             if entity_entry.unique_id in expected_unique_ids:
+                if entity_entry.disabled_by == RegistryEntryDisabler.INTEGRATION:
+                    entity_registry.async_update_entity(
+                        entity_entry.entity_id, disabled_by=None
+                    )
                 continue
 
             entity_registry.async_remove(entity_entry.entity_id)
