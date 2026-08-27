@@ -102,12 +102,11 @@ class FirewallaDeviceTracker(
 
     def find_device_entry(self) -> dr.DeviceEntry | None:
         """Return the tracked-client device entry for this tracker."""
-        return dr.async_get(self.hass).async_get_device(
-            identifiers={
-                self._entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
-                    self._mac
-                )
-            }
+        return dr.async_get(self.hass).async_get_device_by_identifier(
+            self._entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
+                self._mac
+            ),
+            self._entry.entry_id,
         )
 
     @property

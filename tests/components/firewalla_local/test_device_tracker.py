@@ -10,6 +10,7 @@ from homeassistant.const import STATE_HOME, STATE_NOT_HOME, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
@@ -56,12 +57,11 @@ def _tracked_client_device(
     hass: HomeAssistant, entry, mac: str
 ) -> dr.DeviceEntry | None:
     """Return the tracked-client device for one selected MAC."""
-    return dr.async_get(hass).async_get_device(
-        identifiers={
-            entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
-                mac
-            )
-        }
+    return dr.async_get(hass).async_get_device_by_identifier(
+        entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
+            mac
+        ),
+        entry.entry_id,
     )
 
 
@@ -177,8 +177,8 @@ async def test_device_tracker_exposes_state_and_attributes(
     )
     tracker_entry = _device_tracker_registry_entry(hass, entry.entry_id)
     client_device = _tracked_client_device(hass, entry, "AA:BB:CC:DD:EE:FF")
-    router_device = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, "license-123")}
+    router_device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "license-123"), entry.entry_id
     )
 
     assert client_device is not None
@@ -499,11 +499,11 @@ async def test_device_tracker_unique_ids_are_entry_scoped(
     second_client_device = _tracked_client_device(
         hass, second_entry, "AA:BB:CC:DD:EE:FF"
     )
-    first_router_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "license-123")}
+    first_router_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "license-123"), first_entry.entry_id
     )
-    second_router_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "license-456")}
+    second_router_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "license-456"), second_entry.entry_id
     )
 
     assert len(tracker_entries) == 2
@@ -519,3 +519,53 @@ async def test_device_tracker_unique_ids_are_entry_scoped(
         hass.states.get(entity_entry.entity_id).state
         for entity_entry in tracker_entries
     } == {STATE_NOT_HOME}
+
+
+async def test_device_tracker_reenables_integration_disabled_entity(
+    hass: HomeAssistant,
+) -> None:
+    """Test a previously integration-disabled tracker entity is re-enabled."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_DEVICE_TRACKERS: ["AA:BB:CC:DD:EE:FF"],
+            CONF_DEVICE_TRACKER_AWAY_WINDOW: 15,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    entity_registry = er.async_get(hass)
+    entity_registry.async_get_or_create(
+        "device_tracker",
+        DOMAIN,
+        f"{entry.entry_id}_AA:BB:CC:DD:EE:FF_device_tracker",
+        config_entry=entry,
+        disabled_by=RegistryEntryDisabler.INTEGRATION,
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    tracker_entry = _device_tracker_registry_entry(hass, entry.entry_id)
+    assert tracker_entry.disabled_by is None
+    assert tracker_entry.entity_id.startswith("device_tracker.")

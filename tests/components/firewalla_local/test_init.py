@@ -288,8 +288,8 @@ async def test_setup_entry_creates_runtime_sync_button(hass: HomeAssistant) -> N
     assert button_state.attributes[ATTR_INTEGRATION] == DOMAIN
 
     device_registry = dr.async_get(hass)
-    router_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "license-123")}
+    router_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "license-123"), entry.entry_id
     )
     assert router_device is not None
     assert button_entry.device_id == router_device.id
@@ -825,11 +825,11 @@ async def test_setup_multiple_entries_create_distinct_license_devices(
         await hass.async_block_till_done()
 
     device_registry = dr.async_get(hass)
-    first_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "license-123")}
+    first_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "license-123"), first_entry.entry_id
     )
-    second_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "license-456")}
+    second_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "license-456"), second_entry.entry_id
     )
 
     assert first_device is not None
@@ -926,7 +926,12 @@ async def test_deselecting_device_tracker_removes_client_device_and_entity(
     assert entity_registry.async_get_entity_id(
         "device_tracker", DOMAIN, tracker_unique_id
     )
-    assert device_registry.async_get_device(identifiers={client_identifier}) is not None
+    assert (
+        device_registry.async_get_device_by_identifier(
+            client_identifier, entry.entry_id
+        )
+        is not None
+    )
 
     with (
         patch(
@@ -951,7 +956,12 @@ async def test_deselecting_device_tracker_removes_client_device_and_entity(
         entity_registry.async_get_entity_id("device_tracker", DOMAIN, tracker_unique_id)
         is None
     )
-    assert device_registry.async_get_device(identifiers={client_identifier}) is None
+    assert (
+        device_registry.async_get_device_by_identifier(
+            client_identifier, entry.entry_id
+        )
+        is None
+    )
 
 
 async def test_unloading_device_tracker_entry_preserves_registry_for_reload(
@@ -1035,7 +1045,9 @@ async def test_unloading_device_tracker_entry_preserves_registry_for_reload(
     assert entity_id is not None
     entity_entry = entity_registry.async_get(entity_id)
     assert entity_entry is not None
-    client_device = device_registry.async_get_device(identifiers={client_identifier})
+    client_device = device_registry.async_get_device_by_identifier(
+        client_identifier, entry.entry_id
+    )
     assert client_device is not None
     assert entity_entry.device_id == client_device.id
     assert hass.states.get(entity_id) is not None
@@ -1053,7 +1065,9 @@ async def test_unloading_device_tracker_entry_preserves_registry_for_reload(
     assert unloaded_entry is not None
     assert unloaded_entry.device_id == client_device.id
 
-    unloaded_device = device_registry.async_get_device(identifiers={client_identifier})
+    unloaded_device = device_registry.async_get_device_by_identifier(
+        client_identifier, entry.entry_id
+    )
     assert unloaded_device is not None
 
     with (
