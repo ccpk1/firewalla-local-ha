@@ -57,12 +57,11 @@ def _tracked_client_device(
     hass: HomeAssistant, entry, mac: str
 ) -> dr.DeviceEntry | None:
     """Return the tracked-client device for one selected MAC."""
-    return dr.async_get(hass).async_get_device(
-        identifiers={
-            entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
-                mac
-            )
-        }
+    return dr.async_get(hass).async_get_device_by_identifier(
+        entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
+            mac
+        ),
+        entry.entry_id,
     )
 
 
@@ -178,8 +177,8 @@ async def test_device_tracker_exposes_state_and_attributes(
     )
     tracker_entry = _device_tracker_registry_entry(hass, entry.entry_id)
     client_device = _tracked_client_device(hass, entry, "AA:BB:CC:DD:EE:FF")
-    router_device = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, "license-123")}
+    router_device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "license-123"), entry.entry_id
     )
 
     assert client_device is not None
@@ -500,11 +499,11 @@ async def test_device_tracker_unique_ids_are_entry_scoped(
     second_client_device = _tracked_client_device(
         hass, second_entry, "AA:BB:CC:DD:EE:FF"
     )
-    first_router_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "license-123")}
+    first_router_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "license-123"), first_entry.entry_id
     )
-    second_router_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "license-456")}
+    second_router_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "license-456"), second_entry.entry_id
     )
 
     assert len(tracker_entries) == 2
