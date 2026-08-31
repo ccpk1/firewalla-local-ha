@@ -803,12 +803,19 @@ The unified registry is `networkConfig.interface`, keyed by **category**. The
 category key is the source of the granular `network_kind` discriminator
 (`lan`/`vlan`/`vpn`/`wan`) — it is **not** the box's coarse raw `type` field.
 
+Router-Mode boxes segment their LANs one of two ways: as a **LAG `bond`** to a
+managed switch (VLANs ride on the bond) or as per-network **`bridge`**
+interfaces that carry direct ports and/or tagged VLAN members directly. Both
+are LAN networks; the reverse-engineered captures below cover both layouts.
+
 | App screen | `networkConfig.interface` category | `network_kind` | Notes |
 | --- | --- | --- | --- |
-| LAN (`LAN-MGMT`) | `bond` | `lan` | bond of `eth2`+`eth3` |
-| VLAN (`VLAN60 IOT`, `VLAN90 GUEST/DMZ`, …) | `vlan` | `vlan` | entry `vid` = VLAN id; `intf` = parent bond |
+| LAN (`LAN-MGMT`) | `bond` | `lan` | bond of `eth2`+`eth3`; VLANs ride on the bond (`bond0.10`) |
+| LAN (`Guest`, `Home`, `Mgmt`, …) | `bridge` | `lan` | per-network bridge; `intf` lists direct ports and/or tagged VLAN members (e.g. `br1` Guest → `eth3.101`) |
+| VLAN (`VLAN60 IOT`, `VLAN90 GUEST/DMZ`, …) | `vlan` | `vlan` | entry `vid` = VLAN id; `intf` = parent bond. A VLAN **referenced by a bridge's `intf`** is transport for that bridge and is **not** surfaced as its own network |
 | VPN (`AmneziaWG`, `OpenVPN`, `WireGuard`) | `amneziawg` / `openvpn` / `wireguard` | `vpn` | `wgPeers`/`awgPeers` are per-peer hosts, **not** VPN networks |
 | WAN (`WAN-ONE`) | `phy` | `wan` | only a `phy` entry whose `meta.type == "wan"`; unnamed `phy` ports (eth1/2/3) are hardware, not networks |
+| WAN (wireless uplink) | `wlan` | `wan` | only when `meta.type == "wan"`; the box joins a Wi-Fi network as a client (`wpaSupplicant`), so it is a wireless WAN uplink, not a wireless LAN AP |
 
 Each entry carries a `meta` block: `name` (display name), `type` (`lan`/`wan`
 only — coarse), `uuid`. The `network_kind` is derived from the category key so
@@ -821,7 +828,7 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 | Name | `networkConfig.interface.<cat>.<name>.meta.name` → `networkProfiles` display fields | `FirewallaNetwork.name` | (entity name) |
 | Kind | `networkConfig.interface` category key | `FirewallaNetwork.kind` | `network_kind` |
 | VLAN ID | `networkConfig.interface.vlan.<name>.vid` | `FirewallaNetwork.vlan_id` | `vlan_id` |
-| Ethernet ports | `phy` WAN = its device name; `bond` = `intf` members; `vlan` = dereference `intf` parent to members; VPN = none | `FirewallaNetwork.ports` | `ports` |
+| Ethernet ports | `phy`/`wlan` WAN = its device name; `bond`/`bridge` = `intf` members; `vlan` = dereference `intf` parent to members; every member is dereferenced through parent chains (bridge → VLAN → physical port); VPN = none | `FirewallaNetwork.ports` | `ports` |
 | IPv4 address | `networkProfiles[uuid].ipv4` (bare) / `item=intf` `ipv4` | `FirewallaNetwork.ipv4_addresses` | `ipv4_addresses` |
 | IPv4 subnet | `networkProfiles[uuid].ipv4Subnet(s)` (CIDR) | `FirewallaNetwork.ipv4_subnets` | `ipv4_subnets` |
 | IPv6 address | `item=intf` → `ipv6` | `FirewallaNetwork.ipv6_addresses` | `ipv6_addresses` |
@@ -865,6 +872,13 @@ WAN monthly totals also remain on the System Status `current_wan_usage` /
 - Keep entity naming kind-agnostic (no `ipv4`/`ipv6` in the unique-id or
   translation keys); the display name renders the kind acronym + network name
   (`Firewalla VLAN VLAN10 CORE Status`).
+- A VLAN interface that a bridge references in `intf` is **transport** (e.g.
+  `eth3.101` tags the `Guest` bridge), not a standalone network. Only VLANs no
+  bridge references are user-facing `vlan` networks. This prevents duplicate
+  entities for the same physical network (bridge + its tagging VLAN).
+- `wlan` is a wireless WAN uplink only when `meta.type == "wan"`; a non-`wan`
+  `wlan` entry (e.g. an AP-facing interface) is skipped, mirroring the `phy`
+  WAN guard.
 
 ## Inventory-confirmed durable rule findings
 
@@ -2221,6 +2235,57 @@ Implementation impact:
 - a host-delete service should send a `cmd` message with
   `item: "host:delete"` and `value: {"mac": "<host-mac>"}` targeting
   `0.0.0.0`, matching the existing manager-owned mutation pattern
+
+### Finding 23: Router-Mode LANs can be `bridge` interfaces (not only `bond`)
+
+Scenario:
+
+- a user's Gold SE in Router Mode reported network entities with wrong names
+  (`br0`, `br1`, …) and empty ports; a diagnostic download showed all LAN
+  networks defined as `bridge` interfaces, and a wireless `wlan` WAN uplink
+- the initial reverse-engineering capture (Finding 5) only documented the
+  `bond` layout (LAN-MGMT as a LAG of `eth2`+`eth3`, VLANs riding `bond0.10`)
+- the new diagnostic proved a second, equally valid Router-Mode topology: LANs
+  defined as per-network `bridge` interfaces carrying direct ports and/or
+  tagged VLAN members directly
+
+Observed local sources (user diagnostic `runtime_init_payload`):
+
+- `networkConfig.interface.bridge` — `br0`..`br4` with `meta.name` = `Mgmt`,
+  `Guest`, `Home`, `VoIP`, `IoT`, `meta.type` = `lan`, and `intf` listing
+  direct ports and/or tagged VLAN members:
+  - `br0` Mgmt → `intf: ["eth2", "eth3"]`
+  - `br1` Guest → `intf: ["eth3.101"]`
+  - `br3` Home → `intf: ["eth3.100"]`
+  - `br2` VoIP → `intf: ["eth1.102", "eth3.102"]`
+  - `br4` IoT → `intf: ["eth3.103"]`
+- `networkConfig.interface.vlan` — `eth3.100`..`eth3.103`, `eth1.102` are the
+  tagged members behind those bridges (`vid`, `intf: "eth3"`/`"eth1"`)
+- `networkConfig.interface.wlan.wlan0` — `meta.name` = `Wireless`,
+  `meta.type` = `wan`, carrying `wpaSupplicant` (SSID/PSK) — a wireless WAN
+  uplink, not a wireless LAN AP
+- `networkConfig.nat` — per-bridge rules `br0-eth0`..`br4-eth0` (each LAN NAT'd
+  out through the WAN `eth0`) — confirms Router Mode (Firewalla does NAT)
+- `networkConfig.dhcp`/`mdns_reflector`/`icmp` — keyed by the bridge interface
+  names (`br0`..`br4`), so advanced options and DHCP are per-bridge
+
+Conclusion:
+
+- Router-Mode boxes define LANs either as a LAG **`bond`** or as per-network
+  **`bridge`** interfaces; both are `lan`-kind networks and must be collected
+- a `bridge`'s `intf` members are dereferenced through parent chains (bridge →
+  tagged VLAN → physical port) to concrete ports, e.g. `br2` VoIP →
+  `eth1`+`eth3`
+- a VLAN interface that a bridge references in `intf` is **transport** for that
+  bridge (e.g. `eth3.101` tags the `Guest` bridge) and is **not** surfaced as
+  its own `vlan` network; only VLANs no bridge references are standalone VLANs
+- a `wlan` entry is a wireless WAN uplink and maps to `wan` **only** when
+  `meta.type == "wan"`; a non-`wan` `wlan` entry is skipped, mirroring the
+  `phy` WAN guard
+- entity `unique_id`s are uuid-based (`network_<uuid>`), and the bridge uuids
+  are identical whether the network is collected from the registry or the
+  `networkProfiles` fallback, so fixing the collection does not churn existing
+  registry entries — only the display name/ports update
 
 ## Capture workflow note
 

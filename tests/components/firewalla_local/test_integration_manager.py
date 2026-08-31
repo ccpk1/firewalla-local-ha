@@ -670,6 +670,201 @@ def test_get_networks_resolves_physical_ports() -> None:
     assert by_uuid["876e3889-0199-45f3-aeb1-a49c3f38e96e"].ports == ()
 
 
+def test_get_networks_discovers_bridge_and_wlan_categories() -> None:
+    """Test bridge LANs and wireless WAN uplinks are classified correctly.
+
+    Router-Mode boxes segment LANs as ``bridge`` interfaces (carrying direct
+    ports and/or tagged VLAN members), and a ``wlan`` entry is a wireless WAN
+    uplink only when ``meta.type == "wan"``.
+    """
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "2degrees",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    },
+                    "eth1": {"meta": {"uuid": "d2a5b1c5-31ca-4d42-8906-09b24e68c5d2"}},
+                    "eth2": {"meta": {"uuid": "27aa9b20-e679-4f78-8c76-791e02a7c2ca"}},
+                    "eth3": {"meta": {"uuid": "47f86e7a-c673-4374-a8a4-0c7b445f5c8d"}},
+                },
+                "wlan": {
+                    "wlan0": {
+                        "meta": {
+                            "name": "Wireless",
+                            "type": "wan",
+                            "uuid": "deadbeef-1111-4222-8333-444455556666",
+                        }
+                    }
+                },
+                "bridge": {
+                    "br1": {
+                        "meta": {
+                            "name": "Guest",
+                            "type": "lan",
+                            "uuid": "aff1d681-981f-4ae4-ba0c-d1620947097b",
+                        },
+                        "intf": ["eth3.101"],
+                    }
+                },
+                "vlan": {
+                    "eth3.101": {
+                        "meta": {
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        },
+                        "vid": 101,
+                        "intf": "eth3",
+                    }
+                },
+            }
+        }
+    }
+
+    by_uuid = {network.uuid: network for network in manager.get_networks()}
+
+    # The wlan uplink is a WAN, distinct from the phy WAN.
+    assert by_uuid["deadbeef-1111-4222-8333-444455556666"].kind is (
+        FirewallaNetworkKind.WAN
+    )
+    assert by_uuid["deadbeef-1111-4222-8333-444455556666"].name == "Wireless"
+    assert by_uuid["deadbeef-1111-4222-8333-444455556666"].ports == ("wlan0",)
+    # The bridge is a LAN and its tagged VLAN member is transport, so the VLAN
+    # is not surfaced as a separate network.
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].kind is (
+        FirewallaNetworkKind.LAN
+    )
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].name == "Guest"
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].ports == ("eth3",)
+    assert "95169e6a-a7c9-4d6a-8e83-6061b4812bf2" not in by_uuid
+
+
+def test_get_networks_keeps_standalone_vlan_not_referenced_by_bridge() -> None:
+    """Test a standalone VLAN not referenced by any bridge stays a VLAN."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                        }
+                    }
+                },
+                "bridge": {
+                    "br1": {
+                        "meta": {
+                            "name": "Guest",
+                            "type": "lan",
+                            "uuid": "aff1d681-981f-4ae4-ba0c-d1620947097b",
+                        },
+                        "intf": ["eth3.101"],
+                    }
+                },
+                "vlan": {
+                    "eth3.101": {
+                        "meta": {
+                            "uuid": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                        },
+                        "vid": 101,
+                        "intf": "eth3",
+                    },
+                    "eth1.9": {
+                        "meta": {
+                            "name": "DMZ",
+                            "type": "lan",
+                            "uuid": "deadbeef-2222-4222-8333-444455556666",
+                        },
+                        "vid": 9,
+                        "intf": "eth1",
+                    },
+                },
+            }
+        }
+    }
+
+    by_uuid = {network.uuid: network for network in manager.get_networks()}
+
+    # The bridge-referenced VLAN is transport and filtered.
+    assert "95169e6a-a7c9-4d6a-8e83-6061b4812bf2" not in by_uuid
+    # The standalone VLAN is surfaced.
+    assert by_uuid["deadbeef-2222-4222-8333-444455556666"].kind is (
+        FirewallaNetworkKind.VLAN
+    )
+    assert by_uuid["deadbeef-2222-4222-8333-444455556666"].name == "DMZ"
+    assert by_uuid["deadbeef-2222-4222-8333-444455556666"].ports == ("eth1",)
+
+
+def test_get_networks_wan_requires_meta_type_wan() -> None:
+    """Test a wlan entry with a non-wan meta.type is not surfaced as WAN."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "wlan": {
+                    "wlan0": {
+                        "meta": {
+                            "name": "Wireless LAN AP",
+                            "type": "lan",
+                            "uuid": "deadbeef-3333-4222-8333-444455556666",
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    networks = manager.get_networks()
+
+    assert {network.uuid for network in networks} == set()
+
+
 @pytest.mark.asyncio
 async def test_async_refresh_network_usage_attaches_totals() -> None:
     """Test usage refresh fetches item=intf and merges totals into networks."""
