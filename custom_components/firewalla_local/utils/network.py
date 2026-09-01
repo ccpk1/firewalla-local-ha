@@ -60,6 +60,8 @@ _RAW_VLAN_CATEGORY: Final = "vlan"
 _RAW_WIREGUARD_CATEGORY: Final = "wireguard"
 _RAW_AMNEZIAWG_CATEGORY: Final = "amneziawg"
 _RAW_OPENVPN_CATEGORY: Final = "openvpn"
+_RAW_BRIDGE_CATEGORY: Final = "bridge"
+_RAW_WLAN_CATEGORY: Final = "wlan"
 _NETWORK_KIND_BY_INTERFACE_CATEGORY: Final = {
     _RAW_PHY_CATEGORY: FirewallaNetworkKind.WAN,
     _RAW_BOND_CATEGORY: FirewallaNetworkKind.LAN,
@@ -67,6 +69,13 @@ _NETWORK_KIND_BY_INTERFACE_CATEGORY: Final = {
     _RAW_WIREGUARD_CATEGORY: FirewallaNetworkKind.VPN,
     _RAW_AMNEZIAWG_CATEGORY: FirewallaNetworkKind.VPN,
     _RAW_OPENVPN_CATEGORY: FirewallaNetworkKind.VPN,
+    # Router-Mode boxes segment their LANs either as a LAG ``bond`` or as
+    # per-network ``bridge`` interfaces (each carrying direct ports and/or
+    # tagged VLAN members). Both are LAN networks.
+    _RAW_BRIDGE_CATEGORY: FirewallaNetworkKind.LAN,
+    # A ``wlan`` entry is a wireless WAN uplink (the box joins a Wi-Fi
+    # network as a client), so it is a WAN only when ``meta.type == "wan"``.
+    _RAW_WLAN_CATEGORY: FirewallaNetworkKind.WAN,
 }
 
 
@@ -215,15 +224,37 @@ def _collect_wan_status_fallback(
             _collect_wan_status_fallback(nested_value, networks)
 
 
+def _bridge_member_interface_names(data: dict[str, object]) -> set[str]:
+    """Return interface names referenced as members by any bridge."""
+    raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
+    if not isinstance(raw_network_config, dict):
+        return set()
+    raw_interfaces = raw_network_config.get(_RAW_INTERFACE_KEY)
+    if not isinstance(raw_interfaces, dict):
+        return set()
+
+    member_names: set[str] = set()
+    raw_bridges = raw_interfaces.get(_RAW_BRIDGE_CATEGORY)
+    if not isinstance(raw_bridges, dict):
+        return member_names
+    for raw_entry in raw_bridges.values():
+        if not isinstance(raw_entry, dict):
+            continue
+        for member in _normalized_string_tuple(raw_entry.get(_RAW_INTF_KEY)):
+            member_names.add(member)
+    return member_names
+
+
 def build_network_inventory(data: dict[str, object]) -> tuple[FirewallaNetwork, ...]:
     """Return the unified network identities from a raw init payload.
 
     Networks are discovered from the ``networkConfig.interface`` registry,
-    which is category-keyed (``phy``/``bond``/``vlan``/``wireguard``/
-    ``amneziawg``/``openvpn``). The category key drives the network kind.
-    Names prefer the registry ``meta.name``, then ``networkProfiles``
-    display-name fields, then the interface name. WAN identities missing
-    from the registry fall back to ``networkMonitorData.wanStatus``.
+    which is category-keyed (``phy``/``bond``/``bridge``/``vlan``/
+    ``wireguard``/``amneziawg``/``openvpn``). The category key drives the
+    network kind. Names prefer the registry ``meta.name``, then
+    ``networkProfiles`` display-name fields, then the interface name. WAN
+    identities missing from the registry fall back to
+    ``networkMonitorData.wanStatus``.
     """
     networks: dict[str, FirewallaNetwork] = {}
 
@@ -236,6 +267,18 @@ def build_network_inventory(data: dict[str, object]) -> tuple[FirewallaNetwork, 
                 if not isinstance(raw_category, dict):
                     continue
                 _collect_network_interface_entries(raw_category, kind, networks)
+
+    # A VLAN referenced by a bridge's ``intf`` is transport for that bridge
+    # (e.g. ``eth3.101`` tagging the Guest bridge), not a standalone network;
+    # only VLANs no bridge references are user-facing VLAN networks.
+    bridge_member_interfaces = _bridge_member_interface_names(data)
+    for network_id in [
+        network_id
+        for network_id, network in networks.items()
+        if network.kind is FirewallaNetworkKind.VLAN
+        and network.interface_name in bridge_member_interfaces
+    ]:
+        networks.pop(network_id)
 
     # Normalize names from networkProfiles for the same uuids where the registry
     # did not expose a friendlier display name.
@@ -334,10 +377,12 @@ def _enrich_network_ports(
 ) -> None:
     """Resolve per-network physical ports from the interface registry.
 
-    A physical WAN port (``phy``) is the interface itself (its device name).
-    A bond lists its members in ``intf``. A VLAN references its parent
-    interface in ``intf`` (``bond0``); its real ports are the parent's members.
-    VPNs carry no ports.
+    A physical WAN port (``phy``/``wlan``) is the interface itself (its
+    device name). A bond/bridge lists its member interfaces in ``intf``
+    (direct ports and/or tagged VLAN members). A VLAN references its parent
+    interface in ``intf`` (``bond0``/``eth3``); its real ports are the
+    parent's members. VPNs carry no ports. Each member is dereferenced
+    through parent chains (bridge → VLAN → physical port) to concrete ports.
     """
     raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
     if not isinstance(raw_network_config, dict):
@@ -361,15 +406,24 @@ def _enrich_network_ports(
             parent_members[interface_name] = direct
 
     def resolve_members(interface_name: str) -> tuple[str, ...]:
-        """Return the concrete member ports for one interface reference."""
+        """Return the concrete member ports for one interface reference.
+
+        A member may itself be a parent reference (a bond/bridge, or a tagged
+        VLAN interface like ``eth3.101`` whose parent is ``eth3``), so each
+        member is dereferenced recursively to the physical port set.
+        """
         direct = parent_members.get(interface_name)
         if not direct:
             return ()
-        # A single-string intf is a parent reference (e.g. bond0); dereference
-        # it to that parent's members when they exist.
-        if len(direct) == 1 and parent_members.get(direct[0]):
-            return parent_members[direct[0]]
-        return direct
+        resolved: list[str] = []
+        for member in direct:
+            nested = parent_members.get(member)
+            if nested:
+                resolved.extend(nested)
+            else:
+                resolved.append(member)
+        # Deduplicate while preserving order.
+        return tuple(dict.fromkeys(resolved))
 
     for network in networks.values():
         interface_name = network.interface_name
@@ -377,7 +431,7 @@ def _enrich_network_ports(
             continue
 
         if network.kind is FirewallaNetworkKind.WAN:
-            # A phy WAN is itself the port.
+            # A phy/wlan WAN is itself the port.
             ports: tuple[str, ...] = (interface_name,)
         else:
             ports = resolve_members(interface_name)
