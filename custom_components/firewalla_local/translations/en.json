@@ -102,11 +102,12 @@
         "data": {
           "device_tracker_away_window": "Device-tracker away window (minutes)",
           "enable_network_entities": "Enable network status entities",
+          "enable_ssid_entities": "Enable SSID status entities",
           "return_to_main_menu": "Back to main menu without saving",
           "update_interval": "Update interval (minutes)",
           "watched_device_online_window": "Watched-device online window (minutes)"
         },
-        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more. Network status entities expose one connectivity binary sensor per Firewalla network (LAN/VLAN/VPN/WAN) with addressing, advanced options, and usage details.",
+        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more. Network status entities expose one connectivity binary sensor per Firewalla network (LAN/VLAN/VPN/WAN) with addressing, advanced options, and usage details. SSID status entities expose one connectivity binary sensor and one toggle switch per Firewalla wireless network (SSID) when AP7 access points are present.",
         "title": "System settings"
       }
     }
@@ -249,6 +250,41 @@
           },
           "block_icmp": {
             "name": "Block ICMP"
+          }
+        }
+      },
+      "ssid": {
+        "name": "{ssid_kind} {ssid_name} Status",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_ssid": "Shows whether the Firewalla wireless network is enabled and exposes its details"
+            }
+          },
+          "ssid_name": {
+            "name": "SSID name"
+          },
+          "band": {
+            "name": "Band"
+          },
+          "encryption": {
+            "name": "Encryption"
+          },
+          "wpa3": {
+            "name": "WPA3"
+          },
+          "vlan_id": {
+            "name": "VLAN ID"
+          },
+          "interface": {
+            "name": "Interface"
+          },
+          "paused": {
+            "name": "Paused"
           }
         }
       },
@@ -773,6 +809,41 @@
               "time_limit_active": "Time limit active",
               "time_limit_reached": "Time limit reached"
             }
+          }
+        }
+      },
+      "ssid": {
+        "name": "{ssid_kind} {ssid_name}",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_ssid": "Pauses or resumes the Firewalla wireless network"
+            }
+          },
+          "ssid_name": {
+            "name": "SSID name"
+          },
+          "band": {
+            "name": "Band"
+          },
+          "encryption": {
+            "name": "Encryption"
+          },
+          "wpa3": {
+            "name": "WPA3"
+          },
+          "vlan_id": {
+            "name": "VLAN ID"
+          },
+          "interface": {
+            "name": "Interface"
+          },
+          "paused": {
+            "name": "Paused"
           }
         }
       }

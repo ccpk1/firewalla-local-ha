@@ -28,6 +28,13 @@ from custom_components.firewalla_local.const import (
     ATTR_NETWORK_USAGE,
     ATTR_NETWORK_VLAN_ID,
     ATTR_PURPOSE,
+    ATTR_SSID_BAND,
+    ATTR_SSID_ENCRYPTION,
+    ATTR_SSID_INTERFACE,
+    ATTR_SSID_NAME,
+    ATTR_SSID_PAUSED,
+    ATTR_SSID_VLAN_ID,
+    ATTR_SSID_WPA3,
     ATTR_SYSTEM_PORTS,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
@@ -936,3 +943,130 @@ async def test_reconcile_network_entities_removes_stale_entries(
     await entry.runtime_data.integration_manager.async_reconcile_network_entities(())
 
     assert _count_network_binary_sensors(hass) == 0
+
+
+def _ssid_runtime_payload() -> dict[str, object]:
+    """Return a raw init payload with an AP7 wireless config."""
+    return {
+        "policyRules": [],
+        "networkConfig": {
+            "apc": {
+                "assets": {
+                    "20:6D:31:71:1D:D0": {
+                        "sysConfig": {"name": "Main Floor"},
+                        "model": "fwap-D",
+                    }
+                },
+                "assets_template": {
+                    "ap_default": {
+                        "wifiNetworks": [
+                            {
+                                "intf": "br1",
+                                "vlan": 100,
+                                "ssidProfiles": [
+                                    "f185dc47-2730-48a8-844c-b57aa31af4ba"
+                                ],
+                            }
+                        ]
+                    }
+                },
+                "profile": {
+                    "f185dc47-2730-48a8-844c-b57aa31af4ba": {
+                        "ssid": "Castle Guest",
+                        "band": "2.4g+5g+6g",
+                        "encryption": "psk2+ccmp",
+                        "wpa3": False,
+                    },
+                },
+            }
+        },
+    }
+
+
+async def test_ssid_binary_sensor_exposes_state_and_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test the SSID binary sensor surfaces wireless network state."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_ssid_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("binary_sensor.firewalla_ssid_castle_guest_status")
+    assert state is not None
+    assert state.state == STATE_ON
+    assert state.attributes[ATTR_SSID_NAME] == "Castle Guest"
+    assert state.attributes[ATTR_SSID_BAND] == "2.4g+5g+6g"
+    assert state.attributes[ATTR_SSID_ENCRYPTION] == "psk2+ccmp"
+    assert state.attributes[ATTR_SSID_WPA3] is False
+    assert state.attributes[ATTR_SSID_VLAN_ID] == 100
+    assert state.attributes[ATTR_SSID_INTERFACE] == "br1"
+    assert state.attributes[ATTR_SSID_PAUSED] is False
+
+
+async def test_ssid_binary_sensor_reflects_paused_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test the SSID binary sensor is off when the SSID is paused."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    payload = _ssid_runtime_payload()
+    payload["networkConfig"]["apc"]["profile"]["f185dc47-2730-48a8-844c-b57aa31af4ba"][
+        "paused"
+    ] = True
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("binary_sensor.firewalla_ssid_castle_guest_status")
+    assert state is not None
+    assert state.state == STATE_OFF
+    assert state.attributes[ATTR_SSID_PAUSED] is True

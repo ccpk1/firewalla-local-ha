@@ -38,6 +38,7 @@ from .const import (
     CONF_DEVICE_TRACKERS,
     CONF_EID,
     CONF_ENABLE_NETWORK_ENTITIES,
+    CONF_ENABLE_SSID_ENTITIES,
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_BOX_NAME,
     DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     DEFAULT_ENABLE_NETWORK_ENTITIES,
+    DEFAULT_ENABLE_SSID_ENTITIES,
     DEFAULT_FIREWALLA_HOST,
     DEFAULT_PAIRING_DEVICE_NAME,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
@@ -129,6 +131,7 @@ class SystemSettingsOptionsInput(TypedDict):
     return_to_main_menu: bool
     watched_device_online_window: int
     enable_network_entities: bool
+    enable_ssid_entities: bool
 
 
 class DeviceTrackersOptionsInput(TypedDict, total=False):
@@ -749,6 +752,15 @@ class FirewallaOptionsFlow(OptionsFlow):
             return raw_value
         return DEFAULT_ENABLE_NETWORK_ENTITIES
 
+    def _get_stored_enable_ssid_entities(self) -> bool:
+        """Return the persisted SSID-entities toggle or the default when unset."""
+        raw_value = self._config_entry.options.get(
+            CONF_ENABLE_SSID_ENTITIES, DEFAULT_ENABLE_SSID_ENTITIES
+        )
+        if isinstance(raw_value, bool):
+            return raw_value
+        return DEFAULT_ENABLE_SSID_ENTITIES
+
     def _get_stored_rule_selection(
         self,
     ) -> tuple[list[str], tuple[FirewallaRuleTemplate, ...]]:
@@ -884,6 +896,7 @@ class FirewallaOptionsFlow(OptionsFlow):
         device_trackers: list[str] | None = None,
         device_tracker_away_window: int | None = None,
         enable_network_entities: bool | None = None,
+        enable_ssid_entities: bool | None = None,
         selected_rule_ids: list[str] | None = None,
         selected_rule_templates: tuple[FirewallaRuleTemplate, ...] | None = None,
         watched_devices: list[str] | None = None,
@@ -934,6 +947,11 @@ class FirewallaOptionsFlow(OptionsFlow):
                 self._get_stored_enable_network_entities()
                 if enable_network_entities is None
                 else enable_network_entities
+            ),
+            CONF_ENABLE_SSID_ENTITIES: (
+                self._get_stored_enable_ssid_entities()
+                if enable_ssid_entities is None
+                else enable_ssid_entities
             ),
             CONF_UPDATE_INTERVAL: (
                 self._get_stored_update_interval()
@@ -1248,6 +1266,7 @@ class FirewallaOptionsFlow(OptionsFlow):
                 enable_network_entities=cast(
                     bool, user_input[CONF_ENABLE_NETWORK_ENTITIES]
                 ),
+                enable_ssid_entities=cast(bool, user_input[CONF_ENABLE_SSID_ENTITIES]),
             )
             if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
                 return await self.async_step_init()
@@ -1266,6 +1285,7 @@ class FirewallaOptionsFlow(OptionsFlow):
                     enable_network_entities=typed_user_input[
                         CONF_ENABLE_NETWORK_ENTITIES
                     ],
+                    enable_ssid_entities=typed_user_input[CONF_ENABLE_SSID_ENTITIES],
                 )
             )
             return await self.async_step_init()
@@ -1301,6 +1321,10 @@ class FirewallaOptionsFlow(OptionsFlow):
                     vol.Required(
                         CONF_ENABLE_NETWORK_ENTITIES,
                         default=self._get_stored_enable_network_entities(),
+                    ): bool,
+                    vol.Required(
+                        CONF_ENABLE_SSID_ENTITIES,
+                        default=self._get_stored_enable_ssid_entities(),
                     ): bool,
                     vol.Optional(
                         _OPTION_RETURN_TO_MAIN_MENU,

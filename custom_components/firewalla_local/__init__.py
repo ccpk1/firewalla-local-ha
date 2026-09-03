@@ -23,6 +23,7 @@ from .coordinator import (
     FirewallaRuntimeData,
     async_migrate_entry_host,
     get_enabled_network_entities,
+    get_enabled_ssid_entities,
 )
 from .managers import (
     FirewallaHostManager,
@@ -93,6 +94,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         )
     else:
         await integration_manager.async_reconcile_network_entities(())
+    if get_enabled_ssid_entities(entry.options):
+        await integration_manager.async_reconcile_ssid_entities(
+            tuple(
+                profile.profile_uuid for profile in wireless_manager.get_ssid_profiles()
+            )
+        )
+    else:
+        await integration_manager.async_reconcile_ssid_entities(())
     integration_manager.async_reconcile_tracked_client_devices(
         host_manager.configured_device_tracker_macs,
         host_manager.get_hosts(),
