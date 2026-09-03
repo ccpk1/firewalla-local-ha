@@ -205,7 +205,76 @@ These are **deferred** pending maintainer decision. The plan does not implement 
 - **B1** (per-AP client-count sensors) — pairs with A1.
 - **C1** (watched-device attributes) — consistent with Workstream 3.
 
-## 8. References
+## 8. Per-SSID entities (binary sensor + switch) — design
+
+The SSID pause toggle should be promoted from a service-only surface to
+**per-SSID entities** under the Firewalla box device, mirroring the existing
+per-network entity pattern. This is the natural home: the SSID ``profile`` is a
+single global object in ``networkConfig.apc`` (not duplicated per AP), and the
+Firewalla box is the controller of the SSIDs just as it is the controller of
+the LAN networks.
+
+### 8.1 Entity surfaces
+
+| Surface | Platform | State | Attributes |
+| --- | --- | --- | --- |
+| SSID status | binary sensor | `is_on` = SSID enabled (not paused) | SSID name, band, encryption, wpa3, VLAN, interface, paused |
+| SSID toggle | switch | `is_on` = SSID enabled (not paused) | same context |
+
+### 8.2 Naming pattern (mirrors the network entities)
+
+The network entities use a **kind prefix** in the name template:
+`"{network_kind} {network_name} Status"` (e.g. "VLAN VLAN10 CORE Status").
+The SSID entities use the same pattern with **"SSID"** as the kind:
+
+- Binary sensor name template: `"{ssid_kind} {ssid_name} Status"` → "SSID Universe Guest Status"
+- Switch name template: `"{ssid_kind} {ssid_name}"` → "SSID Universe Guest"
+
+Both flow through translation placeholders (``{ssid_kind}``, ``{ssid_name}``),
+exactly like the network pattern. HA applies its native device-prefix and
+slugification rules to derive the entity ID.
+
+**Entity ID awareness note:** because HA prefixes the entity name with the
+device name (the Firewalla box) and slugifies, the actual entity IDs will look
+like:
+
+- `binary_sensor.firewalla_ssid_universe_guest_status`
+- `switch.firewalla_ssid_universe_guest`
+
+We do **not** construct these ourselves — following the existing best practices
+(translation placeholders + `build_entity_unique_id`) means HA derives them
+correctly. This note is for awareness/documentation only.
+
+### 8.3 Unique IDs (stable, registry-level)
+
+Using the existing `build_entity_unique_id` helper:
+
+- Binary sensor: `{entry_id}_ssid_{profile_uuid}_binary_sensor`
+- Switch: `{entry_id}_ssid_{profile_uuid}_switch`
+
+The `profile_uuid` is embedded in the `object_id` portion, mirroring how
+`network_{network_uuid}` is used for network entities.
+
+### 8.4 Reconciliation
+
+Mirror `async_reconcile_network_entities`: remove stale SSID registry entries
+when profiles disappear, using the `_ssid_` prefix check (analogous to the
+`_network_` prefix check).
+
+### 8.5 Gating
+
+- New `CONF_ENABLE_SSID_ENTITIES` option (default on), mirroring
+  `CONF_ENABLE_NETWORK_ENTITIES`.
+- AP7-presence gate: entities only appear when `networkConfig.apc.assets` is
+  non-empty. Non-AP7 users see nothing.
+
+### 8.6 Switch behavior
+
+- `turn_on`/`turn_off` call the confirmed `async_set_ssid_paused` write.
+- State reflects the runtime `paused` field and updates on coordinator refresh,
+  mirroring `FirewallaRuleSwitch`.
+
+## 9. References
 
 - Issue: `ccpk1/firewalla-local-ha#21`.
 - Evidence: `.tmp/wifi_toggle_capture_20260903/analysis.json`, `safe_report.zip`.
