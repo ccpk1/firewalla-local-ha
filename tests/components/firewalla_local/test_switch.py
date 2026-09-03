@@ -32,6 +32,13 @@ from custom_components.firewalla_local.const import (
     ATTR_RULE_TIME_LIMIT_PERIOD_CRON,
     ATTR_RULE_TIME_LIMIT_QUOTA,
     ATTR_RULE_TIME_LIMIT_USED,
+    ATTR_SSID_BAND,
+    ATTR_SSID_ENCRYPTION,
+    ATTR_SSID_INTERFACE,
+    ATTR_SSID_NAME,
+    ATTR_SSID_PAUSED,
+    ATTR_SSID_VLAN_ID,
+    ATTR_SSID_WPA3,
     CONF_AID,
     CONF_EID,
     CONF_GID,
@@ -834,3 +841,140 @@ async def test_deselecting_all_rules_removes_switch_entities(
 
     assert not list(hass.states.async_entity_ids("switch"))
     assert entity_registry.async_get(entity_id) is None
+
+
+def _ssid_runtime_payload() -> dict[str, object]:
+    """Return a raw init payload with an AP7 wireless config."""
+    return {
+        "policyRules": [],
+        "networkConfig": {
+            "apc": {
+                "assets": {
+                    "20:6D:31:71:1D:D0": {
+                        "sysConfig": {"name": "Main Floor"},
+                        "model": "fwap-D",
+                    }
+                },
+                "profile": {
+                    "f185dc47-2730-48a8-844c-b57aa31af4ba": {
+                        "ssid": "Castle Guest",
+                        "band": "2.4g+5g+6g",
+                        "encryption": "psk2+ccmp",
+                        "wpa3": False,
+                    },
+                },
+            }
+        },
+    }
+
+
+async def test_ssid_switch_turns_ssid_off_and_on(hass: HomeAssistant) -> None:
+    """Test the SSID switch pauses and resumes the wireless network."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_ssid_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule(None),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.wireless_manager.FirewallaWirelessManager.async_set_ssid_paused",
+            new=AsyncMock(return_value={}),
+        ) as mock_set_paused,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        entity_id = "switch.firewalla_ssid_castle_guest"
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "on"
+        assert state.attributes[ATTR_SSID_NAME] == "Castle Guest"
+        assert state.attributes[ATTR_SSID_BAND] == "2.4g+5g+6g"
+        assert state.attributes[ATTR_SSID_ENCRYPTION] == "psk2+ccmp"
+        assert state.attributes[ATTR_SSID_WPA3] is False
+        assert state.attributes[ATTR_SSID_PAUSED] is False
+
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": entity_id},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+        assert mock_set_paused.await_args is not None
+        assert (
+            mock_set_paused.await_args.args[0] == "f185dc47-2730-48a8-844c-b57aa31af4ba"
+        )
+        assert mock_set_paused.await_args.kwargs["paused"] is True
+
+
+async def test_ssid_switch_exposes_vlan_and_interface_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test the SSID switch surfaces VLAN and interface context."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    payload = _ssid_runtime_payload()
+    payload["networkConfig"]["apc"]["assets_template"] = {
+        "ap_default": {
+            "wifiNetworks": [
+                {
+                    "intf": "br1",
+                    "vlan": 100,
+                    "ssidProfiles": ["f185dc47-2730-48a8-844c-b57aa31af4ba"],
+                }
+            ]
+        }
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule(None),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        state = hass.states.get("switch.firewalla_ssid_castle_guest")
+        assert state is not None
+        assert state.attributes[ATTR_SSID_VLAN_ID] == 100
+        assert state.attributes[ATTR_SSID_INTERFACE] == "br1"

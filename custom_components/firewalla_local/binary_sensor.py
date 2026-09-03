@@ -28,6 +28,13 @@ from .const import (
     ATTR_NETWORK_SSDP_RELAY,
     ATTR_NETWORK_USAGE,
     ATTR_NETWORK_VLAN_ID,
+    ATTR_SSID_BAND,
+    ATTR_SSID_ENCRYPTION,
+    ATTR_SSID_INTERFACE,
+    ATTR_SSID_NAME,
+    ATTR_SSID_PAUSED,
+    ATTR_SSID_VLAN_ID,
+    ATTR_SSID_WPA3,
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_BOX_IMAGE_CODENAME,
     ATTR_SYSTEM_BOX_IMAGE_VERSION,
@@ -60,19 +67,36 @@ from .const import (
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
+    ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
+    ATTR_WATCHED_DEVICE_WIFI_AP,
+    ATTR_WATCHED_DEVICE_WIFI_BAND,
+    ATTR_WATCHED_DEVICE_WIFI_RSSI,
+    ATTR_WATCHED_DEVICE_WIFI_SSID,
     ENTITY_SUFFIX_BINARY_SENSOR,
     TRANS_KEY_ENTITY_BINARY_SENSOR_NETWORK,
+    TRANS_KEY_ENTITY_BINARY_SENSOR_SSID,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SYSTEM_STATUS,
     TRANS_KEY_ENTITY_BINARY_SENSOR_WATCHED_DEVICE,
     TRANS_KEY_PURPOSE_NETWORK,
+    TRANS_KEY_PURPOSE_SSID,
     TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS,
     TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY,
     TRANS_PLACEHOLDER_NETWORK_KIND,
     TRANS_PLACEHOLDER_NETWORK_NAME,
+    TRANS_PLACEHOLDER_SSID_KIND,
+    TRANS_PLACEHOLDER_SSID_NAME,
 )
-from .coordinator import FirewallaConfigEntry, get_enabled_network_entities
+from .coordinator import (
+    FirewallaConfigEntry,
+    get_enabled_network_entities,
+    get_enabled_ssid_entities,
+)
 from .entity import FirewallaEntity
+from .managers.wireless_manager import (
+    FirewallaSsidProfile,
+    FirewallaWirelessConnection,
+)
 from .models import (
     FirewallaHostRuntime,
     FirewallaNetwork,
@@ -83,6 +107,7 @@ from .models import (
 PARALLEL_UPDATES = 0
 
 _SYSTEM_STATUS_OBJECT_ID = "system_status"
+_SSID_KIND_DISPLAY_NAME = "SSID"
 
 
 def _serialize_usage_window(window: object) -> dict[str, int | None]:
@@ -106,10 +131,18 @@ async def async_setup_entry(
             for network in entry.runtime_data.integration_manager.get_networks()
         ]
 
+    ssid_entities = []
+    if get_enabled_ssid_entities(entry.options):
+        ssid_entities = [
+            FirewallaSsidBinarySensor(entry, profile.profile_uuid)
+            for profile in entry.runtime_data.wireless_manager.get_ssid_profiles()
+        ]
+
     async_add_entities(
         [
             FirewallaSystemStatusBinarySensor(entry),
             *network_entities,
+            *ssid_entities,
             *[
                 FirewallaWatchedDeviceBinarySensor(entry, mac)
                 for mac in (
@@ -400,6 +433,72 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         }
 
 
+class FirewallaSsidBinarySensor(FirewallaEntity, BinarySensorEntity):
+    """Expose one Firewalla AP7 SSID (wireless network) surface."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_translation_key = TRANS_KEY_ENTITY_BINARY_SENSOR_SSID
+
+    def __init__(self, entry: FirewallaConfigEntry, profile_uuid: str) -> None:
+        """Initialize one SSID binary sensor."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._profile_uuid = profile_uuid
+        self._update_translation_placeholders()
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id=f"ssid_{profile_uuid}",
+            suffix=ENTITY_SUFFIX_BINARY_SENSOR,
+        )
+
+    @property
+    def _profile(self) -> FirewallaSsidProfile | None:
+        """Return the current SSID profile view for this sensor."""
+        return self.wireless_manager.resolve_ssid_profile(self._profile_uuid)
+
+    def _update_translation_placeholders(self) -> None:
+        """Refresh name placeholders from the latest SSID profile view."""
+        profile = self._profile
+        self._attr_translation_placeholders = {
+            TRANS_PLACEHOLDER_SSID_KIND: _SSID_KIND_DISPLAY_NAME,
+            TRANS_PLACEHOLDER_SSID_NAME: (
+                profile.display_name if profile is not None else self._profile_uuid
+            ),
+        }
+        self.__dict__.pop("name", None)
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh dynamic placeholders before writing updated state."""
+        self._update_translation_placeholders()
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the SSID profile is present in the runtime payload."""
+        return super().available and self._profile is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether the SSID is enabled (not paused)."""
+        profile = self._profile
+        if profile is None:
+            return None
+        return not profile.paused
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return bounded SSID metadata attributes."""
+        profile = self._profile
+        return {
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_SSID),
+            ATTR_SSID_NAME: (profile.ssid if profile is not None else None),
+            ATTR_SSID_BAND: (profile.band if profile is not None else None),
+            ATTR_SSID_ENCRYPTION: (profile.encryption if profile is not None else None),
+            ATTR_SSID_WPA3: (profile.wpa3 if profile is not None else None),
+            ATTR_SSID_VLAN_ID: (profile.vlan if profile is not None else None),
+            ATTR_SSID_INTERFACE: (profile.interface if profile is not None else None),
+            ATTR_SSID_PAUSED: (profile.paused if profile is not None else None),
+        }
+
+
 class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
     """Expose one selected watched-device connectivity surface."""
 
@@ -451,7 +550,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         """Return bounded watched-device metadata attributes."""
         host = self._host
-        return {
+        attributes: dict[str, object] = {
             **self.build_state_attributes(
                 TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
             ),
@@ -492,3 +591,22 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
                 else None
             ),
         }
+        if topology_connection := self._get_topology_connection():
+            attributes[ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE] = (
+                topology_connection.connection_type
+            )
+            if topology_connection.connection_type == "wireless":
+                attributes[ATTR_WATCHED_DEVICE_WIFI_SSID] = topology_connection.ssid
+                attributes[ATTR_WATCHED_DEVICE_WIFI_BAND] = topology_connection.band
+                attributes[ATTR_WATCHED_DEVICE_WIFI_RSSI] = topology_connection.rssi
+                attributes[ATTR_WATCHED_DEVICE_WIFI_AP] = topology_connection.ap_name
+        return attributes
+
+    def _get_topology_connection(self) -> FirewallaWirelessConnection | None:
+        """Return the topology connection info for this host, if any."""
+        if self._host is None:
+            return None
+        for connection in self.wireless_manager.get_wireless_connections():
+            if connection.mac == self._mac:
+                return connection
+        return None

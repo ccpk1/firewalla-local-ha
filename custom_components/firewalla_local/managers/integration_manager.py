@@ -2487,6 +2487,41 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
             entity_registry.async_remove(entity_entry.entity_id)
 
+    async def async_reconcile_ssid_entities(
+        self, profile_uuids: tuple[str, ...]
+    ) -> None:
+        """Remove stale SSID registry entries when profiles disappear."""
+        entity_registry = er.async_get(self.coordinator.hass)
+        expected_unique_ids = {
+            self.build_entity_unique_id(
+                object_id=f"ssid_{profile_uuid}",
+                suffix=ENTITY_SUFFIX_BINARY_SENSOR,
+            )
+            for profile_uuid in profile_uuids
+        }
+        expected_unique_ids.update(
+            {
+                self.build_entity_unique_id(
+                    object_id=f"ssid_{profile_uuid}",
+                    suffix=ENTITY_SUFFIX_SWITCH,
+                )
+                for profile_uuid in profile_uuids
+            }
+        )
+
+        for entity_entry in er.async_entries_for_config_entry(
+            entity_registry,
+            self.entry.entry_id,
+        ):
+            if entity_entry.platform != DOMAIN:
+                continue
+            if "_ssid_" not in entity_entry.unique_id:
+                continue
+            if entity_entry.unique_id in expected_unique_ids:
+                continue
+
+            entity_registry.async_remove(entity_entry.entity_id)
+
     async def async_reconcile_network_entities(
         self, network_uuids: tuple[str, ...]
     ) -> None:

@@ -61,6 +61,9 @@ _GET_MESSAGE_TYPE: Final = "get"
 _INIT_MESSAGE_TYPE: Final = "init"
 _SET_MESSAGE_TYPE: Final = "set"
 _PAIRING_COMMAND_TIMEOUT_KEY: Final = "COMMAND_TIMEOUT"
+_WIRELESS_WRITE_TIMEOUT_SECONDS: Final = 90
+_WIRELESS_WRITE_LAN_ONLY_KEY: Final = "LAN_ONLY"
+_WIRELESS_WRITE_LAN_ONLY_VALUE: Final = 1
 _PAIRING_DAP_OPS_KEY: Final = "dapOps"
 _PAIRING_FWAPC_OPS_KEY: Final = "fwapcOps"
 _PAIRING_EMBEDDED_OPS_KEY: Final = "embeddedOps"
@@ -812,45 +815,27 @@ class FirewallaApiClient:
     async def async_set_ssid_paused(
         self,
         *,
-        write_pattern: str,
-        apc_payload: dict[str, object],
+        network_config_payload: dict[str, object],
     ) -> dict[str, object]:
-        """Write the paused state for one SSID profile using a selected pattern.
+        """Write the paused state for one SSID profile.
 
-        The write contract for the AP controller config is not yet confirmed
-        from packet captures, so this supports multiple candidate patterns that
-        can be tested against a live box. ``apc_payload`` is the current
-        ``networkConfig.apc`` value with the target profile's ``paused`` field
-        already applied.
+        The confirmed write contract (from packet capture 2026-09-03) is a
+        ``set`` message with ``item: "networkConfig"`` carrying the **full**
+        ``networkConfig`` object wrapped in ``value.config``, plus
+        ``COMMAND_TIMEOUT`` and ``LAN_ONLY`` in ``data``. ``network_config_payload``
+        is the current ``networkConfig`` value with the target profile's
+        ``paused`` field already applied and a fresh ``ts``.
         """
-        if write_pattern == "set_apc":
-            return await self._async_send_local_message(
-                message_type=_SET_MESSAGE_TYPE,
-                data={
-                    _COMMAND_ITEM_KEY: "apc",
-                    _COMMAND_VALUE_KEY: apc_payload,
-                },
-                target=DEFAULT_INIT_TARGET,
-            )
-        if write_pattern == "cmd_apc":
-            return await self._async_send_local_message(
-                message_type=_COMMAND_MESSAGE_TYPE,
-                data={
-                    _COMMAND_ITEM_KEY: "apc",
-                    _COMMAND_VALUE_KEY: apc_payload,
-                },
-                target=DEFAULT_INIT_TARGET,
-            )
-        if write_pattern == "set_networkconfig":
-            return await self._async_send_local_message(
-                message_type=_SET_MESSAGE_TYPE,
-                data={
-                    _COMMAND_ITEM_KEY: "networkConfig",
-                    _COMMAND_VALUE_KEY: {"apc": apc_payload},
-                },
-                target=DEFAULT_INIT_TARGET,
-            )
-        raise FirewallaProtocolError(f"Unknown wireless write pattern: {write_pattern}")
+        return await self._async_send_local_message(
+            message_type=_SET_MESSAGE_TYPE,
+            data={
+                _PAIRING_COMMAND_TIMEOUT_KEY: _WIRELESS_WRITE_TIMEOUT_SECONDS,
+                _WIRELESS_WRITE_LAN_ONLY_KEY: _WIRELESS_WRITE_LAN_ONLY_VALUE,
+                _COMMAND_ITEM_KEY: "networkConfig",
+                _COMMAND_VALUE_KEY: {"config": network_config_payload},
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
 
     async def async_get_monthly_wan_usage_payload(self) -> dict[str, object]:
         """Fetch the current-month WAN usage payload from the local runtime."""

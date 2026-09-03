@@ -64,7 +64,6 @@ from .const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
-    SERVICE_FIELD_WRITE_PATTERN,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -147,8 +146,6 @@ from .const import (
     TRANS_PLACEHOLDER_SSID_PROFILE_ID,
     TRANS_PLACEHOLDER_WAN_NAME,
     TRANS_PLACEHOLDER_WAN_UUID,
-    WRITE_PATTERN_OPTIONS,
-    WRITE_PATTERN_SET_APC,
 )
 from .coordinator import FirewallaConfigEntry
 from .models import (
@@ -321,9 +318,6 @@ SET_SSID_PAUSED_SCHEMA = vol.Schema(
     {
         vol.Required(SERVICE_FIELD_SSID_PROFILE_ID): cv.string,
         vol.Required(SERVICE_FIELD_ENABLED): cv.boolean,
-        vol.Optional(
-            SERVICE_FIELD_WRITE_PATTERN, default=WRITE_PATTERN_SET_APC
-        ): vol.In(WRITE_PATTERN_OPTIONS),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -4114,12 +4108,7 @@ async def _async_handle_resume_rule(call: ServiceCall) -> None:
 
 
 async def _async_handle_set_ssid_paused(call: ServiceCall) -> None:
-    """Pause or resume one AP7 SSID profile.
-
-    This is a PoC service for the unconfirmed wireless write contract. The
-    ``write_pattern`` field lets the user try alternative write patterns
-    without a code change.
-    """
+    """Pause or resume one AP7 SSID profile."""
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
@@ -4127,21 +4116,22 @@ async def _async_handle_set_ssid_paused(call: ServiceCall) -> None:
     )
     await _async_refresh_runtime_state(entry)
 
-    profile_uuid = call.data[SERVICE_FIELD_SSID_PROFILE_ID]
+    profile_uuid_or_ssid = call.data[SERVICE_FIELD_SSID_PROFILE_ID]
     enabled = call.data[SERVICE_FIELD_ENABLED]
-    write_pattern = call.data.get(SERVICE_FIELD_WRITE_PATTERN, WRITE_PATTERN_SET_APC)
 
     wireless_manager = entry.runtime_data.wireless_manager
-    if not wireless_manager.has_ssid_profile(profile_uuid):
+    profile = wireless_manager.resolve_ssid_profile(profile_uuid_or_ssid)
+    if profile is None:
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_SSID_PROFILE_NOT_FOUND,
-            translation_placeholders={TRANS_PLACEHOLDER_SSID_PROFILE_ID: profile_uuid},
+            translation_placeholders={
+                TRANS_PLACEHOLDER_SSID_PROFILE_ID: profile_uuid_or_ssid
+            },
         )
 
     await wireless_manager.async_set_ssid_paused(
-        profile_uuid,
+        profile.profile_uuid,
         paused=not enabled,
-        write_pattern=write_pattern,
     )
 
 

@@ -28,6 +28,13 @@ from custom_components.firewalla_local.const import (
     ATTR_NETWORK_USAGE,
     ATTR_NETWORK_VLAN_ID,
     ATTR_PURPOSE,
+    ATTR_SSID_BAND,
+    ATTR_SSID_ENCRYPTION,
+    ATTR_SSID_INTERFACE,
+    ATTR_SSID_NAME,
+    ATTR_SSID_PAUSED,
+    ATTR_SSID_VLAN_ID,
+    ATTR_SSID_WPA3,
     ATTR_SYSTEM_PORTS,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
@@ -35,7 +42,12 @@ from custom_components.firewalla_local.const import (
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
+    ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
+    ATTR_WATCHED_DEVICE_WIFI_AP,
+    ATTR_WATCHED_DEVICE_WIFI_BAND,
+    ATTR_WATCHED_DEVICE_WIFI_RSSI,
+    ATTR_WATCHED_DEVICE_WIFI_SSID,
     CONF_AID,
     CONF_EID,
     CONF_ENABLE_NETWORK_ENTITIES,
@@ -178,6 +190,119 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
         watched_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE]
         == datetime.fromtimestamp(1774287984.272, UTC).isoformat()
     )
+    # Without AP7s there is no AP config, so topology/WiFi attributes are absent.
+    assert ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE not in watched_state.attributes
+    assert ATTR_WATCHED_DEVICE_WIFI_SSID not in watched_state.attributes
+    assert ATTR_WATCHED_DEVICE_WIFI_BAND not in watched_state.attributes
+    assert ATTR_WATCHED_DEVICE_WIFI_RSSI not in watched_state.attributes
+    assert ATTR_WATCHED_DEVICE_WIFI_AP not in watched_state.attributes
+
+
+async def test_watched_device_binary_sensor_exposes_wifi_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test the watched-device sensor surfaces wireless connection attributes."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"]},
+    )
+    entry.add_to_hass(hass)
+
+    snapshot = _snapshot_with_hosts(
+        FirewallaHostRuntime(
+            mac="AA:BB:CC:DD:EE:FF",
+            host_name="Kaden Phone",
+            dns_hostname="kaden-phone",
+            ip_address="192.168.200.25",
+            group_name="KADEN",
+            network_name="VLAN10 CORE",
+            connection_type="phone",
+            last_active=1774287984.272,
+            download_bytes=1234,
+            upload_bytes=5678,
+            stale=False,
+        )
+    )
+
+    payload = _runtime_payload()
+    payload["networkConfig"] = {
+        "apc": {
+            "assets": {
+                "20:6D:31:71:1D:D0": {
+                    "sysConfig": {"name": "Main Floor"},
+                    "model": "fwap-D",
+                }
+            }
+        }
+    }
+    payload["switchTopology"] = {
+        "info": {
+            "tree": [
+                {
+                    "mac": "AA:BB:CC:DD:EE:00",
+                    "type": "box",
+                    "children": [
+                        {
+                            "mac": "20:6D:31:71:1D:D0",
+                            "name": "Main Floor",
+                            "type": "ap",
+                            "connectionType": "wired",
+                            "children": [
+                                {
+                                    "mac": "AA:BB:CC:DD:EE:FF",
+                                    "name": "Kaden Phone",
+                                    "type": "device",
+                                    "connectionType": "wireless",
+                                    "ssid": "Universe",
+                                    "band": "5g",
+                                    "rssi": -51,
+                                    "parent_port": "ath1",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        "errors": [],
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    watched_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_AA:BB:CC:DD:EE:FF_binary_sensor"
+    )
+
+    assert watched_state is not None
+    assert (
+        watched_state.attributes[ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE]
+        == "wireless"
+    )
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_SSID] == "Universe"
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_BAND] == "5g"
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_RSSI] == -51
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_AP] == "Main Floor"
 
 
 async def test_watched_device_binary_sensor_is_unavailable_when_host_missing(
@@ -818,3 +943,130 @@ async def test_reconcile_network_entities_removes_stale_entries(
     await entry.runtime_data.integration_manager.async_reconcile_network_entities(())
 
     assert _count_network_binary_sensors(hass) == 0
+
+
+def _ssid_runtime_payload() -> dict[str, object]:
+    """Return a raw init payload with an AP7 wireless config."""
+    return {
+        "policyRules": [],
+        "networkConfig": {
+            "apc": {
+                "assets": {
+                    "20:6D:31:71:1D:D0": {
+                        "sysConfig": {"name": "Main Floor"},
+                        "model": "fwap-D",
+                    }
+                },
+                "assets_template": {
+                    "ap_default": {
+                        "wifiNetworks": [
+                            {
+                                "intf": "br1",
+                                "vlan": 100,
+                                "ssidProfiles": [
+                                    "f185dc47-2730-48a8-844c-b57aa31af4ba"
+                                ],
+                            }
+                        ]
+                    }
+                },
+                "profile": {
+                    "f185dc47-2730-48a8-844c-b57aa31af4ba": {
+                        "ssid": "Castle Guest",
+                        "band": "2.4g+5g+6g",
+                        "encryption": "psk2+ccmp",
+                        "wpa3": False,
+                    },
+                },
+            }
+        },
+    }
+
+
+async def test_ssid_binary_sensor_exposes_state_and_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test the SSID binary sensor surfaces wireless network state."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_ssid_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("binary_sensor.firewalla_ssid_castle_guest_status")
+    assert state is not None
+    assert state.state == STATE_ON
+    assert state.attributes[ATTR_SSID_NAME] == "Castle Guest"
+    assert state.attributes[ATTR_SSID_BAND] == "2.4g+5g+6g"
+    assert state.attributes[ATTR_SSID_ENCRYPTION] == "psk2+ccmp"
+    assert state.attributes[ATTR_SSID_WPA3] is False
+    assert state.attributes[ATTR_SSID_VLAN_ID] == 100
+    assert state.attributes[ATTR_SSID_INTERFACE] == "br1"
+    assert state.attributes[ATTR_SSID_PAUSED] is False
+
+
+async def test_ssid_binary_sensor_reflects_paused_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test the SSID binary sensor is off when the SSID is paused."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    payload = _ssid_runtime_payload()
+    payload["networkConfig"]["apc"]["profile"]["f185dc47-2730-48a8-844c-b57aa31af4ba"][
+        "paused"
+    ] = True
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("binary_sensor.firewalla_ssid_castle_guest_status")
+    assert state is not None
+    assert state.state == STATE_OFF
+    assert state.attributes[ATTR_SSID_PAUSED] is True

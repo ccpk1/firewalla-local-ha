@@ -1,4 +1,4 @@
-"""Switch platform for Firewalla Local rule-backed controls."""
+"""Switch platform for Firewalla Local rule-backed and SSID controls."""
 
 from __future__ import annotations
 
@@ -31,15 +31,27 @@ from .const import (
     ATTR_RULE_TIME_LIMIT_PERIOD_CRON,
     ATTR_RULE_TIME_LIMIT_QUOTA,
     ATTR_RULE_TIME_LIMIT_USED,
+    ATTR_SSID_BAND,
+    ATTR_SSID_ENCRYPTION,
+    ATTR_SSID_INTERFACE,
+    ATTR_SSID_NAME,
+    ATTR_SSID_PAUSED,
+    ATTR_SSID_VLAN_ID,
+    ATTR_SSID_WPA3,
     ENTITY_SUFFIX_SWITCH,
     RULE_ACTION_BLOCK,
     TRANS_KEY_ENTITY_SWITCH_ALLOW_RULE,
     TRANS_KEY_ENTITY_SWITCH_BLOCK_RULE,
+    TRANS_KEY_ENTITY_SWITCH_SSID,
     TRANS_KEY_PURPOSE_RULE_SWITCH,
+    TRANS_KEY_PURPOSE_SSID,
     TRANS_PLACEHOLDER_RULE_NAME,
+    TRANS_PLACEHOLDER_SSID_KIND,
+    TRANS_PLACEHOLDER_SSID_NAME,
 )
-from .coordinator import FirewallaConfigEntry
+from .coordinator import FirewallaConfigEntry, get_enabled_ssid_entities
 from .entity import FirewallaEntity
+from .managers.wireless_manager import FirewallaSsidProfile
 from .models import (
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
@@ -48,16 +60,29 @@ from .models import (
 
 PARALLEL_UPDATES = 0
 
+_SSID_KIND_DISPLAY_NAME = "SSID"
+
 
 async def async_setup_entry(
     _hass: HomeAssistant,
     entry: FirewallaConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up Firewalla Local rule-backed switches from a config entry."""
+    """Set up Firewalla Local rule-backed and SSID switches from a config entry."""
     del _hass
     templates = entry.runtime_data.rule_manager.selected_templates
-    async_add_entities(FirewallaRuleSwitch(entry, template) for template in templates)
+    ssid_switches = []
+    if get_enabled_ssid_entities(entry.options):
+        ssid_switches = [
+            FirewallaSsidSwitch(entry, profile.profile_uuid)
+            for profile in entry.runtime_data.wireless_manager.get_ssid_profiles()
+        ]
+    async_add_entities(
+        [
+            *(FirewallaRuleSwitch(entry, template) for template in templates),
+            *ssid_switches,
+        ]
+    )
 
 
 class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
@@ -245,4 +270,91 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
         del kwargs
         await self.rule_manager.async_set_template_enabled(
             self._template, enabled=False
+        )
+
+
+class FirewallaSsidSwitch(FirewallaEntity, SwitchEntity):
+    """Expose one Firewalla AP7 SSID (wireless network) toggle."""
+
+    _attr_translation_key = TRANS_KEY_ENTITY_SWITCH_SSID
+
+    def __init__(self, entry: FirewallaConfigEntry, profile_uuid: str) -> None:
+        """Initialize one SSID switch."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._profile_uuid = profile_uuid
+        self._update_translation_placeholders()
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id=f"ssid_{profile_uuid}",
+            suffix=ENTITY_SUFFIX_SWITCH,
+        )
+
+    @property
+    def _profile(self) -> FirewallaSsidProfile | None:
+        """Return the current SSID profile view for this switch."""
+        return self.wireless_manager.resolve_ssid_profile(self._profile_uuid)
+
+    def _update_translation_placeholders(self) -> None:
+        """Refresh name placeholders from the latest SSID profile view."""
+        profile = self._profile
+        self._attr_translation_placeholders = {
+            TRANS_PLACEHOLDER_SSID_KIND: _SSID_KIND_DISPLAY_NAME,
+            TRANS_PLACEHOLDER_SSID_NAME: (
+                profile.display_name if profile is not None else self._profile_uuid
+            ),
+        }
+        self.__dict__.pop("name", None)
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh dynamic placeholders before writing updated state."""
+        self._update_translation_placeholders()
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the SSID profile is present in the runtime payload."""
+        return super().available and self._profile is not None
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the SSID is enabled (not paused)."""
+        profile = self._profile
+        return profile is not None and not profile.paused
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return bounded SSID metadata attributes."""
+        profile = self._profile
+        return {
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_SSID),
+            ATTR_SSID_NAME: (profile.ssid if profile is not None else None),
+            ATTR_SSID_BAND: (profile.band if profile is not None else None),
+            ATTR_SSID_ENCRYPTION: (profile.encryption if profile is not None else None),
+            ATTR_SSID_WPA3: (profile.wpa3 if profile is not None else None),
+            ATTR_SSID_VLAN_ID: (profile.vlan if profile is not None else None),
+            ATTR_SSID_INTERFACE: (profile.interface if profile is not None else None),
+            ATTR_SSID_PAUSED: (profile.paused if profile is not None else None),
+        }
+
+    def turn_on(self, **kwargs: object) -> None:
+        """Satisfy the sync toggle contract; Home Assistant calls async_turn_on."""
+        raise NotImplementedError
+
+    def turn_off(self, **kwargs: object) -> None:
+        """Satisfy the sync toggle contract; Home Assistant calls async_turn_off."""
+        raise NotImplementedError
+
+    async def async_turn_on(self, **kwargs: object) -> None:
+        """Enable (unpause) the SSID."""
+        del kwargs
+        if self.is_on:
+            return
+        await self.wireless_manager.async_set_ssid_paused(
+            self._profile_uuid, paused=False
+        )
+
+    async def async_turn_off(self, **kwargs: object) -> None:
+        """Pause the SSID."""
+        del kwargs
+        await self.wireless_manager.async_set_ssid_paused(
+            self._profile_uuid, paused=True
         )

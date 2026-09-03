@@ -102,11 +102,12 @@
         "data": {
           "device_tracker_away_window": "Device-tracker away window (minutes)",
           "enable_network_entities": "Enable network status entities",
+          "enable_ssid_entities": "Enable SSID status entities",
           "return_to_main_menu": "Back to main menu without saving",
           "update_interval": "Update interval (minutes)",
           "watched_device_online_window": "Watched-device online window (minutes)"
         },
-        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more. Network status entities expose one connectivity binary sensor per Firewalla network (LAN/VLAN/VPN/WAN) with addressing, advanced options, and usage details.",
+        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more. Network status entities expose one connectivity binary sensor per Firewalla network (LAN/VLAN/VPN/WAN) with addressing, advanced options, and usage details. SSID status entities expose one connectivity binary sensor and one toggle switch per Firewalla wireless network (SSID) when AP7 access points are present.",
         "title": "System settings"
       }
     }
@@ -252,6 +253,41 @@
           }
         }
       },
+      "ssid": {
+        "name": "{ssid_kind} {ssid_name} Status",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_ssid": "Shows whether the Firewalla wireless network is enabled and exposes its details"
+            }
+          },
+          "ssid_name": {
+            "name": "SSID name"
+          },
+          "band": {
+            "name": "Band"
+          },
+          "encryption": {
+            "name": "Encryption"
+          },
+          "wpa3": {
+            "name": "WPA3"
+          },
+          "vlan_id": {
+            "name": "VLAN ID"
+          },
+          "interface": {
+            "name": "Interface"
+          },
+          "paused": {
+            "name": "Paused"
+          }
+        }
+      },
       "watched_device": {
         "name": "{host_name}",
         "state_attributes": {
@@ -282,8 +318,23 @@
           "network_name": {
             "name": "Network name"
           },
+          "topology_connection_type": {
+            "name": "Link type"
+          },
           "upload_usage": {
             "name": "Data uploaded"
+          },
+          "wifi_ap": {
+            "name": "WiFi access point"
+          },
+          "wifi_band": {
+            "name": "WiFi band"
+          },
+          "wifi_rssi": {
+            "name": "WiFi signal strength"
+          },
+          "wifi_ssid": {
+            "name": "WiFi network"
           }
         }
       }
@@ -760,6 +811,41 @@
             }
           }
         }
+      },
+      "ssid": {
+        "name": "{ssid_kind} {ssid_name}",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_ssid": "Pauses or resumes the Firewalla wireless network"
+            }
+          },
+          "ssid_name": {
+            "name": "SSID name"
+          },
+          "band": {
+            "name": "Band"
+          },
+          "encryption": {
+            "name": "Encryption"
+          },
+          "wpa3": {
+            "name": "WPA3"
+          },
+          "vlan_id": {
+            "name": "VLAN ID"
+          },
+          "interface": {
+            "name": "Interface"
+          },
+          "paused": {
+            "name": "Paused"
+          }
+        }
       }
     }
   },
@@ -867,7 +953,7 @@
       "message": "The rule target \"{rule_target}\" does not match a managed live rule."
     },
     "ssid_profile_not_found": {
-      "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network."
+      "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network. Provide the profile UUID or the SSID name."
     },
     "set_host_dhcp_reservation_failed": {
       "message": "The integration could not update the host DHCP reservation. Check the Firewalla connection and try again."
@@ -1567,19 +1653,15 @@
     },
     "set_ssid_paused": {
       "name": "Set SSID paused",
-      "description": "Pause or resume one AP7 wireless network (SSID profile). This is a PoC service for the unconfirmed wireless write contract.",
+      "description": "Pause or resume one AP7 wireless network (SSID profile).",
       "fields": {
         "ssid_profile_id": {
-          "name": "SSID profile ID",
-          "description": "The UUID of the SSID profile to toggle. Get the list from the get_wireless_status service."
+          "name": "SSID profile",
+          "description": "The UUID or SSID name of the wireless network to toggle. Get the list from the get_wireless_status service."
         },
         "enabled": {
           "name": "Enabled",
           "description": "Set to true to enable (unpause) the wireless network, or false to pause it."
-        },
-        "write_pattern": {
-          "name": "Write pattern",
-          "description": "The write pattern to use for the unconfirmed wireless write contract. Defaults to set_apc. Try the alternatives if the default does not work."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
