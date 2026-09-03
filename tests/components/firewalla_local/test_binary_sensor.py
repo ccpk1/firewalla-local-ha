@@ -35,6 +35,7 @@ from custom_components.firewalla_local.const import (
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
+    ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
     ATTR_WATCHED_DEVICE_WIFI_AP,
     ATTR_WATCHED_DEVICE_WIFI_BAND,
@@ -182,7 +183,8 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
         watched_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE]
         == datetime.fromtimestamp(1774287984.272, UTC).isoformat()
     )
-    # Without AP7s there is no switchTopology, so WiFi attributes are absent.
+    # Without AP7s there is no AP config, so topology/WiFi attributes are absent.
+    assert ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE not in watched_state.attributes
     assert ATTR_WATCHED_DEVICE_WIFI_SSID not in watched_state.attributes
     assert ATTR_WATCHED_DEVICE_WIFI_BAND not in watched_state.attributes
     assert ATTR_WATCHED_DEVICE_WIFI_RSSI not in watched_state.attributes
@@ -226,6 +228,16 @@ async def test_watched_device_binary_sensor_exposes_wifi_attributes(
     )
 
     payload = _runtime_payload()
+    payload["networkConfig"] = {
+        "apc": {
+            "assets": {
+                "20:6D:31:71:1D:D0": {
+                    "sysConfig": {"name": "Main Floor"},
+                    "model": "fwap-D",
+                }
+            }
+        }
+    }
     payload["switchTopology"] = {
         "info": {
             "tree": [
@@ -276,6 +288,10 @@ async def test_watched_device_binary_sensor_exposes_wifi_attributes(
     )
 
     assert watched_state is not None
+    assert (
+        watched_state.attributes[ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE]
+        == "wireless"
+    )
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_SSID] == "Universe"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_BAND] == "5g"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_RSSI] == -51

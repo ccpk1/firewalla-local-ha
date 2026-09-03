@@ -102,21 +102,33 @@ class FirewallaAccessPoint:
 
 
 class FirewallaWirelessConnection:
-    """Normalized per-client wireless connection info from switchTopology."""
+    """Normalized per-client connection info from switchTopology.
 
-    __slots__ = ("ap_name", "band", "mac", "rssi", "ssid")
+    Covers both wired and wireless clients attached to the box or an AP7.
+    """
+
+    __slots__ = (
+        "ap_name",
+        "band",
+        "connection_type",
+        "mac",
+        "rssi",
+        "ssid",
+    )
 
     def __init__(
         self,
         *,
         mac: str,
+        connection_type: str | None,
         ssid: str | None,
         band: str | None,
         rssi: int | None,
         ap_name: str | None,
     ) -> None:
-        """Initialize one wireless connection."""
+        """Initialize one wired or wireless connection."""
         self.mac = mac
+        self.connection_type = connection_type
         self.ssid = ssid
         self.band = band
         self.rssi = rssi
@@ -271,14 +283,22 @@ class FirewallaWirelessManager(FirewallaBaseManager):
         return tuple(access_points)
 
     def get_wireless_connections(self) -> tuple[FirewallaWirelessConnection, ...]:
-        """Return per-client wireless connection info from switchTopology.
+        """Return per-client connection info from switchTopology.
+
+        Only meaningful when AP7 access points are present: without them the
+        topology tree contains only the box and its wired clients, and a
+        partial wired/wireless label would be misleading. Returns an empty
+        tuple when ``networkConfig.apc.assets`` has no AP entries.
 
         The ``switchTopology`` section of the init response is a tree rooted at
         the box, with ``type=ap`` nodes (the APs) whose children are
-        ``type=device`` nodes. Each device node carries ``ssid``, ``band``,
-        ``rssi``, and ``parent_port`` (the radio it is attached to). The AP
-        name is resolved from the parent ``ap`` node.
+        ``type=device`` nodes. Each device node carries ``connectionType``
+        (``wired`` or ``wireless``), and wireless ones also carry ``ssid``,
+        ``band``, ``rssi``, and ``parent_port`` (the radio it is attached to).
+        The AP name is resolved from the parent ``ap`` node.
         """
+        if not self.get_access_points():
+            return ()
         raw_switch_topology = self._last_payload.get(_RAW_SWITCH_TOPOLOGY_KEY)
         if not isinstance(raw_switch_topology, dict):
             return ()
@@ -301,12 +321,17 @@ class FirewallaWirelessManager(FirewallaBaseManager):
                     if isinstance(node.get(_RAW_NAME_KEY), str)
                     else ap_name
                 )
-            elif node_type == "device" and node.get("connectionType") == "wireless":
+            elif node_type == "device":
                 mac = node.get("mac")
                 if isinstance(mac, str):
                     connections.append(
                         FirewallaWirelessConnection(
                             mac=mac,
+                            connection_type=(
+                                node.get("connectionType")
+                                if isinstance(node.get("connectionType"), str)
+                                else None
+                            ),
                             ssid=(
                                 node.get("ssid")
                                 if isinstance(node.get("ssid"), str)

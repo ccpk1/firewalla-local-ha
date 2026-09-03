@@ -60,6 +60,7 @@ from .const import (
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
+    ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
     ATTR_WATCHED_DEVICE_WIFI_AP,
     ATTR_WATCHED_DEVICE_WIFI_BAND,
@@ -497,15 +498,19 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
                 else None
             ),
         }
-        if wireless_connection := self._get_wireless_connection():
-            attributes[ATTR_WATCHED_DEVICE_WIFI_SSID] = wireless_connection.ssid
-            attributes[ATTR_WATCHED_DEVICE_WIFI_BAND] = wireless_connection.band
-            attributes[ATTR_WATCHED_DEVICE_WIFI_RSSI] = wireless_connection.rssi
-            attributes[ATTR_WATCHED_DEVICE_WIFI_AP] = wireless_connection.ap_name
+        if topology_connection := self._get_topology_connection():
+            attributes[ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE] = (
+                topology_connection.connection_type
+            )
+            if topology_connection.connection_type == "wireless":
+                attributes[ATTR_WATCHED_DEVICE_WIFI_SSID] = topology_connection.ssid
+                attributes[ATTR_WATCHED_DEVICE_WIFI_BAND] = topology_connection.band
+                attributes[ATTR_WATCHED_DEVICE_WIFI_RSSI] = topology_connection.rssi
+                attributes[ATTR_WATCHED_DEVICE_WIFI_AP] = topology_connection.ap_name
         return attributes
 
-    def _get_wireless_connection(self) -> FirewallaWirelessConnection | None:
-        """Return the wireless connection info for this host, if any."""
+    def _get_topology_connection(self) -> FirewallaWirelessConnection | None:
+        """Return the topology connection info for this host, if any."""
         if self._host is None:
             return None
         for connection in self.wireless_manager.get_wireless_connections():

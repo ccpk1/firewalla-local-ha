@@ -282,6 +282,9 @@
           "network_name": {
             "name": "Network name"
           },
+          "topology_connection_type": {
+            "name": "Link type"
+          },
           "upload_usage": {
             "name": "Data uploaded"
           },
