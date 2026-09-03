@@ -249,6 +249,7 @@ At minimum:
 - `HostManager` owns normalized endpoint-host inventory, watched-device lookup state, device-tracker lookup state, and host-scoped orchestration for watched-device, device-tracker, and host-derived summary surfaces
 - `RuleManager` owns rule-specific behavior, including registry indexing, rule-template matching, runtime inventory inputs, and rule-command orchestration
 - `UserManager` owns watched-user identity, usage shaping, selection lookups, host association joins, total and unique fallback handling, and user-scoped orchestration for the proven user-usage surface
+- `WirelessManager` owns the AP7 wireless surface, including SSID profile and access-point normalization from the raw init payload, wireless read models, and the confirmed `networkConfig` write path for SSID pause/resume
 - normalization owned by `api/` and manager-owned view shaping must preserve the distinction between raw backing group identity and the app-facing identity actually shown to Home Assistant users
 
 Manager methods are the single write and mutation path for runtime behavior above the API layer.
@@ -474,6 +475,21 @@ Rule control model:
 - temporary rules remain a separate family defined by true expiry behavior, not
 	by descriptive metadata alone
 - the durable interpretation details live in `docs/RULE_MODEL.md`
+
+SSID entity model (AP7):
+
+- SSID profiles are a single global object in `networkConfig.apc.profile`, not
+	duplicated per AP, so per-SSID entities attach to the Firewalla box device
+	(the controller), mirroring the per-network entity pattern
+- each SSID exposes a connectivity binary sensor (state = enabled, not paused)
+	and a toggle switch that calls the confirmed `networkConfig` write path
+- the SSID pause is a global SSID-level control across all AP7s; per-AP
+	`pauseWifi` is a separate, deferred surface
+- SSID entities are gated on AP7 presence (`networkConfig.apc.assets` non-empty)
+	so non-AP7 users see nothing
+- naming mirrors the network pattern: `{ssid_kind} {ssid_name} Status` for the
+	sensor and `{ssid_kind} {ssid_name}` for the switch, with "SSID" as the kind
+	prefix, via translation placeholders
 
 Switch-enabled rule policy:
 

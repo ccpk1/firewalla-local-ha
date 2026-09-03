@@ -21,6 +21,8 @@ Firewalla Local can expose these main surface areas:
 - Firewalla appliance monitoring on the main router device
 - a diagnostic `Sync runtime` button on the main router device
 - per-network status binary sensors for every LAN, VLAN, VPN, and WAN
+- per-SSID status binary sensors and toggle switches for every wireless network
+  when Firewalla AP7 access points are present
 - watched-device binary sensors for selected endpoints
 - watched-user usage sensors for selected Firewalla users
 - router-based `device_tracker` entities for selected MAC-backed LAN clients
@@ -53,6 +55,8 @@ Services added after 1.0.0:
 - `firewalla_local.get_time_usage_report`
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
+- `firewalla_local.get_wireless_status`
+- `firewalla_local.set_ssid_paused`
 
 ## Installation
 
@@ -187,6 +191,9 @@ Home Assistant.
   as Home Assistant router-based device trackers.
 - **Manage network entities:** Toggle per-network status binary sensors for
   every LAN, VLAN, VPN, and WAN.
+- **Manage SSID entities:** Toggle per-SSID status binary sensors and toggle
+  switches for every wireless network when Firewalla AP7 access points are
+  present.
 - **General options:** Adjust the local polling interval and timing settings
   without re-pairing the box.
 
@@ -200,6 +207,9 @@ It currently exposes:
 - a system-status binary sensor
 - WAN-scoped speed-test download, upload, and latency sensors
 - a diagnostic `Sync runtime` button
+- per-network status binary sensors (LAN, VLAN, VPN, WAN)
+- per-SSID status binary sensors and toggle switches when AP7 access points
+  are present
 
 ### System-status binary sensor
 
@@ -262,6 +272,35 @@ The per-network attributes include:
 Use these entities for a live, per-network health and usage view on your
 dashboards. For a deeper configuration or usage drill-down, use the
 `get_network_segment_report` and `get_network_segment_usage` services instead.
+
+## Per-SSID wireless monitoring (AP7)
+
+When Firewalla AP7 access points are present, the integration creates one
+status binary sensor and one toggle switch per wireless network (SSID),
+mirroring the wireless network list in the Firewalla app. Both entities attach
+to the main Firewalla box device, which is the controller of the SSIDs.
+
+- enable or disable this surface in the options flow with **Enable SSID status
+  entities**
+- each binary sensor's state reflects whether the wireless network is currently
+  enabled (not paused)
+- each toggle switch pauses or resumes the wireless network across all AP7s
+  (the SSID pause is a global SSID-level control, not per-AP)
+- each entity exposes a stable set of attributes describing the wireless
+  network
+
+The per-SSID attributes include:
+
+- SSID name
+- band (e.g. 2.4g+5g+6g)
+- encryption and WPA3 state
+- VLAN ID and interface when applicable
+- paused state
+
+Use these entities for a live, per-wireless-network status and control view on
+your dashboards. For a structured read of the full wireless configuration, use
+the `get_wireless_status` service; to pause or resume one SSID from an
+automation, use the `set_ssid_paused` service.
 
 ## Watched-device monitoring
 
@@ -424,6 +463,7 @@ Inspection and report services:
 - `firewalla_local.get_time_usage_report`
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
+- `firewalla_local.get_wireless_status`
 
 Host and network operator actions:
 
@@ -436,6 +476,10 @@ Host and network operator actions:
 - `firewalla_local.set_host_notify_when_next_online`
 - `firewalla_local.set_host_notify_when_next_offline`
 - `firewalla_local.set_host_dhcp_reservation`
+
+Wireless control services:
+
+- `firewalla_local.set_ssid_paused`
 
 Rule control services:
 
@@ -643,6 +687,29 @@ Use `firewalla_local.resume_rule` to resume a paused managed rule immediately.
 
 Like `pause_rule`, this operates on an existing persistent rule rather than
 creating a new rule for you.
+
+### Get wireless status
+
+Use `firewalla_local.get_wireless_status` to read the current Firewalla
+wireless configuration as structured data.
+
+- returns the SSID profiles (SSID, band, encryption, WPA3, paused state, VLAN,
+  interface) and the access points (name, model, channels, LED)
+- for Firewalla boxes without AP7 access points, the returned sections are
+  empty
+
+### Set SSID paused
+
+Use `firewalla_local.set_ssid_paused` to pause or resume one wireless network
+(SSID profile).
+
+- provide `ssid_profile_id` — either the profile UUID or the SSID name (e.g.
+  "Universe Guest")
+- provide `enabled` — `true` to enable (unpause) the network, `false` to pause
+  it
+- the pause applies to the SSID across all AP7 access points (a global
+  SSID-level control, not per-AP)
+- the per-SSID toggle switches expose the same control as native entities
 
 ## Reauthentication and host changes
 
