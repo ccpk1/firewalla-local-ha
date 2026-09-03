@@ -41,7 +41,7 @@ import zipfile
 from collections import Counter, defaultdict
 from contextlib import suppress
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
@@ -398,7 +398,7 @@ async def _provision_symmetric_key(
                                 symmetric_key = _rsa_decrypt_base64(
                                     rkey_cipher, private_pem
                                 )
-                        except (ValueError, TypeError, json.JSONDecodeError):
+                        except ValueError, TypeError, json.JSONDecodeError:
                             print("  rkey parsing failed; using direct key")
                     print(
                         f"  Derived symmetric key: "
@@ -484,7 +484,7 @@ async def _provision_symmetric_key(
                                     symmetric_key = _rsa_decrypt_base64(
                                         rkey_cipher, private_pem
                                     )
-                            except (ValueError, TypeError, json.JSONDecodeError):
+                            except ValueError, TypeError, json.JSONDecodeError:
                                 print("  rkey parsing failed; using direct key")
                         print(
                             f"  Derived symmetric key: "
@@ -644,7 +644,7 @@ def build_capture_filter(client_ip: str | None) -> str:
 
 def format_ts(ts: float) -> str:
     """Render one timestamp in a stable UTC format."""
-    return datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(ts, UTC).isoformat().replace("+00:00", "Z")
 
 
 def reassemble(segments: list[Segment]) -> tuple[bytes, list[tuple[int, float]]]:
@@ -956,7 +956,7 @@ def build_safe_report(
 
     summary: dict[str, object] = {
         "report_version": 1,
-        "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "created_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "capture_file_name": capture_path.name,
         "capture_label": capture_label,
         "capture_filter": capture_filter,
@@ -1420,9 +1420,7 @@ def main() -> int:
                         "eid": result.eid,
                         "aid": result.aid,
                         "provisioned_at_utc": (
-                            datetime.now(timezone.utc)
-                            .isoformat()
-                            .replace("+00:00", "Z")
+                            datetime.now(UTC).isoformat().replace("+00:00", "Z")
                         ),
                     },
                     indent=2,

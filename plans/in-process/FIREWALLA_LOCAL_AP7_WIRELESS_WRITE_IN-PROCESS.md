@@ -113,7 +113,7 @@ recurrence:
 
 2. **`client.async_set_ssid_paused`:** change the `set_networkconfig` pattern to send:
    ```python
-   data={
+   data = {
        "COMMAND_TIMEOUT": 90,
        "LAN_ONLY": 1,
        _COMMAND_ITEM_KEY: "networkConfig",

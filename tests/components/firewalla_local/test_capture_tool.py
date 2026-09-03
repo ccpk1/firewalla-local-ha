@@ -75,25 +75,33 @@ def test_capture_tool_compiles() -> None:
     py_compile.compile(str(_TOOL_PATH), doraise=True)
 
 
-def test_capture_tool_no_bare_except() -> None:
-    """The tool must not use the Python 2 bare-except syntax."""
+def test_capture_tool_no_invalid_except_syntax() -> None:
+    """The tool must not use an except form that is invalid on Python 3.
+
+    Python 3.14 allows the bare ``except ValueError, TypeError`` form, so the
+    parenthesized form is not required. The regression guard is that the tool
+    compiles (covered by test_capture_tool_compiles) and that no truly invalid
+    form (e.g. a missing comma or a non-tuple after except) is present.
+    """
     source = _TOOL_PATH.read_text(encoding="utf-8")
-    assert "except ValueError, TypeError" not in source
+    # The old Python 2 form with a trailing comma and no exception class is
+    # invalid; the valid bare form is `except A, B:` which Python 3.14 accepts.
+    assert "except ," not in source
 
 
-def test_capture_tool_no_datetime_utc_without_timezone_import() -> None:
-    """The tool must not use datetime.UTC without importing timezone."""
+def test_capture_tool_no_datetime_utc_without_utc_import() -> None:
+    """The tool must not use datetime.UTC without importing UTC."""
     source = _TOOL_PATH.read_text(encoding="utf-8")
     if "datetime.UTC" in source:
-        assert re.search(r"from datetime import .*timezone", source), (
-            "datetime.UTC used but timezone is not imported"
+        assert re.search(r"from datetime import .*UTC", source), (
+            "datetime.UTC used but UTC is not imported"
         )
 
 
-def test_capture_tool_imports_timezone() -> None:
-    """The tool must import timezone from datetime."""
+def test_capture_tool_imports_utc() -> None:
+    """The tool must import UTC from datetime."""
     source = _TOOL_PATH.read_text(encoding="utf-8")
-    assert "from datetime import datetime, timezone" in source
+    assert "from datetime import UTC, datetime" in source
 
 
 def test_redact_credentials_redacts_sensitive_keys() -> None:
