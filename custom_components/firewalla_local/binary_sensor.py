@@ -456,8 +456,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         """Return bounded watched-device metadata attributes."""
         host = self._host
-        wireless_connection = self._get_wireless_connection()
-        return {
+        attributes: dict[str, object] = {
             **self.build_state_attributes(
                 TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
             ),
@@ -497,19 +496,13 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
                 if host is not None and host.last_active is not None
                 else None
             ),
-            ATTR_WATCHED_DEVICE_WIFI_SSID: (
-                wireless_connection.ssid if wireless_connection is not None else None
-            ),
-            ATTR_WATCHED_DEVICE_WIFI_BAND: (
-                wireless_connection.band if wireless_connection is not None else None
-            ),
-            ATTR_WATCHED_DEVICE_WIFI_RSSI: (
-                wireless_connection.rssi if wireless_connection is not None else None
-            ),
-            ATTR_WATCHED_DEVICE_WIFI_AP: (
-                wireless_connection.ap_name if wireless_connection is not None else None
-            ),
         }
+        if wireless_connection := self._get_wireless_connection():
+            attributes[ATTR_WATCHED_DEVICE_WIFI_SSID] = wireless_connection.ssid
+            attributes[ATTR_WATCHED_DEVICE_WIFI_BAND] = wireless_connection.band
+            attributes[ATTR_WATCHED_DEVICE_WIFI_RSSI] = wireless_connection.rssi
+            attributes[ATTR_WATCHED_DEVICE_WIFI_AP] = wireless_connection.ap_name
+        return attributes
 
     def _get_wireless_connection(self) -> FirewallaWirelessConnection | None:
         """Return the wireless connection info for this host, if any."""

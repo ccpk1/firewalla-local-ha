@@ -182,6 +182,11 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
         watched_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE]
         == datetime.fromtimestamp(1774287984.272, UTC).isoformat()
     )
+    # Without AP7s there is no switchTopology, so WiFi attributes are absent.
+    assert ATTR_WATCHED_DEVICE_WIFI_SSID not in watched_state.attributes
+    assert ATTR_WATCHED_DEVICE_WIFI_BAND not in watched_state.attributes
+    assert ATTR_WATCHED_DEVICE_WIFI_RSSI not in watched_state.attributes
+    assert ATTR_WATCHED_DEVICE_WIFI_AP not in watched_state.attributes
 
 
 async def test_watched_device_binary_sensor_exposes_wifi_attributes(
