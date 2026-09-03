@@ -284,6 +284,18 @@
           },
           "upload_usage": {
             "name": "Data uploaded"
+          },
+          "wifi_ap": {
+            "name": "WiFi access point"
+          },
+          "wifi_band": {
+            "name": "WiFi band"
+          },
+          "wifi_rssi": {
+            "name": "WiFi signal strength"
+          },
+          "wifi_ssid": {
+            "name": "WiFi network"
           }
         }
       }
@@ -867,7 +879,7 @@
       "message": "The rule target \"{rule_target}\" does not match a managed live rule."
     },
     "ssid_profile_not_found": {
-      "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network."
+      "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network. Provide the profile UUID or the SSID name."
     },
     "set_host_dhcp_reservation_failed": {
       "message": "The integration could not update the host DHCP reservation. Check the Firewalla connection and try again."
@@ -1567,19 +1579,15 @@
     },
     "set_ssid_paused": {
       "name": "Set SSID paused",
-      "description": "Pause or resume one AP7 wireless network (SSID profile). This is a PoC service for the unconfirmed wireless write contract.",
+      "description": "Pause or resume one AP7 wireless network (SSID profile).",
       "fields": {
         "ssid_profile_id": {
-          "name": "SSID profile ID",
-          "description": "The UUID of the SSID profile to toggle. Get the list from the get_wireless_status service."
+          "name": "SSID profile",
+          "description": "The UUID or SSID name of the wireless network to toggle. Get the list from the get_wireless_status service."
         },
         "enabled": {
           "name": "Enabled",
           "description": "Set to true to enable (unpause) the wireless network, or false to pause it."
-        },
-        "write_pattern": {
-          "name": "Write pattern",
-          "description": "The write pattern to use for the unconfirmed wireless write contract. Defaults to set_apc. Try the alternatives if the default does not work."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

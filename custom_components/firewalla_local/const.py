@@ -101,6 +101,10 @@ ATTR_WATCHED_DEVICE_IP_ADDRESS: Final = "ip_address"
 ATTR_WATCHED_DEVICE_LAST_ACTIVE: Final = "last_active"
 ATTR_WATCHED_DEVICE_NETWORK_NAME: Final = "network_name"
 ATTR_WATCHED_DEVICE_UPLOAD_USAGE: Final = "upload_usage"
+ATTR_WATCHED_DEVICE_WIFI_AP: Final = "wifi_ap"
+ATTR_WATCHED_DEVICE_WIFI_BAND: Final = "wifi_band"
+ATTR_WATCHED_DEVICE_WIFI_RSSI: Final = "wifi_rssi"
+ATTR_WATCHED_DEVICE_WIFI_SSID: Final = "wifi_ssid"
 ATTR_WATCHED_USER_APP_USAGE_BY_APP: Final = "app_usage_by_app"
 ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT: Final = "associated_device_count"
 ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP: Final = "associated_device_group"
@@ -165,7 +169,6 @@ SERVICE_FIELD_WAN_NAME: Final = "wan_name"
 SERVICE_FIELD_WAN_UUID: Final = "wan_uuid"
 SERVICE_FIELD_WINDOW: Final = "window"
 SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
-SERVICE_FIELD_WRITE_PATTERN: Final = "write_pattern"
 
 # Config entry data and options keys
 CONF_AID: Final = "aid"
@@ -269,14 +272,6 @@ SERVICE_RESUME_RULE: Final = "resume_rule"
 SERVICE_RUN_INTERNET_SPEED_TEST: Final = "run_internet_speed_test"
 SERVICE_SET_SSID_PAUSED: Final = "set_ssid_paused"
 SERVICE_GET_WIRELESS_STATUS: Final = "get_wireless_status"
-WRITE_PATTERN_SET_APC: Final = "set_apc"
-WRITE_PATTERN_CMD_APC: Final = "cmd_apc"
-WRITE_PATTERN_SET_NETWORKCONFIG: Final = "set_networkconfig"
-WRITE_PATTERN_OPTIONS: Final = (
-    WRITE_PATTERN_SET_APC,
-    WRITE_PATTERN_CMD_APC,
-    WRITE_PATTERN_SET_NETWORKCONFIG,
-)
 HOST_DEVICE_TYPE_OPTIONS: Final = (
     "desktop",
     "phone",

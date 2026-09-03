@@ -203,3 +203,96 @@ The diagnostics show only **1 asset** ("Upstairs") while the live
 `**REDACTED**`, and since both AP asset IDs are MACs, they collide and the dict
 collapses to one entry. This is a **redaction fidelity bug** that hides data in
 diagnostics (reproduced with a unit check). The live service is unaffected.
+
+## 7. Confirmed write contract from packet capture (2026-09-03)
+
+The reporter ran the capture tool on Linux (after fixing two script bugs) and
+submitted `analysis.json` + a safe report zip. Files stored in
+`.tmp/wifi_toggle_capture_20260903/`.
+
+### 7.1 Capture tool bugs the reporter had to fix (confirmed real)
+
+The reporter reported two bugs in `tools/support/capture_firewalla_packets.py`
+that blocked the script on Python 3. Both are confirmed in the source:
+
+- **Invalid `except` syntax** at lines 401 and 487:
+  `except ValueError, TypeError, json.JSONDecodeError:` — this is Python 2
+  syntax and is a `SyntaxError` on Python 3. It must be parenthesized:
+  `except (ValueError, TypeError, json.JSONDecodeError):`.
+- **`datetime.UTC` AttributeError** at lines 647, 959, 1410: the module only
+  imports `from datetime import datetime`, so `datetime.UTC` does not exist.
+  The reporter's fix — `from datetime import datetime, timezone` and using
+  `timezone.utc` — is correct.
+
+These are genuine bugs in the support tool and should be fixed (separate from
+the integration code).
+
+### 7.2 The confirmed write contract
+
+The capture contains the **exact** write command the Firewalla app sends to
+toggle an SSID. It is a `set` message with `item: "networkConfig"`:
+
+```
+mtype: set
+target: 0.0.0.0
+data:
+  COMMAND_TIMEOUT: 90
+  LAN_ONLY: 1
+  item: networkConfig
+  value:
+    config:
+      <the FULL networkConfig, 16 top-level keys>
+      apc:
+        assets: {...}
+        assets_template: {...}
+        profile:
+          <uuid>: { ..., paused: true }   # or paused absent
+        globalSysConfig: {...}
+      ts: <epoch ms>
+```
+
+**Key differences from our current `set_networkconfig` implementation:**
+
+1. **`value` must be `{"config": {...}}`** — the full `networkConfig` object
+   (16 keys: `mroute`, `nat`, `routing`, `icmp`, `nat_passthrough`, `dhcp`,
+   `version`, `hostapd`, `dns`, `apc`, `upnp`, `app`, `interface`,
+   `mdns_reflector`, `sshd`, `ts`). Our current code sends
+   `value: {"apc": apc_payload}` — **missing the `config` wrapper and all
+   sibling keys**.
+2. **`config.ts` is required** — a fresh epoch-millisecond timestamp
+   (e.g. `1788412692554`). Our current code does not send `ts`.
+3. **`data` includes `COMMAND_TIMEOUT: 90` and `LAN_ONLY: 1`** alongside
+   `item`/`value`. Our current code sends only `item`/`value`.
+4. The `paused` mutation is exactly what we already implement: `paused: true`
+   to pause, absent to resume. The only diff between the two captured writes
+   (off then on) is the `paused` field on the Guest profile.
+
+**The write is accepted:** the box responds `code=200` with
+`data: {"ncid": "<id>"}` (a network-config id acknowledgment) — **not** the
+code 500 we got from our guessed patterns. This confirms the write contract.
+
+### 7.3 What this means for the implementation
+
+- The `set_networkconfig` pattern was **directionally correct** (right message
+  type + item) but the payload shape was wrong. The fix is to send the **full
+  `networkConfig`** (not just `apc`) wrapped in `value.config`, include `ts`,
+  and add `COMMAND_TIMEOUT`/`LAN_ONLY` to `data`.
+- The `paused` set/clear logic in `_build_apc_with_paused` is confirmed correct.
+- The read model (`networkConfig.apc.profile` / `assets`) is confirmed correct.
+- The `init` message also reveals the AP-controller operation surface
+  (`fwapcOps`): `GET /config/stations`, `GET /status/wired_station`,
+  `GET /status/switch`, `GET /config/country` — useful for future per-AP
+  status/control (e.g. `pauseWifi`, LED).
+
+### 7.4 Recommended next steps
+
+1. **Fix the capture tool bugs** (except syntax + `datetime.UTC`) so the tool
+   runs on Python 3 without manual patching.
+2. **Rework `async_set_ssid_paused`** to send the full `networkConfig` payload
+   per the confirmed contract (wrap in `value.config`, add `ts`,
+   `COMMAND_TIMEOUT`, `LAN_ONLY`). This is the core fix to make the toggle work.
+3. **Retest with the reporter** on the live box to confirm the toggle works
+   end-to-end.
+4. **Promote to switch entities** (Phase 4) once confirmed.
+5. Optionally explore `fwapcOps` for per-AP status/control (pauseWifi, LED) as
+   a follow-up.

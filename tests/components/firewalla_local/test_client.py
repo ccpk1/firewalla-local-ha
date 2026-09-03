@@ -1459,6 +1459,45 @@ async def test_async_set_host_policy_sends_host_targeted_policy_write() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_ssid_paused_sends_full_network_config_write() -> None:
+    """Test SSID pause uses the confirmed full-networkConfig set contract."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        network_config_payload = {
+            "apc": {"profile": {"uuid-1": {"ssid": "Guest", "paused": True}}},
+            "ts": 1788412692554,
+        }
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"ncid": "abc123"}),
+        ) as mock_send:
+            response = await client.async_set_ssid_paused(
+                network_config_payload=network_config_payload,
+            )
+
+    assert response == {"ncid": "abc123"}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "set",
+        "data": {
+            "COMMAND_TIMEOUT": 90,
+            "LAN_ONLY": 1,
+            "item": "networkConfig",
+            "value": {"config": network_config_payload},
+        },
+        "target": "0.0.0.0",
+    }
+
+
+@pytest.mark.asyncio
 async def test_async_set_host_name_sends_host_targeted_write_and_accepts_null_ack() -> (
     None
 ):

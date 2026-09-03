@@ -64,7 +64,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
-    SERVICE_FIELD_WRITE_PATTERN,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -86,8 +85,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
-    WRITE_PATTERN_CMD_APC,
-    WRITE_PATTERN_SET_APC,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
 from custom_components.firewalla_local.models import (
@@ -5643,10 +5640,25 @@ def _wireless_runtime_payload() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize(
+    ("profile_selector", "expected_uuid"),
+    [
+        pytest.param(
+            "f185dc47-2730-48a8-844c-b57aa31af4ba",
+            "f185dc47-2730-48a8-844c-b57aa31af4ba",
+            id="by_uuid",
+        ),
+        pytest.param(
+            "Castle Guest", "f185dc47-2730-48a8-844c-b57aa31af4ba", id="by_ssid"
+        ),
+    ],
+)
 async def test_set_ssid_paused_service_toggles_profile(
     hass: HomeAssistant,
+    profile_selector: str,
+    expected_uuid: str,
 ) -> None:
-    """Test set_ssid_paused sends the paused write for the target profile."""
+    """Test set_ssid_paused sends the full networkConfig write for a profile."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -5684,7 +5696,7 @@ async def test_set_ssid_paused_service_toggles_profile(
             DOMAIN,
             SERVICE_SET_SSID_PAUSED,
             {
-                SERVICE_FIELD_SSID_PROFILE_ID: "f185dc47-2730-48a8-844c-b57aa31af4ba",
+                SERVICE_FIELD_SSID_PROFILE_ID: profile_selector,
                 SERVICE_FIELD_ENABLED: False,
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -5694,16 +5706,16 @@ async def test_set_ssid_paused_service_toggles_profile(
 
     assert mock_set_paused.await_args is not None
     assert mock_set_paused.await_count == 1
-    assert mock_set_paused.await_args.kwargs["write_pattern"] == WRITE_PATTERN_SET_APC
-    apc_payload = mock_set_paused.await_args.kwargs["apc_payload"]
-    profile = apc_payload["profile"]["f185dc47-2730-48a8-844c-b57aa31af4ba"]
+    network_config_payload = mock_set_paused.await_args.kwargs["network_config_payload"]
+    assert "ts" in network_config_payload
+    profile = network_config_payload["apc"]["profile"][expected_uuid]
     assert profile["paused"] is True
 
 
-async def test_set_ssid_paused_service_supports_alternative_write_pattern(
+async def test_set_ssid_paused_service_resumes_profile(
     hass: HomeAssistant,
 ) -> None:
-    """Test set_ssid_paused passes through the selected write pattern."""
+    """Test set_ssid_paused clears paused when resuming."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -5743,7 +5755,6 @@ async def test_set_ssid_paused_service_supports_alternative_write_pattern(
             {
                 SERVICE_FIELD_SSID_PROFILE_ID: "f185dc47-2730-48a8-844c-b57aa31af4ba",
                 SERVICE_FIELD_ENABLED: True,
-                SERVICE_FIELD_WRITE_PATTERN: WRITE_PATTERN_CMD_APC,
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
             blocking=True,
@@ -5751,10 +5762,13 @@ async def test_set_ssid_paused_service_supports_alternative_write_pattern(
         await hass.async_block_till_done()
 
     assert mock_set_paused.await_args is not None
-    assert mock_set_paused.await_args.kwargs["write_pattern"] == WRITE_PATTERN_CMD_APC
-    apc_payload = mock_set_paused.await_args.kwargs["apc_payload"]
-    profile = apc_payload["profile"]["f185dc47-2730-48a8-844c-b57aa31af4ba"]
-    assert "paused" not in profile
+    network_config_payload = mock_set_paused.await_args.kwargs["network_config_payload"]
+    assert (
+        network_config_payload["apc"]["profile"][
+            "f185dc47-2730-48a8-844c-b57aa31af4ba"
+        ].get("paused")
+        is None
+    )
 
 
 async def test_set_ssid_paused_service_rejects_unknown_profile(

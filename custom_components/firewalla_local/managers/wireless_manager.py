@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import Any, Final
 
@@ -12,6 +13,7 @@ from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from .base_manager import FirewallaBaseManager
 
 _RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
+_RAW_SWITCH_TOPOLOGY_KEY: Final = "switchTopology"
 _RAW_APC_KEY: Final = "apc"
 _RAW_PROFILE_KEY: Final = "profile"
 _RAW_ASSETS_KEY: Final = "assets"
@@ -28,6 +30,7 @@ _RAW_NAME_KEY: Final = "name"
 _RAW_MODEL_KEY: Final = "model"
 _RAW_INTF_KEY: Final = "intf"
 _RAW_VLAN_KEY: Final = "vlan"
+_RAW_TS_KEY: Final = "ts"
 
 
 class FirewallaSsidProfile:
@@ -98,6 +101,28 @@ class FirewallaAccessPoint:
         self.led = led
 
 
+class FirewallaWirelessConnection:
+    """Normalized per-client wireless connection info from switchTopology."""
+
+    __slots__ = ("ap_name", "band", "mac", "rssi", "ssid")
+
+    def __init__(
+        self,
+        *,
+        mac: str,
+        ssid: str | None,
+        band: str | None,
+        rssi: int | None,
+        ap_name: str | None,
+    ) -> None:
+        """Initialize one wireless connection."""
+        self.mac = mac
+        self.ssid = ssid
+        self.band = band
+        self.rssi = rssi
+        self.ap_name = ap_name
+
+
 class FirewallaWirelessManager(FirewallaBaseManager):
     """Own the AP7 wireless config surface from the raw init payload."""
 
@@ -124,6 +149,13 @@ class FirewallaWirelessManager(FirewallaBaseManager):
         if not isinstance(raw_apc, dict):
             return {}
         return raw_apc
+
+    def _get_network_config(self) -> dict[str, Any]:
+        """Return the current ``networkConfig`` value or an empty dict."""
+        raw_network_config = self._last_payload.get(_RAW_NETWORK_CONFIG_KEY)
+        if not isinstance(raw_network_config, dict):
+            return {}
+        return raw_network_config
 
     def get_ssid_profiles(self) -> tuple[FirewallaSsidProfile, ...]:
         """Return the current SSID profiles with their network mapping."""
@@ -238,18 +270,97 @@ class FirewallaWirelessManager(FirewallaBaseManager):
             )
         return tuple(access_points)
 
-    def has_ssid_profile(self, profile_uuid: str) -> bool:
-        """Return whether an SSID profile with the given UUID exists."""
-        return any(
-            profile.profile_uuid == profile_uuid for profile in self.get_ssid_profiles()
-        )
+    def get_wireless_connections(self) -> tuple[FirewallaWirelessConnection, ...]:
+        """Return per-client wireless connection info from switchTopology.
 
-    def _build_apc_with_paused(
+        The ``switchTopology`` section of the init response is a tree rooted at
+        the box, with ``type=ap`` nodes (the APs) whose children are
+        ``type=device`` nodes. Each device node carries ``ssid``, ``band``,
+        ``rssi``, and ``parent_port`` (the radio it is attached to). The AP
+        name is resolved from the parent ``ap`` node.
+        """
+        raw_switch_topology = self._last_payload.get(_RAW_SWITCH_TOPOLOGY_KEY)
+        if not isinstance(raw_switch_topology, dict):
+            return ()
+        raw_info = raw_switch_topology.get("info")
+        if not isinstance(raw_info, dict):
+            return ()
+        raw_tree = raw_info.get("tree")
+        if not isinstance(raw_tree, list):
+            return ()
+
+        connections: list[FirewallaWirelessConnection] = []
+
+        def walk(node: object, ap_name: str | None) -> None:
+            if not isinstance(node, dict):
+                return
+            node_type = node.get("type")
+            if node_type == "ap":
+                ap_name = (
+                    node.get(_RAW_NAME_KEY)
+                    if isinstance(node.get(_RAW_NAME_KEY), str)
+                    else ap_name
+                )
+            elif node_type == "device" and node.get("connectionType") == "wireless":
+                mac = node.get("mac")
+                if isinstance(mac, str):
+                    connections.append(
+                        FirewallaWirelessConnection(
+                            mac=mac,
+                            ssid=(
+                                node.get("ssid")
+                                if isinstance(node.get("ssid"), str)
+                                else None
+                            ),
+                            band=(
+                                node.get("band")
+                                if isinstance(node.get("band"), str)
+                                else None
+                            ),
+                            rssi=(
+                                node.get("rssi")
+                                if isinstance(node.get("rssi"), int)
+                                else None
+                            ),
+                            ap_name=ap_name,
+                        )
+                    )
+            for child in node.get("children", []):
+                walk(child, ap_name)
+
+        for root in raw_tree:
+            walk(root, None)
+        return tuple(connections)
+
+    def resolve_ssid_profile(
+        self, profile_uuid_or_ssid: str
+    ) -> FirewallaSsidProfile | None:
+        """Resolve an SSID profile by UUID or by SSID name.
+
+        Accepts either the profile UUID (stable identifier) or the human-facing
+        SSID name (e.g. "Universe Guest"). Returns the matching profile or
+        ``None`` if no profile matches.
+        """
+        for profile in self.get_ssid_profiles():
+            if profile.profile_uuid == profile_uuid_or_ssid:
+                return profile
+            if profile.ssid == profile_uuid_or_ssid:
+                return profile
+        return None
+
+    def _build_network_config_with_paused(
         self, profile_uuid: str, *, paused: bool
     ) -> dict[str, Any]:
-        """Return a copy of the apc payload with the profile's paused set."""
-        apc = self._get_apc()
-        raw_profiles = apc.get(_RAW_PROFILE_KEY)
+        """Return a copy of the full networkConfig with the profile's paused set.
+
+        The confirmed write contract sends the entire ``networkConfig`` object
+        (not just ``apc``) wrapped in ``value.config``, with a fresh ``ts``.
+        """
+        network_config = self._get_network_config()
+        raw_apc = network_config.get(_RAW_APC_KEY)
+        if not isinstance(raw_apc, dict):
+            raise ValueError("No AP controller config available in the runtime payload")
+        raw_profiles = raw_apc.get(_RAW_PROFILE_KEY)
         if not isinstance(raw_profiles, dict):
             raise ValueError("No SSID profiles available in the runtime payload")
 
@@ -265,22 +376,26 @@ class FirewallaWirelessManager(FirewallaBaseManager):
             updated_profile.pop(_RAW_PAUSED_KEY, None)
         updated_profiles[profile_uuid] = updated_profile
 
-        updated_apc = dict(apc)
+        updated_apc = dict(raw_apc)
         updated_apc[_RAW_PROFILE_KEY] = updated_profiles
-        return updated_apc
+
+        updated_network_config = dict(network_config)
+        updated_network_config[_RAW_APC_KEY] = updated_apc
+        updated_network_config[_RAW_TS_KEY] = int(time.time() * 1000)
+        return updated_network_config
 
     async def async_set_ssid_paused(
         self,
         profile_uuid: str,
         *,
         paused: bool,
-        write_pattern: str,
     ) -> dict[str, object]:
         """Toggle the paused state of one SSID profile."""
-        apc_payload = self._build_apc_with_paused(profile_uuid, paused=paused)
+        network_config_payload = self._build_network_config_with_paused(
+            profile_uuid, paused=paused
+        )
         return await self.client.async_set_ssid_paused(
-            write_pattern=write_pattern,
-            apc_payload=apc_payload,
+            network_config_payload=network_config_payload,
         )
 
     def get_wireless_status(self) -> JsonObjectType:

@@ -786,7 +786,7 @@ The following are confirmed by repository code and live captures.
 | Category rule block, persistent | `policy:create` without expiry fields | not yet fully confirmed | not yet captured | Example: `Always block` on `social` for `AV_SMART_TV` |
 | Internet block | `policy:create` when absent | `policy:update` with `disabled: 1` or `policy:delete` | `policy:update` with `disabled: 0` | Example: `Traffic from & to Internet` for `AV_SMART_TV` |
 | Direct DNS allow, device-scoped | existing rule observed only | `policy:update` with `disabled: 1` and `idleTs` for timed pause | inventory confirms same-rule re-enable with cleared `idleTs`; payload not captured in this run | Example: `allow dns dns.google` for Kaden's Chromebook |
-| AP7 wireless SSID pause | read via `networkConfig.apc.profile.<uuid>.paused` | **unconfirmed** — three candidate write patterns rejected with code 500 | not applicable until write contract is confirmed | Example: pause/resume "Universe Guest" on VLAN 100 |
+| AP7 wireless SSID pause | read via `networkConfig.apc.profile.<uuid>.paused` | `set` with `item: networkConfig`, full `networkConfig` in `value.config`, `ts` + `COMMAND_TIMEOUT`/`LAN_ONLY` (confirmed 2026-09-03) | `set` with `paused` absent to resume | Example: pause/resume "Universe Guest" on VLAN 100 |
 
 ## Unified Network model
 
@@ -1731,17 +1731,15 @@ Questions to answer for this family:
 
 ### AP7 wireless SSID pause
 
-The write contract for the `paused` field on an SSID profile is unconfirmed.
-All three candidate write patterns (set_apc, cmd_apc, set_networkconfig) were
-rejected with code 500. The correct write command must be determined from a
-packet capture of the Firewalla app toggling a wireless network.
+**Resolved (2026-09-03):** The write contract is now confirmed from a packet
+capture. See Finding 24 for the exact `set`/`networkConfig` contract. No
+further capture is required for the SSID pause toggle.
 
-Required capture:
+Remaining wireless capture opportunities (not required for the toggle):
 
-- toggle a wireless network (enable → disable) in the Firewalla app
-- capture the decrypted `set` or `cmd` message directed at the AP controller
-- the target SSID profile UUID is `f185dc47-2730-48a8-844c-b57aa31af4ba`
-  (Universe Guest, VLAN 100) for the reporter's setup
+- per-AP `pauseWifi` / LED control (the `fwapcOps` surface — see Finding 24)
+- `stationControls` band-steering / banned-AP control
+- channel/band changes
 
 ## Open questions
 
@@ -1762,9 +1760,6 @@ These items remain unconfirmed and should stay visible.
   delete payload shape
 - whether re-enabling a timed-paused direct DNS rule uses the same payload shape
   as internet-block re-enable, in addition to clearing `idleTs`
-- the exact AP7 wireless SSID pause write command (all three alpha.7
-  candidates rejected — requires a fresh packet capture; see §"Next capture
-  targets" above)
 
 ## AP7 wireless controller findings
 
@@ -1821,12 +1816,12 @@ The wireless on/off toggle for one SSID is the `paused` field on its profile
 entry. When `paused` is `true` (or present), the SSID is disabled. When the
 field is absent (or `false`), the SSID is enabled.
 
-**Write contract — unconfirmed:**
+**Write contract — confirmed (2026-09-03):**
 
-Three candidate write patterns were tested in alpha.7 (`set_apc`, `cmd_apc`,
-`set_networkconfig`). All three were rejected by the Firewalla box with
-protocol code 500. The correct write command remains unknown and requires
-packet capture of the app-to-box traffic during a wireless toggle.
+The write contract was confirmed from a packet capture of the app toggling a
+wireless network. The app sends a `set` message with `item: "networkConfig"`
+carrying the **full** `networkConfig` object (not just `apc`). See Finding 24
+for the exact contract.
 
 **Redaction fidelity note:**
 
@@ -1846,6 +1841,76 @@ Aruba InstantOn AP22 units that have since been removed.
 The AP7s also appear as `wg_peer` hosts with `intf=wg_ap` for their mesh
 backhaul connection, and have dedicated entries in `networkConfig.apc.assets`
 identified by their MAC address key.
+
+### Finding 24: AP7 wireless SSID pause write contract is a `set` on the full `networkConfig`
+
+**Scenario:**
+
+- The reporter ran the capture tool on Linux (after fixing two script bugs in
+  `tools/support/capture_firewalla_packets.py` — see the supporting note §7.1)
+  and submitted a decrypted `analysis.json` + safe report zip on 2026-09-03.
+- The capture contains the app toggling "Universe Guest" off then on. The two
+  `set` writes differ **only** in the `paused` field on the guest profile
+  (`f185dc47-2730-48a8-844c-b57aa31af4ba`): `paused: true` to pause, absent to
+  resume.
+- The box **accepted** both writes: `code=200` with `data: {"ncid": "<id>"}`
+  (a network-config id acknowledgment) — not the code 500 from the earlier
+  guessed patterns.
+
+**Artifacts:**
+
+- `.tmp/wifi_toggle_capture_20260903/analysis.json`
+- `.tmp/wifi_toggle_capture_20260903/safe_report.zip`
+
+**Confirmed write contract:**
+
+```
+mtype: set
+target: 0.0.0.0
+data:
+  COMMAND_TIMEOUT: 90
+  LAN_ONLY: 1
+  item: networkConfig
+  value:
+    config:
+      <full networkConfig, 16 top-level keys>
+      apc:
+        assets: {...}
+        assets_template: {...}
+        profile:
+          <uuid>: { ..., paused: true }   # or paused absent
+        globalSysConfig: {...}
+      ts: <epoch ms>
+```
+
+**Key differences from the earlier guessed `set_networkconfig` pattern:**
+
+1. `value` must be `{"config": {...}}` — the full `networkConfig` object
+   (16 keys: `mroute`, `nat`, `routing`, `icmp`, `nat_passthrough`, `dhcp`,
+   `version`, `hostapd`, `dns`, `apc`, `upnp`, `app`, `interface`,
+   `mdns_reflector`, `sshd`, `ts`), not `{"apc": apc_payload}`.
+2. `config.ts` is required — a fresh epoch-millisecond timestamp.
+3. `data` includes `COMMAND_TIMEOUT: 90` and `LAN_ONLY: 1` alongside
+   `item`/`value`.
+4. The `paused` mutation (true to pause, absent to resume) is confirmed correct.
+
+**AP-controller operation surface (`fwapcOps`):**
+
+The init request also carries `fwapcOps` — AP-controller HTTP operations whose
+responses are embedded in the init response:
+
+| Op | Path | Returns |
+| --- | --- | --- |
+| `stationControls` | `GET /config/stations` | Per-client band-steering / banned-AP policy (`bannedAPs`, `mode`) |
+| `switchTopology` | `GET /status/wired_station` | Full network topology tree — every device (wired + wireless) with `rssi`, `band`, `ssid`, `parent_port`, `connectionType`, `type` (`device`/`ap`) |
+| `switchInfo` | `GET /status/switch` | Switch info (empty in this capture) |
+| `fwapcCountry` | `GET /config/country` | Country config (`{"model": "purple"}`) |
+
+This surface is useful for future per-AP status/control (e.g. `pauseWifi`,
+LED) and for per-client wireless connection attributes (`rssi`, `band`,
+`ssid`, `parent_port`). The integration already requests these ops during
+pairing/init (`api/client.py`), but the returned data is not yet parsed into
+the normalized model.
 
 ## Additional host-settings findings
 

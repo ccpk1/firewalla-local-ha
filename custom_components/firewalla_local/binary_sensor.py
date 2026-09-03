@@ -61,6 +61,10 @@ from .const import (
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
+    ATTR_WATCHED_DEVICE_WIFI_AP,
+    ATTR_WATCHED_DEVICE_WIFI_BAND,
+    ATTR_WATCHED_DEVICE_WIFI_RSSI,
+    ATTR_WATCHED_DEVICE_WIFI_SSID,
     ENTITY_SUFFIX_BINARY_SENSOR,
     TRANS_KEY_ENTITY_BINARY_SENSOR_NETWORK,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SYSTEM_STATUS,
@@ -73,6 +77,7 @@ from .const import (
 )
 from .coordinator import FirewallaConfigEntry, get_enabled_network_entities
 from .entity import FirewallaEntity
+from .managers.wireless_manager import FirewallaWirelessConnection
 from .models import (
     FirewallaHostRuntime,
     FirewallaNetwork,
@@ -451,6 +456,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         """Return bounded watched-device metadata attributes."""
         host = self._host
+        wireless_connection = self._get_wireless_connection()
         return {
             **self.build_state_attributes(
                 TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
@@ -491,4 +497,25 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
                 if host is not None and host.last_active is not None
                 else None
             ),
+            ATTR_WATCHED_DEVICE_WIFI_SSID: (
+                wireless_connection.ssid if wireless_connection is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_WIFI_BAND: (
+                wireless_connection.band if wireless_connection is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_WIFI_RSSI: (
+                wireless_connection.rssi if wireless_connection is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_WIFI_AP: (
+                wireless_connection.ap_name if wireless_connection is not None else None
+            ),
         }
+
+    def _get_wireless_connection(self) -> FirewallaWirelessConnection | None:
+        """Return the wireless connection info for this host, if any."""
+        if self._host is None:
+            return None
+        for connection in self.wireless_manager.get_wireless_connections():
+            if connection.mac == self._mac:
+                return connection
+        return None

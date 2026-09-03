@@ -974,8 +974,8 @@ set_ssid_paused:
       example: "f185dc47-2730-48a8-844c-b57aa31af4ba"
       selector:
         text:
-      name: SSID profile ID
-      description: The UUID of the SSID profile to toggle. Get the list from the get_wireless_status service.
+      name: SSID profile
+      description: The UUID or SSID name of the wireless network to toggle. Get the list from the get_wireless_status service.
     enabled:
       required: true
       example: true
@@ -983,17 +983,6 @@ set_ssid_paused:
         boolean:
       name: Enabled
       description: Set to true to enable (unpause) the wireless network, or false to pause it.
-    write_pattern:
-      required: false
-      example: "set_apc"
-      selector:
-        select:
-          options:
-            - "set_apc"
-            - "cmd_apc"
-            - "set_networkconfig"
-      name: Write pattern
-      description: The write pattern to use for the unconfirmed wireless write contract. Defaults to set_apc. Try the alternatives if the default does not work.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

@@ -36,6 +36,10 @@ from custom_components.firewalla_local.const import (
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
+    ATTR_WATCHED_DEVICE_WIFI_AP,
+    ATTR_WATCHED_DEVICE_WIFI_BAND,
+    ATTR_WATCHED_DEVICE_WIFI_RSSI,
+    ATTR_WATCHED_DEVICE_WIFI_SSID,
     CONF_AID,
     CONF_EID,
     CONF_ENABLE_NETWORK_ENTITIES,
@@ -178,6 +182,99 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
         watched_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE]
         == datetime.fromtimestamp(1774287984.272, UTC).isoformat()
     )
+
+
+async def test_watched_device_binary_sensor_exposes_wifi_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test the watched-device sensor surfaces wireless connection attributes."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_WATCHED_DEVICES: ["AA:BB:CC:DD:EE:FF"]},
+    )
+    entry.add_to_hass(hass)
+
+    snapshot = _snapshot_with_hosts(
+        FirewallaHostRuntime(
+            mac="AA:BB:CC:DD:EE:FF",
+            host_name="Kaden Phone",
+            dns_hostname="kaden-phone",
+            ip_address="192.168.200.25",
+            group_name="KADEN",
+            network_name="VLAN10 CORE",
+            connection_type="phone",
+            last_active=1774287984.272,
+            download_bytes=1234,
+            upload_bytes=5678,
+            stale=False,
+        )
+    )
+
+    payload = _runtime_payload()
+    payload["switchTopology"] = {
+        "info": {
+            "tree": [
+                {
+                    "mac": "AA:BB:CC:DD:EE:00",
+                    "type": "box",
+                    "children": [
+                        {
+                            "mac": "20:6D:31:71:1D:D0",
+                            "name": "Main Floor",
+                            "type": "ap",
+                            "connectionType": "wired",
+                            "children": [
+                                {
+                                    "mac": "AA:BB:CC:DD:EE:FF",
+                                    "name": "Kaden Phone",
+                                    "type": "device",
+                                    "connectionType": "wireless",
+                                    "ssid": "Universe",
+                                    "band": "5g",
+                                    "rssi": -51,
+                                    "parent_port": "ath1",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        "errors": [],
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    watched_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_AA:BB:CC:DD:EE:FF_binary_sensor"
+    )
+
+    assert watched_state is not None
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_SSID] == "Universe"
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_BAND] == "5g"
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_RSSI] == -51
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_WIFI_AP] == "Main Floor"
 
 
 async def test_watched_device_binary_sensor_is_unavailable_when_host_missing(

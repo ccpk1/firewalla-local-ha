@@ -12,6 +12,7 @@ from .managers import (
     FirewallaIntegrationManager,
     FirewallaRuleManager,
     FirewallaUserManager,
+    FirewallaWirelessManager,
 )
 from .models import (
     FirewallaSpeedTestResult,
@@ -49,6 +50,11 @@ class FirewallaEntity(CoordinatorEntity[FirewallaDataUpdateCoordinator]):
     def rule_manager(self) -> FirewallaRuleManager:
         """Return the entry-scoped rule manager."""
         return self._entry.runtime_data.rule_manager
+
+    @property
+    def wireless_manager(self) -> FirewallaWirelessManager:
+        """Return the entry-scoped wireless manager."""
+        return self._entry.runtime_data.wireless_manager
 
     @property
     def user_manager(self) -> FirewallaUserManager:
