@@ -191,6 +191,56 @@
           }
         }
       },
+      "ap_status": {
+        "name": "AP Status",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "ap_name": {
+            "name": "AP name"
+          },
+          "ap_model": {
+            "name": "AP model"
+          },
+          "channel_5g": {
+            "name": "Channel (5 GHz)"
+          },
+          "channel_2g": {
+            "name": "Channel (2.4 GHz)"
+          },
+          "led": {
+            "name": "LED"
+          },
+          "tx_power": {
+            "name": "TX power"
+          },
+          "country": {
+            "name": "Country"
+          },
+          "mesh_mode": {
+            "name": "Mesh mode"
+          },
+          "timezone": {
+            "name": "Timezone"
+          },
+          "pause_wifi": {
+            "name": "Pause WiFi"
+          },
+          "disable_acl": {
+            "name": "Disable ACL"
+          },
+          "client_count": {
+            "name": "Clients"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_ap_status": "Shows whether the Firewalla access point is available and exposes its status"
+            }
+          }
+        }
+      },
       "network": {
         "name": "{network_kind} {network_name} Status",
         "state_attributes": {

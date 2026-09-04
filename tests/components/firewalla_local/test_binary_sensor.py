@@ -8,10 +8,23 @@ from unittest.mock import AsyncMock, patch
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
+    ATTR_AP_CHANNEL_2G,
+    ATTR_AP_CHANNEL_5G,
+    ATTR_AP_CLIENT_COUNT,
+    ATTR_AP_COUNTRY,
+    ATTR_AP_DISABLE_ACL,
+    ATTR_AP_LED,
+    ATTR_AP_MESH_MODE,
+    ATTR_AP_MODEL,
+    ATTR_AP_NAME,
+    ATTR_AP_PAUSE_WIFI,
+    ATTR_AP_TIMEZONE,
+    ATTR_AP_TX_POWER,
     ATTR_INTEGRATION,
     ATTR_NETWORK_BLOCK_ICMP,
     ATTR_NETWORK_DEVICE_COUNT,
@@ -1070,3 +1083,166 @@ async def test_ssid_binary_sensor_reflects_paused_state(
     assert state is not None
     assert state.state == STATE_OFF
     assert state.attributes[ATTR_SSID_PAUSED] is True
+
+
+def _ap_runtime_payload() -> dict[str, object]:
+    """Return a raw init payload with an AP7 access point."""
+    return {
+        "policyRules": [],
+        "networkConfig": {
+            "apc": {
+                "assets": {
+                    "20:6D:31:71:1D:D0": {
+                        "sysConfig": {
+                            "name": "Main Floor",
+                            "channel": {"5g": "149", "2g": "1"},
+                            "led": "off",
+                            "txPower": "auto",
+                            "country": "US",
+                            "meshMode": "mesh",
+                            "timezone": "America/New_York",
+                            "pauseWifi": False,
+                            "disableAcl": False,
+                        },
+                        "model": "fwap-D",
+                    }
+                },
+            }
+        },
+        "switchTopology": {
+            "info": {
+                "tree": [
+                    {
+                        "mac": "AA:BB:CC:DD:EE:00",
+                        "type": "box",
+                        "children": [
+                            {
+                                "mac": "20:6D:31:71:1D:D0",
+                                "name": "Main Floor",
+                                "type": "ap",
+                                "children": [
+                                    {
+                                        "mac": "AA:BB:CC:DD:EE:FF",
+                                        "type": "device",
+                                        "connectionType": "wireless",
+                                    },
+                                    {
+                                        "mac": "AA:BB:CC:DD:EE:01",
+                                        "type": "device",
+                                        "connectionType": "wireless",
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    }
+
+
+async def test_ap_status_binary_sensor_exposes_state_and_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test the AP status binary sensor surfaces access-point state."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_ap_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    state = hass.states.get("binary_sensor.main_floor_ap_status")
+    assert state is not None
+    assert state.state == STATE_ON
+    assert state.attributes[ATTR_AP_NAME] == "Main Floor"
+    assert state.attributes[ATTR_AP_MODEL] == "fwap-D"
+    assert state.attributes[ATTR_AP_CHANNEL_5G] == "149"
+    assert state.attributes[ATTR_AP_CHANNEL_2G] == "1"
+    assert state.attributes[ATTR_AP_LED] == "off"
+    assert state.attributes[ATTR_AP_TX_POWER] == "auto"
+    assert state.attributes[ATTR_AP_COUNTRY] == "US"
+    assert state.attributes[ATTR_AP_MESH_MODE] == "mesh"
+    assert state.attributes[ATTR_AP_TIMEZONE] == "America/New_York"
+    assert state.attributes[ATTR_AP_PAUSE_WIFI] is False
+    assert state.attributes[ATTR_AP_DISABLE_ACL] is False
+    assert state.attributes[ATTR_AP_CLIENT_COUNT] == 2
+
+    ap_device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "license-123_ap_20:6d:31:71:1d:d0"), entry.entry_id
+    )
+    router_device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "license-123"), entry.entry_id
+    )
+    assert ap_device is not None
+    assert router_device is not None
+    assert ap_device.name == "Main Floor"
+    assert ap_device.model == "fwap-D"
+    assert ap_device.via_device_id == router_device.id
+
+
+async def test_ap_status_binary_sensor_removed_when_ap_disappears(
+    hass: HomeAssistant,
+) -> None:
+    """Test the AP entity is removed when the AP disappears from the payload."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_ap_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    entity_id = "binary_sensor.main_floor_ap_status"
+    state = hass.states.get(entity_id)
+    assert state is not None
+
+    entity_registry = er.async_get(hass)
+    assert entity_registry.async_get(entity_id) is not None
+
+    await entry.runtime_data.integration_manager.async_reconcile_ap_entities(())
+
+    assert entity_registry.async_get(entity_id) is None
