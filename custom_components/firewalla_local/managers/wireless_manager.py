@@ -419,9 +419,41 @@ class FirewallaWirelessManager(FirewallaBaseManager):
         network_config_payload = self._build_network_config_with_paused(
             profile_uuid, paused=paused
         )
-        return await self.client.async_set_ssid_paused(
+        result = await self.client.async_set_ssid_paused(
             network_config_payload=network_config_payload,
         )
+        self._apply_optimistic_ssid_paused(profile_uuid, paused=paused)
+        return result
+
+    def _apply_optimistic_ssid_paused(self, profile_uuid: str, *, paused: bool) -> None:
+        """Apply a successful SSID mutation to the in-memory payload state."""
+        network_config = self._get_network_config()
+        raw_apc = network_config.get(_RAW_APC_KEY)
+        if not isinstance(raw_apc, dict):
+            return
+        raw_profiles = raw_apc.get(_RAW_PROFILE_KEY)
+        if not isinstance(raw_profiles, dict):
+            return
+        raw_profile = raw_profiles.get(profile_uuid)
+        if not isinstance(raw_profile, dict):
+            return
+
+        updated_profiles = dict(raw_profiles)
+        updated_profile = dict(raw_profile)
+        if paused:
+            updated_profile[_RAW_PAUSED_KEY] = True
+        else:
+            updated_profile.pop(_RAW_PAUSED_KEY, None)
+        updated_profiles[profile_uuid] = updated_profile
+
+        updated_apc = dict(raw_apc)
+        updated_apc[_RAW_PROFILE_KEY] = updated_profiles
+
+        updated_network_config = dict(network_config)
+        updated_network_config[_RAW_APC_KEY] = updated_apc
+        self._last_payload = dict(self._last_payload)
+        self._last_payload[_RAW_NETWORK_CONFIG_KEY] = updated_network_config
+        self.coordinator.async_update_listeners()
 
     def get_wireless_status(self) -> JsonObjectType:
         """Return a structured view of the current wireless config."""

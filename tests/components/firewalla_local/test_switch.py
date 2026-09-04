@@ -978,3 +978,61 @@ async def test_ssid_switch_exposes_vlan_and_interface_attributes(
         assert state is not None
         assert state.attributes[ATTR_SSID_VLAN_ID] == 100
         assert state.attributes[ATTR_SSID_INTERFACE] == "br1"
+
+
+async def test_ssid_switch_optimistically_updates_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test the SSID switch reflects the new state immediately after toggling."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_ssid_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule(None),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_set_ssid_paused",
+            new=AsyncMock(return_value={}),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        entity_id = "switch.firewalla_ssid_castle_guest"
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "on"
+
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": entity_id},
+            blocking=True,
+        )
+        await hass.async_block_till_done()
+
+        # The switch state should reflect the paused state immediately,
+        # without waiting for the next poll.
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "off"
+        assert state.attributes[ATTR_SSID_PAUSED] is True
