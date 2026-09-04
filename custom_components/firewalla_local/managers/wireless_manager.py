@@ -10,6 +10,7 @@ from homeassistant.util.json import JsonObjectType
 
 from ..api import FirewallaApiClient
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
+from ..models import FirewallaAccessPointStatus
 from .base_manager import FirewallaBaseManager
 
 _RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
@@ -31,6 +32,18 @@ _RAW_MODEL_KEY: Final = "model"
 _RAW_INTF_KEY: Final = "intf"
 _RAW_VLAN_KEY: Final = "vlan"
 _RAW_TS_KEY: Final = "ts"
+_RAW_CHANNEL_KEY: Final = "channel"
+_RAW_TX_POWER_KEY: Final = "txPower"
+_RAW_COUNTRY_KEY: Final = "country"
+_RAW_MESH_MODE_KEY: Final = "meshMode"
+_RAW_TIMEZONE_KEY: Final = "timezone"
+_RAW_PAUSE_WIFI_KEY: Final = "pauseWifi"
+_RAW_DISABLE_ACL_KEY: Final = "disableAcl"
+_RAW_LED_KEY: Final = "led"
+_RAW_TYPE_KEY: Final = "type"
+_RAW_AP_TYPE_KEY: Final = "ap"
+_RAW_DEVICE_TYPE_KEY: Final = "device"
+_RAW_CHILDREN_KEY: Final = "children"
 
 
 class FirewallaSsidProfile:
@@ -80,7 +93,21 @@ class FirewallaSsidProfile:
 class FirewallaAccessPoint:
     """Normalized view of one AP7 access point."""
 
-    __slots__ = ("asset_id", "channel_2g", "channel_5g", "led", "model", "name")
+    __slots__ = (
+        "asset_id",
+        "channel_2g",
+        "channel_5g",
+        "client_count",
+        "country",
+        "disable_acl",
+        "led",
+        "mesh_mode",
+        "model",
+        "name",
+        "pause_wifi",
+        "timezone",
+        "tx_power",
+    )
 
     def __init__(
         self,
@@ -91,6 +118,13 @@ class FirewallaAccessPoint:
         channel_5g: str | None,
         channel_2g: str | None,
         led: str | None,
+        tx_power: str | None,
+        country: str | None,
+        mesh_mode: str | None,
+        timezone: str | None,
+        pause_wifi: bool | None,
+        disable_acl: bool | None,
+        client_count: int | None,
     ) -> None:
         """Initialize one access point."""
         self.asset_id = asset_id
@@ -99,6 +133,13 @@ class FirewallaAccessPoint:
         self.channel_5g = channel_5g
         self.channel_2g = channel_2g
         self.led = led
+        self.tx_power = tx_power
+        self.country = country
+        self.mesh_mode = mesh_mode
+        self.timezone = timezone
+        self.pause_wifi = pause_wifi
+        self.disable_acl = disable_acl
+        self.client_count = client_count
 
 
 class FirewallaWirelessConnection:
@@ -147,10 +188,12 @@ class FirewallaWirelessManager(FirewallaBaseManager):
         """Initialize the wireless manager."""
         super().__init__(coordinator, entry, client)
         self._last_payload: dict[str, object] = {}
+        self._access_points: tuple[FirewallaAccessPoint, ...] = ()
 
     def handle_refresh(self, payload: Mapping[str, object]) -> None:
         """Store the latest raw init payload for wireless reads."""
         self._last_payload = dict(payload)
+        self._access_points = self._parse_access_points()
 
     def _get_apc(self) -> dict[str, Any]:
         """Return the current ``networkConfig.apc`` value or an empty dict."""
@@ -236,19 +279,24 @@ class FirewallaWirelessManager(FirewallaBaseManager):
         return tuple(profiles)
 
     def get_access_points(self) -> tuple[FirewallaAccessPoint, ...]:
-        """Return the current AP7 access points from the assets section."""
+        """Return the current AP7 access points from the cached parse."""
+        return self._access_points
+
+    def _parse_access_points(self) -> tuple[FirewallaAccessPoint, ...]:
+        """Parse AP7 access points from the raw init payload."""
         apc = self._get_apc()
         raw_assets = apc.get(_RAW_ASSETS_KEY)
         if not isinstance(raw_assets, dict):
             return ()
 
+        client_counts = self._build_ap_client_counts()
         access_points: list[FirewallaAccessPoint] = []
         for asset_id, raw_asset in raw_assets.items():
             if not isinstance(asset_id, str) or not isinstance(raw_asset, dict):
                 continue
             raw_sys_config = raw_asset.get(_RAW_SYS_CONFIG_KEY)
             sys_config = raw_sys_config if isinstance(raw_sys_config, dict) else {}
-            raw_channel = sys_config.get("channel")
+            raw_channel = sys_config.get(_RAW_CHANNEL_KEY)
             channel = raw_channel if isinstance(raw_channel, dict) else {}
             access_points.append(
                 FirewallaAccessPoint(
@@ -274,13 +322,101 @@ class FirewallaWirelessManager(FirewallaBaseManager):
                         else None
                     ),
                     led=(
-                        sys_config.get("led")
-                        if isinstance(sys_config.get("led"), str)
+                        sys_config.get(_RAW_LED_KEY)
+                        if isinstance(sys_config.get(_RAW_LED_KEY), str)
                         else None
                     ),
+                    tx_power=(
+                        sys_config.get(_RAW_TX_POWER_KEY)
+                        if isinstance(sys_config.get(_RAW_TX_POWER_KEY), str)
+                        else None
+                    ),
+                    country=(
+                        sys_config.get(_RAW_COUNTRY_KEY)
+                        if isinstance(sys_config.get(_RAW_COUNTRY_KEY), str)
+                        else None
+                    ),
+                    mesh_mode=(
+                        sys_config.get(_RAW_MESH_MODE_KEY)
+                        if isinstance(sys_config.get(_RAW_MESH_MODE_KEY), str)
+                        else None
+                    ),
+                    timezone=(
+                        sys_config.get(_RAW_TIMEZONE_KEY)
+                        if isinstance(sys_config.get(_RAW_TIMEZONE_KEY), str)
+                        else None
+                    ),
+                    pause_wifi=(
+                        sys_config.get(_RAW_PAUSE_WIFI_KEY)
+                        if isinstance(sys_config.get(_RAW_PAUSE_WIFI_KEY), bool)
+                        else None
+                    ),
+                    disable_acl=(
+                        sys_config.get(_RAW_DISABLE_ACL_KEY)
+                        if isinstance(sys_config.get(_RAW_DISABLE_ACL_KEY), bool)
+                        else None
+                    ),
+                    client_count=client_counts.get(asset_id),
                 )
             )
         return tuple(access_points)
+
+    def get_access_point(self, asset_id: str) -> FirewallaAccessPoint | None:
+        """Resolve one access point by its asset ID (MAC)."""
+        for ap in self._access_points:
+            if ap.asset_id == asset_id:
+                return ap
+        return None
+
+    def _build_ap_client_counts(self) -> dict[str, int]:
+        """Return a per-AP client count map from the switchTopology tree."""
+        raw_switch_topology = self._last_payload.get(_RAW_SWITCH_TOPOLOGY_KEY)
+        if not isinstance(raw_switch_topology, dict):
+            return {}
+        raw_info = raw_switch_topology.get("info")
+        if not isinstance(raw_info, dict):
+            return {}
+        raw_tree = raw_info.get("tree")
+        if not isinstance(raw_tree, list):
+            return {}
+
+        counts: dict[str, int] = {}
+
+        def walk(node: object, ap_mac: str | None) -> None:
+            if not isinstance(node, dict):
+                return
+            node_type = node.get(_RAW_TYPE_KEY)
+            if node_type == _RAW_AP_TYPE_KEY:
+                ap_mac = node.get("mac") if isinstance(node.get("mac"), str) else ap_mac
+            elif node_type == _RAW_DEVICE_TYPE_KEY and ap_mac is not None:
+                counts[ap_mac] = counts.get(ap_mac, 0) + 1
+            for child in node.get(_RAW_CHILDREN_KEY, []):
+                walk(child, ap_mac)
+
+        for root in raw_tree:
+            walk(root, None)
+        return counts
+
+    def build_ap_status(self, asset_id: str) -> FirewallaAccessPointStatus | None:
+        """Return the normalized system-status view for one access point."""
+        ap = self.get_access_point(asset_id)
+        if ap is None:
+            return None
+        return FirewallaAccessPointStatus(
+            asset_id=ap.asset_id,
+            name=ap.name,
+            model=ap.model,
+            channel_5g=ap.channel_5g,
+            channel_2g=ap.channel_2g,
+            led=ap.led,
+            tx_power=ap.tx_power,
+            country=ap.country,
+            mesh_mode=ap.mesh_mode,
+            timezone=ap.timezone,
+            pause_wifi=ap.pause_wifi,
+            disable_acl=ap.disable_acl,
+            client_count=ap.client_count,
+        )
 
     def get_wireless_connections(self) -> tuple[FirewallaWirelessConnection, ...]:
         """Return per-client connection info from switchTopology.
@@ -479,6 +615,13 @@ class FirewallaWirelessManager(FirewallaBaseManager):
                     "channel_5g": ap.channel_5g,
                     "channel_2g": ap.channel_2g,
                     "led": ap.led,
+                    "tx_power": ap.tx_power,
+                    "country": ap.country,
+                    "mesh_mode": ap.mesh_mode,
+                    "timezone": ap.timezone,
+                    "pause_wifi": ap.pause_wifi,
+                    "disable_acl": ap.disable_acl,
+                    "client_count": ap.client_count,
                 }
                 for ap in self.get_access_points()
             ],

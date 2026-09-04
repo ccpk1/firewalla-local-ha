@@ -102,6 +102,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         )
     else:
         await integration_manager.async_reconcile_ssid_entities(())
+    await integration_manager.async_reconcile_ap_entities(
+        tuple(ap.asset_id for ap in wireless_manager.get_access_points())
+    )
+    integration_manager.async_reconcile_ap_devices(wireless_manager.get_access_points())
     integration_manager.async_reconcile_tracked_client_devices(
         host_manager.configured_device_tracker_macs,
         host_manager.get_hosts(),

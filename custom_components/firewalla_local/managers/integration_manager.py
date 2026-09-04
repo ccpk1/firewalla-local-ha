@@ -73,6 +73,7 @@ from .base_manager import FirewallaBaseManager
 if TYPE_CHECKING:
     from ..api import FirewallaApiClient
     from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
+    from .wireless_manager import FirewallaAccessPoint
 
 ORPHAN_POLICY_RETAIN_UNAVAILABLE_UNTIL_DESELECTED: Final = (
     "retain_unavailable_until_deselected"
@@ -2381,13 +2382,98 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         ):
             if self.build_primary_device_identifier() in device.identifiers:
                 continue
-            if not any(
+            if any(
                 identifier in expected_identifiers for identifier in device.identifiers
             ):
+                continue
+            if any(
+                identifier[0] == DOMAIN
+                and identifier[1].startswith(
+                    f"{self.entry.unique_id or self.entry.data[CONF_LICENSE]}_ap_"
+                )
+                for identifier in device.identifiers
+            ):
+                continue
+            device_registry.async_update_device(
+                device.id,
+                remove_config_entry_id=self.entry.entry_id,
+            )
+
+    def build_ap_device_identifier(self, asset_id: str) -> tuple[str, str]:
+        """Build the stable identifier for one AP7 access-point device."""
+        return (
+            DOMAIN,
+            (
+                f"{self.entry.unique_id or self.entry.data[CONF_LICENSE]}"
+                f"_ap_{dr.format_mac(asset_id)}"
+            ),
+        )
+
+    def _build_ap_device_name(self, ap: FirewallaAccessPoint) -> str:
+        """Build the default device name for one access point."""
+        if ap.name:
+            return ap.name
+        return f"AP {dr.format_mac(ap.asset_id)}"
+
+    def async_reconcile_ap_devices(
+        self,
+        access_points: tuple[FirewallaAccessPoint, ...],
+    ) -> None:
+        """Create, update, and prune AP7 access-point devices."""
+        device_registry = dr.async_get(self.coordinator.hass)
+        router_device = self.async_ensure_primary_device()
+        expected_identifiers = {
+            self.build_ap_device_identifier(ap.asset_id) for ap in access_points
+        }
+
+        for ap in access_points:
+            device_name = self._build_ap_device_name(ap)
+            device = device_registry.async_get_or_create(
+                config_entry_id=self.entry.entry_id,
+                identifiers={self.build_ap_device_identifier(ap.asset_id)},
+                manufacturer=MANUFACTURER,
+                model=ap.model or "fwap",
+                name=device_name,
+                serial_number=dr.format_mac(ap.asset_id),
+                via_device=self.build_primary_device_identifier(),
+            )
+
+            if device.name_by_user is None and device.name != device_name:
                 device_registry.async_update_device(
                     device.id,
-                    remove_config_entry_id=self.entry.entry_id,
+                    name=device_name,
+                    manufacturer=MANUFACTURER,
+                    model=ap.model or "fwap",
+                    serial_number=dr.format_mac(ap.asset_id),
+                    via_device_id=router_device.id,
                 )
+
+        # Prune devices not owned by this reconciler. Each device family
+        # (tracked-client, AP) must explicitly skip the others to avoid
+        # cross-family removal. If a new device family is added, both
+        # prune loops (here and in async_reconcile_tracked_client_devices)
+        # must be updated to skip it.
+        for device in dr.async_entries_for_config_entry(
+            device_registry, self.entry.entry_id
+        ):
+            if self.build_primary_device_identifier() in device.identifiers:
+                continue
+            if any(
+                identifier in expected_identifiers for identifier in device.identifiers
+            ):
+                continue
+            entry_key = self.entry.unique_id or self.entry.data[CONF_LICENSE]
+            tracked_client_prefix = f"{entry_key}_tracked_client_"
+            if any(
+                identifier[0] == DOMAIN
+                and identifier[1].startswith(tracked_client_prefix)
+                for identifier in device.identifiers
+            ):
+                continue
+            device_registry.async_update_device(
+                device.id,
+                remove_config_entry_id=self.entry.entry_id,
+            )
 
     def build_entity_unique_id(self, *, object_id: str, suffix: str) -> str:
         """Build a multi-instance-safe unique ID for one entity surface."""
@@ -2481,6 +2567,30 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             if not entity_entry.unique_id.endswith(f"_{ENTITY_SUFFIX_SENSOR}"):
                 continue
             if "_speed_test_" not in entity_entry.unique_id:
+                continue
+            if entity_entry.unique_id in expected_unique_ids:
+                continue
+
+            entity_registry.async_remove(entity_entry.entity_id)
+
+    async def async_reconcile_ap_entities(self, asset_ids: tuple[str, ...]) -> None:
+        """Remove stale access-point registry entries when APs disappear."""
+        entity_registry = er.async_get(self.coordinator.hass)
+        expected_unique_ids = {
+            self.build_entity_unique_id(
+                object_id=f"ap_{asset_id}_system_status",
+                suffix=ENTITY_SUFFIX_BINARY_SENSOR,
+            )
+            for asset_id in asset_ids
+        }
+
+        for entity_entry in er.async_entries_for_config_entry(
+            entity_registry,
+            self.entry.entry_id,
+        ):
+            if entity_entry.platform != DOMAIN:
+                continue
+            if "_ap_" not in entity_entry.unique_id:
                 continue
             if entity_entry.unique_id in expected_unique_ids:
                 continue

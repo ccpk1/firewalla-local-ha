@@ -188,7 +188,7 @@ async def test_device_tracker_exposes_state_and_attributes(
     assert client_device.via_device_id == router_device.id
     assert tracker_state.name is not None
     assert tracker_state.name == "Kaden Phone Presence"
-    assert tracker_entry.entity_id == "device_tracker.kaden_phone_presence"
+    assert tracker_entry.entity_id == "device_tracker.presence"
     assert tracker_state.state == STATE_HOME
     assert (
         tracker_state.attributes[ATTR_PURPOSE]
@@ -328,10 +328,10 @@ async def test_device_tracker_uses_recent_activity_window(
     assert tracker_state.state == STATE_NOT_HOME
 
 
-async def test_device_tracker_name_updates_after_host_rename(
+async def test_device_tracker_device_name_follows_host_rename(
     hass: HomeAssistant,
 ) -> None:
-    """Test device-tracker friendly names track app-side renames after refresh."""
+    """Test the device name follows Firewalla renames while the entity stays stable."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -414,7 +414,9 @@ async def test_device_tracker_name_updates_after_host_rename(
     renamed_device = _tracked_client_device(hass, entry, "AA:BB:CC:DD:EE:FF")
     assert renamed_state is not None
     assert renamed_state.name is not None
-    assert renamed_state.name == "Kaden Pixel Presence"
+    # The device name follows Firewalla (source of record), but the entity
+    # name and ID stay stable until the user manually regenerates them.
+    assert renamed_state.name == "Kaden Phone Presence"
     assert renamed_device is not None
     assert renamed_device.name == "Kaden Pixel"
 

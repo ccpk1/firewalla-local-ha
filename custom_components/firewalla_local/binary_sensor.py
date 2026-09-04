@@ -9,9 +9,22 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
+    ATTR_AP_CHANNEL_2G,
+    ATTR_AP_CHANNEL_5G,
+    ATTR_AP_CLIENT_COUNT,
+    ATTR_AP_COUNTRY,
+    ATTR_AP_DISABLE_ACL,
+    ATTR_AP_LED,
+    ATTR_AP_MESH_MODE,
+    ATTR_AP_MODEL,
+    ATTR_AP_NAME,
+    ATTR_AP_PAUSE_WIFI,
+    ATTR_AP_TIMEZONE,
+    ATTR_AP_TX_POWER,
     ATTR_NETWORK_BLOCK_ICMP,
     ATTR_NETWORK_DEVICE_COUNT,
     ATTR_NETWORK_DHCP,
@@ -74,10 +87,13 @@ from .const import (
     ATTR_WATCHED_DEVICE_WIFI_RSSI,
     ATTR_WATCHED_DEVICE_WIFI_SSID,
     ENTITY_SUFFIX_BINARY_SENSOR,
+    MANUFACTURER,
+    TRANS_KEY_ENTITY_BINARY_SENSOR_AP_STATUS,
     TRANS_KEY_ENTITY_BINARY_SENSOR_NETWORK,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SSID,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SYSTEM_STATUS,
     TRANS_KEY_ENTITY_BINARY_SENSOR_WATCHED_DEVICE,
+    TRANS_KEY_PURPOSE_AP_STATUS,
     TRANS_KEY_PURPOSE_NETWORK,
     TRANS_KEY_PURPOSE_SSID,
     TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS,
@@ -94,10 +110,12 @@ from .coordinator import (
 )
 from .entity import FirewallaEntity
 from .managers.wireless_manager import (
+    FirewallaAccessPoint,
     FirewallaSsidProfile,
     FirewallaWirelessConnection,
 )
 from .models import (
+    FirewallaAccessPointStatus,
     FirewallaHostRuntime,
     FirewallaNetwork,
     FirewallaNetworkUsageSummary,
@@ -138,11 +156,17 @@ async def async_setup_entry(
             for profile in entry.runtime_data.wireless_manager.get_ssid_profiles()
         ]
 
+    ap_entities = [
+        FirewallaAccessPointStatusBinarySensor(entry, ap.asset_id)
+        for ap in entry.runtime_data.wireless_manager.get_access_points()
+    ]
+
     async_add_entities(
         [
             FirewallaSystemStatusBinarySensor(entry),
             *network_entities,
             *ssid_entities,
+            *ap_entities,
             *[
                 FirewallaWatchedDeviceBinarySensor(entry, mac)
                 for mac in (
@@ -296,6 +320,86 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
         if total_hours > 0:
             return f"{total_hours}h {minutes:02d}m"
         return f"{total_minutes}m"
+
+
+class FirewallaAccessPointStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
+    """Expose one AP7 access-point system-status binary sensor surface."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_translation_key = TRANS_KEY_ENTITY_BINARY_SENSOR_AP_STATUS
+
+    def __init__(self, entry: FirewallaConfigEntry, asset_id: str) -> None:
+        """Initialize one access-point status binary sensor."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._asset_id = asset_id
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id=f"ap_{asset_id}_system_status",
+            suffix=ENTITY_SUFFIX_BINARY_SENSOR,
+        )
+
+    @property
+    def _ap(self) -> FirewallaAccessPoint | None:
+        """Return the current access-point view for this sensor."""
+        return self.wireless_manager.get_access_point(self._asset_id)
+
+    @property
+    def _ap_status(self) -> FirewallaAccessPointStatus | None:
+        """Return the current normalized access-point status view."""
+        return self.wireless_manager.build_ap_status(self._asset_id)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the access-point device information for this sensor."""
+        ap = self._ap
+        return DeviceInfo(
+            identifiers={
+                self.integration_manager.build_ap_device_identifier(self._asset_id)
+            },
+            manufacturer=MANUFACTURER,
+            model=ap.model if ap is not None else None,
+            name=ap.name if ap is not None else None,
+            serial_number=self._asset_id,
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether the access point is present in the runtime payload."""
+        return super().available and self._ap is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether access-point status data is currently available."""
+        return self._ap_status is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return stable access-point status metadata attributes."""
+        ap_status = self._ap_status
+        return {
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_AP_STATUS),
+            ATTR_AP_NAME: (ap_status.name if ap_status is not None else None),
+            ATTR_AP_MODEL: (ap_status.model if ap_status is not None else None),
+            ATTR_AP_CHANNEL_5G: (
+                ap_status.channel_5g if ap_status is not None else None
+            ),
+            ATTR_AP_CHANNEL_2G: (
+                ap_status.channel_2g if ap_status is not None else None
+            ),
+            ATTR_AP_LED: (ap_status.led if ap_status is not None else None),
+            ATTR_AP_TX_POWER: (ap_status.tx_power if ap_status is not None else None),
+            ATTR_AP_COUNTRY: (ap_status.country if ap_status is not None else None),
+            ATTR_AP_MESH_MODE: (ap_status.mesh_mode if ap_status is not None else None),
+            ATTR_AP_TIMEZONE: (ap_status.timezone if ap_status is not None else None),
+            ATTR_AP_PAUSE_WIFI: (
+                ap_status.pause_wifi if ap_status is not None else None
+            ),
+            ATTR_AP_DISABLE_ACL: (
+                ap_status.disable_acl if ap_status is not None else None
+            ),
+            ATTR_AP_CLIENT_COUNT: (
+                ap_status.client_count if ap_status is not None else None
+            ),
+        }
 
 
 class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):

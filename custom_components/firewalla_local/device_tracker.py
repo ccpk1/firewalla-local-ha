@@ -11,7 +11,6 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import slugify
 
 from .const import (
     ATTR_INTEGRATION,
@@ -109,13 +108,8 @@ class FirewallaDeviceTracker(
             self._entry.entry_id,
         )
 
-    @property
-    def _host(self) -> FirewallaHostRuntime | None:
-        """Return the currently resolved device-tracker host."""
-        return self.host_manager.get_host(self._mac)
-
     async def async_added_to_hass(self) -> None:
-        """Attach the tracker to its client device and normalize auto IDs."""
+        """Attach the tracker to its client device."""
         await super().async_added_to_hass()
 
         if self.registry_entry is None:
@@ -132,40 +126,10 @@ class FirewallaDeviceTracker(
                 device_id=device_entry.id,
             )
 
-        new_entity_id = entity_registry.async_regenerate_entity_id(self.registry_entry)
-
-        if new_entity_id == self.entity_id:
-            return
-
-        if not self._is_auto_generated_entity_id():
-            return
-
-        self.registry_entry = entity_registry.async_update_entity(
-            self.entity_id,
-            new_entity_id=new_entity_id,
-        )
-        self.entity_id = self.registry_entry.entity_id
-
-    def _is_auto_generated_entity_id(self) -> bool:
-        """Return whether the current entity ID can be safely normalized."""
-        current_object_id = self.entity_id.split(".", maxsplit=1)[1]
-        if current_object_id == "presence":
-            return True
-
-        if (
-            current_object_id.startswith("presence_")
-            and current_object_id[9:].isdigit()
-        ):
-            return True
-
-        if (device_entry := self.find_device_entry()) is None:
-            return False
-
-        device_name = device_entry.name_by_user or device_entry.name
-        if device_name is None:
-            return False
-
-        return current_object_id == slugify(device_name)
+    @property
+    def _host(self) -> FirewallaHostRuntime | None:
+        """Return the currently resolved device-tracker host."""
+        return self.host_manager.get_host(self._mac)
 
     @property
     def available(self) -> bool:

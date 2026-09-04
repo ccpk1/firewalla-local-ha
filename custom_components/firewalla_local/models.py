@@ -296,6 +296,25 @@ class FirewallaSystemStatus:
 
 
 @dataclass(slots=True)
+class FirewallaAccessPointStatus:
+    """Normalized system-status state for one AP7 access point."""
+
+    asset_id: str
+    name: str | None = None
+    model: str | None = None
+    channel_5g: str | None = None
+    channel_2g: str | None = None
+    led: str | None = None
+    tx_power: str | None = None
+    country: str | None = None
+    mesh_mode: str | None = None
+    timezone: str | None = None
+    pause_wifi: bool | None = None
+    disable_acl: bool | None = None
+    client_count: int | None = None
+
+
+@dataclass(slots=True)
 class FirewallaSpeedTestResult:
     """Normalized latest internet speed-test result."""
 
