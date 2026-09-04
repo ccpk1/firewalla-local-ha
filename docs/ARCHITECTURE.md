@@ -491,6 +491,23 @@ SSID entity model (AP7):
 	sensor and `{ssid_kind} {ssid_name}` for the switch, with "SSID" as the kind
 	prefix, via translation placeholders
 
+AP device model (AP7):
+
+- each AP7 access point in `networkConfig.apc.assets` becomes its own Home
+	Assistant device, keyed by its MAC (`build_ap_device_identifier`), linked to
+	the Firewalla box device via `via_device`
+- device lifecycle is manager-owned: `async_reconcile_ap_devices` creates,
+	updates, and prunes AP devices at setup, mirroring the tracked-client device
+	pattern; the tracked-client and AP prune loops each skip the other family
+- each AP device exposes one system-status binary sensor
+	(`FirewallaAccessPointStatusBinarySensor`) carrying channel, LED, TX power,
+	country, mesh mode, timezone, pause-WiFi/ACL state, and live client count
+- the AP device name follows the Firewalla app (source of record); entity IDs
+	are stable at creation and are not auto-regenerated on device renames — users
+	regenerate them manually via the Home Assistant device management screen
+- AP entities are gated on AP7 presence (`networkConfig.apc.assets` non-empty)
+	so non-AP7 users see nothing
+
 Switch-enabled rule policy:
 
 - switch eligibility must be defined through one manager-owned logic path

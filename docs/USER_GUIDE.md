@@ -23,6 +23,8 @@ Firewalla Local can expose these main surface areas:
 - per-network status binary sensors for every LAN, VLAN, VPN, and WAN
 - per-SSID status binary sensors and toggle switches for every wireless network
   when Firewalla AP7 access points are present
+- per-AP system-status binary sensors on a dedicated device per access point
+  when Firewalla AP7 access points are present
 - watched-device binary sensors for selected endpoints
 - watched-user usage sensors for selected Firewalla users
 - router-based `device_tracker` entities for selected MAC-backed LAN clients
@@ -301,6 +303,27 @@ Use these entities for a live, per-wireless-network status and control view on
 your dashboards. For a structured read of the full wireless configuration, use
 the `get_wireless_status` service; to pause or resume one SSID from an
 automation, use the `set_ssid_paused` service.
+
+## Per-AP device monitoring (AP7)
+
+When Firewalla AP7 access points are present, the integration creates one Home
+Assistant device per access point, linked to the main Firewalla box device as
+its parent. Each AP device carries a system-status binary sensor that reflects
+whether the access point is currently present in the runtime payload.
+
+The per-AP status attributes include:
+
+- AP name and model
+- 5 GHz and 2.4 GHz channel
+- LED state
+- TX power, country, mesh mode, and timezone
+- pause-WiFi and disable-ACL state
+- live client count (from the switch topology)
+
+Use these entities for a per-access-point health and coverage view on your
+dashboards. The AP device name follows the Firewalla app (the source of record);
+entity IDs stay stable until you regenerate them from the Home Assistant device
+management screen.
 
 ## Watched-device monitoring
 

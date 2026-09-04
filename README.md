@@ -63,6 +63,7 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
 * **Appliance Monitoring:** Track Firewalla system status, WAN IP details, uptime, memory/disk usage, and the latest successful Speed Test natively. Includes a diagnostic `Sync runtime` button to force an immediate local data refresh.
 * **Per-Network Entities:** Expose every Firewalla network (LAN, VLAN, VPN, WAN) as a native binary sensor carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, device count, advanced options (mDNS/SSDP Relay, Block ICMP), and usage — including current-month WAN usage.
 * **Per-SSID Wireless Entities (AP7):** When Firewalla AP7 access points are present, expose every wireless network (SSID) as a native binary sensor (status + band, encryption, WPA3, VLAN, interface) and a toggle switch to pause/resume it — all under the Firewalla box device.
+* **Per-AP Device Monitoring (AP7):** Each Firewalla AP7 access point becomes its own Home Assistant device (linked to the box), with a system-status binary sensor exposing channel, LED, TX power, country, mesh mode, timezone, pause-WiFi/ACL state, and live client count.
 * **Rich Local Reporting:** Leverage over a dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, and WAN event timelines—all pulled directly from the local data plane without touching the cloud.
 
 ## **Supported Hardware & Prerequisites**
@@ -130,7 +131,7 @@ It covers:
 - pairing expectations
 - options-flow management for rule switches (allow, block, disturb, QoS, and route), watched devices, device trackers, watched users, network entities, SSID entities, and polling
 - refresh behavior
-- appliance monitoring, watched-device monitoring, device-tracker monitoring, watched-user monitoring, and per-SSID wireless monitoring
+- appliance monitoring, watched-device monitoring, device-tracker monitoring, watched-user monitoring, per-SSID wireless monitoring, and per-AP device monitoring
 - runtime inventory, network, time-usage, speed-test, and WAN report services
 - host operator actions including Wake-on-LAN, rename, notification toggles, and DHCP reservations
 - wireless services including `get_wireless_status` and `set_ssid_paused`
