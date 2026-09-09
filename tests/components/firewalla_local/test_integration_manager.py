@@ -747,13 +747,57 @@ def test_get_networks_discovers_bridge_and_wlan_categories() -> None:
     assert by_uuid["deadbeef-1111-4222-8333-444455556666"].name == "Wireless"
     assert by_uuid["deadbeef-1111-4222-8333-444455556666"].ports == ("wlan0",)
     # The bridge is a LAN and its tagged VLAN member is transport, so the VLAN
-    # is not surfaced as a separate network.
+    # is not surfaced as a separate network. The bridge surfaces the member's
+    # vid (100) as its own vlan_id.
     assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].kind is (
         FirewallaNetworkKind.LAN
     )
     assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].name == "Guest"
     assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].ports == ("eth3",)
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].vlan_id == 101
     assert "95169e6a-a7c9-4d6a-8e83-6061b4812bf2" not in by_uuid
+
+
+def test_get_networks_untagged_bridge_keeps_vlan_none() -> None:
+    """Test a bridge with only untagged physical ports keeps vlan_id None."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "bridge": {
+                    "br0": {
+                        "meta": {
+                            "name": "Mgmt",
+                            "type": "lan",
+                            "uuid": "aff1d681-981f-4ae4-ba0c-d1620947097b",
+                        },
+                        "intf": ["eth2", "eth3"],
+                    }
+                }
+            }
+        }
+    }
+
+    by_uuid = {network.uuid: network for network in manager.get_networks()}
+
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].vlan_id is None
+    assert by_uuid["aff1d681-981f-4ae4-ba0c-d1620947097b"].ports == (
+        "eth2",
+        "eth3",
+    )
 
 
 def test_get_networks_keeps_standalone_vlan_not_referenced_by_bridge() -> None:

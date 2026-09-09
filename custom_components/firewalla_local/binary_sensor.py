@@ -48,6 +48,7 @@ from .const import (
     ATTR_SSID_PAUSED,
     ATTR_SSID_VLAN_ID,
     ATTR_SSID_WPA3,
+    ATTR_SYSTEM_BLUETOOTH_MAC,
     ATTR_SYSTEM_BOOT_COMPLETE,
     ATTR_SYSTEM_BOX_IMAGE_CODENAME,
     ATTR_SYSTEM_BOX_IMAGE_VERSION,
@@ -65,6 +66,7 @@ from .const import (
     ATTR_SYSTEM_PORTS,
     ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
     ATTR_SYSTEM_SOFTWARE_VERSION,
+    ATTR_SYSTEM_TIMEZONE,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
     ATTR_SYSTEM_WAN_IP,
@@ -118,6 +120,7 @@ from .models import (
     FirewallaAccessPointStatus,
     FirewallaHostRuntime,
     FirewallaNetwork,
+    FirewallaNetworkKind,
     FirewallaNetworkUsageSummary,
     FirewallaWanUsageSummary,
 )
@@ -261,23 +264,54 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
                 else None
             ),
             ATTR_SYSTEM_PORTS: self._build_ports_attribute(),
+            ATTR_SYSTEM_BLUETOOTH_MAC: self._build_bluetooth_mac_attribute(),
+            ATTR_SYSTEM_TIMEZONE: (
+                system_status.timezone_name if system_status is not None else None
+            ),
         }
 
-    def _build_ports_attribute(self) -> dict[str, str]:
-        """Return the physical port link-state map from nicStates."""
+    def _build_ports_attribute(self) -> dict[str, dict[str, str | int | None]]:
+        """Return the physical port link/speed/MAC map from nicStates."""
         raw_nic_states = (self.coordinator.last_init_payload or {}).get("nicStates")
         if not isinstance(raw_nic_states, dict):
             return {}
 
-        ports: dict[str, str] = {}
+        ports: dict[str, dict[str, str | int | None]] = {}
         for port_name, raw_state in raw_nic_states.items():
             if not isinstance(port_name, str) or not port_name:
                 continue
             if not isinstance(raw_state, dict):
                 continue
             carrier = raw_state.get("carrier")
-            ports[port_name] = "up" if carrier == "1" else "down"
+            speed = raw_state.get("speed")
+            ports[port_name] = {
+                "link": "up" if carrier == "1" else "down",
+                "speed_mbps": self._normalized_port_speed(speed),
+                "mac": raw_state.get("address"),
+            }
         return ports
+
+    @staticmethod
+    def _normalized_port_speed(value: object) -> int | None:
+        """Return a port speed in Mbps, or None when unknown/inactive."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if isinstance(value, str):
+            try:
+                parsed = int(value)
+            except ValueError:
+                return None
+            return parsed if parsed > 0 else None
+        return None
+
+    def _build_bluetooth_mac_attribute(self) -> str | None:
+        """Return the box Bluetooth MAC from the init payload."""
+        raw_bt_mac = (self.coordinator.last_init_payload or {}).get("btMac")
+        if not isinstance(raw_bt_mac, str) or not raw_bt_mac.strip():
+            return None
+        return raw_bt_mac.strip()
 
     def _build_current_wan_usage_attribute(
         self,
@@ -461,7 +495,7 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         """Return bounded network metadata attributes."""
         network = self._network
-        return {
+        attributes: dict[str, object] = {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_NETWORK),
             ATTR_NETWORK_KIND: (network.kind.value if network is not None else None),
             ATTR_NETWORK_VLAN_ID: (network.vlan_id if network is not None else None),
@@ -479,9 +513,6 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 list(network.ipv6_subnets) if network is not None else None
             ),
             ATTR_NETWORK_GATEWAY: (network.gateway if network is not None else None),
-            ATTR_NETWORK_DNS_SERVERS: (
-                list(network.dns_servers) if network is not None else None
-            ),
             ATTR_NETWORK_DHCP: (
                 self._serialize_dhcp(network.dhcp) if network is not None else None
             ),
@@ -502,6 +533,12 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 network.block_icmp if network is not None else None
             ),
         }
+        # DNS servers are exposed for WAN networks only (matching the Firewalla
+        # app, which does not list DNS for local networks). Omit the attribute
+        # for non-WAN networks so it does not render as "unknown".
+        if network is not None and network.kind is FirewallaNetworkKind.WAN:
+            attributes[ATTR_NETWORK_DNS_SERVERS] = list(network.dns_servers)
+        return attributes
 
     @staticmethod
     def _serialize_usage(

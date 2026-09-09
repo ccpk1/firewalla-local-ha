@@ -286,6 +286,7 @@ class FirewallaSystemStatus:
     cloud_connected: bool | None = None
     ddns: str | None = None
     firmware_release_type: str | None = None
+    timezone_name: str | None = None
     wan_ip: str | None = None
     wan_ips: dict[str, str] | None = None
     cpu_usage_1m: float | None = None

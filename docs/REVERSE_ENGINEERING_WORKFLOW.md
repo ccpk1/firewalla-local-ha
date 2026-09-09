@@ -827,7 +827,8 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 | --- | --- | --- | --- |
 | Name | `networkConfig.interface.<cat>.<name>.meta.name` → `networkProfiles` display fields | `FirewallaNetwork.name` | (entity name) |
 | Kind | `networkConfig.interface` category key | `FirewallaNetwork.kind` | `network_kind` |
-| VLAN ID | `networkConfig.interface.vlan.<name>.vid` | `FirewallaNetwork.vlan_id` | `vlan_id` |
+| VLAN ID | `networkConfig.interface.vlan.<name>.vid`; a `bridge`/`bond` surfaces the `vid` of its tagged member(s) (e.g. `br3` Home → `eth3.100` → 100). An untagged network (only physical ports) has no VLAN. | `FirewallaNetwork.vlan_id` | `vlan_id` |
+| DNS servers | `networkProfiles[uuid].dns`; only meaningful for WAN. LAN/VLAN/VPN set it `null` matching the Firewalla app, which does not list DNS for local networks (they inherit WAN DNS via `networkConfig.dns[<intf>].useNameserversFromWAN`). | `FirewallaNetwork.dns_servers` | `dns_servers` |
 | Ethernet ports | `phy`/`wlan` WAN = its device name; `bond`/`bridge` = `intf` members; `vlan` = dereference `intf` parent to members; every member is dereferenced through parent chains (bridge → VLAN → physical port); VPN = none | `FirewallaNetwork.ports` | `ports` |
 | IPv4 address | `networkProfiles[uuid].ipv4` (bare) / `item=intf` `ipv4` | `FirewallaNetwork.ipv4_addresses` | `ipv4_addresses` |
 | IPv4 subnet | `networkProfiles[uuid].ipv4Subnet(s)` (CIDR) | `FirewallaNetwork.ipv4_subnets` | `ipv4_subnets` |
@@ -863,6 +864,34 @@ zero and the box-wide init windows are aggregate (not per-WAN) — so a WAN
 `monthlyDataUsageOnWans`), never conflated with the rolling `last_30d` window.
 WAN monthly totals also remain on the System Status `current_wan_usage` /
 `get_wan_data_usage` surface.
+
+### Box identity and port detail
+
+The System Status entity surfaces box-level identity and physical-port detail
+from the init payload:
+
+| App field | Raw path | Normalized | Entity attribute |
+| --- | --- | --- | --- |
+| Box version | `longVersion` / `versionStr` | `FirewallaSystemInfo.software_version` | `software_version` |
+| WAN IP | `publicIp` / `publicIps` | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
+| Port MAC | `nicStates[<port>].address` | per-port `mac` | `ports[<port>].mac` |
+| Port speed | `nicStates[<port>].speed` (Mbps; `-1` = inactive) | per-port `speed_mbps` | `ports[<port>].speed_mbps` |
+| Port link | `nicStates[<port>].carrier` (`1`/`0`) | per-port `link` | `ports[<port>].link` |
+| Bluetooth MAC | `btMac` | `FirewallaSystemStatus` (raw) | `bluetooth_mac` |
+| Box time zone | `timezone` | `FirewallaSystemStatus.timezone_name` | `timezone` |
+| Release type | `releaseType` / `firmwareReleaseType` | `FirewallaSystemStatus.firmware_release_type` | `firmware_release_type` |
+| Uptime | `uptime` | `FirewallaSystemStatus.uptime_seconds` | `uptime` / `uptime_seconds` |
+
+Notes:
+
+- `nicStates` is keyed by physical port (`eth0`..`eth3` on a Gold SE) and
+  carries `address` (MAC), `speed` (Mbps, `-1` when disconnected), `carrier`
+  (link up/down), and `duplex`. The `ports` attribute bundles these per port.
+- The Firewalla app exposes DNS servers for the **WAN only**; local networks
+  inherit WAN DNS via `networkConfig.dns[<intf>].useNameserversFromWAN`, so the
+  per-network `dns_servers` attribute is surfaced for WAN networks only.
+- App version and cloud instance are app-side/cloud-side and are **not**
+  available from the local box init payload.
 
 ### Design notes
 
