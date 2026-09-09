@@ -495,7 +495,7 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, object]:
         """Return bounded network metadata attributes."""
         network = self._network
-        return {
+        attributes: dict[str, object] = {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_NETWORK),
             ATTR_NETWORK_KIND: (network.kind.value if network is not None else None),
             ATTR_NETWORK_VLAN_ID: (network.vlan_id if network is not None else None),
@@ -513,13 +513,6 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 list(network.ipv6_subnets) if network is not None else None
             ),
             ATTR_NETWORK_GATEWAY: (network.gateway if network is not None else None),
-            # DNS servers are exposed for WAN networks only (matching the
-            # Firewalla app, which does not list DNS for local networks).
-            ATTR_NETWORK_DNS_SERVERS: (
-                list(network.dns_servers)
-                if network is not None and network.kind is FirewallaNetworkKind.WAN
-                else None
-            ),
             ATTR_NETWORK_DHCP: (
                 self._serialize_dhcp(network.dhcp) if network is not None else None
             ),
@@ -540,6 +533,12 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 network.block_icmp if network is not None else None
             ),
         }
+        # DNS servers are exposed for WAN networks only (matching the Firewalla
+        # app, which does not list DNS for local networks). Omit the attribute
+        # for non-WAN networks so it does not render as "unknown".
+        if network is not None and network.kind is FirewallaNetworkKind.WAN:
+            attributes[ATTR_NETWORK_DNS_SERVERS] = list(network.dns_servers)
+        return attributes
 
     @staticmethod
     def _serialize_usage(

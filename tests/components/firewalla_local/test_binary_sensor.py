@@ -761,8 +761,8 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
     assert vlan_state.attributes[ATTR_NETWORK_IPV4_ADDRESSES] == ["192.168.10.1"]
     assert vlan_state.attributes[ATTR_NETWORK_IPV4_SUBNETS] == ["192.168.10.0/24"]
     assert vlan_state.attributes[ATTR_NETWORK_GATEWAY] == "192.168.10.1"
-    # DNS servers are exposed for WAN networks only; a VLAN exposes None.
-    assert vlan_state.attributes[ATTR_NETWORK_DNS_SERVERS] is None
+    # DNS servers are exposed for WAN networks only; a VLAN omits the attribute.
+    assert ATTR_NETWORK_DNS_SERVERS not in vlan_state.attributes
     assert vlan_state.attributes[ATTR_NETWORK_MDNS_RELAY] is True
     assert vlan_state.attributes[ATTR_NETWORK_SSDP_RELAY] is False
     assert vlan_state.attributes[ATTR_NETWORK_BLOCK_ICMP] is True
@@ -785,6 +785,8 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
     assert wan_state.state == STATE_ON
     assert wan_state.attributes[ATTR_NETWORK_KIND] == "wan"
     assert wan_state.attributes[ATTR_NETWORK_PORTS] == ["eth0"]
+    # WAN keeps the dns_servers attribute (empty here as the fixture has none).
+    assert wan_state.attributes[ATTR_NETWORK_DNS_SERVERS] == []
     assert wan_state.attributes[ATTR_NETWORK_USAGE] == {
         "last_24h": {"download_bytes": None, "upload_bytes": None},
         "last_60m": {"download_bytes": None, "upload_bytes": None},
