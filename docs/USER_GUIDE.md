@@ -224,6 +224,9 @@ The system-status entity exposes stable attributes such as:
 - current WAN usage summary
 - total, online, and offline device counts
 - CPU, memory, and disk summary values
+- `ports` with per-port link state, speed (Mbps), and MAC address
+- `bluetooth_mac` for the box's Bluetooth radio
+- `timezone` for the box's configured time zone
 - `runtime_data_updated_at` showing when the current runtime snapshot was last
   refreshed successfully
 

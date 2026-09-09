@@ -48,7 +48,9 @@ from custom_components.firewalla_local.const import (
     ATTR_SSID_PAUSED,
     ATTR_SSID_VLAN_ID,
     ATTR_SSID_WPA3,
+    ATTR_SYSTEM_BLUETOOTH_MAC,
     ATTR_SYSTEM_PORTS,
+    ATTR_SYSTEM_TIMEZONE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DEVICE_GROUP,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
@@ -603,6 +605,7 @@ def _network_payload() -> dict[str, object]:
     """Return a raw init payload with one VLAN and one VPN network."""
     return {
         "policyRules": [],
+        "btMac": "20:6D:31:FC:1C:56",
         "hosts": [
             {
                 "mac": "AA:BB:CC:DD:EE:01",
@@ -622,8 +625,12 @@ def _network_payload() -> dict[str, object]:
             },
         ],
         "nicStates": {
-            "eth0": {"carrier": "1"},
-            "eth1": {"carrier": "0"},
+            "eth0": {
+                "carrier": "1",
+                "speed": "1000",
+                "address": "20:6D:31:01:5E:DD",
+            },
+            "eth1": {"carrier": "0", "speed": "-1"},
         },
         "networkConfig": {
             "interface": {
@@ -869,9 +876,15 @@ async def test_system_status_exposes_ports_attribute(
 
     assert system_state is not None
     assert system_state.attributes[ATTR_SYSTEM_PORTS] == {
-        "eth0": "up",
-        "eth1": "down",
+        "eth0": {
+            "link": "up",
+            "speed_mbps": 1000,
+            "mac": "20:6D:31:01:5E:DD",
+        },
+        "eth1": {"link": "down", "speed_mbps": None, "mac": None},
     }
+    assert system_state.attributes[ATTR_SYSTEM_BLUETOOTH_MAC] == "20:6D:31:FC:1C:56"
+    assert system_state.attributes[ATTR_SYSTEM_TIMEZONE] is None
 
 
 def _count_network_binary_sensors(hass: HomeAssistant) -> int:

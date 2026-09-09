@@ -188,6 +188,12 @@
           },
           "ports": {
             "name": "Ports"
+          },
+          "bluetooth_mac": {
+            "name": "Bluetooth MAC"
+          },
+          "timezone": {
+            "name": "Timezone"
           }
         }
       },

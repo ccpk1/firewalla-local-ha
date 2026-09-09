@@ -865,6 +865,34 @@ zero and the box-wide init windows are aggregate (not per-WAN) — so a WAN
 WAN monthly totals also remain on the System Status `current_wan_usage` /
 `get_wan_data_usage` surface.
 
+### Box identity and port detail
+
+The System Status entity surfaces box-level identity and physical-port detail
+from the init payload:
+
+| App field | Raw path | Normalized | Entity attribute |
+| --- | --- | --- | --- |
+| Box version | `longVersion` / `versionStr` | `FirewallaSystemInfo.software_version` | `software_version` |
+| WAN IP | `publicIp` / `publicIps` | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
+| Port MAC | `nicStates[<port>].address` | per-port `mac` | `ports[<port>].mac` |
+| Port speed | `nicStates[<port>].speed` (Mbps; `-1` = inactive) | per-port `speed_mbps` | `ports[<port>].speed_mbps` |
+| Port link | `nicStates[<port>].carrier` (`1`/`0`) | per-port `link` | `ports[<port>].link` |
+| Bluetooth MAC | `btMac` | `FirewallaSystemStatus` (raw) | `bluetooth_mac` |
+| Box time zone | `timezone` | `FirewallaSystemStatus.timezone_name` | `timezone` |
+| Release type | `releaseType` / `firmwareReleaseType` | `FirewallaSystemStatus.firmware_release_type` | `firmware_release_type` |
+| Uptime | `uptime` | `FirewallaSystemStatus.uptime_seconds` | `uptime` / `uptime_seconds` |
+
+Notes:
+
+- `nicStates` is keyed by physical port (`eth0`..`eth3` on a Gold SE) and
+  carries `address` (MAC), `speed` (Mbps, `-1` when disconnected), `carrier`
+  (link up/down), and `duplex`. The `ports` attribute bundles these per port.
+- The Firewalla app exposes DNS servers for the **WAN only**; local networks
+  inherit WAN DNS via `networkConfig.dns[<intf>].useNameserversFromWAN`, so the
+  per-network `dns_servers` attribute is surfaced for WAN networks only.
+- App version and cloud instance are app-side/cloud-side and are **not**
+  available from the local box init payload.
+
 ### Design notes
 
 - `network_kind` (not `network_type`): the value is the derived granular

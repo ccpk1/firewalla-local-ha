@@ -625,6 +625,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             cloud_connected=appliance_runtime.cloud_connected,
             ddns=appliance_runtime.ddns,
             firmware_release_type=appliance_runtime.firmware_release_type,
+            timezone_name=appliance_runtime.timezone_name,
             wan_ip=self._build_wan_ip(appliance_runtime),
             wan_ips=appliance_runtime.public_ips,
             cpu_usage_1m=appliance_runtime.cpu_usage_1m,
