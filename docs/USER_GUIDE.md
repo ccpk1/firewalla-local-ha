@@ -275,19 +275,28 @@ Use these entities for a live, per-network health and usage view on your
 dashboards. For a deeper configuration or usage drill-down, use the
 `get_network_segment_report` and `get_network_segment_usage` services instead.
 
-## Per-SSID wireless monitoring (AP7)
+## Per-SSID wireless monitoring and control (AP7)
 
 When Firewalla AP7 access points are present, the integration creates one
 status binary sensor and one toggle switch per wireless network (SSID),
 mirroring the wireless network list in the Firewalla app. Both entities attach
 to the main Firewalla box device, which is the controller of the SSIDs.
 
+**Control: turn a full SSID network on or off**
+
+- each toggle switch **turns the entire wireless network (SSID) on or off** —
+  switch **on** enables (unpauses) the network, switch **off** pauses it
+- the pause/resume is a **global SSID-level control across all AP7 access
+  points** — toggling one SSID affects that network everywhere in the house
+- the switch state reflects the current paused state and updates immediately
+  on toggle (optimistic), then reconciles with the next coordinator refresh
+- you can also drive the same control in automations with the
+  `set_ssid_paused` service
+
 - enable or disable this surface in the options flow with **Enable SSID status
   entities**
 - each binary sensor's state reflects whether the wireless network is currently
   enabled (not paused)
-- each toggle switch pauses or resumes the wireless network across all AP7s
-  (the SSID pause is a global SSID-level control, not per-AP)
 - each entity exposes a stable set of attributes describing the wireless
   network
 
@@ -325,6 +334,11 @@ dashboards. The AP device name follows the Firewalla app (the source of record);
 entity IDs stay stable until you regenerate them from the Home Assistant device
 management screen.
 
+> Note: per-AP `pauseWifi` is surfaced as a read-only attribute today. It is
+> not yet exposed as a toggle switch; per-AP wireless control remains a
+> separate, deferred surface. The per-SSID toggle switches (documented in the
+> previous section) provide global wireless control across all APs.
+
 ## Watched-device monitoring
 
 Watched devices are opt-in. After selecting devices in the options flow, the
@@ -339,6 +353,11 @@ host identity.
   state
 - attributes include local IP address, device group, network name, connection
   type when available, upload and download totals, and last activity time
+- when the current switch topology places the device on an AP7 access point,
+  the entity also exposes conditional WiFi attributes:
+  - `topology_connection_type` — `wired` or `wireless`
+  - for wireless connections only: `wifi_ssid`, `wifi_band`, `wifi_rssi`, and
+    `wifi_ap` (the access-point name it is attached to)
 - if a selected device disappears from the current Firewalla payload, the
   entity remains in Home Assistant and becomes unavailable instead of being
   silently removed
@@ -384,8 +403,9 @@ selected MAC-backed LAN client.
   standard router-tracker states `home`, `not_home`, or unavailable
 - the tracker friendly name follows Home Assistant's translated sub-entity
   pattern as `<device name> Presence`
-- auto-generated entity IDs follow Home Assistant's normal slugging rules from
-  that composed name, for example `device_tracker.chads_phone_presence`
+- entity IDs are stable at creation and are not auto-regenerated when the
+  device is renamed; if you want an entity ID to reflect a new device name,
+  regenerate it manually from the Home Assistant device management screen
 - attributes include IP address, device group, network name, connection type,
   and last-active time when those values are available in the current runtime
   snapshot
@@ -717,7 +737,8 @@ Use `firewalla_local.get_wireless_status` to read the current Firewalla
 wireless configuration as structured data.
 
 - returns the SSID profiles (SSID, band, encryption, WPA3, paused state, VLAN,
-  interface) and the access points (name, model, channels, LED)
+  interface) and the access points (name, model, channels, LED, TX power,
+  country, mesh mode, timezone, pause-WiFi/ACL state, and client count)
 - for Firewalla boxes without AP7 access points, the returned sections are
   empty
 
