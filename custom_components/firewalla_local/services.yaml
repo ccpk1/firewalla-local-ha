@@ -967,7 +967,7 @@ resume_rule:
 
 set_ssid_paused:
   name: Set SSID paused
-  description: Pause or resume one AP7 wireless network (SSID profile). This is a PoC service for the unconfirmed wireless write contract.
+  description: Pause or resume one AP7 wireless network (SSID profile). Uses the confirmed local write contract to toggle the wireless network across all AP7 access points.
   fields:
     ssid_profile_id:
       required: true
