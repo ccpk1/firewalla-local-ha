@@ -827,7 +827,8 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 | --- | --- | --- | --- |
 | Name | `networkConfig.interface.<cat>.<name>.meta.name` → `networkProfiles` display fields | `FirewallaNetwork.name` | (entity name) |
 | Kind | `networkConfig.interface` category key | `FirewallaNetwork.kind` | `network_kind` |
-| VLAN ID | `networkConfig.interface.vlan.<name>.vid` | `FirewallaNetwork.vlan_id` | `vlan_id` |
+| VLAN ID | `networkConfig.interface.vlan.<name>.vid`; a `bridge`/`bond` surfaces the `vid` of its tagged member(s) (e.g. `br3` Home → `eth3.100` → 100). An untagged network (only physical ports) has no VLAN. | `FirewallaNetwork.vlan_id` | `vlan_id` |
+| DNS servers | `networkProfiles[uuid].dns`; only meaningful for WAN. LAN/VLAN/VPN set it `null` matching the Firewalla app, which does not list DNS for local networks (they inherit WAN DNS via `networkConfig.dns[<intf>].useNameserversFromWAN`). | `FirewallaNetwork.dns_servers` | `dns_servers` |
 | Ethernet ports | `phy`/`wlan` WAN = its device name; `bond`/`bridge` = `intf` members; `vlan` = dereference `intf` parent to members; every member is dereferenced through parent chains (bridge → VLAN → physical port); VPN = none | `FirewallaNetwork.ports` | `ports` |
 | IPv4 address | `networkProfiles[uuid].ipv4` (bare) / `item=intf` `ipv4` | `FirewallaNetwork.ipv4_addresses` | `ipv4_addresses` |
 | IPv4 subnet | `networkProfiles[uuid].ipv4Subnet(s)` (CIDR) | `FirewallaNetwork.ipv4_subnets` | `ipv4_subnets` |

@@ -118,6 +118,7 @@ from .models import (
     FirewallaAccessPointStatus,
     FirewallaHostRuntime,
     FirewallaNetwork,
+    FirewallaNetworkKind,
     FirewallaNetworkUsageSummary,
     FirewallaWanUsageSummary,
 )
@@ -479,8 +480,12 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 list(network.ipv6_subnets) if network is not None else None
             ),
             ATTR_NETWORK_GATEWAY: (network.gateway if network is not None else None),
+            # DNS servers are exposed for WAN networks only (matching the
+            # Firewalla app, which does not list DNS for local networks).
             ATTR_NETWORK_DNS_SERVERS: (
-                list(network.dns_servers) if network is not None else None
+                list(network.dns_servers)
+                if network is not None and network.kind is FirewallaNetworkKind.WAN
+                else None
             ),
             ATTR_NETWORK_DHCP: (
                 self._serialize_dhcp(network.dhcp) if network is not None else None

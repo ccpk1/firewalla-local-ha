@@ -754,7 +754,8 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
     assert vlan_state.attributes[ATTR_NETWORK_IPV4_ADDRESSES] == ["192.168.10.1"]
     assert vlan_state.attributes[ATTR_NETWORK_IPV4_SUBNETS] == ["192.168.10.0/24"]
     assert vlan_state.attributes[ATTR_NETWORK_GATEWAY] == "192.168.10.1"
-    assert vlan_state.attributes[ATTR_NETWORK_DNS_SERVERS] == ["192.168.10.1"]
+    # DNS servers are exposed for WAN networks only; a VLAN exposes None.
+    assert vlan_state.attributes[ATTR_NETWORK_DNS_SERVERS] is None
     assert vlan_state.attributes[ATTR_NETWORK_MDNS_RELAY] is True
     assert vlan_state.attributes[ATTR_NETWORK_SSDP_RELAY] is False
     assert vlan_state.attributes[ATTR_NETWORK_BLOCK_ICMP] is True

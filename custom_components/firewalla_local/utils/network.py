@@ -392,8 +392,11 @@ def _enrich_network_ports(
         return
 
     # Resolve member ports per interface once, so a VLAN can dereference its
-    # ``intf`` parent (a bond or a phy port) to the concrete member set.
+    # ``intf`` parent (a bond or a phy port) to the concrete member set. Also
+    # record each tagged interface's vid so a bridge can surface the VLAN of
+    # its tagged members.
     parent_members: dict[str, tuple[str, ...]] = {}
+    member_vlan_ids: dict[str, int] = {}
     for raw_category in raw_interfaces.values():
         if not isinstance(raw_category, dict):
             continue
@@ -404,6 +407,9 @@ def _enrich_network_ports(
                 continue
             direct = _normalized_string_tuple(raw_entry.get(_RAW_INTF_KEY))
             parent_members[interface_name] = direct
+            vlan_id = _normalized_int(raw_entry.get(_RAW_VID_KEY))
+            if vlan_id is not None:
+                member_vlan_ids[interface_name] = vlan_id
 
     def resolve_members(interface_name: str) -> tuple[str, ...]:
         """Return the concrete member ports for one interface reference.
@@ -425,6 +431,19 @@ def _enrich_network_ports(
         # Deduplicate while preserving order.
         return tuple(dict.fromkeys(resolved))
 
+    def resolve_vlan_id(interface_name: str) -> int | None:
+        """Return the VLAN id of a network from its tagged members.
+
+        A bridge/bond network surfaces the vid of its tagged member(s) when
+        present (e.g. ``br3`` Home carries ``eth3.100`` → 100); an untagged
+        network has no VLAN. An explicit vid on the network itself wins.
+        """
+        for member in parent_members.get(interface_name, ()):
+            vlan_id = member_vlan_ids.get(member)
+            if vlan_id is not None:
+                return vlan_id
+        return None
+
     for network in networks.values():
         interface_name = network.interface_name
         if interface_name is None:
@@ -433,15 +452,19 @@ def _enrich_network_ports(
         if network.kind is FirewallaNetworkKind.WAN:
             # A phy/wlan WAN is itself the port.
             ports: tuple[str, ...] = (interface_name,)
+            vlan_id = network.vlan_id
         else:
             ports = resolve_members(interface_name)
+            # Only fill an unset vlan_id from tagged members; an explicit vid
+            # (standalone VLAN/bond) is preserved.
+            vlan_id = network.vlan_id or resolve_vlan_id(interface_name)
 
         networks[network.uuid] = FirewallaNetwork(
             uuid=network.uuid,
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
-            vlan_id=network.vlan_id,
+            vlan_id=vlan_id,
             ports=ports,
             ipv4_addresses=network.ipv4_addresses,
             ipv4_subnets=network.ipv4_subnets,
