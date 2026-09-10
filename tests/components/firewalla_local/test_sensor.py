@@ -125,6 +125,30 @@ def _runtime_payload() -> dict[str, object]:
     """Return a minimal raw init payload for coordinator setup tests."""
     return {
         "policyRules": [],
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "wan-1",
+                        }
+                    },
+                    "eth1": {
+                        "meta": {
+                            "name": "WAN-TWO",
+                            "type": "wan",
+                            "uuid": "wan-2",
+                        }
+                    },
+                }
+            }
+        },
+        "networkProfiles": {
+            "wan-1": {"intf": "eth0", "ipv4": "23.245.207.179"},
+            "wan-2": {"intf": "eth1", "ipv4": "23.245.207.180"},
+        },
         "monthlyDataUsageOnWans": {
             "wan-1": {
                 "download": [[1_743_480_000, 1024]],
@@ -385,7 +409,10 @@ async def test_sensor_setup_exposes_system_status_and_wan_speed_test_entities(
         == "Ubuntu 18.04 LTS (Bionic Beaver)"
     )
     assert system_state.attributes[ATTR_SYSTEM_WAN_IP] == "23.245.207.179"
-    assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] == {"eth0": "23.245.207.179"}
+    assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] == {
+        "eth0": "23.245.207.179",
+        "eth1": "23.245.207.180",
+    }
     assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {
         "WAN-ONE": {"download_bytes": 3072, "upload_bytes": 1280},
         "WAN-TWO": {"download_bytes": 900, "upload_bytes": 450},
@@ -656,8 +683,11 @@ async def test_sensor_setup_handles_missing_wan_speed_test_history(
         system_state.attributes[ATTR_SYSTEM_BOX_IMAGE_VERSION]
         == "Ubuntu 18.04 LTS (Bionic Beaver)"
     )
-    assert system_state.attributes[ATTR_SYSTEM_WAN_IP] is None
-    assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] is None
+    assert system_state.attributes[ATTR_SYSTEM_WAN_IP] == "23.245.207.179"
+    assert system_state.attributes[ATTR_SYSTEM_WAN_IPS] == {
+        "eth0": "23.245.207.179",
+        "eth1": "23.245.207.180",
+    }
     assert system_state.attributes[ATTR_SYSTEM_CURRENT_WAN_USAGE] == {
         "WAN-ONE": {"download_bytes": 3072, "upload_bytes": 1280},
         "WAN-TWO": {"download_bytes": 900, "upload_bytes": 450},

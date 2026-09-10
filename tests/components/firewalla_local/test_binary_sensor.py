@@ -780,6 +780,8 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
     assert vpn_state.state == STATE_ON
     assert vpn_state.attributes[ATTR_NETWORK_KIND] == "vpn"
     assert vpn_state.attributes[ATTR_NETWORK_PORTS] == []
+    # A network without a VLAN omits the vlan_id attribute (no "unknown").
+    assert ATTR_NETWORK_VLAN_ID not in vpn_state.attributes
 
     assert wan_state is not None
     assert wan_state.state == STATE_ON

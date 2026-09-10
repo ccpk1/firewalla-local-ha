@@ -874,7 +874,7 @@ from the init payload:
 | App field | Raw path | Normalized | Entity attribute |
 | --- | --- | --- | --- |
 | Box version | `longVersion` / `versionStr` | `FirewallaSystemInfo.software_version` | `software_version` |
-| WAN IP | `publicIp` / `publicIps` | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
+| WAN IP | WAN network `networkProfiles[<wan_uuid>].ipv4` (primary = lowest port) | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
 | Port MAC | `nicStates[<port>].address` | per-port `mac` | `ports[<port>].mac` |
 | Port speed | `nicStates[<port>].speed` (Mbps; `-1` = inactive) | per-port `speed_mbps` | `ports[<port>].speed_mbps` |
 | Port link | `nicStates[<port>].carrier` (`1`/`0`) | per-port `link` | `ports[<port>].link` |
@@ -891,6 +891,16 @@ Notes:
 - The Firewalla app exposes DNS servers for the **WAN only**; local networks
   inherit WAN DNS via `networkConfig.dns[<intf>].useNameserversFromWAN`, so the
   per-network `dns_servers` attribute is surfaced for WAN networks only.
+- **WAN IP source (2026-09-10):** The box-level `wan_ip`/`wan_ips` are derived
+  from the **WAN network inventory** (`networkProfiles[<wan_uuid>].ipv4`), not
+  from the init payload's `publicIp`/`publicIps`. On some models (e.g. Gold SE)
+  `publicIp`/`publicIps` can report a DNS resolver address (an Amazon Route 53
+  IP in the reported case) instead of the actual WAN IP, while the WAN network
+  entities carry the correct per-WAN IPv4. The primary WAN is the one with the
+  lowest port number (e.g. `eth0` over `eth1`); `wan_ip` is the primary WAN's
+  first IPv4 and `wan_ips` maps each WAN interface name to its first IPv4.
+  IPv6 is intentionally not included here — it is surfaced per-network on the
+  WAN network entities' `ipv6_addresses` attribute.
 - App version and cloud instance are app-side/cloud-side and are **not**
   available from the local box init payload.
 

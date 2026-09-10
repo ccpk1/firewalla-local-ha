@@ -43,6 +43,30 @@ def _build_manager(
     )
     manager = FirewallaIntegrationManager(coordinator, entry, MagicMock())
     coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "wan-1",
+                        }
+                    },
+                    "eth1": {
+                        "meta": {
+                            "name": "WAN-TWO",
+                            "type": "wan",
+                            "uuid": "wan-2",
+                        }
+                    },
+                }
+            }
+        },
+        "networkProfiles": {
+            "wan-1": {"intf": "eth0", "ipv4": "23.245.207.179"},
+            "wan-2": {"intf": "eth1", "ipv4": "23.245.207.180"},
+        },
         "networkMonitorData": {
             "overall_wan_state:overall_wan_state": {
                 "labels": {
@@ -58,7 +82,7 @@ def _build_manager(
                     }
                 }
             }
-        }
+        },
     }
     return manager
 

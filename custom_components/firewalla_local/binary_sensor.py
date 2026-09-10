@@ -498,7 +498,6 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         attributes: dict[str, object] = {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_NETWORK),
             ATTR_NETWORK_KIND: (network.kind.value if network is not None else None),
-            ATTR_NETWORK_VLAN_ID: (network.vlan_id if network is not None else None),
             ATTR_NETWORK_PORTS: (list(network.ports) if network is not None else None),
             ATTR_NETWORK_IPV4_ADDRESSES: (
                 list(network.ipv4_addresses) if network is not None else None
@@ -538,6 +537,10 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         # for non-WAN networks so it does not render as "unknown".
         if network is not None and network.kind is FirewallaNetworkKind.WAN:
             attributes[ATTR_NETWORK_DNS_SERVERS] = list(network.dns_servers)
+        # VLAN ID is exposed only when the network actually has a VLAN, so it
+        # does not render as "unknown" for untagged networks.
+        if network is not None and network.vlan_id is not None:
+            attributes[ATTR_NETWORK_VLAN_ID] = network.vlan_id
         return attributes
 
     @staticmethod
