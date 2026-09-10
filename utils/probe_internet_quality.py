@@ -51,8 +51,10 @@ async def async_main() -> int:
                 message_type="get",
                 data={"item": "networkMonitorData", "value": {}},
             )
-            Path(".tmp/quality_networkMonitorData.json").write_text(
-                json.dumps(nmd, indent=2, sort_keys=True), encoding="utf-8"
+            await asyncio.to_thread(
+                Path(".tmp/quality_networkMonitorData.json").write_text,
+                json.dumps(nmd, indent=2, sort_keys=True),
+                encoding="utf-8",
             )
             print(
                 "networkMonitorData keys:",
@@ -79,8 +81,10 @@ async def async_main() -> int:
                     },
                 },
             )
-            Path(".tmp/quality_events.json").write_text(
-                json.dumps(events, indent=2, sort_keys=True), encoding="utf-8"
+            await asyncio.to_thread(
+                Path(".tmp/quality_events.json").write_text,
+                json.dumps(events, indent=2, sort_keys=True),
+                encoding="utf-8",
             )
             print("events type:", type(events).__name__)
             if isinstance(events, list):
