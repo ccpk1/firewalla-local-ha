@@ -54,6 +54,7 @@ Services added after 1.0.0:
 - `firewalla_local.set_host_notify_when_next_offline`
 - `firewalla_local.set_host_dhcp_reservation`
 - `firewalla_local.get_speed_test_results`
+- `firewalla_local.get_internet_quality_report`
 - `firewalla_local.get_time_usage_report`
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
@@ -208,6 +209,7 @@ It currently exposes:
 
 - a system-status binary sensor
 - WAN-scoped speed-test download, upload, and latency sensors
+- WAN-scoped internet-quality ping latency and packet-loss sensors
 - a diagnostic `Sync runtime` button
 - per-network status binary sensors (LAN, VLAN, VPN, WAN)
 - per-SSID status binary sensors and toggle switches when AP7 access points
@@ -243,6 +245,24 @@ The sensor state is the metric named by the entity, and every speed-test sensor
 also includes the full speed-test metadata in its attributes, including upload
 speed, latency, jitter, packet loss, server details, timestamp, WAN name, and
 WAN UUID.
+
+### WAN-scoped internet-quality sensors
+
+Each discovered WAN gets two internet-quality sensors: **ping latency** and
+**ping packet loss**. These reflect the Firewalla box's continuous per-WAN
+Internet Quality monitoring, sampled every 15 minutes against a ping target
+(Cloudflare `1.1.1.1` by default).
+
+- the latency sensor state is the latest sample's **mean** latency in
+  milliseconds
+- the packet-loss sensor state is the latest sample's loss as a percentage
+- every internet-quality sensor also exposes the full sample in its attributes:
+  `ping_target`, `sampled_at`, `ping_latency`, `ping_latency_max`,
+  `ping_latency_median`, `ping_latency_min`, `ping_packet_loss`, `wan_name`,
+  and `wan_uuid`
+
+These sensors are always created per WAN (like the speed-test sensors) and can
+be disabled per-entity in Home Assistant if you do not want them.
 
 ### Sync runtime button
 
@@ -506,6 +526,7 @@ Inspection and report services:
 - `firewalla_local.get_network_segment_report`
 - `firewalla_local.get_network_segment_usage`
 - `firewalla_local.get_speed_test_results`
+- `firewalla_local.get_internet_quality_report`
 - `firewalla_local.get_time_usage_report`
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
@@ -685,6 +706,19 @@ results.
 - by default it refreshes once and returns only the most recent result
 - use `limit` to request more than one record
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
+
+### Get internet quality report
+
+Use `firewalla_local.get_internet_quality_report` to read normalized
+internet-quality samples (ping latency and packet loss) for one or all WANs.
+
+- by default it refreshes once and returns only the most recent sample
+- use `limit` to request more than one sample (the runtime keeps ~24 hours of
+  15-minute buckets)
+- use `wan_uuid` or `wan_name` to filter to one WAN when needed
+- each sample includes `sampled_at`, `ping_target`, `ping_latency_ms`,
+  `ping_latency_max_ms`, `ping_latency_median_ms`, `ping_latency_min_ms`,
+  `ping_packet_loss_percent`, `wan_uuid`, and `wan_name`
 
 ### Get time usage report
 

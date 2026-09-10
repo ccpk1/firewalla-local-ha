@@ -65,6 +65,7 @@ from .const import (
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
     SERVICE_GET_HOST_NAME_MAPPING,
+    SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_RUNTIME_INVENTORY,
@@ -151,6 +152,7 @@ from .coordinator import FirewallaConfigEntry
 from .models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
+    FirewallaInternetQualitySample,
     FirewallaNetwork,
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkHostActions,
@@ -372,6 +374,17 @@ GET_SPEED_TEST_RESULTS_SCHEMA = vol.Schema(
     }
 )
 
+GET_INTERNET_QUALITY_REPORT_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
+        vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_LIMIT, default=1): cv.positive_int,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
 GET_TIME_USAGE_REPORT_SCHEMA = vol.Schema(
     {
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND): vol.In(
@@ -554,6 +567,28 @@ def _serialize_speed_test_result(
         "vendor": speed_test_result.vendor,
         "wan_uuid": speed_test_result.wan_uuid,
         "wan_name": speed_test_result.wan_name,
+    }
+
+
+def _serialize_internet_quality_sample(
+    sample: FirewallaInternetQualitySample,
+) -> JsonObjectType:
+    """Serialize one shaped internet-quality sample for service responses."""
+    return {
+        "sampled_at": (
+            datetime.fromtimestamp(sample.timestamp, UTC).isoformat()
+            if sample.timestamp is not None
+            else None
+        ),
+        "sampled_at_timestamp": sample.timestamp,
+        "ping_target": sample.target,
+        "ping_latency_ms": sample.ping_latency_ms,
+        "ping_latency_max_ms": sample.ping_latency_max_ms,
+        "ping_latency_median_ms": sample.ping_latency_median_ms,
+        "ping_latency_min_ms": sample.ping_latency_min_ms,
+        "ping_packet_loss_percent": sample.ping_packet_loss_percent,
+        "wan_uuid": sample.wan_uuid,
+        "wan_name": sample.wan_name,
     }
 
 
@@ -3514,6 +3549,45 @@ async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectT
     }
 
 
+async def _async_handle_get_internet_quality_report(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Return shaped internet-quality samples from the manager cache."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    wan = _resolve_requested_wan(
+        entry,
+        wan_uuid=call.data.get(SERVICE_FIELD_WAN_UUID),
+        wan_name=call.data.get(SERVICE_FIELD_WAN_NAME),
+        required=False,
+    )
+
+    samples = entry.runtime_data.integration_manager.get_internet_quality_samples(
+        wan_uuid=wan.uuid if wan is not None else None,
+        limit=cast(int, call.data[SERVICE_FIELD_LIMIT]),
+    )
+    serialized_samples: list[JsonValueType] = [
+        _serialize_internet_quality_sample(sample) for sample in samples
+    ]
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "wan": _serialize_wan_interface(wan) if wan is not None else None,
+        "count": len(serialized_samples),
+        "latest": serialized_samples[0] if serialized_samples else None,
+        "samples": serialized_samples,
+    }
+
+
 def _resolve_report_time_zone(
     hass: HomeAssistant,
     entry: FirewallaConfigEntry,
@@ -4250,6 +4324,12 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_GET_SPEED_TEST_RESULTS,
         _async_handle_get_speed_test_results,
         GET_SPEED_TEST_RESULTS_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_GET_INTERNET_QUALITY_REPORT,
+        _async_handle_get_internet_quality_report,
+        GET_INTERNET_QUALITY_REPORT_SCHEMA,
         SupportsResponse.ONLY,
     ),
     (

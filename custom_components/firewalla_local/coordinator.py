@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -253,7 +254,11 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
 
         if self.integration_manager is not None:
             self.integration_manager.handle_refresh(snapshot)
-            await self.integration_manager.async_refresh_network_usage()
+            await asyncio.gather(
+                self.integration_manager.async_refresh_network_usage(),
+                self.integration_manager.async_refresh_internet_quality(),
+                return_exceptions=True,
+            )
         if self.host_manager is not None:
             self.host_manager.handle_refresh(snapshot)
         if self.user_manager is not None:

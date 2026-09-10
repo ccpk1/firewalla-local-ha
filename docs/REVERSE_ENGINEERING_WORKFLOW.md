@@ -787,6 +787,7 @@ The following are confirmed by repository code and live captures.
 | Internet block | `policy:create` when absent | `policy:update` with `disabled: 1` or `policy:delete` | `policy:update` with `disabled: 0` | Example: `Traffic from & to Internet` for `AV_SMART_TV` |
 | Direct DNS allow, device-scoped | existing rule observed only | `policy:update` with `disabled: 1` and `idleTs` for timed pause | inventory confirms same-rule re-enable with cleared `idleTs`; payload not captured in this run | Example: `allow dns dns.google` for Kaden's Chromebook |
 | AP7 wireless SSID pause | read via `networkConfig.apc.profile.<uuid>.paused` | `set` with `item: networkConfig`, full `networkConfig` in `value.config`, `ts` + `COMMAND_TIMEOUT`/`LAN_ONLY` (confirmed 2026-09-03) | `set` with `paused` absent to resume | Example: pause/resume "Universe Guest" on VLAN 100 |
+| Internet quality (ping latency/loss) | `get` with `item: networkMonitorData`, `value: {}` (confirmed 2026-09-10) | read-only | read-only | Per-WAN 15-min samples; `stat {lossrate, max, mean, median, min}`; loss is a fraction, latency in ms; ~24h history in one call |
 
 ## Unified Network model
 
@@ -1733,6 +1734,13 @@ Implementation note:
 
 ## Next capture targets
 
+### Internet quality (ping latency / packet loss)
+
+**Resolved (2026-09-10):** The read contract is confirmed from a live pull. See
+Finding 25 for the exact `get`/`networkMonitorData` shape and value granularity.
+No further capture is required for the per-WAN ping latency and packet-loss
+sensors or the interval report.
+
 ### Direct DNS rules
 
 The next protocol family to confirm is direct DNS rules.
@@ -1940,6 +1948,54 @@ LED) and for per-client wireless connection attributes (`rssi`, `band`,
 `ssid`, `parent_port`). The integration already requests these ops during
 pairing/init (`api/client.py`), but the returned data is not yet parsed into
 the normalized model.
+
+### Finding 25: Internet quality is a `networkMonitorData` read with per-WAN ping samples
+
+**Scenario:**
+
+- Confirmed via a live pull (`utils/probe_internet_quality.py`) on the connected
+  dev box (2026-09-10) using the stored HA config-entry credentials.
+- The app's per-WAN **Internet Quality** view (ping latency and packet loss)
+  maps to a single `mtype=get, item=networkMonitorData` read.
+
+**Confirmed read contract:**
+
+```
+mtype: get
+target: 0.0.0.0
+data:
+  item: networkMonitorData
+  value: {}
+```
+
+**Confirmed response shape:**
+
+- Top-level dict keyed by `metric:monitor:raw:ping:<target>:<wan_uuid>` — one
+  key per WAN+target, so a **single call returns all WANs** (no per-WAN fan-out).
+- Each value is a dict of **epoch-second buckets** (15-minute cadence) whose
+  `stat` holds:
+  - `lossrate` — a **fraction** (0 = 0%, `0.0017` = 0.17%, `0.165` = 16.5%);
+    multiply by 100 for a percentage.
+  - `max`, `mean`, `median`, `min` — latency in **milliseconds**.
+- Returns roughly **24 hours of history** (98 samples in the probe), so a single
+  call serves both the latest-sample sensors and an interval report.
+
+**`events` ping feed (alerting, not sampling):**
+
+- `mtype=get, item=events` filtered to `ping_RTT` / `ping_lossrate` returns
+  **threshold-crossing alerts** (only fire when loss/RTT exceeds the limit),
+  not a continuous sample stream. It is **not** the sensor source.
+
+**Value granularity notes:**
+
+- The app's hourly drill-down shows the **worst (max) sub-bucket**, not the
+  average. The integration surfaces raw 15-minute samples and does **not**
+  reproduce that hourly roll-up.
+
+**Artifacts:**
+
+- `.tmp/quality_networkMonitorData.json`
+- `.tmp/quality_events.json`
 
 ## Additional host-settings findings
 

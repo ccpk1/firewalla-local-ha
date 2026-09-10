@@ -656,6 +656,88 @@
           }
         }
       },
+      "wan_internet_quality_latency": {
+        "name": "{wan_name} Ping latency",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_internet_quality": "Shows the latest internet-quality ping latency for this WAN reported by the Firewalla box"
+            }
+          },
+          "ping_target": {
+            "name": "Ping target"
+          },
+          "sampled_at": {
+            "name": "Sampled at"
+          },
+          "ping_latency": {
+            "name": "Ping latency (ms)"
+          },
+          "ping_latency_max": {
+            "name": "Ping latency max (ms)"
+          },
+          "ping_latency_median": {
+            "name": "Ping latency median (ms)"
+          },
+          "ping_latency_min": {
+            "name": "Ping latency min (ms)"
+          },
+          "ping_packet_loss": {
+            "name": "Ping packet loss"
+          },
+          "wan_name": {
+            "name": "WAN name"
+          },
+          "wan_uuid": {
+            "name": "WAN UUID"
+          }
+        }
+      },
+      "wan_internet_quality_packet_loss": {
+        "name": "{wan_name} Ping packet loss",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_internet_quality": "Shows the latest internet-quality ping packet loss for this WAN reported by the Firewalla box"
+            }
+          },
+          "ping_target": {
+            "name": "Ping target"
+          },
+          "sampled_at": {
+            "name": "Sampled at"
+          },
+          "ping_latency": {
+            "name": "Ping latency (ms)"
+          },
+          "ping_latency_max": {
+            "name": "Ping latency max (ms)"
+          },
+          "ping_latency_median": {
+            "name": "Ping latency median (ms)"
+          },
+          "ping_latency_min": {
+            "name": "Ping latency min (ms)"
+          },
+          "ping_packet_loss": {
+            "name": "Ping packet loss"
+          },
+          "wan_name": {
+            "name": "WAN name"
+          },
+          "wan_uuid": {
+            "name": "WAN UUID"
+          }
+        }
+      },
       "watched_user_today_usage": {
         "name": "{user_name} Usage",
         "state_attributes": {
@@ -1188,6 +1270,36 @@
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading results."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_internet_quality_report": {
+      "name": "Get internet quality report",
+      "description": "Return normalized Firewalla internet-quality samples (ping latency and packet loss) from the manager cache.",
+      "fields": {
+        "wan_uuid": {
+          "name": "WAN UUID (Optional)",
+          "description": "Filter samples to one WAN UUID."
+        },
+        "wan_name": {
+          "name": "WAN name (Optional)",
+          "description": "Filter samples to one WAN display name."
+        },
+        "limit": {
+          "name": "Sample limit",
+          "description": "Optional. Defaults to 1 so the service can easily return only the most recent sample."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before reading samples."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

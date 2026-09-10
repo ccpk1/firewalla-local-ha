@@ -21,6 +21,7 @@ from custom_components.firewalla_local.models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaHostVpnClient,
+    FirewallaInternetQualitySample,
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     FirewallaSpeedTestRecord,
@@ -2096,3 +2097,124 @@ async def test_get_network_interface_payload_sends_targeted_get_request() -> Non
         "data": {"item": "intf"},
         "target": "5799d896-5e0f-40a5-a776-38a5d7746204",
     }
+
+
+@pytest.mark.asyncio
+async def test_get_internet_quality_payload_sends_get_request() -> None:
+    """Test networkMonitorData pulls use the confirmed get shape."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={}),
+        ) as mock_send:
+            await client.async_get_internet_quality_payload()
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {"item": "networkMonitorData", "value": {}},
+        "target": "0.0.0.0",
+    }
+
+
+def test_extract_internet_quality_samples_parses_buckets() -> None:
+    """Test extraction parses the metric key and stat buckets."""
+    client = FirewallaApiClient(
+        session=None,  # type: ignore[arg-type]
+        host="192.168.200.1",
+        gid="gid-123",
+        eid="eid-123",
+        aid="aid-123",
+        symmetric_key=TEST_SYMMETRIC_KEY,
+        device_name="Home Assistant",
+    )
+    samples = client._extract_internet_quality_samples(
+        {
+            "metric:monitor:raw:ping:1.1.1.1:8d5a7f20-2923-49a3-8e2b-338f9428a632": {
+                "1788961500": {
+                    "stat": {
+                        "lossrate": 0,
+                        "max": 73.7,
+                        "mean": 22.2,
+                        "median": 21,
+                        "min": 19.2,
+                    }
+                },
+                "1788962400": {
+                    "stat": {
+                        "lossrate": 0.0017,
+                        "max": 45,
+                        "mean": 21.4,
+                        "median": 20.4,
+                        "min": 19.2,
+                    }
+                },
+            }
+        }
+    )
+
+    assert samples == (
+        FirewallaInternetQualitySample(
+            timestamp=1788961500.0,
+            target="1.1.1.1",
+            ping_latency_ms=22.2,
+            ping_latency_max_ms=73.7,
+            ping_latency_median_ms=21,
+            ping_latency_min_ms=19.2,
+            ping_packet_loss_percent=0.0,
+            wan_uuid="8d5a7f20-2923-49a3-8e2b-338f9428a632",
+        ),
+        FirewallaInternetQualitySample(
+            timestamp=1788962400.0,
+            target="1.1.1.1",
+            ping_latency_ms=21.4,
+            ping_latency_max_ms=45,
+            ping_latency_median_ms=20.4,
+            ping_latency_min_ms=19.2,
+            ping_packet_loss_percent=0.17,
+            wan_uuid="8d5a7f20-2923-49a3-8e2b-338f9428a632",
+        ),
+    )
+
+
+def test_extract_internet_quality_samples_skips_invalid_keys() -> None:
+    """Test extraction ignores non-metric keys and malformed buckets."""
+    client = FirewallaApiClient(
+        session=None,  # type: ignore[arg-type]
+        host="192.168.200.1",
+        gid="gid-123",
+        eid="eid-123",
+        aid="aid-123",
+        symmetric_key=TEST_SYMMETRIC_KEY,
+        device_name="Home Assistant",
+    )
+    samples = client._extract_internet_quality_samples(
+        {
+            "unrelated": {"1788961500": {"stat": {"mean": 1}}},
+            "metric:monitor:raw:ping:1.1.1.1:wan-1": {
+                "1788961500": {"stat": {"mean": 22.2, "lossrate": 0}},
+                "not-a-number": {"stat": {"mean": 1, "lossrate": 0}},
+                "1788962400": "not-a-dict",
+            },
+        }
+    )
+
+    assert samples == (
+        FirewallaInternetQualitySample(
+            timestamp=1788961500.0,
+            target="1.1.1.1",
+            ping_latency_ms=22.2,
+            ping_packet_loss_percent=0.0,
+            wan_uuid="wan-1",
+        ),
+    )

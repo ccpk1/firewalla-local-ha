@@ -7,11 +7,15 @@ get_runtime_inventory:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_host_name_mapping:
   name: Get host name mapping
@@ -29,11 +33,15 @@ get_host_name_mapping:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_network_segment_report:
   name: Get network segment report
@@ -65,11 +73,15 @@ get_network_segment_report:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_network_segment_usage:
   name: Get network segment usage
@@ -138,11 +150,15 @@ get_network_segment_usage:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 run_internet_speed_test:
   name: Run internet speed test
@@ -167,11 +183,15 @@ run_internet_speed_test:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 wake_host:
   name: Wake host
@@ -210,11 +230,15 @@ wake_host:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 delete_host:
   name: Delete host
@@ -246,11 +270,15 @@ delete_host:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 set_host_name:
   name: Set host name
@@ -296,11 +324,15 @@ set_host_name:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 set_host_dns_hostname:
   name: Set host DNS hostname
@@ -346,11 +378,15 @@ set_host_dns_hostname:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 set_host_device_type:
   name: Set host device type
@@ -447,11 +483,15 @@ set_host_device_type:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 set_host_notify_when_next_online:
   name: Set host notify when next online
@@ -497,11 +537,15 @@ set_host_notify_when_next_online:
       example: "0123456789abcdef"
       selector:
         text: {}
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text: {}
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 set_host_notify_when_next_offline:
   name: Set host notify when next offline
@@ -547,11 +591,15 @@ set_host_notify_when_next_offline:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 set_host_dhcp_reservation:
   name: Set host DHCP reservation
@@ -623,11 +671,15 @@ set_host_dhcp_reservation:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_speed_test_results:
   name: Get speed test results
@@ -669,11 +721,69 @@ get_speed_test_results:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
+
+get_internet_quality_report:
+  name: Get internet quality report
+  description: Return normalized Firewalla internet-quality samples (ping latency and packet loss) from the manager cache.
+  fields:
+    wan_uuid:
+      required: false
+      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      selector:
+        text:
+      name: WAN UUID
+      description: Optional. Filter samples to one WAN UUID.
+    wan_name:
+      required: false
+      example: "WAN-ONE"
+      selector:
+        text:
+      name: WAN name
+      description: Optional. Filter samples to one WAN display name.
+    limit:
+      required: false
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+      name: Sample limit
+      description: Optional. Defaults to 1 so the service can easily return only the most recent sample.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before reading samples.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_time_usage_report:
   name: Get time usage report
@@ -773,11 +883,15 @@ get_time_usage_report:
       example: "0123456789abcdef"
       selector:
         text: {}
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text: {}
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_wan_data_usage:
   name: Get WAN data usage
@@ -872,11 +986,15 @@ get_wan_data_usage:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_wan_events:
   name: Get WAN events
@@ -921,11 +1039,15 @@ get_wan_events:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 pause_rule:
   name: Pause rule
@@ -952,6 +1074,20 @@ pause_rule:
         datetime:
       name: Resume at
       description: Optional. Local date and time when the rule should resume.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 resume_rule:
   name: Resume rule
@@ -964,6 +1100,20 @@ resume_rule:
         text:
       name: Rule target
       description: Use the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 set_ssid_paused:
   name: Set SSID paused
@@ -988,11 +1138,15 @@ set_ssid_paused:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_wireless_status:
   name: Get wireless status
@@ -1003,8 +1157,12 @@ get_wireless_status:
       example: "0123456789abcdef"
       selector:
         text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.

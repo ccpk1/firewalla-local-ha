@@ -13,6 +13,15 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.const import (
     ATTR_INTEGRATION,
+    ATTR_INTERNET_QUALITY_PING_LATENCY,
+    ATTR_INTERNET_QUALITY_PING_LATENCY_MAX,
+    ATTR_INTERNET_QUALITY_PING_LATENCY_MEDIAN,
+    ATTR_INTERNET_QUALITY_PING_LATENCY_MIN,
+    ATTR_INTERNET_QUALITY_PING_PACKET_LOSS,
+    ATTR_INTERNET_QUALITY_PING_TARGET,
+    ATTR_INTERNET_QUALITY_SAMPLED_AT,
+    ATTR_INTERNET_QUALITY_WAN_NAME,
+    ATTR_INTERNET_QUALITY_WAN_UUID,
     ATTR_PURPOSE,
     ATTR_SPEED_TEST_DOWNLOAD_MBYTES,
     ATTR_SPEED_TEST_ISP,
@@ -67,6 +76,7 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     CONF_WATCHED_USERS,
     DOMAIN,
+    TRANS_KEY_PURPOSE_INTERNET_QUALITY,
     TRANS_KEY_PURPOSE_SPEED_TEST,
     TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS,
     TRANS_KEY_PURPOSE_WATCHED_USER_USAGE,
@@ -471,6 +481,119 @@ async def test_sensor_setup_exposes_system_status_and_wan_speed_test_entities(
         "latest_speed_test_download" not in entry.unique_id
         for entry in speed_test_entries
     )
+
+
+async def test_sensor_setup_exposes_wan_internet_quality_entities(
+    hass: HomeAssistant,
+) -> None:
+    """Test the sensor platform exposes WAN-scoped internet-quality entities."""
+    refresh_timestamp = datetime(2026, 4, 2, 12, 0, tzinfo=UTC)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.coordinator.dt_util.utcnow",
+            return_value=refresh_timestamp,
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_monitoring(with_speed_test=True),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_internet_quality_payload",
+            new=AsyncMock(
+                return_value={
+                    "metric:monitor:raw:ping:1.1.1.1:wan-1": {
+                        "1774293094": {
+                            "stat": {
+                                "lossrate": 0.0017,
+                                "max": 73.7,
+                                "mean": 22.2,
+                                "median": 21,
+                                "min": 19.2,
+                            }
+                        }
+                    },
+                    "metric:monitor:raw:ping:1.1.1.1:wan-2": {
+                        "1774293000": {
+                            "stat": {
+                                "lossrate": 0,
+                                "max": 45,
+                                "mean": 18.75,
+                                "median": 18,
+                                "min": 15,
+                            }
+                        }
+                    },
+                }
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await entry.runtime_data.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    latency_state = _state_for_unique_suffix(
+        hass, "sensor", "_internet_quality_ping_latency_wan-1_sensor"
+    )
+    loss_state = _state_for_unique_suffix(
+        hass, "sensor", "_internet_quality_ping_packet_loss_wan-1_sensor"
+    )
+    secondary_latency_state = _state_for_unique_suffix(
+        hass, "sensor", "_internet_quality_ping_latency_wan-2_sensor"
+    )
+
+    assert latency_state.name == "Firewalla WAN-ONE Ping latency"
+    assert float(latency_state.state) == pytest.approx(22.2)
+    assert latency_state.attributes[ATTR_PURPOSE] == TRANS_KEY_PURPOSE_INTERNET_QUALITY
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_PING_TARGET] == "1.1.1.1"
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_PING_LATENCY] == 22.2
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_PING_LATENCY_MAX] == 73.7
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_PING_LATENCY_MEDIAN] == 21
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_PING_LATENCY_MIN] == 19.2
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_PING_PACKET_LOSS] == 0.17
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_WAN_NAME] == "WAN-ONE"
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_WAN_UUID] == "wan-1"
+    assert latency_state.attributes[ATTR_INTERNET_QUALITY_SAMPLED_AT] == (
+        datetime.fromtimestamp(1774293094, UTC).isoformat()
+    )
+
+    assert loss_state.name == "Firewalla WAN-ONE Ping packet loss"
+    assert float(loss_state.state) == pytest.approx(0.17)
+    assert loss_state.attributes[ATTR_INTERNET_QUALITY_WAN_UUID] == "wan-1"
+
+    assert secondary_latency_state.name == "Firewalla WAN-TWO Ping latency"
+    assert float(secondary_latency_state.state) == pytest.approx(18.75)
+    assert (
+        secondary_latency_state.attributes[ATTR_INTERNET_QUALITY_WAN_NAME] == "WAN-TWO"
+    )
+
+    quality_entries = [
+        entry
+        for entry in registry.entities.values()
+        if entry.domain == "sensor" and "_internet_quality_" in entry.unique_id
+    ]
+    assert len(quality_entries) == 4
 
 
 async def test_sensor_setup_handles_missing_wan_speed_test_history(
