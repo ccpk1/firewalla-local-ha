@@ -65,6 +65,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
     SERVICE_GET_HOST_NAME_MAPPING,
+    SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_SPEED_TEST_RESULTS,
@@ -2022,6 +2023,164 @@ async def test_get_speed_test_results_service_filters_one_wan_without_refresh(
         )
 
     assert mock_get_runtime.await_count == 1
+    assert response is not None
+    assert response["refreshed"] is False
+    assert response["wan"] == {"uuid": "wan-2", "name": "WAN-TWO"}
+    assert response["count"] == 1
+    assert response["latest"]["wan_uuid"] == "wan-2"
+
+
+async def test_get_internet_quality_report_service_returns_latest_sample(
+    hass: HomeAssistant,
+) -> None:
+    """Test the internet-quality report service returns the latest sample."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_internet_quality_payload",
+            new=AsyncMock(
+                return_value={
+                    "metric:monitor:raw:ping:1.1.1.1:wan-1": {
+                        "1774293094": {
+                            "stat": {
+                                "lossrate": 0.0017,
+                                "max": 73.7,
+                                "mean": 22.2,
+                                "median": 21,
+                                "min": 19.2,
+                            }
+                        }
+                    }
+                }
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_INTERNET_QUALITY_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["config_entry_id"] == entry.entry_id
+    assert response["refreshed"] is True
+    assert response["count"] == 1
+    assert response["wan"] is None
+    assert response["latest"] is not None
+    assert response["latest"]["wan_uuid"] == "wan-1"
+    assert response["latest"]["wan_name"] == "WAN-ONE"
+    assert response["latest"]["ping_target"] == "1.1.1.1"
+    assert response["latest"]["ping_latency_ms"] == 22.2
+    assert response["latest"]["ping_latency_max_ms"] == 73.7
+    assert response["latest"]["ping_latency_median_ms"] == 21
+    assert response["latest"]["ping_latency_min_ms"] == 19.2
+    assert response["latest"]["ping_packet_loss_percent"] == 0.17
+    assert response["samples"] == [response["latest"]]
+
+
+async def test_get_internet_quality_report_service_filters_one_wan(
+    hass: HomeAssistant,
+) -> None:
+    """Test the internet-quality report service can filter one WAN."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_internet_quality_payload",
+            new=AsyncMock(
+                return_value={
+                    "metric:monitor:raw:ping:1.1.1.1:wan-1": {
+                        "1774293094": {
+                            "stat": {
+                                "lossrate": 0.0017,
+                                "max": 73.7,
+                                "mean": 22.2,
+                                "median": 21,
+                                "min": 19.2,
+                            }
+                        }
+                    },
+                    "metric:monitor:raw:ping:1.1.1.1:wan-2": {
+                        "1774293000": {
+                            "stat": {
+                                "lossrate": 0,
+                                "max": 45,
+                                "mean": 18.75,
+                                "median": 18,
+                                "min": 15,
+                            }
+                        }
+                    },
+                }
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_INTERNET_QUALITY_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_WAN_UUID: "wan-2",
+                SERVICE_FIELD_LIMIT: 2,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
     assert response is not None
     assert response["refreshed"] is False
     assert response["wan"] == {"uuid": "wan-2", "name": "WAN-TWO"}

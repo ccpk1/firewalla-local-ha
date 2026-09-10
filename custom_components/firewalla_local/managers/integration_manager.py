@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
+from ..api.exceptions import FirewallaApiError
 from ..const import (
     CONF_LICENSE,
     DOMAIN,
@@ -32,6 +33,7 @@ from ..models import (
     FirewallaDiskUsageInput,
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
+    FirewallaInternetQualitySample,
     FirewallaNetwork,
     FirewallaNetworkHostRanking,
     FirewallaNetworkHostTotals,
@@ -157,6 +159,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self._system_status: FirewallaSystemStatus | None = None
         self._latest_speed_test: FirewallaSpeedTestResult | None = None
         self._network_usage_by_uuid: dict[str, FirewallaNetworkUsageSummary] = {}
+        self._internet_quality_samples: tuple[FirewallaInternetQualitySample, ...] = ()
 
     def handle_refresh(self, snapshot: FirewallaRuntimeSnapshot) -> None:
         """Shape manager-owned appliance views from one refresh snapshot."""
@@ -232,6 +235,19 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         return self._build_speed_test_results(
             self.coordinator.data.speed_test_results,
+            wan_uuid=wan_uuid,
+            limit=limit,
+        )
+
+    def get_internet_quality_samples(
+        self,
+        *,
+        wan_uuid: str | None = None,
+        limit: int | None = None,
+    ) -> tuple[FirewallaInternetQualitySample, ...]:
+        """Return shaped internet-quality samples from the manager cache."""
+        return self._build_internet_quality_samples(
+            self._internet_quality_samples,
             wan_uuid=wan_uuid,
             limit=limit,
         )
@@ -539,6 +555,52 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             last_30d=_extract_usage_window(raw_payload.get("last30")),
             last_12m=_extract_usage_window(raw_payload.get("last12Months")),
         )
+
+    async def async_refresh_internet_quality(self) -> None:
+        """Refresh the cached internet-quality samples for all WANs.
+
+        A single ``networkMonitorData`` call returns samples for every WAN, so
+        no per-WAN fan-out is needed. A failing fetch keeps the previous cache.
+        """
+        if not self.get_available_wans():
+            return
+        try:
+            raw_payload = await self.client.async_get_internet_quality_payload()
+        except FirewallaApiError:
+            return
+        self._internet_quality_samples = self.client._extract_internet_quality_samples(
+            raw_payload
+        )
+
+    def _build_internet_quality_samples(
+        self,
+        samples: tuple[FirewallaInternetQualitySample, ...],
+        *,
+        wan_uuid: str | None = None,
+        limit: int | None = None,
+    ) -> tuple[FirewallaInternetQualitySample, ...]:
+        """Shape protocol-facing samples into a stable, filtered result list."""
+        wan_name_by_uuid = {wan.uuid: wan.name for wan in self.get_available_wans()}
+        shaped = [
+            replace(
+                sample,
+                wan_name=(
+                    wan_name_by_uuid.get(sample.wan_uuid, sample.wan_uuid)
+                    if sample.wan_uuid is not None
+                    else None
+                ),
+            )
+            for sample in samples
+            if sample.timestamp is not None
+            and (wan_uuid is None or sample.wan_uuid == wan_uuid)
+        ]
+        shaped.sort(
+            key=lambda sample: sample.timestamp if sample.timestamp is not None else 0,
+            reverse=True,
+        )
+        if limit is not None:
+            shaped = shaped[:limit]
+        return tuple(shaped)
 
     def _with_usage(self, network: FirewallaNetwork) -> FirewallaNetwork:
         """Return the network with its cached usage summary attached.

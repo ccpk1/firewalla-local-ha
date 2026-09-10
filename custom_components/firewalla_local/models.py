@@ -367,6 +367,21 @@ class FirewallaSpeedTestRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaInternetQualitySample:
+    """Protocol-facing internet-quality sample extracted from one payload bucket."""
+
+    timestamp: float | None
+    target: str | None
+    ping_latency_ms: float | None
+    ping_latency_max_ms: float | None = None
+    ping_latency_median_ms: float | None = None
+    ping_latency_min_ms: float | None = None
+    ping_packet_loss_percent: float | None = None
+    wan_uuid: str | None = None
+    wan_name: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaWanInterface:
     """Normalized WAN interface metadata available in the runtime payload."""
 

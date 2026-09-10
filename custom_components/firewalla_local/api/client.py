@@ -28,6 +28,7 @@ from ..models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaHostVpnClient,
+    FirewallaInternetQualitySample,
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
@@ -208,6 +209,15 @@ _RAW_SPEED_TEST_SERVER_SPONSOR_KEY: Final = "sponsor"
 _RAW_APP_TIME_USAGE_KEY: Final = "appTimeUsage"
 _RAW_MONTHLY_WAN_USAGE_KEY: Final = "monthlyDataUsageOnWans"
 _RAW_LAST12_WAN_USAGE_KEY: Final = "last12monthlyDataUsageOnWans"
+
+_RAW_INTERNET_QUALITY_ITEM_KEY: Final = "networkMonitorData"
+_RAW_INTERNET_QUALITY_METRIC_PREFIX: Final = "metric:monitor:raw:ping:"
+_RAW_INTERNET_QUALITY_STAT_KEY: Final = "stat"
+_RAW_INTERNET_QUALITY_LOSS_KEY: Final = "lossrate"
+_RAW_INTERNET_QUALITY_MEAN_KEY: Final = "mean"
+_RAW_INTERNET_QUALITY_MAX_KEY: Final = "max"
+_RAW_INTERNET_QUALITY_MEDIAN_KEY: Final = "median"
+_RAW_INTERNET_QUALITY_MIN_KEY: Final = "min"
 
 _RAW_TAG_PREFIX_GROUP: Final = "tag"
 _RAW_TAG_PREFIX_DEVICE: Final = "dtag"
@@ -930,6 +940,24 @@ class FirewallaApiClient:
 
         return data_payload
 
+    async def async_get_internet_quality_payload(self) -> dict[str, object]:
+        """Fetch the internet-quality payload for all WANs from the local runtime."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _RAW_INTERNET_QUALITY_ITEM_KEY,
+                _COMMAND_VALUE_KEY: {},
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                "Firewalla local runtime payload did not include a "
+                "networkMonitorData object"
+            )
+
+        return data_payload
+
     def _extract_appliance_identity(
         self, data: dict[str, object]
     ) -> FirewallaApplianceIdentityInput:
@@ -1239,6 +1267,77 @@ class FirewallaApiClient:
             )
 
         return tuple(records)
+
+    def _extract_internet_quality_samples(
+        self, data: dict[str, object]
+    ) -> tuple[FirewallaInternetQualitySample, ...]:
+        """Extract protocol-facing internet-quality samples from the payload.
+
+        The payload is keyed by ``metric:monitor:raw:ping:<target>:<wan_uuid>``
+        with each value a dict of epoch-second buckets whose ``stat`` holds
+        ``lossrate`` (a fraction) and latency fields in milliseconds.
+        """
+        if not isinstance(data, dict):
+            return ()
+
+        samples: list[FirewallaInternetQualitySample] = []
+        for raw_key, raw_buckets in data.items():
+            if not isinstance(raw_key, str) or not raw_key.startswith(
+                _RAW_INTERNET_QUALITY_METRIC_PREFIX
+            ):
+                continue
+            if not isinstance(raw_buckets, dict):
+                continue
+
+            key_parts = raw_key.split(":")
+            if len(key_parts) < 2:
+                continue
+            target = key_parts[-2]
+            wan_uuid = key_parts[-1]
+
+            for raw_timestamp, raw_bucket in raw_buckets.items():
+                if not isinstance(raw_bucket, dict):
+                    continue
+                raw_stat = raw_bucket.get(_RAW_INTERNET_QUALITY_STAT_KEY)
+                if not isinstance(raw_stat, dict):
+                    continue
+
+                timestamp = self._coerce_float(raw_timestamp)
+                if timestamp is None:
+                    continue
+
+                lossrate = self._coerce_float(
+                    raw_stat.get(_RAW_INTERNET_QUALITY_LOSS_KEY)
+                )
+                mean_latency = self._coerce_float(
+                    raw_stat.get(_RAW_INTERNET_QUALITY_MEAN_KEY)
+                )
+                max_latency = self._coerce_float(
+                    raw_stat.get(_RAW_INTERNET_QUALITY_MAX_KEY)
+                )
+                median_latency = self._coerce_float(
+                    raw_stat.get(_RAW_INTERNET_QUALITY_MEDIAN_KEY)
+                )
+                min_latency = self._coerce_float(
+                    raw_stat.get(_RAW_INTERNET_QUALITY_MIN_KEY)
+                )
+
+                samples.append(
+                    FirewallaInternetQualitySample(
+                        timestamp=timestamp,
+                        target=target if target else None,
+                        ping_latency_ms=mean_latency,
+                        ping_latency_max_ms=max_latency,
+                        ping_latency_median_ms=median_latency,
+                        ping_latency_min_ms=min_latency,
+                        ping_packet_loss_percent=(
+                            round(lossrate * 100, 2) if lossrate is not None else None
+                        ),
+                        wan_uuid=wan_uuid if wan_uuid else None,
+                    )
+                )
+
+        return tuple(samples)
 
     def _build_category_lookup(self, data: dict[str, object]) -> dict[str, str]:
         """Build a lookup of category identifiers to human-readable names."""

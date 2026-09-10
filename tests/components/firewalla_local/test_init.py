@@ -45,6 +45,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_GET_HOST_NAME_MAPPING,
+    SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_RUNTIME_INVENTORY,
@@ -1178,6 +1179,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
     ) == sorted(
         [
             (DOMAIN, SERVICE_GET_HOST_NAME_MAPPING),
+            (DOMAIN, SERVICE_GET_INTERNET_QUALITY_REPORT),
             (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT),
             (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE),
             (DOMAIN, SERVICE_GET_RUNTIME_INVENTORY),
@@ -1202,6 +1204,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
         SERVICE_GET_HOST_NAME_MAPPING,
+        SERVICE_GET_INTERNET_QUALITY_REPORT,
         SERVICE_GET_NETWORK_SEGMENT_REPORT,
         SERVICE_GET_NETWORK_SEGMENT_USAGE,
         SERVICE_GET_RUNTIME_INVENTORY,

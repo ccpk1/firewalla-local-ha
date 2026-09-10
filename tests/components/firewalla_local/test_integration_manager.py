@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.firewalla_local.api.client import FirewallaApiClient
+from custom_components.firewalla_local.api.exceptions import FirewallaConnectionError
 from custom_components.firewalla_local.const import CONF_LICENSE, DOMAIN
 from custom_components.firewalla_local.managers.host_manager import (
     FirewallaHostManager,
@@ -20,6 +22,7 @@ from custom_components.firewalla_local.models import (
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
     FirewallaHostRuntime,
+    FirewallaInternetQualitySample,
     FirewallaNetworkKind,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
@@ -365,6 +368,171 @@ def test_get_speed_test_results_reuses_shaped_speed_test_path() -> None:
     assert results[0].wan_name == "WAN-TWO"
     assert len(wan_filtered_results) == 1
     assert wan_filtered_results[0].wan_uuid == "wan-1"
+
+
+def test_get_internet_quality_samples_filters_sorts_and_limits() -> None:
+    """Test quality samples are filtered by WAN, sorted newest-first, and limited."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager._internet_quality_samples = (
+        FirewallaInternetQualitySample(
+            timestamp=1000,
+            target="1.1.1.1",
+            ping_latency_ms=22.2,
+            ping_packet_loss_percent=0.0,
+            wan_uuid="wan-1",
+        ),
+        FirewallaInternetQualitySample(
+            timestamp=2000,
+            target="1.1.1.1",
+            ping_latency_ms=21.4,
+            ping_packet_loss_percent=0.17,
+            wan_uuid="wan-2",
+        ),
+        FirewallaInternetQualitySample(
+            timestamp=3000,
+            target="1.1.1.1",
+            ping_latency_ms=20.0,
+            ping_packet_loss_percent=0.0,
+            wan_uuid="wan-1",
+        ),
+    )
+
+    results = manager.get_internet_quality_samples(limit=2)
+    wan_filtered_results = manager.get_internet_quality_samples(
+        wan_uuid="wan-1", limit=2
+    )
+
+    assert [sample.timestamp for sample in results] == [3000, 2000]
+    assert results[0].wan_name == "WAN-ONE"
+    assert [sample.timestamp for sample in wan_filtered_results] == [3000, 1000]
+    assert wan_filtered_results[0].wan_uuid == "wan-1"
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_internet_quality_caches_samples() -> None:
+    """Test the quality refresh fetches once and caches the extracted samples."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "wan-1",
+                        }
+                    }
+                }
+            }
+        }
+    }
+    raw_payload = {
+        "metric:monitor:raw:ping:1.1.1.1:wan-1": {
+            "1788961500": {
+                "stat": {
+                    "lossrate": 0,
+                    "max": 73.7,
+                    "mean": 22.2,
+                    "median": 21,
+                    "min": 19.2,
+                }
+            }
+        }
+    }
+    manager.client.async_get_internet_quality_payload = AsyncMock(
+        return_value=raw_payload
+    )
+    manager.client._extract_internet_quality_samples = MethodType(
+        FirewallaApiClient._extract_internet_quality_samples, manager.client
+    )
+    manager.client._coerce_float = MethodType(
+        FirewallaApiClient._coerce_float, manager.client
+    )
+
+    await manager.async_refresh_internet_quality()
+
+    samples = manager.get_internet_quality_samples()
+    assert len(samples) == 1
+    assert samples[0].wan_uuid == "wan-1"
+    assert samples[0].ping_latency_ms == 22.2
+    assert samples[0].ping_packet_loss_percent == 0.0
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_internet_quality_keeps_cache_on_failure() -> None:
+    """Test a failing quality fetch keeps the previous cached samples."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "wan-1",
+                        }
+                    }
+                }
+            }
+        }
+    }
+    manager._internet_quality_samples = (
+        FirewallaInternetQualitySample(
+            timestamp=1000,
+            target="1.1.1.1",
+            ping_latency_ms=22.2,
+            ping_packet_loss_percent=0.0,
+            wan_uuid="wan-1",
+        ),
+    )
+    manager.client.async_get_internet_quality_payload = AsyncMock(
+        side_effect=FirewallaConnectionError("unavailable")
+    )
+
+    await manager.async_refresh_internet_quality()
+
+    assert len(manager.get_internet_quality_samples()) == 1
 
 
 def test_get_available_wans_ignores_speed_test_uuid_fallback() -> None:

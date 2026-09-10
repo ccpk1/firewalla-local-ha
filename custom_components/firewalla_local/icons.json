@@ -10,6 +10,12 @@
       "wan_speed_test_latency": {
         "default": "mdi:timer-outline"
       },
+      "wan_internet_quality_latency": {
+        "default": "mdi:timeline-clock-outline"
+      },
+      "wan_internet_quality_packet_loss": {
+        "default": "mdi:signal-off"
+      },
       "system_status": {
         "default": "mdi:router-network"
       }

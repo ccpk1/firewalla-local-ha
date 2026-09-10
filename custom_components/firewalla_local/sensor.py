@@ -14,6 +14,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
+    ATTR_INTERNET_QUALITY_PING_LATENCY,
+    ATTR_INTERNET_QUALITY_PING_LATENCY_MAX,
+    ATTR_INTERNET_QUALITY_PING_LATENCY_MEDIAN,
+    ATTR_INTERNET_QUALITY_PING_LATENCY_MIN,
+    ATTR_INTERNET_QUALITY_PING_PACKET_LOSS,
+    ATTR_INTERNET_QUALITY_PING_TARGET,
+    ATTR_INTERNET_QUALITY_SAMPLED_AT,
+    ATTR_INTERNET_QUALITY_WAN_NAME,
+    ATTR_INTERNET_QUALITY_WAN_UUID,
     ATTR_SPEED_TEST_DOWNLOAD_MBYTES,
     ATTR_SPEED_TEST_ISP,
     ATTR_SPEED_TEST_JITTER,
@@ -40,17 +49,24 @@ from .const import (
     ATTR_WATCHED_USER_LAST_ACTIVE,
     ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     ENTITY_SUFFIX_SENSOR,
+    TRANS_KEY_ENTITY_SENSOR_WAN_INTERNET_QUALITY_LATENCY,
+    TRANS_KEY_ENTITY_SENSOR_WAN_INTERNET_QUALITY_PACKET_LOSS,
     TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_DOWNLOAD,
     TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_LATENCY,
     TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_UPLOAD,
     TRANS_KEY_ENTITY_SENSOR_WATCHED_USER_TODAY_USAGE,
+    TRANS_KEY_PURPOSE_INTERNET_QUALITY,
     TRANS_KEY_PURPOSE_SPEED_TEST,
     TRANS_KEY_PURPOSE_WATCHED_USER_USAGE,
     TRANS_PLACEHOLDER_WAN_NAME,
 )
 from .coordinator import FirewallaConfigEntry
 from .entity import FirewallaEntity
-from .models import FirewallaSpeedTestResult, FirewallaWatchedUser
+from .models import (
+    FirewallaInternetQualitySample,
+    FirewallaSpeedTestResult,
+    FirewallaWatchedUser,
+)
 
 PARALLEL_UPDATES = 0
 
@@ -70,6 +86,8 @@ async def async_setup_entry(
                 FirewallaWanSpeedTestDownloadSensor(entry, wan.uuid),
                 FirewallaWanSpeedTestUploadSensor(entry, wan.uuid),
                 FirewallaWanSpeedTestLatencySensor(entry, wan.uuid),
+                FirewallaWanInternetQualityLatencySensor(entry, wan.uuid),
+                FirewallaWanInternetQualityPacketLossSensor(entry, wan.uuid),
             )
         )
 
@@ -275,6 +293,146 @@ class FirewallaWanSpeedTestLatencySensor(FirewallaWanSpeedTestSensor):
         """Return the latest WAN latency in milliseconds."""
         speed_test = self._speed_test_result
         return speed_test.latency_ms if speed_test is not None else None
+
+
+class FirewallaWanInternetQualitySensor(FirewallaEntity, SensorEntity):
+    """Expose one WAN-scoped internet-quality surface."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        entry: FirewallaConfigEntry,
+        wan_uuid: str,
+        *,
+        metric: str,
+        translation_key: str,
+    ) -> None:
+        """Initialize one WAN-scoped internet-quality sensor."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._wan_uuid = wan_uuid
+        self._attr_translation_key = translation_key
+        self._update_translation_placeholders()
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id=f"internet_quality_{metric}_{wan_uuid}",
+            suffix=ENTITY_SUFFIX_SENSOR,
+        )
+
+    @property
+    def _internet_quality_sample(self) -> FirewallaInternetQualitySample | None:
+        """Return the latest internet-quality sample for this WAN."""
+        samples = self.integration_manager.get_internet_quality_samples(
+            wan_uuid=self._wan_uuid,
+            limit=1,
+        )
+        return samples[0] if samples else None
+
+    def _resolve_wan_name(self) -> str:
+        """Return the current user-facing WAN label for this sensor."""
+        for wan in self.integration_manager.get_available_wans():
+            if wan.uuid == self._wan_uuid:
+                return wan.name
+        return self._wan_uuid
+
+    def _update_translation_placeholders(self) -> None:
+        """Refresh WAN placeholders from the latest runtime inventory."""
+        self._attr_translation_placeholders = {
+            TRANS_PLACEHOLDER_WAN_NAME: self._resolve_wan_name()
+        }
+        self.__dict__.pop("name", None)
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh dynamic placeholders before writing updated state."""
+        self._update_translation_placeholders()
+        super()._handle_coordinator_update()
+
+    @property
+    def available(self) -> bool:
+        """Return whether the sensor's WAN still exists in the runtime inventory."""
+        return super().available and any(
+            wan.uuid == self._wan_uuid
+            for wan in self.integration_manager.get_available_wans()
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return stable attributes describing the latest internet-quality sample."""
+        sample = self._internet_quality_sample
+        return {
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_INTERNET_QUALITY),
+            ATTR_INTERNET_QUALITY_PING_TARGET: (
+                sample.target if sample is not None else None
+            ),
+            ATTR_INTERNET_QUALITY_SAMPLED_AT: (
+                datetime.fromtimestamp(sample.timestamp, UTC).isoformat()
+                if sample is not None and sample.timestamp is not None
+                else None
+            ),
+            ATTR_INTERNET_QUALITY_PING_LATENCY: (
+                sample.ping_latency_ms if sample is not None else None
+            ),
+            ATTR_INTERNET_QUALITY_PING_LATENCY_MAX: (
+                sample.ping_latency_max_ms if sample is not None else None
+            ),
+            ATTR_INTERNET_QUALITY_PING_LATENCY_MEDIAN: (
+                sample.ping_latency_median_ms if sample is not None else None
+            ),
+            ATTR_INTERNET_QUALITY_PING_LATENCY_MIN: (
+                sample.ping_latency_min_ms if sample is not None else None
+            ),
+            ATTR_INTERNET_QUALITY_PING_PACKET_LOSS: (
+                sample.ping_packet_loss_percent if sample is not None else None
+            ),
+            ATTR_INTERNET_QUALITY_WAN_NAME: (
+                sample.wan_name
+                if sample is not None and sample.wan_name is not None
+                else self._resolve_wan_name()
+            ),
+            ATTR_INTERNET_QUALITY_WAN_UUID: self._wan_uuid,
+        }
+
+
+class FirewallaWanInternetQualityLatencySensor(FirewallaWanInternetQualitySensor):
+    """Expose the latest WAN-scoped internet-quality ping latency."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MILLISECONDS
+
+    def __init__(self, entry: FirewallaConfigEntry, wan_uuid: str) -> None:
+        """Initialize one WAN-scoped internet-quality latency sensor."""
+        super().__init__(
+            entry,
+            wan_uuid,
+            metric="ping_latency",
+            translation_key=TRANS_KEY_ENTITY_SENSOR_WAN_INTERNET_QUALITY_LATENCY,
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest WAN ping latency in milliseconds."""
+        sample = self._internet_quality_sample
+        return sample.ping_latency_ms if sample is not None else None
+
+
+class FirewallaWanInternetQualityPacketLossSensor(FirewallaWanInternetQualitySensor):
+    """Expose the latest WAN-scoped internet-quality ping packet loss."""
+
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, entry: FirewallaConfigEntry, wan_uuid: str) -> None:
+        """Initialize one WAN-scoped internet-quality packet-loss sensor."""
+        super().__init__(
+            entry,
+            wan_uuid,
+            metric="ping_packet_loss",
+            translation_key=TRANS_KEY_ENTITY_SENSOR_WAN_INTERNET_QUALITY_PACKET_LOSS,
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest WAN ping packet loss as a percentage."""
+        sample = self._internet_quality_sample
+        return sample.ping_packet_loss_percent if sample is not None else None
 
 
 class FirewallaWatchedUserTodayUsageSensor(FirewallaEntity, SensorEntity):
