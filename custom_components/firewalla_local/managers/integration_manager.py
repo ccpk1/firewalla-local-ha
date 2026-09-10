@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta, tzinfo
@@ -140,6 +141,24 @@ def _normalized_int_value(value: object) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _interface_port_number(interface_name: str | None) -> int:
+    """Return the trailing port number of an interface name for ordering.
+
+    ``eth0`` -> 0, ``eth1`` -> 1, ``bond0.10`` -> 10. Interfaces without a
+    trailing number sort last so named WANs (e.g. ``tun_fwvpn``) do not
+    displace physical ports.
+    """
+    if interface_name is None:
+        return _MAX_INTERFACE_PORT
+    match = re.search(r"(\d+)$", interface_name)
+    if match is None:
+        return _MAX_INTERFACE_PORT
+    return int(match.group(1))
+
+
+_MAX_INTERFACE_PORT: Final = 1 << 30
 
 
 class FirewallaIntegrationManager(FirewallaBaseManager):
@@ -680,6 +699,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self, appliance_runtime: FirewallaApplianceRuntimeInput
     ) -> FirewallaSystemStatus:
         """Shape the appliance status view from protocol-facing input."""
+        wan_ip, wan_ips = self._build_wan_ips()
         return FirewallaSystemStatus(
             booting_complete=appliance_runtime.booting_complete,
             box_image_codename=appliance_runtime.dist_codename,
@@ -688,8 +708,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             ddns=appliance_runtime.ddns,
             firmware_release_type=appliance_runtime.firmware_release_type,
             timezone_name=appliance_runtime.timezone_name,
-            wan_ip=self._build_wan_ip(appliance_runtime),
-            wan_ips=appliance_runtime.public_ips,
+            wan_ip=wan_ip,
+            wan_ips=wan_ips,
             cpu_usage_1m=appliance_runtime.cpu_usage_1m,
             memory_usage_percent=self._build_memory_usage_percent(appliance_runtime),
             memory_free_mb=self._build_memory_free_mb(appliance_runtime),
@@ -715,15 +735,36 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         release_version, release_name = release_details
         return f"Ubuntu {release_version} ({release_name})"
 
-    def _build_wan_ip(
-        self, appliance_runtime: FirewallaApplianceRuntimeInput
-    ) -> str | None:
-        """Build the primary WAN public IP from protocol-facing input."""
-        if appliance_runtime.public_ip is not None:
-            return appliance_runtime.public_ip
-        if appliance_runtime.public_ips:
-            return next(iter(appliance_runtime.public_ips.values()))
-        return None
+    def _build_wan_ips(self) -> tuple[str | None, dict[str, str] | None]:
+        """Build the box WAN IPs from the WAN network inventory.
+
+        The init payload's ``publicIp``/``publicIps`` fields are not reliable
+        as the WAN IP source on some models (e.g. Gold SE), where they can
+        report a DNS resolver address instead of the actual WAN IP. The WAN
+        network entities already carry the correct per-WAN IPv4 (from
+        ``networkProfiles``), so derive the box-level WAN IPs from them.
+
+        The primary WAN is the one with the lowest port number (e.g. ``eth0``
+        over ``eth1``). ``wan_ip`` is the primary WAN's first IPv4, and
+        ``wan_ips`` maps each WAN interface name to its first IPv4.
+        """
+        wan_networks = [
+            network
+            for network in self.get_networks()
+            if network.kind is FirewallaNetworkKind.WAN and network.ipv4_addresses
+        ]
+        if not wan_networks:
+            return None, None
+
+        wan_networks.sort(
+            key=lambda network: _interface_port_number(network.interface_name)
+        )
+        wan_ips = {
+            network.interface_name or network.uuid: network.ipv4_addresses[0]
+            for network in wan_networks
+        }
+        primary = wan_networks[0]
+        return primary.ipv4_addresses[0], wan_ips
 
     def _build_memory_usage_percent(
         self, appliance_runtime: FirewallaApplianceRuntimeInput
