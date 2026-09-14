@@ -88,7 +88,8 @@ the shipped behavior:
 
 ## Draft release summary
 
-- Added full AP7 wireless support: per-SSID binary sensors and pause/resume toggle switches, per-AP device monitoring with system-status entities, wired/wireless link-type detection, and optimistic SSID pause state updates.
+- Added per-SSID wireless control (AP7): every wireless network (SSID) is exposed as a pause/resume toggle switch plus a status binary sensor carrying band, encryption, WPA3, VLAN, and interface details, with optimistic pause state updates.
+- Added per-AP device monitoring (AP7): each Firewalla AP7 access point becomes its own Home Assistant device with a system-status binary sensor exposing channel, LED, TX power, country, mesh mode, timezone, pause-WiFi/ACL state, and live client count.
 - Added a unified LAN network model with per-network status entities (LAN, VLAN, VPN, WAN) carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, device count, advanced options, and usage — including current-month WAN usage.
 - Added per-WAN internet quality monitoring with ping latency and packet-loss sensors plus a `get_internet_quality_report` service.
 - Expanded appliance monitoring with per-port link/speed/MAC, Bluetooth MAC, box time zone, and derived box WAN IP.
