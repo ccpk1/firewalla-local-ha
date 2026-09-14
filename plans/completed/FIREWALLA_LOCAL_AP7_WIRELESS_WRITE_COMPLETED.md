@@ -4,10 +4,10 @@
 
 - **Source:** `ccpk1/firewalla-local-ha` issue #21 — *"[Feature]: Wireless Network Toggle for AP7"*.
 - **Branch:** `ccpk1/issue21-wireless-write` (created 2026-09-03).
-- **Status:** The write contract is now **CONFIRMED** from a packet capture submitted by the reporter on 2026-09-03. This plan covers the three workstreams the maintainer approved for drafting:
-  1. Fix the capture tool bugs the reporter had to patch manually.
-  2. Rework the wireless toggle write to match the confirmed contract.
-  3. Surface WiFi attributes on the watched-device binary sensors.
+- **Status:** **COMPLETED (2026-09-14).** The write contract was **CONFIRMED** from a packet capture submitted by the reporter on 2026-09-03, and all three workstreams shipped in the `1.3.0-beta.x` line:
+  1. Fixed the capture tool bugs the reporter had to patch manually.
+  2. Reworked the wireless toggle write to match the confirmed contract.
+  3. Surfaced WiFi attributes on the watched-device binary sensors.
 - **Evidence:** `.tmp/wifi_toggle_capture_20260903/analysis.json` + safe report zip. Supporting note: `plans/in-process/FIREWALLA_LOCAL_AP7_WIRELESS_TOGGLE_SUP_INVENTORY.md` §7.
 
 ## 2. Confirmed write contract (from capture)

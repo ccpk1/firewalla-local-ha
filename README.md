@@ -68,13 +68,11 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
 * **Rich Local Reporting:** Leverage over a dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, and WAN event timelines—all pulled directly from the local data plane without touching the cloud.
 
 ## **Supported Hardware & Prerequisites**
-* **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. It should be compatible with the Purple, Gold Pro, and any other series running the Firewalla Box software that supports the local API.
-    * 🗣️ Community Feedback Needed: If you successfully run this on a model not listed below, please drop a note in the Discussions tab so I can officially update this supported list!
-    * Updated July 22nd, 2026 - User reports confirm working for models:
-       * Gold
-       * Gold Plus
-       * Gold SE
-       * Purple
+* **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. Confirmed working on the following models running the Firewalla Box software that supports the local API:
+   * Gold
+   * Gold Plus
+   * Gold SE
+   * Purple
 * **Home Assistant:** Requires Home Assistant Core version 2026.3.0 or newer.
 * **Network:** Your Home Assistant instance must be able to reach the Firewalla's local LAN IP.
 

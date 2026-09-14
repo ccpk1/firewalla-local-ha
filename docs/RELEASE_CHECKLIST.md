@@ -69,7 +69,7 @@ Checklist:
 
 ## 9) Launch blockers and defers
 
-Treat these as launch blockers for `1.1.0` unless the release decision is reopened
+Treat these as launch blockers for `2.0.0` unless the release decision is reopened
 explicitly:
 
 - [x] The worktree is clean and free of generated artifacts.
@@ -88,11 +88,11 @@ the shipped behavior:
 
 ## Draft release summary
 
-- Expanded local host controls with `wake_host`, `set_host_name`, `set_host_notify_when_next_online`, `set_host_notify_when_next_offline`, and `set_host_dhcp_reservation`.
-- Added broader local report surfaces for host identity records, network segment configuration, network segment usage, scoped time usage, WAN data usage, WAN events, and speed test history.
-- Unified newer report services around a more consistent response envelope so automations and debugging workflows can reason about targets, queries, time basis, summaries, sections, and metadata more predictably.
-- Added host DHCP reservation management with network-aware validation for the selected network range and duplicate reservation conflicts.
-- Added watched-user monitoring, router-based device trackers for selected MAC-backed LAN clients, and a manual `Sync runtime` button with a runtime refresh timestamp on the main Firewalla device.
+- Added full AP7 wireless support: per-SSID binary sensors and pause/resume toggle switches, per-AP device monitoring with system-status entities, wired/wireless link-type detection, and optimistic SSID pause state updates.
+- Added a unified LAN network model with per-network status entities (LAN, VLAN, VPN, WAN) carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, device count, advanced options, and usage — including current-month WAN usage.
+- Added per-WAN internet quality monitoring with ping latency and packet-loss sensors plus a `get_internet_quality_report` service.
+- Expanded appliance monitoring with per-port link/speed/MAC, Bluetooth MAC, box time zone, and derived box WAN IP.
+- Fixed device trackers so integration-disabled tracker entities can be re-enabled and use the non-deprecated device registry lookup.
 
 ## Known risks and defers
 

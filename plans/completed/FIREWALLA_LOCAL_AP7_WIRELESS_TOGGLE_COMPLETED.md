@@ -4,7 +4,7 @@
 
 - **Source:** `ccpk1/firewalla-local-ha` issue #21 — *"[Feature]: Wireless Network Toggle for AP7"* (label: `enhancement`).
 - **Requested capability:** A Home Assistant frontend switch to enable/disable a wireless network (e.g. guest SSID) on a Firewalla AP7D / AP7C, plus optional wireless status/diagnostics sensors.
-- **Current state (2026-08-07):** The reporter (`squirtbrnr`) submitted two **comprehensive** diagnostic captures (`ap7_wifi_on.json`, `ap7_wifi_off.json`) using the extended diagnostic. These **confirmed** the wireless config location and the toggle control. See §3 and the supporting note.
+- **Current state (2026-09-14):** Initiative **complete**. Delivered across the `1.3.0-beta.x` line: per-SSID status binary sensors and pause/resume toggle switches, per-AP device monitoring with system-status entities, wired/wireless link-type detection, optimistic SSID pause state, and WiFi attributes on watched devices. The write contract was confirmed via packet capture (see `FIREWALLA_LOCAL_AP7_WIRELESS_WRITE_COMPLETED.md`).
 - **Branch context:** `release-1.2.0`; manifest version `1.2.0-alpha.6`.
 - **Architecture clarification (2026-08-05):** **AP7 is the name of the access points**, not the Firewalla box. The AP7 access points require a Firewalla device (here a **Firewalla Purple**, `model: "purple"`) for control. The Firewalla model itself does not matter — if you have a Firewalla device, you can add AP7 access points.
 - **Correction (2026-08-07):** The earlier assumption that the user had **5 Firewalla AP7s** was **wrong**. Those 5 APs were **Aruba InstantOn AP22** (managed outside Firewalla, now removed from config). The user actually has **2 Firewalla AP7s**: "Main Floor" and "Upstairs" (both `fwap-D`).
