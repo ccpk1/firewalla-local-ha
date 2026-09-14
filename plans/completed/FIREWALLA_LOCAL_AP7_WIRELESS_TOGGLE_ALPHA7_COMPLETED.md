@@ -1,5 +1,7 @@
 # Initiative: AP7 Wireless Toggle — alpha.7 Implementation Plan
 
+> **Status: COMPLETED (2026-09-14).** The alpha.7 services shipped and were superseded by the confirmed write contract and per-SSID entities delivered in the `1.3.0-beta.x` line. See `FIREWALLA_LOCAL_AP7_WIRELESS_TOGGLE_COMPLETED.md` and `FIREWALLA_LOCAL_AP7_WIRELESS_WRITE_COMPLETED.md`.
+
 ## 1. Initiative snapshot
 
 - **Source:** `ccpk1/firewalla-local-ha` issue #21 — *"[Feature]: Wireless Network Toggle for AP7"*.
