@@ -142,6 +142,9 @@ It covers:
 The full expert command catalog and network rollback flow are documented in
 [`docs/ADMIN_CONTROL.md`](docs/ADMIN_CONTROL.md).
 
+Fork updates, upstream merges, releases, deployment checks, and rollback are
+documented in [`docs/MAINTAINING_FORK.md`](docs/MAINTAINING_FORK.md).
+
 ## 🏗️ **Development & Architecture Docs**
 
 The durable project rules live in:
