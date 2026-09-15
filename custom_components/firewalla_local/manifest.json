@@ -9,5 +9,5 @@
   "issue_tracker": "https://github.com/erabti/firewalla-local-ha/issues",
   "loggers": ["custom_components.firewalla_local"],
   "requirements": ["cryptography>=44.0.0"],
-  "version": "2.1.0"
+  "version": "2.1.1"
 }
