@@ -15,7 +15,7 @@ paid cloud API.
   `admin_rollback_network_config` services.
 - Writes default to dry run and require both `dry_run: false` and
   `confirm: true` to execute.
-- Full `networkConfig` writes require a fresh hash and Firewalla's native impact
+- `networkConfig` writes require a fresh hash and Firewalla's native impact
   check; five raw rollback snapshots remain in memory for the loaded HA process.
 - Network config inputs are merge patches applied to a fresh raw config, so
   redacted passwords, certificates, and tokens are preserved. Rollback still

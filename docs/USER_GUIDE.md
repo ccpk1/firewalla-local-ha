@@ -636,7 +636,10 @@ Common management payloads:
 
 `networkConfig` is the complete FireRouter configuration and therefore covers
 WAN, LAN, VLAN, routes, DHCP, DNS, wireless, and Smart Queue references present
-in that object. It has two extra gates:
+in that object. Callers provide only an RFC 7396-style merge patch: omitted and
+redacted values are preserved, while `null` removes a key. The integration
+applies that patch to a fresh raw read before sending Firewalla's required full
+object. It has two extra gates:
 
 1. `admin_execute` always calls Firewalla's native `networkConfigImpact` check.
 2. Execution requires `expected_current_hash` copied from a fresh
@@ -648,7 +651,7 @@ Example network dry run:
 action: firewalla_local.admin_execute
 data:
   item: networkConfig
-  value: "<complete edited networkConfig object>"
+  value: {}  # Safe no-op merge patch for checking the impact path
 ```
 
 After reviewing `impact`, execute with `dry_run: false`, `confirm: true`, and
