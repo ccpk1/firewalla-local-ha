@@ -127,15 +127,21 @@ letters, numbers, or underscores. Stop a running profile before deleting it.
 1. Call `admin_read` with `item: networkConfig`.
 2. Keep the returned `config_hash`; the manager stores the raw snapshot in
    memory without returning its sensitive fields.
-3. Edit a copy of the complete object.
-4. Call `admin_execute` in dry-run mode and review `impact`.
+3. Build a merge patch containing only the keys to change. Use `null` to remove
+   a key.
+4. Call `admin_execute` in dry-run mode and review `impact` and
+   `requested_config_hash`.
 5. Execute with `dry_run: false`, `confirm: true`, and
    `expected_current_hash` from step 1.
 6. Read back the configuration and connectivity state.
 
 `networkConfig` is the full FireRouter object. It contains the WAN, LAN, VLAN,
 route, DHCP, DNS, wireless, and related configuration supported by that box.
-The manager sends it as `value.config`, matching the live `setHandler`.
+Because sensitive fields are redacted on read, `admin_execute` treats `value` as
+an RFC 7396-style merge patch, applies it to a fresh raw read, and sends the
+complete merged object as `value.config`. This preserves passwords,
+certificates, and other hidden fields. The rollback path uses an internal full
+replacement so it can also remove keys added after the snapshot.
 
 Rollback uses the same guarded write path: read the new current hash and call
 `admin_rollback_network_config` with the original snapshot hash. Raw snapshots

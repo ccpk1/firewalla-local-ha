@@ -19,6 +19,7 @@ Resolve conflicts by preserving:
 - the fork owner and HACS URLs
 - `FirewallaAdminManager` and the four admin services
 - dry-run, confirmation, redaction, hash, impact, and rollback safeguards
+- merge-patch handling that preserves redacted network configuration fields
 - the explicit exclusion of shell, credential, firmware, migration, reboot,
   and shutdown commands
 
