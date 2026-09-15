@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Firewalla Local 2.1.1 exposes the confirmed local configuration surface through
+Firewalla Local 2.2.0 exposes the confirmed local configuration surface through
 Home Assistant, so an MCP client can inspect and manage devices, groups, rules,
 WAN, VLAN, VPN, wireless, routing, DNS, and other supported settings without the
 paid cloud API.
@@ -17,6 +17,9 @@ paid cloud API.
   `confirm: true` to execute.
 - Full `networkConfig` writes require a fresh hash and Firewalla's native impact
   check; five raw rollback snapshots remain in memory for the loaded HA process.
+- Network config inputs are merge patches applied to a fresh raw config, so
+  redacted passwords, certificates, and tokens are preserved. Rollback still
+  replaces the complete raw snapshot.
 - Device and group policy writes, tag lifecycle, rule CRUD, full network config,
   interface actions, VPN clients, virtual WAN groups, DNS, data plans,
   categories, exceptions, and other confirmed handlers are supported.
@@ -28,14 +31,16 @@ paid cloud API.
 
 - Quick lint and formatting: passed.
 - Mypy: passed for 34 source files.
-- Pytest: 305 passed.
+- Pytest: 307 passed.
 - Home Assistant config check: valid.
-- HACS: only `erabti/firewalla-local-ha` is installed, version 2.1.1.
+- HACS: only `erabti/firewalla-local-ha` is installed, version 2.2.0.
 - Firewalla config entry: loaded after restart.
 - MCP: 26 reads, 18 set items, and 55 command items discovered.
 - Live read: timezone returned `Africa/Tripoli`; WAN interface read succeeded.
 - Live dry run: `tag:create` returned `executed: false`; runtime inventory showed
   no `Codex Dry Run` group.
+- Live network dry run: an empty merge patch ran the native impact check,
+  returned matching current/requested hashes, and executed no write.
 - Post-restart logs: no Firewalla error, duplicate YAML warning, or deprecated
   device-registry warning.
 
