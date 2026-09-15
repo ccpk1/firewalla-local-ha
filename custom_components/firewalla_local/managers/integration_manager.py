@@ -2468,7 +2468,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 model=_TRACKED_CLIENT_DEVICE_MODEL,
                 name=device_name,
                 serial_number=dr.format_mac(mac),
-                via_device=self.build_primary_device_identifier(),
+                via_device_id=router_device.id,
             )
 
             if device.name_by_user is None and device.name != device_name:
@@ -2539,7 +2539,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 model=ap.model or "fwap",
                 name=device_name,
                 serial_number=dr.format_mac(ap.asset_id),
-                via_device=self.build_primary_device_identifier(),
+                via_device_id=router_device.id,
             )
 
             if device.name_by_user is None and device.name != device_name:
