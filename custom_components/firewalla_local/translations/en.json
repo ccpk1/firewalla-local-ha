@@ -988,6 +988,15 @@
     }
   },
   "exceptions": {
+    "admin_execute_failed": {
+      "message": "The integration could not execute the Firewalla admin command. Check the local connection and command payload."
+    },
+    "admin_read_failed": {
+      "message": "The integration could not read the Firewalla admin item. Check the local connection and command payload."
+    },
+    "admin_validation_failed": {
+      "message": "The Firewalla admin request is invalid: {reason}"
+    },
     "config_entry_name_ambiguous": {
       "message": "More than one loaded Firewalla entry uses that name. Use the config entry ID instead."
     },
@@ -1155,6 +1164,22 @@
     }
   },
   "services": {
+    "get_admin_capabilities": {
+      "name": "Get admin capabilities",
+      "description": "List the local Firewalla read and write commands exposed to Home Assistant, including safeguards and excluded commands."
+    },
+    "admin_read": {
+      "name": "Admin read",
+      "description": "Read one allowlisted Firewalla configuration or status item through the local API. Sensitive response fields are redacted."
+    },
+    "admin_execute": {
+      "name": "Admin execute",
+      "description": "Plan or execute one allowlisted Firewalla configuration command. Dry run is the default; execution requires confirm."
+    },
+    "admin_rollback_network_config": {
+      "name": "Admin rollback network config",
+      "description": "Plan or restore a raw network configuration snapshot kept in memory by the integration."
+    },
     "get_host_name_mapping": {
       "name": "Get host name mapping",
       "description": "Return current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.",

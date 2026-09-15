@@ -26,13 +26,18 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DOMAIN,
+    SERVICE_ADMIN_EXECUTE,
+    SERVICE_ADMIN_READ,
     SERVICE_DELETE_HOST,
+    SERVICE_FIELD_ADMIN_ITEM,
+    SERVICE_FIELD_ADMIN_VALUE,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_DNS_HOSTNAME,
+    SERVICE_FIELD_DRY_RUN,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
@@ -64,6 +69,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_GET_ADMIN_CAPABILITIES,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -6030,3 +6036,84 @@ async def test_get_wireless_status_service_returns_profiles(
     assert guest["interface"] == "br1"
     assert response["access_points"][0]["name"] == "Upstairs"
     assert response["access_points"][0]["model"] == "fwap-D"
+
+
+async def test_admin_services_expose_catalog_read_and_dry_run(
+    hass: HomeAssistant,
+) -> None:
+    """Admin services register, read through the manager, and keep dry run safe."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-admin",
+        title="Firewalla Admin",
+        data={
+            CONF_LICENSE: "license-admin",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-admin",
+            CONF_EID: "eid-admin",
+            CONF_AID: "aid-admin",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_wireless_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_item",
+            new=AsyncMock(return_value={"timezone": "Africa/Tripoli"}),
+        ) as mock_read,
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_command_item",
+            new=AsyncMock(return_value={}),
+        ) as mock_command,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        capabilities = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_ADMIN_CAPABILITIES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+        read_response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_ADMIN_READ,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_ADMIN_ITEM: "timezone",
+            },
+            blocking=True,
+            return_response=True,
+        )
+        dry_run_response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_ADMIN_EXECUTE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_ADMIN_ITEM: "tag:create",
+                SERVICE_FIELD_ADMIN_VALUE: {"name": "Guests"},
+                SERVICE_FIELD_DRY_RUN: True,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert capabilities is not None
+    assert "networkConfig" in capabilities["set_items"]
+    assert read_response is not None
+    assert read_response["result"] == {"timezone": "Africa/Tripoli"}
+    mock_read.assert_awaited_once()
+    assert dry_run_response is not None
+    assert dry_run_response["executed"] is False
+    mock_command.assert_not_awaited()

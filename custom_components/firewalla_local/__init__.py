@@ -26,6 +26,7 @@ from .coordinator import (
     get_enabled_ssid_entities,
 )
 from .managers import (
+    FirewallaAdminManager,
     FirewallaHostManager,
     FirewallaIntegrationManager,
     FirewallaRuleManager,
@@ -65,12 +66,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         timezone_name=hass.config.time_zone,
     )
     coordinator = FirewallaDataUpdateCoordinator(hass, entry, client)
+    admin_manager = FirewallaAdminManager(coordinator, entry, client)
     host_manager = FirewallaHostManager(coordinator, entry, client)
     integration_manager = FirewallaIntegrationManager(coordinator, entry, client)
     rule_manager = FirewallaRuleManager(coordinator, entry, client)
     user_manager = FirewallaUserManager(coordinator, entry, client)
     wireless_manager = FirewallaWirelessManager(coordinator, entry, client)
     coordinator.attach_managers(
+        admin_manager=admin_manager,
         host_manager=host_manager,
         integration_manager=integration_manager,
         rule_manager=rule_manager,
@@ -114,6 +117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     entry.runtime_data = FirewallaRuntimeData(
         client=client,
         coordinator=coordinator,
+        admin_manager=admin_manager,
         host_manager=host_manager,
         integration_manager=integration_manager,
         rule_manager=rule_manager,

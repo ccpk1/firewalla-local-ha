@@ -1,8 +1,8 @@
 # Firewalla Local ownership
 
-- @ccpk1
+- @erabti
 
-/.github/ @ccpk1
-/custom_components/firewalla_local/ @ccpk1
-/tests/ @ccpk1
-/docs/ @ccpk1
+/.github/ @erabti
+/custom_components/firewalla_local/ @erabti
+/tests/ @erabti
+/docs/ @erabti

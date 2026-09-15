@@ -183,6 +183,7 @@ The runtime should converge on named directories with clear ownership:
 	- `IntegrationManager` for config-entry-scoped lifecycle, Firewalla appliance device lifecycle, entity lifecycle, and shared orchestration concerns
 	- `HostManager` for normalized endpoint-host inventory plus watched-device and MAC-backed device-tracker orchestration
 	- `RuleManager` for rule resolution, registry indexing, command handling, optimistic updates, and read-model generation for rule-backed surfaces
+	- `AdminManager` for allowlisted expert reads and writes, dry-run planning, confirmation, network-config impact and stale-write gates, and response redaction
 	- `UserManager` for watched-user identity, usage shaping, total and unique fallback handling, and host-association joins
 - `helpers/` contains Home Assistant-aware shared helper code only and must not become a second manager layer
 - `utils/` contains pure functions only and must not import `homeassistant.*`
@@ -250,6 +251,7 @@ At minimum:
 - `RuleManager` owns rule-specific behavior, including registry indexing, rule-template matching, runtime inventory inputs, and rule-command orchestration
 - `UserManager` owns watched-user identity, usage shaping, selection lookups, host association joins, total and unique fallback handling, and user-scoped orchestration for the proven user-usage surface
 - `WirelessManager` owns the AP7 wireless surface, including SSID profile and access-point normalization from the raw init payload, wireless read models, and the confirmed `networkConfig` write path for SSID pause/resume
+- `AdminManager` owns the generic expert control surface. It is the only layer that may map allowlisted protocol item names to generic `get`, `set`, or `cmd` transport calls. It must keep shell, credential, migration, power, and firmware lifecycle commands excluded.
 - normalization owned by `api/` and manager-owned view shaping must preserve the distinction between raw backing group identity and the app-facing identity actually shown to Home Assistant users
 
 Manager methods are the single write and mutation path for runtime behavior above the API layer.

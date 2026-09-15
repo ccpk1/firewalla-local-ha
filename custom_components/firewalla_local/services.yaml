@@ -1166,3 +1166,176 @@ get_wireless_status:
         text:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
+get_admin_capabilities:
+  name: Get admin capabilities
+  description: List every allowlisted local Firewalla admin read and write item, its message type, safeguards, and excluded command families.
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this to target one Firewalla setup when more than one is loaded.
+    config_entry_name:
+      required: false
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this to target one uniquely named Firewalla setup.
+
+admin_read:
+  name: Admin read
+  description: Read one allowlisted configuration or status item from the local Firewalla runtime. Sensitive response fields are redacted. Read get_admin_capabilities first for the current item list.
+  fields:
+    item:
+      required: true
+      example: networkConfig
+      selector:
+        text:
+      name: Item
+      description: A read item returned by get_admin_capabilities.
+    value:
+      required: false
+      example: {}
+      selector:
+        object:
+      name: Value
+      description: Optional command arguments, such as live or history count.
+    target:
+      required: false
+      example: 0.0.0.0
+      selector:
+        text:
+      name: Target
+      description: Optional Firewalla protocol target. Defaults to the box.
+    config_entry_id:
+      required: false
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this to target one Firewalla setup when more than one is loaded.
+    config_entry_name:
+      required: false
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this to target one uniquely named Firewalla setup.
+
+admin_execute:
+  name: Admin execute
+  description: Plan or execute one allowlisted Firewalla configuration change. Dry run is the default. Set dry_run to false and confirm to true to execute. A networkConfig write also needs the current hash from admin_read and always runs Firewalla's impact check first.
+  fields:
+    item:
+      required: true
+      example: tag:create
+      selector:
+        text:
+      name: Item
+      description: A set or command item returned by get_admin_capabilities.
+    value:
+      required: true
+      example:
+        name: Guests
+      selector:
+        object:
+      name: Value
+      description: The exact object required by the selected Firewalla command.
+    target:
+      required: false
+      example: 0.0.0.0
+      selector:
+        text:
+      name: Target
+      description: Optional protocol target. Use a host MAC for device policy writes or a tag UID for tag rename.
+    dry_run:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Dry run
+      description: Defaults to true. Returns the planned request without changing the router.
+    confirm:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Confirm
+      description: Must be true together with dry_run false to execute a write.
+    expected_current_hash:
+      required: false
+      example: 0123456789abcdef
+      selector:
+        text:
+      name: Expected current hash
+      description: Required for networkConfig execution. Copy config_hash from a fresh admin_read networkConfig response.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh after write
+      description: Defaults to true. Set false for network changes that may briefly interrupt the local connection.
+    config_entry_id:
+      required: false
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this to target one Firewalla setup when more than one is loaded.
+    config_entry_name:
+      required: false
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this to target one uniquely named Firewalla setup.
+
+admin_rollback_network_config:
+  name: Admin rollback network config
+  description: Plan or restore a raw networkConfig snapshot kept in memory by this loaded integration instance. Dry run is the default. Execution requires a fresh current hash and confirmation.
+  fields:
+    snapshot_hash:
+      required: true
+      example: 0123456789abcdef
+      selector:
+        text:
+      name: Snapshot hash
+      description: The config_hash returned by an earlier admin_read networkConfig call during this Home Assistant run.
+    dry_run:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Dry run
+      description: Defaults to true and runs the impact check without restoring the snapshot.
+    confirm:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Confirm
+      description: Must be true together with dry_run false to restore the snapshot.
+    expected_current_hash:
+      required: false
+      example: 0123456789abcdef
+      selector:
+        text:
+      name: Expected current hash
+      description: Required for execution. Copy config_hash from a fresh admin_read networkConfig response.
+    refresh:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Refresh after rollback
+      description: Defaults to false because restoring network settings may briefly interrupt the local connection.
+    config_entry_id:
+      required: false
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this to target one Firewalla setup when more than one is loaded.
+    config_entry_name:
+      required: false
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this to target one uniquely named Firewalla setup.

@@ -60,18 +60,22 @@ Services added after 1.0.0:
 - `firewalla_local.get_wan_events`
 - `firewalla_local.get_wireless_status`
 - `firewalla_local.set_ssid_paused`
+- `firewalla_local.get_admin_capabilities`
+- `firewalla_local.admin_read`
+- `firewalla_local.admin_execute`
+- `firewalla_local.admin_rollback_network_config`
 
 ## Installation
 
 ### One-click HACS install
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ccpk1&repository=firewalla-local-ha&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=erabti&repository=firewalla-local-ha&category=integration)
 
 ### Manual HACS setup
 
 1. Ensure HACS is installed.
 2. In Home Assistant, open **HACS -> Integrations -> Custom repositories**.
-3. Add `https://github.com/ccpk1/firewalla-local-ha` as an **Integration** repository.
+3. Add `https://github.com/erabti/firewalla-local-ha` as an **Integration** repository.
 4. Search for **Firewalla Local**, install it, and restart Home Assistant.
 
 ### Add the integration and pair your device
@@ -494,9 +498,9 @@ Temporary rules:
   paused rule
 - are not treated as switch candidates by this integration
 
-The Firewalla app remains the normal place to create or delete rules. The
-integration is primarily built to expose supported persistent rules, and to
-pause or resume those existing rules cleanly.
+The guarded admin service can also create, update, or delete rules through the
+confirmed local protocol. Use `get_admin_capabilities` to discover the current
+command list and run `admin_execute` in its default dry-run mode before writing.
 
 ## Services
 
@@ -506,6 +510,7 @@ three groups:
 - inspection and report services
 - host and network operator actions
 - rule control services
+- guarded expert administration services
 
 The report-style services in this section were built primarily to help model,
 correlate, and validate Firewalla data during reverse engineering.
@@ -552,6 +557,115 @@ Rule control services:
 
 - `firewalla_local.pause_rule`
 - `firewalla_local.resume_rule`
+
+Guarded expert administration services:
+
+- `firewalla_local.get_admin_capabilities`
+- `firewalla_local.admin_read`
+- `firewalla_local.admin_execute`
+- `firewalla_local.admin_rollback_network_config`
+
+### Full local administration
+
+The expert administration surface covers confirmed local commands for device
+and group policies, tag or group lifecycle, rule CRUD, complete WAN/VLAN/LAN/
+Wi-Fi configuration, network-interface changes, VPN client profiles, virtual
+WAN groups, data-plan settings, DNS settings, categories, and exceptions.
+
+Start with `firewalla_local.get_admin_capabilities`. It returns:
+
+- `read_items`: safe local configuration and status reads
+- `set_items`: configuration values written with Firewalla's `set` message
+- `command_items`: actions written with Firewalla's `cmd` message
+- `excluded_items`: shell, credential, migration, power, and firmware commands
+  intentionally unavailable through this generic service
+- `safeguards`: the write gates enforced by the manager
+
+Use `firewalla_local.admin_read` with an item from `read_items`. For example,
+read the complete router configuration:
+
+```yaml
+action: firewalla_local.admin_read
+data:
+  item: networkConfig
+```
+
+The response includes `config_hash`. The manager also keeps the raw configuration
+in a bounded in-memory snapshot cache so rollback does not require exposing
+secrets. Sensitive response fields such as passwords, tokens, private keys, and
+certificates are replaced with `[redacted]`.
+
+Use `firewalla_local.admin_execute` first without changing its defaults. It
+returns the exact planned message and does not write:
+
+```yaml
+action: firewalla_local.admin_execute
+data:
+  item: tag:create
+  value:
+    name: Guests
+```
+
+To execute, set both write gates:
+
+```yaml
+action: firewalla_local.admin_execute
+data:
+  item: tag:create
+  value:
+    name: Guests
+  dry_run: false
+  confirm: true
+```
+
+Common management payloads:
+
+| Task | Item | Target and value |
+| --- | --- | --- |
+| Create a device group | `tag:create` | `value: {name: Guests}` |
+| Rename a device group | `tag` | target is the tag UID; value contains `name` |
+| Delete a device group | `tag:remove` | value contains `uid` or `name` |
+| Assign device policy or group | `policy` | target is the host MAC; value is the host policy patch |
+| Create a rule | `policy:create` | value is the Firewalla rule object |
+| Update a rule | `policy:update` | value includes `pid` and changed rule fields |
+| Delete a rule | `policy:delete` | value contains `policyID` |
+| Save a VPN profile | `saveVpnProfile` | value contains `type`, `profileId`, profile data, and settings |
+| Start or stop VPN | `startVpnClient` / `stopVpnClient` | value contains `type` and `profileId` |
+| Delete a VPN profile | `deleteVpnProfile` | value contains `type` and `profileId` |
+| Manage virtual WAN groups | `createOrUpdateVirtWanGroup` / `removeVirtWanGroup` | value follows the live Firewalla object |
+
+`networkConfig` is the complete FireRouter configuration and therefore covers
+WAN, LAN, VLAN, routes, DHCP, DNS, wireless, and Smart Queue references present
+in that object. It has two extra gates:
+
+1. `admin_execute` always calls Firewalla's native `networkConfigImpact` check.
+2. Execution requires `expected_current_hash` copied from a fresh
+   `admin_read` response. A stale hash is rejected.
+
+Example network dry run:
+
+```yaml
+action: firewalla_local.admin_execute
+data:
+  item: networkConfig
+  value: "<complete edited networkConfig object>"
+```
+
+After reviewing `impact`, execute with `dry_run: false`, `confirm: true`, and
+the fresh `expected_current_hash`. Set `refresh: false` when the network change
+may briefly interrupt Home Assistant's path to the router.
+
+To roll back, call `admin_rollback_network_config` with the original
+`config_hash`. Dry run is still the default. Execution requires a fresh current
+hash, `dry_run: false`, and `confirm: true`. Raw snapshots live only in memory
+and are lost when the integration reloads or Home Assistant restarts; Firewalla's
+own `networkConfigHistory` remains available through `admin_read` for recovery.
+
+This is an expert protocol surface. `get_admin_capabilities` states what the
+installed integration permits; the exact fields inside each value are defined
+by the Firewalla firmware running on the box and can change with firmware.
+The complete static catalog and payload examples are in
+[`ADMIN_CONTROL.md`](ADMIN_CONTROL.md).
 
 ### Get rule and runtime inventory
 

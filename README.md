@@ -1,11 +1,11 @@
-[![Quality Scale: Platinum](https://img.shields.io/badge/Quality%20Scale-platinum-platinum.svg)](https://github.com/ccpk1/firewalla-local-ha)
-[![Quality Gates](https://img.shields.io/github/actions/workflow/status/ccpk1/firewalla-local-ha/lint-validation.yaml?branch=main&label=Quality%20Gates)](https://github.com/ccpk1/firewalla-local-ha/actions/workflows/lint-validation.yaml)
-[![License](https://img.shields.io/static/v1?label=License&message=GPL-3.0&color=1E88E5&labelColor=555)](https://github.com/ccpk1/firewalla-local-ha/blob/main/LICENSE)
+[![Quality Scale: Platinum](https://img.shields.io/badge/Quality%20Scale-platinum-platinum.svg)](https://github.com/erabti/firewalla-local-ha)
+[![Quality Gates](https://img.shields.io/github/actions/workflow/status/erabti/firewalla-local-ha/lint-validation.yaml?branch=main&label=Quality%20Gates)](https://github.com/erabti/firewalla-local-ha/actions/workflows/lint-validation.yaml)
+[![License](https://img.shields.io/static/v1?label=License&message=GPL-3.0&color=1E88E5&labelColor=555)](https://github.com/erabti/firewalla-local-ha/blob/main/LICENSE)
 [![HACS Custom](https://img.shields.io/static/v1?label=HACS&message=custom&color=1E88E5&labelColor=555)](https://github.com/custom-components/hacs) <br>
-[![Version](https://img.shields.io/github/v/release/ccpk1/firewalla-local-ha?include_prereleases&label=Version&color=1E88E5)](https://github.com/ccpk1/firewalla-local-ha/releases)
-[![Stars](https://img.shields.io/github/stars/ccpk1/firewalla-local-ha)](https://github.com/ccpk1/firewalla-local-ha/stargazers)
+[![Version](https://img.shields.io/github/v/release/erabti/firewalla-local-ha?include_prereleases&label=Version&color=1E88E5)](https://github.com/erabti/firewalla-local-ha/releases)
+[![Stars](https://img.shields.io/github/stars/erabti/firewalla-local-ha)](https://github.com/erabti/firewalla-local-ha/stargazers)
 
-![Firewalla Local](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/assets/3-1%20Logo%20Rectangle.png)
+![Firewalla Local](https://github.com/erabti/firewalla-local-ha/blob/main/docs/assets/3-1%20Logo%20Rectangle.png)
 
 > ### **Local control. Zero latency. No subscription. Native Home Assistant.**
 
@@ -53,6 +53,7 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
 ### **Dynamic Network Control**
 * **Rule-Backed Switches & Timed Pauses:** Toggle your most-used rules (Internet Block, Social, Gaming) instantly. Use the `pause_rule` and `resume_rule` services to grant duration-based access (e.g., "Give the kids 30 more minutes of gaming") via any HA automation or voice assistant.
 * **Host Operator Actions:** Act as the network admin directly from Home Assistant. Wake devices (WOL), rename hosts, set/clear DHCP reservations, and toggle "notify when online/offline" settings seamlessly via actions (services).
+* **Guarded Full Admin API:** Discover and manage confirmed local device/group policies, rule CRUD, WAN/VLAN/LAN/Wi-Fi configuration, network interfaces, VPN clients, virtual WAN groups, DNS, data plans, categories, and exceptions. Writes default to dry run, require confirmation, redact sensitive responses, and add hash plus impact gates for full network changes.
 
 ### **Presence & Usage Tracking**
 * **Router-Based Device Trackers:** Expose highly reliable Home Assistant `device_tracker` entities for your MAC-backed LAN clients for rock-solid "Home/Away" presence automations.
@@ -109,20 +110,20 @@ Financial support is **never required**, but it is the strongest motivation for 
 
 ### One-click HACS install
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ccpk1&repository=firewalla-local-ha&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=erabti&repository=firewalla-local-ha&category=integration)
 
 ### Manual HACS setup
 
 1. Ensure HACS is installed.
 2. In Home Assistant, open **HACS -> Integrations -> Custom repositories**.
-3. Add `https://github.com/ccpk1/firewalla-local-ha` as an **Integration** repository.
+3. Add `https://github.com/erabti/firewalla-local-ha` as an **Integration** repository.
 4. Search for **Firewalla Local**, install it, and restart Home Assistant.
 5. Open **Settings -> Devices & Services -> Add Integration**.
 6. Choose **Firewalla Local** and complete the QR-based pairing flow.
 
 ## 📖 **User Guide**
 
-The operating guide lives here: [docs/USER_GUIDE.md](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md).
+The operating guide lives here: [docs/USER_GUIDE.md](https://github.com/erabti/firewalla-local-ha/blob/main/docs/USER_GUIDE.md).
 
 It covers:
 
@@ -136,6 +137,10 @@ It covers:
 - host operator actions including Wake-on-LAN, rename, notification toggles, and DHCP reservations
 - wireless services including `get_wireless_status` and `set_ssid_paused`
 - pause and resume services
+- guarded admin discovery, read, dry-run, and confirmed write services
+
+The full expert command catalog and network rollback flow are documented in
+[`docs/ADMIN_CONTROL.md`](docs/ADMIN_CONTROL.md).
 
 ## 🏗️ **Development & Architecture Docs**
 
@@ -161,9 +166,9 @@ Repository layout:
 
 ## 🤝 **Community and Contribution**
 
-- Issues and feature requests: https://github.com/ccpk1/firewalla-local-ha/issues
-- Discussions: https://github.com/ccpk1/firewalla-local-ha/discussions
-- Pull requests: https://github.com/ccpk1/firewalla-local-ha/pulls
+- Issues and feature requests: https://github.com/erabti/firewalla-local-ha/issues
+- Discussions: https://github.com/erabti/firewalla-local-ha/discussions
+- Pull requests: https://github.com/erabti/firewalla-local-ha/pulls
 
 ## 🔒 **Security and Support Posture**
 
@@ -184,4 +189,3 @@ AI-Assisted Development: In today’s age, leveraging AI is one of the few ways 
 ## 📄 **License**
 
 This project is licensed under the GPL-3.0 license. See `LICENSE`.
-

@@ -26,14 +26,22 @@ from .const import (
     DOMAIN,
     HOST_DEVICE_TYPE_OPTIONS,
     LOGGER,
+    SERVICE_ADMIN_EXECUTE,
+    SERVICE_ADMIN_READ,
+    SERVICE_ADMIN_ROLLBACK_NETWORK_CONFIG,
     SERVICE_DELETE_HOST,
+    SERVICE_FIELD_ADMIN_ITEM,
+    SERVICE_FIELD_ADMIN_TARGET,
+    SERVICE_FIELD_ADMIN_VALUE,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_DNS_HOSTNAME,
+    SERVICE_FIELD_DRY_RUN,
     SERVICE_FIELD_ENABLED,
+    SERVICE_FIELD_EXPECTED_CURRENT_HASH,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
@@ -53,6 +61,7 @@ from .const import (
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SECTIONS,
+    SERVICE_FIELD_SNAPSHOT_HASH,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
@@ -64,6 +73,7 @@ from .const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_GET_ADMIN_CAPABILITIES,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -85,6 +95,9 @@ from .const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_SET_SSID_PAUSED,
     SERVICE_WAKE_HOST,
+    TRANS_KEY_EXCEPTION_ADMIN_EXECUTE_FAILED,
+    TRANS_KEY_EXCEPTION_ADMIN_READ_FAILED,
+    TRANS_KEY_EXCEPTION_ADMIN_VALIDATION_FAILED,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND,
@@ -149,6 +162,11 @@ from .const import (
     TRANS_PLACEHOLDER_WAN_UUID,
 )
 from .coordinator import FirewallaConfigEntry
+from .managers.admin_manager import (
+    ADMIN_COMMAND_ITEMS,
+    ADMIN_READ_ITEMS,
+    ADMIN_SET_ITEMS,
+)
 from .models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
@@ -205,6 +223,55 @@ _TIME_USAGE_REPORT_SUMMARY_SECTIONS = (
 
 GET_RUNTIME_INVENTORY_SCHEMA = vol.Schema(
     {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_ADMIN_CAPABILITIES_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+ADMIN_READ_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_ADMIN_ITEM): vol.In(ADMIN_READ_ITEMS),
+        vol.Optional(SERVICE_FIELD_ADMIN_VALUE, default=dict): dict,
+        vol.Optional(
+            SERVICE_FIELD_ADMIN_TARGET, default=DEFAULT_INIT_TARGET
+        ): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+ADMIN_EXECUTE_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_ADMIN_ITEM): vol.In(
+            (*ADMIN_SET_ITEMS, *ADMIN_COMMAND_ITEMS)
+        ),
+        vol.Required(SERVICE_FIELD_ADMIN_VALUE): dict,
+        vol.Optional(
+            SERVICE_FIELD_ADMIN_TARGET, default=DEFAULT_INIT_TARGET
+        ): cv.string,
+        vol.Optional(SERVICE_FIELD_DRY_RUN, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIRM, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_EXPECTED_CURRENT_HASH): cv.string,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+ADMIN_ROLLBACK_NETWORK_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_SNAPSHOT_HASH): cv.string,
+        vol.Optional(SERVICE_FIELD_DRY_RUN, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIRM, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_EXPECTED_CURRENT_HASH): cv.string,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -2911,6 +2978,127 @@ def _resolve_usage_history_target(
     )
 
 
+async def _async_handle_get_admin_capabilities(call: ServiceCall) -> JsonObjectType:
+    """Return the allowlisted local administration command catalog."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    response: dict[str, object] = {
+        "config_entry_id": entry.entry_id,
+        **entry.runtime_data.admin_manager.get_capabilities(),
+    }
+    return cast(JsonObjectType, response)
+
+
+async def _async_handle_admin_read(call: ServiceCall) -> JsonObjectType:
+    """Read one allowlisted Firewalla administration item."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    try:
+        response = await entry.runtime_data.admin_manager.async_read(
+            cast(str, call.data[SERVICE_FIELD_ADMIN_ITEM]),
+            value=cast(dict[str, object], call.data[SERVICE_FIELD_ADMIN_VALUE]),
+            target=cast(str, call.data[SERVICE_FIELD_ADMIN_TARGET]),
+        )
+    except ValueError as err:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ADMIN_VALIDATION_FAILED,
+            translation_placeholders={"reason": str(err)},
+        ) from err
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to read Firewalla admin item",
+            translation_key=TRANS_KEY_EXCEPTION_ADMIN_READ_FAILED,
+        )
+    service_response: dict[str, object] = {
+        "config_entry_id": entry.entry_id,
+        **response,
+    }
+    return cast(JsonObjectType, service_response)
+
+
+async def _async_handle_admin_execute(call: ServiceCall) -> JsonObjectType:
+    """Plan or execute one allowlisted Firewalla administration mutation."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    try:
+        response = await entry.runtime_data.admin_manager.async_execute(
+            cast(str, call.data[SERVICE_FIELD_ADMIN_ITEM]),
+            value=cast(dict[str, object], call.data[SERVICE_FIELD_ADMIN_VALUE]),
+            target=cast(str, call.data[SERVICE_FIELD_ADMIN_TARGET]),
+            dry_run=cast(bool, call.data[SERVICE_FIELD_DRY_RUN]),
+            confirm=cast(bool, call.data[SERVICE_FIELD_CONFIRM]),
+            expected_current_hash=cast(
+                str | None,
+                call.data.get(SERVICE_FIELD_EXPECTED_CURRENT_HASH),
+            ),
+            refresh=cast(bool, call.data[SERVICE_FIELD_REFRESH]),
+        )
+    except ValueError as err:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ADMIN_VALIDATION_FAILED,
+            translation_placeholders={"reason": str(err)},
+        ) from err
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to execute Firewalla admin item",
+            translation_key=TRANS_KEY_EXCEPTION_ADMIN_EXECUTE_FAILED,
+        )
+    service_response: dict[str, object] = {
+        "config_entry_id": entry.entry_id,
+        **response,
+    }
+    return cast(JsonObjectType, service_response)
+
+
+async def _async_handle_admin_rollback_network_config(
+    call: ServiceCall,
+) -> JsonObjectType:
+    """Plan or restore a raw in-memory network configuration snapshot."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    try:
+        response = await entry.runtime_data.admin_manager.async_rollback_network_config(
+            cast(str, call.data[SERVICE_FIELD_SNAPSHOT_HASH]),
+            dry_run=cast(bool, call.data[SERVICE_FIELD_DRY_RUN]),
+            confirm=cast(bool, call.data[SERVICE_FIELD_CONFIRM]),
+            expected_current_hash=cast(
+                str | None,
+                call.data.get(SERVICE_FIELD_EXPECTED_CURRENT_HASH),
+            ),
+            refresh=cast(bool, call.data[SERVICE_FIELD_REFRESH]),
+        )
+    except ValueError as err:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ADMIN_VALIDATION_FAILED,
+            translation_placeholders={"reason": str(err)},
+        ) from err
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to roll back Firewalla network configuration",
+            translation_key=TRANS_KEY_EXCEPTION_ADMIN_EXECUTE_FAILED,
+        )
+    service_response: dict[str, object] = {
+        "config_entry_id": entry.entry_id,
+        **response,
+    }
+    return cast(JsonObjectType, service_response)
+
+
 async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectType:
     """Return the current runtime inventory as markdown and structured data."""
     entry = _get_loaded_entry(
@@ -4242,6 +4430,30 @@ type FirewallaServiceRegistration = tuple[
 ]
 
 _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
+    (
+        SERVICE_GET_ADMIN_CAPABILITIES,
+        _async_handle_get_admin_capabilities,
+        GET_ADMIN_CAPABILITIES_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_ADMIN_READ,
+        _async_handle_admin_read,
+        ADMIN_READ_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_ADMIN_EXECUTE,
+        _async_handle_admin_execute,
+        ADMIN_EXECUTE_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
+    (
+        SERVICE_ADMIN_ROLLBACK_NETWORK_CONFIG,
+        _async_handle_admin_rollback_network_config,
+        ADMIN_ROLLBACK_NETWORK_CONFIG_SCHEMA,
+        SupportsResponse.ONLY,
+    ),
     (
         SERVICE_GET_RUNTIME_INVENTORY,
         _async_handle_get_runtime_inventory,
