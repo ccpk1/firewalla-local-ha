@@ -95,17 +95,26 @@ async def test_admin_execute_routes_confirmed_command_and_refreshes() -> None:
 
 @pytest.mark.asyncio
 async def test_network_config_dry_run_runs_impact_check() -> None:
-    """Network dry runs read current state and run the native impact check."""
-    manager, client = _manager(get_result={"ncid": "current"})
-    requested = {"ncid": "next", "interface": {}}
+    """Network dry runs merge patches without dropping hidden current values."""
+    current = {
+        "ncid": "current",
+        "interface": {"wan": {"enabled": True, "password": "hidden"}},
+    }
+    manager, client = _manager(get_result=current)
+    requested = {"ncid": "next", "interface": {"wan": {"enabled": False}}}
+    merged = {
+        "ncid": "next",
+        "interface": {"wan": {"enabled": False, "password": "hidden"}},
+    }
 
     response = await manager.async_execute("networkConfig", value=requested)
 
     assert response["executed"] is False
+    assert response["network_config_mode"] == "merge_patch"
     assert isinstance(response["current_config_hash"], str)
     assert client.async_get_item.await_count == 2
     assert client.async_get_item.await_args_list[1].kwargs == {
-        "value": {"config": requested}
+        "value": {"config": merged}
     }
     client.async_set_item.assert_not_awaited()
 
@@ -129,15 +138,19 @@ async def test_network_config_rejects_stale_hash() -> None:
 
 @pytest.mark.asyncio
 async def test_network_config_executes_with_matching_hash() -> None:
-    """Network execution wraps config only after hash and impact gates pass."""
-    current = {"ncid": "current"}
+    """Network execution sends the merged config after hash and impact gates."""
+    current = {
+        "ncid": "current",
+        "secretToken": "hidden",
+        "interface": {"lan": {"enabled": True}},
+    }
     manager, client = _manager(get_result=current)
     read_response = await manager.async_read("networkConfig")
     client.async_get_item.reset_mock()
 
     response = await manager.async_execute(
         "networkConfig",
-        value={"ncid": "next"},
+        value={"ncid": "next", "interface": {"lan": {"name": "Core"}}},
         dry_run=False,
         confirm=True,
         expected_current_hash=str(read_response["config_hash"]),
@@ -147,9 +160,32 @@ async def test_network_config_executes_with_matching_hash() -> None:
     assert response["executed"] is True
     client.async_set_item.assert_awaited_once_with(
         "networkConfig",
-        value={"config": {"ncid": "next"}},
+        value={
+            "config": {
+                "ncid": "next",
+                "secretToken": "hidden",
+                "interface": {"lan": {"enabled": True, "name": "Core"}},
+            }
+        },
         target="0.0.0.0",
     )
+
+
+@pytest.mark.asyncio
+async def test_network_config_merge_patch_can_remove_keys() -> None:
+    """A null merge-patch value removes the selected network config key."""
+    manager, client = _manager(
+        get_result={"ncid": "current", "interface": {"lan": {}, "old": {}}}
+    )
+
+    await manager.async_execute(
+        "networkConfig",
+        value={"interface": {"old": None}},
+    )
+
+    assert client.async_get_item.await_args_list[1].kwargs == {
+        "value": {"config": {"ncid": "current", "interface": {"lan": {}}}}
+    }
 
 
 @pytest.mark.asyncio
@@ -182,6 +218,36 @@ async def test_network_config_rollback_rejects_unknown_snapshot() -> None:
         await manager.async_rollback_network_config("missing")
 
     client.async_set_item.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_network_config_rollback_replaces_the_complete_snapshot() -> None:
+    """Rollback removes keys that were added after the selected snapshot."""
+    original = {"ncid": "original", "interface": {"lan": {}}}
+    manager, client = _manager(get_result=original)
+    original_read = await manager.async_read("networkConfig")
+    current = {
+        "ncid": "changed",
+        "interface": {"lan": {}, "new": {"enabled": True}},
+    }
+    client.async_get_item.return_value = current
+    current_read = await manager.async_read("networkConfig")
+    client.async_get_item.reset_mock()
+
+    response = await manager.async_rollback_network_config(
+        str(original_read["config_hash"]),
+        dry_run=False,
+        confirm=True,
+        expected_current_hash=str(current_read["config_hash"]),
+    )
+
+    assert response["executed"] is True
+    assert response["network_config_mode"] == "replace"
+    client.async_set_item.assert_awaited_once_with(
+        "networkConfig",
+        value={"config": original},
+        target="0.0.0.0",
+    )
 
 
 @pytest.mark.asyncio

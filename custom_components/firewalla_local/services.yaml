@@ -1235,7 +1235,7 @@ admin_execute:
       selector:
         object:
       name: Value
-      description: The exact object required by the selected Firewalla command.
+      description: The exact object required by the selected Firewalla command. For networkConfig, provide only an RFC 7396-style merge patch; omitted and redacted values are preserved, while null removes a key.
     target:
       required: false
       example: 0.0.0.0

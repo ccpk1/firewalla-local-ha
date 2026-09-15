@@ -187,6 +187,25 @@ def _redact_sensitive(value: object) -> object:
     return value
 
 
+def _apply_network_config_patch(
+    current: Mapping[str, object],
+    patch: Mapping[str, object],
+) -> dict[str, object]:
+    """Apply an RFC 7396-style merge patch while preserving hidden values."""
+    merged = deepcopy(dict(current))
+    for key, patch_value in patch.items():
+        if patch_value is None:
+            merged.pop(key, None)
+            continue
+        current_value = merged.get(key)
+        if isinstance(patch_value, Mapping):
+            nested_current = current_value if isinstance(current_value, Mapping) else {}
+            merged[key] = _apply_network_config_patch(nested_current, patch_value)
+            continue
+        merged[key] = deepcopy(patch_value)
+    return merged
+
+
 class FirewallaAdminManager(FirewallaBaseManager):
     """Own the allowlisted expert administration surface."""
 
@@ -258,6 +277,7 @@ class FirewallaAdminManager(FirewallaBaseManager):
         confirm: bool = False,
         expected_current_hash: str | None = None,
         refresh: bool = True,
+        _replace_network_config: bool = False,
     ) -> dict[str, object]:
         """Plan or execute one allowlisted local runtime mutation."""
         if item not in ADMIN_SET_ITEMS and item not in ADMIN_COMMAND_ITEMS:
@@ -272,6 +292,7 @@ class FirewallaAdminManager(FirewallaBaseManager):
             "confirmed": confirm,
         }
 
+        requested_network_config: dict[str, object] | None = None
         if item == _NETWORK_CONFIG_ITEM:
             current_config = await self.client.async_get_item(_NETWORK_CONFIG_ITEM)
             if not isinstance(current_config, dict):
@@ -280,12 +301,22 @@ class FirewallaAdminManager(FirewallaBaseManager):
                 )
             current_hash = _canonical_hash(current_config)
             self._store_network_config_snapshot(current_config)
+            requested_network_config = (
+                deepcopy(value)
+                if _replace_network_config
+                else _apply_network_config_patch(current_config, value)
+            )
             response["current_config_hash"] = current_hash
-            response["requested_config_hash"] = _canonical_hash(value)
+            response["network_config_mode"] = (
+                "replace" if _replace_network_config else "merge_patch"
+            )
+            response["requested_config_hash"] = _canonical_hash(
+                requested_network_config
+            )
             response["impact"] = _redact_sensitive(
                 await self.client.async_get_item(
                     _NETWORK_CONFIG_IMPACT_ITEM,
-                    value={"config": value},
+                    value={"config": requested_network_config},
                 )
             )
 
@@ -310,7 +341,11 @@ class FirewallaAdminManager(FirewallaBaseManager):
 
         wire_value = cast(
             dict[str, object],
-            {"config": value} if item == _NETWORK_CONFIG_ITEM else value,
+            (
+                {"config": requested_network_config}
+                if item == _NETWORK_CONFIG_ITEM
+                else value
+            ),
         )
         if message_type == "set":
             result = await self.client.async_set_item(
@@ -357,6 +392,7 @@ class FirewallaAdminManager(FirewallaBaseManager):
             confirm=confirm,
             expected_current_hash=expected_current_hash,
             refresh=refresh,
+            _replace_network_config=True,
         )
         response["rollback_snapshot_hash"] = snapshot_hash
         return response
