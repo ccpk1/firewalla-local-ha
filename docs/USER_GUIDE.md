@@ -565,12 +565,14 @@ Guarded expert administration services:
 - `firewalla_local.admin_execute`
 - `firewalla_local.admin_rollback_network_config`
 
-### Full local administration
+### Guarded local administration
 
-The expert administration surface covers confirmed local commands for device
-and group policies, tag or group lifecycle, rule CRUD, complete WAN/VLAN/LAN/
-Wi-Fi configuration, network-interface changes, VPN client profiles, virtual
-WAN groups, data-plan settings, DNS settings, categories, and exceptions.
+The expert administration surface covers the confirmed local catalog for device
+and group policies, tag or group lifecycle, rule CRUD, WAN/VLAN/LAN/Wi-Fi
+configuration, network-interface changes, VPN client profiles, virtual WAN
+groups, data-plan settings, DNS settings, categories, and exceptions. It does
+not expose the excluded shell, credential, migration, power, or firmware
+commands listed below.
 
 Start with `firewalla_local.get_admin_capabilities`. It returns:
 
