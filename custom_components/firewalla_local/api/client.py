@@ -613,6 +613,57 @@ class FirewallaApiClient:
             log_level=log_level,
         )
 
+    async def async_get_item(
+        self,
+        item: str,
+        *,
+        value: dict[str, object] | None = None,
+        target: str = DEFAULT_INIT_TARGET,
+    ) -> object:
+        """Read one confirmed item from the local runtime."""
+        return await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: item,
+                _COMMAND_VALUE_KEY: value or {},
+            },
+            target=target,
+        )
+
+    async def async_set_item(
+        self,
+        item: str,
+        *,
+        value: dict[str, object],
+        target: str = DEFAULT_INIT_TARGET,
+    ) -> object:
+        """Write one confirmed set item to the local runtime."""
+        return await self._async_send_local_message_data(
+            message_type=_SET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: item,
+                _COMMAND_VALUE_KEY: value,
+            },
+            target=target,
+        )
+
+    async def async_command_item(
+        self,
+        item: str,
+        *,
+        value: dict[str, object],
+        target: str = DEFAULT_INIT_TARGET,
+    ) -> object:
+        """Run one confirmed command item through the local runtime."""
+        return await self._async_send_local_message_data(
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: item,
+                _COMMAND_VALUE_KEY: value,
+            },
+            target=target,
+        )
+
     async def async_create_rule(self, template: FirewallaRuleTemplate) -> None:
         """Create one persistent rule from a stored template."""
         await self._async_send_local_message(

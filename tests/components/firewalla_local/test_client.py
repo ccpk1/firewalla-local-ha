@@ -1607,6 +1607,50 @@ async def test_async_set_host_device_type_uses_feedback_write() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "expected_message_type"),
+    (
+        ("async_get_item", "get"),
+        ("async_set_item", "set"),
+        ("async_command_item", "cmd"),
+    ),
+)
+async def test_admin_item_transport_uses_requested_message_type(
+    method_name: str,
+    expected_message_type: str,
+) -> None:
+    """Generic admin transports preserve the selected protocol message type."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={"ok": True}),
+        ) as mock_send:
+            method = getattr(client, method_name)
+            response = await method(
+                "networkState",
+                value={"live": True},
+                target="wan-1",
+            )
+
+    assert response == {"ok": True}
+    assert mock_send.await_args.kwargs == {
+        "message_type": expected_message_type,
+        "data": {"item": "networkState", "value": {"live": True}},
+        "target": "wan-1",
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_rule_sends_confirmed_persistent_payload() -> None:
     """Test rule creation uses the confirmed persistent mutation shape."""
     async with ClientSession() as session:

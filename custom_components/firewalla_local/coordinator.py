@@ -41,6 +41,7 @@ _PENDING_PAIRING_INIT_PAYLOADS: str = "pending_pairing_init_payloads"
 
 if TYPE_CHECKING:
     from .managers import (
+        FirewallaAdminManager,
         FirewallaHostManager,
         FirewallaIntegrationManager,
         FirewallaRuleManager,
@@ -190,6 +191,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self.last_init_payload: dict[str, object] | None = None
         self.last_runtime_data_updated_at: datetime | None = None
         self.host_manager: FirewallaHostManager | None = None
+        self.admin_manager: FirewallaAdminManager | None = None
         self.integration_manager: FirewallaIntegrationManager | None = None
         self.rule_manager: FirewallaRuleManager | None = None
         self.user_manager: FirewallaUserManager | None = None
@@ -210,6 +212,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
     def attach_managers(
         self,
         *,
+        admin_manager: FirewallaAdminManager,
         host_manager: FirewallaHostManager,
         integration_manager: FirewallaIntegrationManager,
         rule_manager: FirewallaRuleManager,
@@ -217,6 +220,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         wireless_manager: FirewallaWirelessManager,
     ) -> None:
         """Attach the entry-scoped manager objects to refresh routing."""
+        self.admin_manager = admin_manager
         self.host_manager = host_manager
         self.integration_manager = integration_manager
         self.rule_manager = rule_manager
@@ -337,6 +341,7 @@ class FirewallaRuntimeData:
 
     client: FirewallaApiClient
     coordinator: FirewallaDataUpdateCoordinator
+    admin_manager: FirewallaAdminManager
     host_manager: FirewallaHostManager
     integration_manager: FirewallaIntegrationManager
     rule_manager: FirewallaRuleManager

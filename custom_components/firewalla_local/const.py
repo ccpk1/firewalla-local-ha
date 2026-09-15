@@ -200,6 +200,12 @@ SERVICE_FIELD_WAN_NAME: Final = "wan_name"
 SERVICE_FIELD_WAN_UUID: Final = "wan_uuid"
 SERVICE_FIELD_WINDOW: Final = "window"
 SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
+SERVICE_FIELD_ADMIN_ITEM: Final = "item"
+SERVICE_FIELD_ADMIN_VALUE: Final = "value"
+SERVICE_FIELD_ADMIN_TARGET: Final = "target"
+SERVICE_FIELD_DRY_RUN: Final = "dry_run"
+SERVICE_FIELD_EXPECTED_CURRENT_HASH: Final = "expected_current_hash"
+SERVICE_FIELD_SNAPSHOT_HASH: Final = "snapshot_hash"
 
 # Config entry data and options keys
 CONF_AID: Final = "aid"
@@ -306,6 +312,10 @@ SERVICE_RESUME_RULE: Final = "resume_rule"
 SERVICE_RUN_INTERNET_SPEED_TEST: Final = "run_internet_speed_test"
 SERVICE_SET_SSID_PAUSED: Final = "set_ssid_paused"
 SERVICE_GET_WIRELESS_STATUS: Final = "get_wireless_status"
+SERVICE_GET_ADMIN_CAPABILITIES: Final = "get_admin_capabilities"
+SERVICE_ADMIN_READ: Final = "admin_read"
+SERVICE_ADMIN_EXECUTE: Final = "admin_execute"
+SERVICE_ADMIN_ROLLBACK_NETWORK_CONFIG: Final = "admin_rollback_network_config"
 HOST_DEVICE_TYPE_OPTIONS: Final = (
     "desktop",
     "phone",
@@ -416,6 +426,9 @@ TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
 )
 TRANS_KEY_EXCEPTION_WAN_EVENTS_FAILED: Final = "wan_events_failed"
 TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY: Final = "wrong_integration_entry"
+TRANS_KEY_EXCEPTION_ADMIN_READ_FAILED: Final = "admin_read_failed"
+TRANS_KEY_EXCEPTION_ADMIN_EXECUTE_FAILED: Final = "admin_execute_failed"
+TRANS_KEY_EXCEPTION_ADMIN_VALIDATION_FAILED: Final = "admin_validation_failed"
 TRANS_KEY_ENTITY_BINARY_SENSOR_SYSTEM_STATUS: Final = "system_status"
 TRANS_KEY_ENTITY_BINARY_SENSOR_AP_STATUS: Final = "ap_status"
 TRANS_KEY_ENTITY_BINARY_SENSOR_WATCHED_DEVICE: Final = "watched_device"
