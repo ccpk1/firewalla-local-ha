@@ -320,7 +320,7 @@ Rules:
 	multi-instance loading just like watched-device entities
 - each selected tracked client must create its own Home Assistant device
 	record keyed to the tracked client's MAC address
-- each tracked-client device must set `via_device` to the primary Firewalla
+- each tracked-client device must set `via_device_id` to the primary Firewalla
 	router device for the owning config entry so the Home Assistant UI keeps the
 	client devices grouped under the Firewalla integration
 - the `device_tracker` entity must attach to the tracked-client device rather
@@ -339,7 +339,7 @@ Implementation guidance:
 - missing device trackers should remain selectable as unavailable placeholders
 	rather than being silently dropped from saved options
 - client-device registry creation should be driven from one integration-owned
-	helper or manager path so `identifiers`, `connections`, `via_device`, and
+	helper or manager path so `identifiers`, `connections`, `via_device_id`, and
 	removal behavior stay consistent across setup, reload, and deselection
 - tracker metadata may expose bounded host facts such as IP, network name,
 	connection type, and last active time, but must not invent zone or GPS-like
@@ -495,7 +495,7 @@ AP device model (AP7):
 
 - each AP7 access point in `networkConfig.apc.assets` becomes its own Home
 	Assistant device, keyed by its MAC (`build_ap_device_identifier`), linked to
-	the Firewalla box device via `via_device`
+	the Firewalla box device via `via_device_id`
 - device lifecycle is manager-owned: `async_reconcile_ap_devices` creates,
 	updates, and prunes AP devices at setup, mirroring the tracked-client device
 	pattern; the tracked-client and AP prune loops each skip the other family

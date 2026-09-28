@@ -773,15 +773,11 @@ get_internet_quality_report:
         text:
       name: Config entry ID (Optional)
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
-      name: Config entry ID (Optional)
-      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
       example: "Firewalla (192.168.200.1)"
       selector:
         text:
-      name: Config entry name (Optional)
-      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
