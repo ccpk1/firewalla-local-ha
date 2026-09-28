@@ -131,3 +131,55 @@ true:
 - [x] the HACS install or upgrade path and the live config-flow smoke path both succeed.
 - [x] a representative runtime refresh and one representative service action both succeed.
 - [x] any known risks, defers, and rollback expectations are documented in the release notes or release checklist.
+
+## Patch release 2.0.1
+
+Patch release on top of `2.0.0` for two narrow log-noise and deprecation fixes.
+There is no user-facing behavior change.
+
+### Version and metadata
+
+- [x] `custom_components/firewalla_local/manifest.json` set to `2.0.1`.
+- [x] `pyproject.toml` set to `2.0.1`.
+- [ ] Git tag `2.0.1` created on the release commit after merge into `main`.
+- [ ] GitHub release published with the summary below.
+
+### Fixes in this patch
+
+- Removed duplicate `name` and `description` keys in `services.yaml` under
+  `get_internet_quality_report`. The duplicate keys made Home Assistant log
+  `annotatedyaml` duplicate-key warnings on every startup.
+- Replaced the deprecated `via_device` device-registry argument with
+  `via_device_id` in `async_reconcile_tracked_client_devices` and
+  `async_reconcile_ap_devices`. This removes the
+  `homeassistant.helpers.frame` deprecation warning and keeps device grouping
+  working after Home Assistant 2027.8.0.
+
+### Patch quality gates
+
+- [ ] `bash ./utils/quick_lint.sh`
+- [ ] `python -m mypy custom_components/firewalla_local`
+- [ ] `python -m pytest tests/ -v`
+- [ ] Startup log verified free of both warnings against a real Firewalla box
+
+### Draft release summary
+
+Firewalla Local 2.0.1 is a small patch release that removes two startup log
+warnings introduced in 2.0.0:
+
+- Fixed duplicate YAML keys in the service definition for
+  `get_internet_quality_report`, which caused `services.yaml` duplicate-key
+  warnings at startup.
+- Updated tracked-client and AP device registration to use the current
+  `via_device_id` device-registry parameter instead of the deprecated
+  `via_device` identifier, ahead of Home Assistant 2027.8.0.
+
+No configuration changes and no user action required.
+
+### Patch risk notes
+
+- Device grouping is unchanged: existing devices already store the resolved
+  `via_device_id`, and the reconcilers keep updating it on rename, so no
+  migration is needed.
+- Rollback path is a revert of the two fix commits plus a re-tag, following the
+  repository rule of publishing a new patch instead of rewriting a shipped tag.

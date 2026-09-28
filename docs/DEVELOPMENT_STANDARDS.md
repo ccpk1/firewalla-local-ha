@@ -215,8 +215,8 @@ Rules:
 	design and must not be surfaced as presence trackers
 - selected device trackers must attach to a distinct tracked-client device
 	record keyed by the client's MAC address, and that device must use
-	`via_device` to point at the primary Firewalla router device for the config
-	entry
+	`via_device_id` to point at the primary Firewalla router device for the
+	config entry
 
 ## Async and event loop rules
 
