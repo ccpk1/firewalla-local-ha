@@ -2930,6 +2930,109 @@ documented-from-APK-only.
 **Artifacts:** `utils/probe_alarm_control.py --action {archive-all,
 delete-archived-all, delete-active-all}` (dry-run by default).
 
+### Finding 33: Silences are a separate object with two create paths and two delete paths
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) after an initial partial reading of the app missed
+  the standalone paths. The owner confirmed the app can mute and unmute an
+  **archived** alarm, which does not fit `alarm:allow` — investigation found a
+  second, alarm-independent mechanism.
+- MSP documentation corroborates the model:
+  *"muting … archives the alarm and instructs the box to create a silence
+  exception"*, while *"archiving does not create a silence exception"*.
+
+**A silence is its own object, not a flag on an alarm.**
+
+Exception records live in the top-level `exceptionRules` array. Two identifier
+fields matter and they are **not interchangeable**:
+
+| Field | Identity | Used by |
+| --- | --- | --- |
+| `aid` | the originating alarm | `alarm:unallow` |
+| `eid` | the exception itself | `exception:delete` |
+
+**Confirmed: `fx2.java` reads `optString("eid")` into the field used as
+`exceptionID`.** An exception created standalone has **no `aid` at all**.
+
+**Two create paths:**
+
+| Path | `item` | value | Requires |
+| --- | --- | --- | --- |
+| Mute from an alarm | `alarm:allow` | `{alarmID, matchAll, info{...}}` | an **active** alarm |
+| Standalone mute | `exception:create` | see payload below | **nothing** |
+
+`alarm:allow` operates on an active alarm — it archives that alarm *and* creates
+the silence. **It returns HTTP 500 against an archived alarm**, because there is
+no active record to act on. This is not a limitation on muting archived alarms;
+it means `alarm:allow` is simply the wrong command in that context.
+
+`exception:create` is the standalone path and needs no alarm:
+
+```json
+{
+  "item": "exception:create",
+  "value": {
+    "type": "ALARM_GAME",
+    "if.target": "example-mute-test.com",
+    "if.type": "dns",
+    "p.dest.name": "example-mute-test.com",
+    "target_name": "example-mute-test.com"
+  }
+}
+```
+
+- `p.dest.name` is used for `if.type: "dns"`; `p.dest.ip` for `if.type: "ip"`
+  (`AlarmSettingCategoryMuteDialog`, via `cua.m8202c`).
+- Device scoping is added by `cua.m8202c`: **`p.device.mac`** for a device,
+  **`p.tag.ids`** for a group/user tag, **`p.intf.id`** for a network. Omit all
+  three for a global silence.
+- Builders: `cua.m8200a` / `cua.m8201b`; item constant in `n33` (`EF77`).
+
+Measured live: `exception:create` returned the created record with a fresh
+`eid` (`106`) and `exceptionRules` grew 99 → 100. **No `aid` was present**, which
+is what makes it independent of any alarm.
+
+**Two delete paths:**
+
+| Path | `item` | value | Scope |
+| --- | --- | --- | --- |
+| Alarm-tied unmute | `alarm:unallow` | `{alarmID: <aid>}` | **only** exceptions carrying that `aid` |
+| Universal unmute | `exception:delete` | `{exceptionID: <eid>}` | **any** exception |
+
+Measured live: `exception:delete` with `{"exceptionID": "106"}` removed the
+standalone silence (exceptions 100 → 99) and returned `{}`.
+
+Measured live: `alarm:unallow` with an **`eid`** passed as `alarmID` returned
+**HTTP 500** and the silence remained. So `alarm:unallow` genuinely resolves by
+alarm, not by exception.
+
+**Why the app needs both:** `AlarmUnDoListener` issues `alarm:unallow` when the
+user undoes a mute from the alarm feed (the alarm is known). `AlarmSettingsView`
+and `am4.java` choose `alarm:unallow` when a matching alarm still exists, and
+fall back to `exception:delete` when it does not. That fallback is what makes
+mute-then-unmute work for **archived** alarms.
+
+**Design consequence — `exception:delete` is the more general primitive.**
+Any exception can be removed by `eid`, so a caller that already holds the
+exception record never needs `alarm:unallow`. `alarm:unallow` is a convenience
+that resolves alarm → exception internally. An integration that reads
+`exceptionRules` and exposes `eid` can implement unmute with `exception:delete`
+alone.
+
+**The mute-scope caveat from Finding 29 still applies to both paths:** the
+device/tag/network scope must be explicit. Omitting the scope keys produces a
+**global** silence, which is the broadest possible action.
+
+**Artifacts:** live session 2026-09-30; `AlarmSettingCategoryMuteDialog$saveDestinationRule$1$r$1.java`,
+`cua.java`, `am4.java`, `AlarmSettingsView.java`, `AlarmUnDoListener.java`.
+
+**Related MSP documentation** (`docs.firewalla.net/api-reference/alarm/`) confirms
+the same model and adds: archive and mute require MSP 2.11.0+, `limit` caps at
+500 with a default of 200 and cursor pagination, and mute takes an explicit
+`target` (`alarmType` / `domain` / `ip`) plus `scope` (`all` / `device` / …).
+The local runtime uses the equivalent `matchAll` + `info` envelope instead.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two

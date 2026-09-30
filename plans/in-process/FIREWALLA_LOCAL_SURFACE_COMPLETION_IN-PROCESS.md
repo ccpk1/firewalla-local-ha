@@ -216,7 +216,22 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
   - Honour the type taxonomy plus the **implicit companions** so a `security` filter matches the app.
   - **Entry scoping is mandatory** (architecture compliance): accept `config_entry_id` / `config_entry_name` and resolve exactly one target entry, matching every existing service. `docs/ARCHITECTURE.md` forbids relying on first-loaded-entry behavior.
   - **Alarm type values stay raw `ALARM_*` strings** (owner decision). No translation layer now; revisit only if users ask. Document them as raw identifiers so the raw form is clearly intentional rather than an oversight.
-- [ ] **Mute/block control services — with mandatory scope and the admin gate.** Mute must require an explicit scope (device / user / network / all) rather than defaulting to `matchAll: 1`. Durations are the app's three options (1 hour / today / always) and should reuse `parse_duration_to_seconds` plus the pause-rule expiry convention for the offset form. **Register every alarm control service through the Phase 1 `admin=True` path** — including the single-record ones, so the whole alarm write surface is gated consistently rather than only the bulk variants.
+- [ ] **Mute/unmute — TWO create paths and TWO delete paths (see Finding 33).** This is more capable than the earlier draft recorded, and the extra path settles how archived alarms are silenced.
+
+  | Operation | Path | Requires |
+  |---|---|---|
+  | Mute from an alarm | `alarm:allow` | an **active** alarm; archives it *and* creates the silence |
+  | Mute a target directly | `exception:create` | **nothing** — no alarm needed |
+  | Unmute (alarm-tied) | `alarm:unallow` | needs the alarm's `aid` |
+  | Unmute (universal) | `exception:delete` | works for **any** silence, keyed by `eid` |
+
+  **Recommendation: use `exception:create` / `exception:delete` as the primary pair.** `exception:delete` removes any silence by `eid`, so it covers cases `alarm:unallow` cannot — including archived alarms, where `alarm:allow`/`alarm:unallow` return HTTP 500. If we also expose an alarm-scoped mute, it is a *convenience* over the same underlying object, not a separate capability.
+
+  **Scope is mandatory on both create paths** (device / user tag / network, or explicit global). Omitting the scope keys produces a **global** silence — verified: a `dns` mute with no device scope silenced the target for every device. Durations remain the app's three options (1 hour / today / always), reusing `parse_duration_to_seconds` and the pause-rule expiry convention.
+
+  **Register every alarm control service through the Phase 1 `admin=True` path**, so the whole alarm write surface is gated consistently.
+- [ ] **Block/unblock — separate from mute.** `alarm:block` creates a policy rule rather than a silence, and `alarm:unblock` removes it. Keep these distinct from the mute pair: they have different effects (enforcement vs. notification suppression), different backing objects, and different reversibility surfaces.
+- [ ] **`exceptionRules` should be exposed for discovery.** Only `exception_rule_count` reaches the snapshot today; the individual records are not surfaced anywhere, so a user could mute but never see *what* is muted in order to unmute it. **Expose the rule records** so `get_alarms` can flag which alarms carry a silence (correlate by `aid`) and so the universal `exception:delete` path has an `eid` to work with. Without this, unmute is undiscoverable regardless of which delete path we choose.
 - [ ] **Reuse the block → rule path — for reading, not writing.** `alarm:block` creates an ordinary policy rule that `RuleManager` already parses. Do not build a parallel rule layer for blocks; **surface** them through the existing rule inventory. Note the direction: `RuleManager` discovers the rule on refresh. `AlarmManager` must **not** push rule state into `RuleManager` — see the cross-manager write note above.
 - [ ] **Filtering — confirmed unnecessary.** The box removes muted alarms from `newAlarms` itself (live-verified), so implement **no** client-side filtering and document that muted alarms never reach the entity. Do not build cloud-parity filtering.
 - [ ] **Bulk commands — IN SCOPE for v1, admin-gated with a confirmation toggle (owner decision, 2026-09-30).** All three bulk commands are live-verified (see the table below). An earlier draft recommended excluding them; **that recommendation is overruled.** The owner's reasoning, recorded because it is the deciding argument:
