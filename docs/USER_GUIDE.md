@@ -208,6 +208,52 @@ Home Assistant.
 - **General options:** Adjust the local polling interval and timing settings
   without re-pairing the box.
 
+## Rich data lives in entity attributes
+
+**Read this before assuming a sensor is "just a number."** Most Firewalla Local
+entities expose far more than their state value. The state is the headline
+metric; the full detail sits in the entity's **attributes**, which Home
+Assistant surfaces alongside the state.
+
+For example, the WAN speed-test download sensor shows one number as its state,
+but that same entity carries upload speed, latency, jitter, packet loss, server
+country/host/location/sponsor, ISP, public IP, test timestamp, and the WAN name
+and UUID. You do not need a service call to read any of it.
+
+### How to see the attributes
+
+- **In the UI:** open the entity's more-info dialog (**Settings → Devices &
+  Services → [your Firewalla entry] → Entities**, or click any entity on a
+  dashboard). Attributes are listed under the state, with the names and
+  descriptions this integration defines.
+- **In a template:** use `state_attr('sensor.entity_id', 'attribute_name')`.
+- **Exhaustively:** **Developer Tools → States** lists every entity and every
+  attribute with live values. This is the definitive, always-current reference.
+
+### Where the richest attributes are
+
+| Entity | What else it carries |
+| --- | --- |
+| System status binary sensor | uptime, boot/cloud state, firmware release type, DDNS, WAN IP(s), per-port link/speed/MAC, Bluetooth MAC, box timezone, CPU/memory/disk, device counts, `runtime_data_updated_at` |
+| WAN speed-test sensors | full test result: upload, latency, jitter, packet loss, server detail, ISP, public IP, timestamp, WAN identity |
+| WAN internet-quality sensors | ping target, sampled time, mean/max/median/min latency, packet loss, WAN identity |
+| Per-network binary sensor | kind, VLAN ID, ports, IPv4/IPv6 addresses and subnets, gateway, DNS, DHCP config, device count, mDNS/SSDP relay, Block ICMP, usage windows |
+| Per-SSID and per-AP entities | band, encryption, WPA3, VLAN, interface, paused state; AP channels, LED, TX power, country, mesh mode, client count |
+| Watched-device binary sensor | IP, device group, network name, connection type, download and upload usage, last-active, and conditional Wi-Fi details (SSID, band, RSSI, AP) when wireless |
+| Watched-user sensor | associated device group and names, device count, unique usage, per-app usage, derived last-active |
+| Alarm entities | active/archived/pending counts, per-category counts, and the latest alarm's type, device, message, time, and ID |
+
+Attributes are also translation-named, so the UI shows readable labels rather
+than raw keys.
+
+### Why rich data is in attributes rather than separate entities
+
+Rankings, per-app breakdowns, and detail rows change constantly. Giving each one
+its own entity would create unstable identities that churn the recorder and
+break automations. Attributes keep that detail available without polluting your
+entity registry. Use the report services when you need a full, queryable
+payload rather than a summary.
+
 ## Main Firewalla device
 
 The main Firewalla router device is the anchor device for appliance monitoring
