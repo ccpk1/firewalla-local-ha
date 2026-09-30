@@ -2745,15 +2745,47 @@ resulting exception rule, and a “today” mute resolved to midnight local.
 (`"expireTs"`) is already defined in `helpers/runtime_inventory.py`. Reuse both;
 do not add a second expiry convention.
 
-**Mute is broad by default — `matchAll: 1` means global.**
+**Scope comes from the `info` keys, NOT from `matchAll`.**
 
-Verified live: a `dns` mute on `epicgames.com` issued with `matchAll: 1` silenced
-that domain for **every device**, not just the alarm's device. The app constrains
-this with an “apply to” picker (`AlarmActionHelper.getMuteApplyToItems`) offering
-**device / user / network / global (`null`)**.
+> **Corrected 2026-09-30 (third correction to this section).** An earlier revision
+> claimed that `matchAll: 1` meant a global mute. **That was wrong** — it was an
+> inference from a single observation, not a measurement. A direct four-way test
+> (below) shows `matchAll` changing nothing. The scope decision is entirely
+> governed by whether the device/tag/interface key is present in `info`.
 
-**Any mute exposed by the integration must require an explicit scope.** Defaulting
-to match-all silently silences alarms the user did not intend to silence.
+Measured by blocking on an archived alarm and inspecting the resulting rule's
+`scope` array, which is the same scope resolution a mute uses:
+
+| `value` | Resulting `scope` |
+| --- | --- |
+| `matchAll: 1` + `info.device` | `["0C:85:E1:EB:6A:AF"]` — device-scoped |
+| `matchAll: 0` + `info.device` | `["0C:85:E1:EB:6A:AF"]` — **identical** |
+| `matchAll: 1`, no `info.device` | `null` — **global** |
+| `matchAll: 0`, no `info.device` | `null` — **identical** |
+
+**`matchAll` made no observable difference in any tested path.** It is always
+written as `1` or `0` by the app (`ku7.m14064d`), but its effect is **not
+determined**. Possibilities are that it governs something untested (matching
+multiple alarm instances), or that it is a legacy field the box ignores. Treat it
+as **required-but-inert**: keep sending it for fidelity with the app, and do not
+build behaviour on it.
+
+**What actually determines scope** (from `cua.m8202c`, which a mute shares with
+`exception:create`):
+
+| `info` key present | Scope granted |
+| --- | --- |
+| `device` | that device MAC |
+| `tag` / `p.tag.ids` | a group or user tag |
+| `intf` / `p.intf.id` | a network |
+| **none of the above** | **global — every device** |
+
+So the app's "apply to" picker (`AlarmActionHelper.getMuteApplyToItems`, offering
+**device / user / network / global**) maps exactly onto which key it writes.
+
+**Any mute the integration exposes must require an explicit scope**, because
+omitting the keys — not `matchAll` — silently silences alarms for every device.
+
 
 **`alarm:block` payload differences** (`ku7.m14064d` + `cd0.m2349a`):
 
@@ -3032,6 +3064,69 @@ the same model and adds: archive and mute require MSP 2.11.0+, `limit` caps at
 500 with a default of 200 and cursor pagination, and mute takes an explicit
 `target` (`alarmType` / `domain` / `ip`) plus `scope` (`all` / `device` / …).
 The local runtime uses the equivalent `matchAll` + `info` envelope instead.
+
+### Finding 34: Blocking is pure rule creation; silences support a target-less whole-type mute
+
+**Scenario:**
+
+- Confirmed live (2026-09-30). Two questions were open: whether block needs an
+  active alarm, and whether the whole-alarm-type mute the MSP docs describe
+  (`target: {type: "alarmType"}`) exists locally.
+
+**Blocking does NOT need an active alarm — it is pure rule creation.**
+
+The MSP API exposes **no** "block an alarm" or "unblock an alarm" endpoint. Its
+alarm surface is only get / delete / archive / mute. That is a strong signal that
+blocking is not an alarm feature at all: the app's block button creates an
+ordinary policy rule, and the alarm's `aid` is merely recorded on it as a
+back-reference.
+
+Tested by blocking an **archived** alarm (`aid` 1726, `live-video.net`, scoped to
+one MAC):
+
+| | |
+| --- | --- |
+| Result | `{"policy": {"pid": "653", ...}}` — a new policy rule |
+| `policyRules` | 321 → **322** |
+| `alarm:unblock` | 322 → **321**, rule removed |
+
+Note the `alarm:` prefix on the command is a UI-level naming choice, not
+evidence of alarm ownership — the created object is a plain rule, and `RuleManager`
+already parses it. **The MSP API's omission of a block endpoint is consistent with
+this and is now explained.**
+
+**A target-less silence is a whole-alarm-type mute.**
+
+MSP's `target: {type: "alarmType"}` (silence every future alarm of this type,
+whatever the destination) maps locally to `exception:create` with **`type` and no
+target**:
+
+```json
+{ "item": "exception:create", "value": { "type": "ALARM_GAME" } }
+```
+
+Stored minimally as `{"type": "ALARM_GAME", "timestamp": ..., "eid": "108"}` —
+no `if.target`, no `if.type`, no device keys. Verified: exceptions 99 → 100, then
+removed by `exception:delete` back to 99.
+
+This means the local silence surface covers **all three** MSP target forms:
+
+| MSP `target.type` | Local equivalent |
+| --- | --- |
+| `alarmType` | `exception:create` with `type` only, no target |
+| `domain` | `exception:create` with `if.type: "dns"` + `if.target` + `p.dest.name` |
+| `ip` | `exception:create` with `if.type: "ip"` + `if.target` + `p.dest.ip` |
+
+and all three MSP `scope` forms (`all` / `device` / group) via the presence or
+absence of the device/tag/intf keys (Finding 29).
+
+**Design consequence:** the local silence API is **a superset of MSP's mute
+capability**, and one `exception:create` path expresses every variant MSP needs
+three endpoints' worth of parameters for. A single mute service parameterised on
+(target type, target value, scope) covers the whole surface.
+
+**Artifacts:** live session 2026-09-30; MSP alarm docs at
+`docs.firewalla.net/api-reference/alarm/`.
 
 ## Capture workflow note
 
