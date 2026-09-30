@@ -4,11 +4,19 @@
       "path": ".",
     },
     {
+      "name": "core",
       "path": "../core",
     },
   ],
   "settings": {
     "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
+    // Analyse only files that are actually open. Without this, Pylance walks the
+    // whole workspace folder, and the `core` folder alone holds ~23k Python
+    // files, which is what produced six-figure diagnostic counts.
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    // `exclude` removes paths from indexing, but excluded files are STILL
+    // analysed when imported transitively (our tests import homeassistant.*).
+    // `ignore` suppresses diagnostics that leak in that way, so both are needed.
     "python.analysis.exclude": [
       "**/node_modules",
       "**/__pycache__",
@@ -17,22 +25,31 @@
       "**/.pytest_cache/**",
       "**/.ruff_cache/**",
       "**/.tmp/**",
-      "**/site-packages/**",
       "**/.artifacts/**",
       "**/.captures/**",
-      "/workspaces/core/**",
+      "**/site-packages/**",
+      "${workspaceFolder:core}/**",
+    ],
+    // Absolute paths are NOT valid in these globs; Pylance resolves them against
+    // each workspace folder, so `core` must be named via ${workspaceFolder:core}
+    // or it is analysed in full.
+    "python.analysis.ignore": [
+      "**/.tmp/**",
+      "**/.artifacts/**",
+      "**/.captures/**",
+      "${workspaceFolder:core}/**",
     ],
     "search.exclude": {
       "**/node_modules": true,
       "**/__pycache__": true,
       "**/.*": true,
-      "**/.mypy_cache": true,
-      "**/.pytest_cache": true,
-      "**/.ruff_cache": true,
-      "**/.tmp": true,
-      "**/.artifacts": true,
-      "**/.captures": true,
-      "**/site-packages": true,
+      "**/.mypy_cache/**": true,
+      "**/.pytest_cache/**": true,
+      "**/.ruff_cache/**": true,
+      "**/.tmp/**": true,
+      "**/.artifacts/**": true,
+      "**/.captures/**": true,
+      "**/site-packages/**": true,
       "/home/vscode/.local/ha-venv": true,
     },
     "files.exclude": {
@@ -42,14 +59,18 @@
       "**/.pytest_cache": true,
       "**/.ruff_cache": true,
       "**/.tmp": true,
+      "**/.artifacts": true,
+      "**/.captures": true,
       "**/site-packages": true,
       "/home/vscode/.local/ha-venv": true,
     },
     "pylint.args": [
-      "--ignore-paths=^\\.mypy_cache/.*$,^\\.pytest_cache/.*$,^\\.ruff_cache/.*$,^\\.tmp/.*$,^.*/site-packages/.*$,^/home/vscode/\\.local/ha-venv/.*$,^/workspaces/core/.*$,^poc\\.py$,^utils/poc\\.py$",
+      "--ignore-paths=^\\.mypy_cache/.*$,^\\.pytest_cache/.*$,^\\.ruff_cache/.*$,^\\.tmp/.*$,^\\.artifacts/.*$,^\\.captures/.*$,^.*/site-packages/.*$,^/home/vscode/\\.local/ha-venv/.*$,^/workspaces/core/.*$,^poc\\.py$,^utils/poc\\.py$",
     ],
     "pylint.ignorePatterns": [
       "**/.tmp/**/*.py",
+      "**/.artifacts/**/*.py",
+      "**/.captures/**/*.py",
       "**/site-packages/**/*.py",
       "/home/vscode/.local/ha-venv/**/*.py",
       "/workspaces/core/**/*.py",
