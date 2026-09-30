@@ -7,6 +7,7 @@
 - **Through-line:** *Harden what exists → close the last telemetry gap → make the surface visible → implement MCP exposure.*
 - **Explicitly not in scope:** emulating MSP endpoints, shipping our own MCP server, or building trend/search APIs. Home Assistant already provides REST, WebSocket, history/statistics and MCP; the correct move is to expose data as entities and LLM tools and let HA serve them.
 - **Ordering rationale:** the security model is settled **before** new surface is added, documentation is written **after** the surface is final so it cannot drift, and MCP exposure comes **last** because it depends on both the admin gate (Phase 1) and the documented surface (Phase 3).
+- **Current status (2026-09-30):** Phases 1 and 2 are **complete and committed** (`8acfca5` access hardening, `7e2b989` alarm telemetry). Validation: `ruff check .`, `ruff format --check .`, MyPy, and 314 tests all pass. Next: **Phase 3** (surface completion & visibility), awaiting owner approval to start.
 
 ## 2. Scope and non-goals
 
@@ -90,12 +91,12 @@
 
 ## 4. Phase summary table
 
-| Phase | Focus | Key deliverables | Depends on |
-|---|---|---|---|
-| 1 | Access hardening | 13 services admin-gated (12 mutating + `get_runtime_inventory`); `get_host_name_mapping` stays open; tests + docs. Phase 2 extends the gated set to 18 (4 alarm writes + `delete_rule`) | — |
-| 2 | Alarm telemetry & rule deletion | alarm client/model/manager, 2 entities, **5 alarm services**, `delete_rule`, redaction, tests | Phase 1 (settled access model) |
-| 3 | Surface completion & visibility | top-talker attributes, `docs/SURFACE_INVENTORY.md`, limitations documented | Phase 2 (documents final surface) |
-| 4 | MCP implementation | version-gated owned LLM API, ~9 read tools, tiered control tools, options toggle, prompt fragment, contract doc, tests, README asterisk | Phase 3 (docs format) + Phase 1 (admin gate) |
+| Phase | Focus | Key deliverables | Status | Depends on |
+|---|---|---|---|---|
+| 1 | Access hardening | 13 services admin-gated (12 mutating + `get_runtime_inventory`); `get_host_name_mapping` stays open; tests + docs. Phase 2 extends the gated set to 18 (4 alarm writes + `delete_rule`) | **Complete** | — |
+| 2 | Alarm telemetry & rule deletion | alarm client/model/manager, 2 entities, **5 alarm services**, `delete_rule`, redaction, tests | **Complete** (committed `7e2b989`) | Phase 1 (settled access model) |
+| 3 | Surface completion & visibility | top-talker attributes, `docs/SURFACE_INVENTORY.md`, limitations documented | Not started | Phase 2 (documents final surface) |
+| 4 | MCP implementation | version-gated owned LLM API, ~9 read tools, tiered control tools, options toggle, prompt fragment, contract doc, tests, README asterisk | Not started | Phase 3 (docs format) + Phase 1 (admin gate) |
 
 Phases 1 and 2 are independently shippable. Phase 3 should follow Phase 2 so the inventory reflects the final surface. **Phase 4 has two hard prerequisites: the Phase 1 admin gate (it is the actual write protection) and the Phase 3 documentation format.**
 
@@ -165,6 +166,8 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 **Consequence for the release note:** the affected surface is narrower than "non-admin users can no longer pause rules" — it is specifically **direct `pause_rule` / `resume_rule` service calls by a non-admin user**, e.g. a button wired to the service or a script calling it. Switching to the entity removes the problem entirely. Point users at the switch.
 
 ### Phase 2 — Alarm telemetry
+
+**Status: COMPLETE** — implemented, validated (314 tests, Ruff, MyPy), and committed as `7e2b989`.
 
 #### Detailed implementation plan
 
@@ -428,6 +431,8 @@ So the app's "security / abnormal upload / open port" filters map to **`ALARM_IN
 
 ### Phase 3 — Surface completion & visibility
 
+**Status: NOT STARTED** — awaiting owner approval to begin. Read the correction below before implementing.
+
 ⚠️ **The plan as previously written contained a design error. Corrected below — read this before implementing.**
 
 - [ ] **Reuse the payloads the usage refresh already fetches — do NOT add a second fetch.** `async_refresh_network_usage()` **already** gathers `client.async_get_network_interface_payload(network_uuid=...)` for every non-WAN network on each coordinator cycle, then reduces each payload to a bounded `FirewallaNetworkUsageSummary` and **discards the rest**. The flow rankings live in that same payload. **The correct implementation is to capture the rankings during that existing refresh**, so rankings cost **zero additional box requests** and stay on the normal poll cadence. The earlier instruction ("add a manager accessor that returns the `FirewallaNetworkSegmentView`") implied an on-demand fetch and is wrong — see the next item for why it is also impossible.
@@ -444,6 +449,8 @@ So the app's "security / abnormal upload / open port" filters map to **`ALARM_IN
 - [ ] **Pointers + tests.** Link the new doc from `README.md` and `docs/QUALITY_REFERENCE.md`; add tests for the new attributes.
 
 ### Phase 4 — MCP implementation
+
+**Status: NOT STARTED** — depends on Phase 3 for the documentation format and on the Phase 1 admin gate for write protection.
 
 References: `FIREWALLA_LOCAL_SURFACE_COMPLETION_SUP_LLM_MCP_INVESTIGATION.md` (design decisions and clarity architecture) and `FIREWALLA_LOCAL_SURFACE_COMPLETION_SUP_LLM_MCP_NOTES.md` (verified platform facts).
 
@@ -534,7 +541,7 @@ Per-phase additions:
 - **Phase 1:** explicit test coverage for the three call contexts (admin user / non-admin user / no user context). The no-context case guards existing automations and must be asserted, not inferred.
 - **Phase 2:** recon evidence recorded before modelling; extraction and redaction tests; verify the alarm-free path yields a clean, non-erroring state rather than a stale or "unknown" alarm.
 - **Phase 3:** verify the attribute payload matches the serializer output already used by the service response, so the two paths cannot disagree. Also assert a failing `item=intf` fetch keeps the previous rankings rather than raising.
-- **Phase 4:** per-tool tests, a contract test across all tools, gating tests for the pre-2026.10 path, and an assertion that no module-level `probatio`/`ToolResult`import exists. **None of the current 290-test baseline touches LLM tool code** — this is entirely new coverage.
+- **Phase 4:** per-tool tests, a contract test across all tools, gating tests for the pre-2026.10 path, and an assertion that no module-level `probatio`/`ToolResult`import exists. **None of the current 314-test baseline touches LLM tool code** — this is entirely new coverage.
 
 Manual verification in the HA dev instance: confirm the admin gate is surfaced clearly for a non-admin service call; confirm new entities appear under the box device with translated names and expected attributes; confirm no entity is created for a box with alarms disabled/absent.
 
@@ -575,4 +582,4 @@ Manual verification in the HA dev instance: confirm the admin gate is surfaced c
 
 **Handoff**
 
-Both Phase 1 and Phase 2 are handoff-ready — Phase 2's recon is complete (Findings 26–38), so the earlier gate on writing its handoff no longer applies. When implementation is authorized, create `FIREWALLA_LOCAL_SURFACE_COMPLETION_SUP_BUILDER_HANDOFF.md` following the established builder-handoff convention used by the completed runtime-buildout plan (purpose, scope, source-of-truth ordering, non-negotiable guardrails, completion definition, stop-and-request-direction rule).
+Phases 1 and 2 are **implemented, validated, and committed** (`8acfca5`, `7e2b989`). Phase 2's recon is complete (Findings 26–38). The remaining work is Phase 3 (surface completion & visibility) followed by Phase 4 (MCP implementation). If a written handoff is still wanted, create `FIREWALLA_LOCAL_SURFACE_COMPLETION_SUP_BUILDER_HANDOFF.md` following the established builder-handoff convention used by the completed runtime-buildout plan (purpose, scope, source-of-truth ordering, non-negotiable guardrails, completion definition, stop-and-request-direction rule).
