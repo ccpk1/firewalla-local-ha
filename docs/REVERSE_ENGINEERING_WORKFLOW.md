@@ -3561,6 +3561,71 @@ decisions stand, four of them with stronger evidence than the alarm model alone
 provided. It also removes a possible over-correction — do **not** generalise the
 `all` scope value beyond alarm mute.
 
+### Finding 39: Alarm reads accept NO time filter — and the box already retains roughly 30 days
+
+**Scenario:**
+
+- A 30-day default window was specified for the alarm read service on the
+  assumption that the local runtime accepted a time bound, extrapolated from
+  MSP's `ts` search qualifier. This was **not verified** and the assumption was
+  challenged before implementation. Tested directly.
+
+**Result: no time filter exists. All eight candidate parameter names were
+silently ignored.**
+
+Measured against 230 archived records with a cutoff of `newest - 24h`:
+
+| `value` | Returned |
+| --- | --- |
+| `{"limit": 1000}` (baseline) | 230 |
+| `{"limit": 1000, "tsFrom": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "beginTs": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "from": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "begin": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "since": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "days": 1}` | **230** — ignored |
+| `{"limit": 1000, "ts": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "query": "ts:><cutoff>"}` | **230** — ignored |
+
+Unknown keys are **silently discarded**, not rejected — so a caller passing a
+time bound gets no error and no filtering. That is the dangerous shape: the
+parameter appears accepted.
+
+This is consistent with the general finding that **the local runtime takes no
+query grammar**. MSP's `ts` qualifier is a search-API concept with no local
+equivalent. Do not retry this.
+
+**But the 30-day default is satisfied anyway — by the box itself.**
+
+| Item | Records | Oldest record age |
+| --- | --- | --- |
+| `archivedAlarms` | 230 | **29.9 days** |
+| `alarms` | 0 *(no active alarms at test time)* | — |
+
+The oldest alarm the box will return is ~30 days old, and the archive spans the
+full retained history (it contains everything ever archived, including records
+created before the current session). **No alarm older than ~30 days exists to
+retrieve.**
+
+**Interpretation — stated with appropriate caution.** This is **one observation**
+and is consistent with a ~30-day box-side retention policy, but a retention
+policy is *not* proven: the alternative is that no older alarms happen to exist
+on this box. The practical conclusion holds either way:
+
+- **No client-side 30-day filtering is needed**, because the box does not return
+  older records.
+- **No `ts_from` parameter should be added**, because there is nothing to filter
+  and no server-side mechanism to filter with.
+- **`limit` returns the newest N, full stop** — with no window to configure.
+
+**Design consequence:** drop the planned `ts_from` parameter. Document on the
+service that the box retains roughly the last 30 days and that `limit` therefore
+returns the newest records available within that retained set. If a caller needs
+"alarms in the last hour", that is client-side filtering over a small `limit` —
+which is cheap precisely because the retained set is bounded.
+
+**Artifacts:** live session 2026-09-30, `utils/probe_alarm_control.py`.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two

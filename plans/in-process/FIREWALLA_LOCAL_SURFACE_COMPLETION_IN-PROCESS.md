@@ -86,7 +86,7 @@
 - *(Open, Phase 4.1)* **API id strategy edge case:** if the sole entry is removed while another exists, the survivor keeps its suffixed id until reload. Accepted as documented behaviour; confirm no runtime reshuffling is attempted.
 - *(Open, Phase 4.4)* Is a `meta.units` block ever needed, or does the field-name convention make it redundant?
 - *(Open, Phase 4.5)* Does the MCP section live inside `docs/SURFACE_INVENTORY.md` or as a sibling doc reusing its format?
-- *(Open, Phase 2)* Does the alarm surface introduce an LLM tool, and what mute/exception caveats must it carry?
+- *(Resolved, Phase 2)* ~~Does the local `alarms` item support any server-side time filter?~~ **No — and the 30-day default is the box's own retention (Finding 39).** Eight candidate parameter names were silently ignored, so no `ts_from` parameter will be added. The box returns only ~30 days of alarms anyway, so the MSP-matching default is satisfied without us doing anything. No gap remains here.
 
 ## 4. Phase summary table
 
@@ -192,7 +192,9 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 
   **Use `remote_*` for the destination — do not use `dest_*` (Finding 37).** Measured: `dest` appears **zero times** in `models.py`, while `remote_host` / `remote_ip` already exist on `FirewallaNetworkHostRanking`. MSP also calls the concept `remote`. Using `dest_*` would introduce a third vocabulary against both our own precedent and Firewalla's published model.
 
-  Suggested normalized set: `alarm_id`, `alarm_type`, `device_name`, `message`, `state`, `is_archived`, `fired_at` (from `alarmTimestamp`), `remote_host`, `remote_ip`, `remote_app`, `remote_region`, `remote_latitude`, `remote_longitude`, `interface_name`, `protocol`, `severity` (optional). Retain the untouched record as `raw_payload`, exactly as `FirewallaPolicyRule` already does with `raw_update_payload`. Entities must not derive alarm state themselves.
+  Suggested normalized set: `alarm_id`, `alarm_type`, `device_name`, `message`, `state`, `is_archived`, `fired_at` (from `alarmTimestamp`), **`remote_category`**, `remote_host`, `remote_ip`, `remote_app`, `remote_region`, `remote_latitude`, `remote_longitude`, `interface_name`, `protocol`, `severity` (optional). Retain the untouched record as `raw_payload`, exactly as `FirewallaPolicyRule` already does with `raw_update_payload`. Entities must not derive alarm state themselves.
+
+  **`remote_category` is required, not optional** — the `active_by_category` attribute is built from it, so it must be normalized on the model rather than read from `raw_payload` at attribute time. Values stay raw (`games`, `av`, `intel`); see Finding 37 for why no mapping to MSP's vocabulary is applied.
 
   **Deliberate choices in that list, each documented on the field:**
   - `remote_region` rather than `remote_country` — the value is ISO 3166 alpha-2, identical to MSP's `remote.region`. *(Either name is defensible; pick one and record why.)*
@@ -248,7 +250,11 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
   - **`detail` must stay opt-in.** `alarmDetail` is one request per alarm, so fanning it out over a large page is a request storm.
   - Honour the type taxonomy plus the **implicit companions** so a `security` filter matches the app.
   - **Filtering is a deliberate subset of MSP's qualifier surface (Finding 36).** MSP supports `type`, `device.name`, `remote.domain`, `remote.category`, `remote.region`, `transfer.*`, `ts` range and more, with a full query grammar. **The local runtime takes no query grammar**, so this service exposes named filter parameters only. Document it as a deliberate subset rather than leaving users to wonder why a query string is not accepted.
-  - **Consider a `ts` window parameter.** **DECIDED: default to the last 30 days**, matching MSP's alarm-search default. Add a `ts_from` parameter so a caller can widen it deliberately. The local `alarms` item has no inherent bound (`limit: 1000` returned all 243 regardless of age), so an unbounded default would return arbitrarily old alarms and surprise a caller who expects recent activity.
+  - **No time-window parameter — the 30-day default is the box's own retention, not ours (Finding 39).** MSP's search API exposes a `ts` qualifier and defaults to 30 days, but **the local runtime has no time filter at all**: eight candidate parameter names (`tsFrom`, `beginTs`, `from`, `begin`, `since`, `days`, `ts`, `query`) were each **silently ignored**, returning the full set unchanged. Unknown keys are discarded without error, so a time bound would appear accepted while doing nothing.
+
+    **The 30-day default is nevertheless satisfied for free.** The oldest alarm the box returns is **29.9 days** old, and the archive spans the full retained history — so the box effectively retains ~30 days itself. *(One observation, consistent with a retention policy but not proof of one; the practical conclusion holds either way.)*
+
+    **Therefore: do not add `ts_from`.** Document that `limit` returns the newest N of the box's roughly 30-day retained set. Callers needing a shorter window filter client-side over a small `limit`, which is cheap because the retained set is bounded.
   - **No cursor pagination.** MSP is cursor-based (`next_cursor` / `cursor`); the local runtime is not — `alarms` ignores `offset` entirely and `archivedAlarms` uses a numeric offset. Expose no cursor, and document that `limit` returns the newest N rather than a page to walk.
   - **Entry scoping is mandatory** (architecture compliance): accept `config_entry_id` / `config_entry_name` and resolve exactly one target entry, matching every existing service. `docs/ARCHITECTURE.md` forbids relying on first-loaded-entry behavior.
   - **Alarm type values stay raw `ALARM_*` strings** (owner decision). No translation layer now; revisit only if users ask. Document them as raw identifiers so the raw form is clearly intentional rather than an oversight.
@@ -279,7 +285,7 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 
   | # | Service | Parameters | Notes |
   |---|---|---|---|
-  | 1 | `get_alarms` | `limit` (default 10), `include_archived`, `type`, `detail`, `ts_from` *(default 30 days)* | Read; details below |
+  | 1 | `get_alarms` | `limit` (default 10), `include_archived`, `type`, `detail` | Read; details below. **No time-window parameter — the box has no time filter (Finding 39)** |
   | 2 | `archive_alarms` | `mode`, `alarm_id` | `mode`: `this` \| `all_active`. No `all_archived` — archiving an already-archived alarm is meaningless |
   | 3 | `delete_alarms` | `mode`, `alarm_id`, **`confirm`** | `mode`: `this` \| `all_active` \| `all_archived`. Absorbs both bulk deletes |
   | 4 | `mute_alarm` | `alarm_id` *(optional)*, `target_type`, `target_value` *(optional)*, **`scope_kind` (required)**, `scope_target` *(required unless `scope_kind=all`)*, `duration` | Covers `alarm:allow` **and** standalone `exception:create`. `target_type=alarm_type` ⇒ whole-type mute |
@@ -311,6 +317,25 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
   **State irreversibility in user-facing text.** `archive_alarms(mode=this)` is recoverable (the alarm moves to the archive); every delete path destroys records permanently. The service descriptions and usage-guide entries must say so.
 
   **Add all seven to the Phase 1 admin note list in `docs/USER_GUIDE.md`.**
+- [ ] **Translations + icons.** Update `custom_components/firewalla_local/strings.json` and regenerate `translations/en.json` in lockstep (via the Core translation tooling if the symlinked dev setup is used); update `icons.json`.
+- [ ] **Diagnostics redaction + tests.** Alarm records are far more sensitive than the surrounding payload: they carry `p.dest.ip`, `p.device.ip`, `p.device.real.ip`, MAC addresses, device names, **and `p.dest.latitude` / `p.dest.longitude` — precise geolocation of the destination**, which was not anticipated. `newalarms` is currently excluded wholesale from diagnostics (`helpers/init_payload_redaction.py`). Replace blanket exclusion with targeted redaction that strips IPs, MACs, coordinates and device names while keeping alarm `type`, `state` and `aid` diagnosable. Add tests for extraction, counting, attribute shaping, the alarm-free path, and redaction.
+- [ ] **`docs-actions` obligation.** Add all new services (7 alarm services + `delete_rule`) to the service catalog in `docs/USER_GUIDE.md`, alongside the admin notes above. The catalog currently enumerates every service, so omitting them breaks the quality-scale `docs-actions` rule.
+
+#### Reference — existing machinery to build on
+
+Alarm control is structurally the same problem as rule control, and most of it already exists. **Build on these; do not add parallel math or a parallel rule layer.**
+
+| Need | Already exists |
+|---|---|
+| Parse a duration string | `utils/duration.parse_duration_to_seconds` |
+| `now + offset` expiry | the `pause_rule` pattern: `int(dt_util.utcnow().timestamp()) + seconds` (`services.py:4151`) |
+| `expireTs` key | `_RAW_RULE_EXPIRE_TS_KEY = "expireTs"` (`helpers/runtime_inventory.py:53`) |
+| Box timezone | the box reports `timezone` in the init payload; use `dt_util` rather than raw `ZoneInfo` |
+| Exception rules | already parsed (`api/client.py:2386`) |
+| **Block → policy rule** | `RuleManager` already parses alarm-created block rules; `_COMMAND_POLICY_CREATE` / `_COMMAND_POLICY_DELETE` exist |
+| Optimistic state | `RuleManager._apply_optimistic_rule_update` |
+| Rule targeting plus expiry | `RuleManager.async_pause_rule(rule_target, resume_ts)` → `idle_ts=resume_ts` |
+| **Scope kind enum** | `get_time_usage_report`'s `scope_kind` (`device`/`group`/`user`) — extend, do not re-invent (Finding 35) |
 
 #### Alarm control syntax — LIVE-VERIFIED (2026-09-30)
 
@@ -391,26 +416,7 @@ Recovered from `AlarmFiltersHelper.filterCategories` and `AlarmsHelper.allFilter
 
 So the app's "security / abnormal upload / open port" filters map to **`ALARM_INTEL` (+3), `ALARM_LARGE_UPLOAD` (+2), `ALARM_UPNP`**. Mirror the implicit-grouping or the filter will under-report versus the app.
 
-**Caveat for a type-filtered service:** because the default `alarms` fetch is capped at 50, client-side type filtering over that page would miss older alarms. Use `count` generously (or the full set) before filtering, or the "security" filter will silently omit older security alarms.
-
-#### Reuse — do NOT reinvent (existing machinery)
-
-Alarm control is structurally the same problem as rule control, and most of it already exists. **Build on these; do not add parallel math or a parallel rule layer.**
-
-| Need | Already exists |
-|---|---|
-| Parse a duration string | `utils/duration.parse_duration_to_seconds` |
-| `now + offset` expiry | the `pause_rule` pattern: `int(dt_util.utcnow().timestamp()) + seconds` (`services.py:4151`) |
-| `expireTs` key | `_RAW_RULE_EXPIRE_TS_KEY = "expireTs"` (`helpers/runtime_inventory.py:53`) |
-| Box timezone | the box reports `timezone` in the init payload; use `dt_util` rather than raw `ZoneInfo` |
-| Exception rules | already parsed (`api/client.py:2386`) |
-| **Block → policy rule** | `RuleManager` already parses alarm-created block rules; `_COMMAND_POLICY_CREATE` / `_COMMAND_POLICY_DELETE` exist |
-| Optimistic state | `RuleManager._apply_optimistic_rule_update` |
-| Rule targeting plus expiry | `RuleManager.async_pause_rule(rule_target, resume_ts)` → `idle_ts=resume_ts` |
-
-**Consequence for the design:** model alarm state as **primary** (count + binary sensor) and let **control** delegate to the existing rule/exception machinery. The `expireTs` handling in particular should reuse the pause-rule convention verbatim so there is one expiry idiom in the codebase, not two.
-- [ ] **Translations + icons.** Update `custom_components/firewalla_local/strings.json` and regenerate `translations/en.json` in lockstep (via the Core translation tooling if the symlinked dev setup is used); update `icons.json`.
-- [ ] **Diagnostics redaction + tests.** Alarm records are far more sensitive than the surrounding payload: they carry `p.dest.ip`, `p.device.ip`, `p.device.real.ip`, MAC addresses, device names, **and `p.dest.latitude` / `p.dest.longitude` — precise geolocation of the destination**, which was not anticipated. `newalarms` is currently excluded wholesale from diagnostics (`helpers/init_payload_redaction.py`). Replace blanket exclusion with targeted redaction that strips IPs, MACs, coordinates and device names while keeping alarm `type`, `state` and `aid` diagnosable. Add tests for extraction, counting, attribute shaping, the alarm-free path, and redaction.
+**Caveat for a type-filtered service:** the `alarms` item defaults to a 50-record page when no page size is supplied, so client-side type filtering over that default page would miss older alarms. Pass a large `limit` (or fetch the full set) before filtering, or a "security" filter will silently omit older security alarms. *(Verified: `limit`/`count` of 1000 returned all 243 records, so the full set is obtainable in one call.)*
 
 ### Phase 3 — Surface completion & visibility
 
@@ -561,4 +567,4 @@ Manual verification in the HA dev instance: confirm the admin gate is surfaced c
 
 **Handoff**
 
-Phase 1 is handoff-ready. When implementation is authorized, create `FIREWALLA_LOCAL_SURFACE_COMPLETION_SUP_BUILDER_HANDOFF.md` following the established Phase 3b handoff convention (purpose, scope, source-of-truth ordering, non-negotiable guardrails, completion definition, stop-and-request-direction rule). Phase 2's handoff must not be written until the `newalarms` recon is complete.
+Both Phase 1 and Phase 2 are handoff-ready — Phase 2's recon is complete (Findings 26–38), so the earlier gate on writing its handoff no longer applies. When implementation is authorized, create `FIREWALLA_LOCAL_SURFACE_COMPLETION_SUP_BUILDER_HANDOFF.md` following the established builder-handoff convention used by the completed runtime-buildout plan (purpose, scope, source-of-truth ordering, non-negotiable guardrails, completion definition, stop-and-request-direction rule).
