@@ -73,7 +73,7 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
    * Gold Plus
    * Gold SE
    * Purple
-* **Home Assistant:** Requires Home Assistant Core version 2026.3.0 or newer.
+* **Home Assistant:** Requires Home Assistant Core version 2025.10 or newer.
 * **Network:** Your Home Assistant instance must be able to reach the Firewalla's local LAN IP.
 
 ## 🛡️ **A Note on Security & Privacy**
