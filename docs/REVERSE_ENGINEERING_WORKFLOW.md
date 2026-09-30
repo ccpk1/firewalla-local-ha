@@ -2447,6 +2447,455 @@ Conclusion:
   `networkProfiles` fallback, so fixing the collection does not churn existing
   registry entries — only the display name/ports update
 
+## Alarm findings
+
+### Finding 26: Alarm state arrives in the init payload as two fields plus three counts
+
+**Scenario:**
+
+- Confirmed by a live pull (`utils/pull_runtime.py`) on the connected dev box
+  (2026-09-30), and cross-checked against the Firewalla app's own alarm count.
+- The integration parses **neither** field today; alarms are currently unused.
+
+**Confirmed `mtype=init` response fields:**
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `activeAlarmCount` | `optInt` | Authoritative active total. **This is what the app displays** |
+| `archivedAlarmCount` | `optInt` | Archived total |
+| `pendingAlarmCount` | `optInt` | Pending total (observed `0`) |
+| `newAlarms` | `JSONArray` | The active alarm records — **capped at 50** |
+
+APK references: `xz2.java` line ~4295 reads `activeAlarmCount` via `optInt`;
+line ~4054 reads `newAlarms` via `getJSONArray` and hands it to a `gx2`
+container of `fx2` alarm objects. The alarm parser itself
+(`fx2.m10449j0(JSONObject)`) **failed to decompile** (“Method not decompiled”),
+so field names were recovered from live payloads instead of the APK.
+
+**Critical: `newAlarms` is capped at 50 and is NOT the count.**
+
+Observed live: `activeAlarmCount = 243` while `len(newAlarms) = 50`, and
+`archivedAlarmCount = 5`. **Never derive the alarm total from `len(newAlarms)`.**
+Use `activeAlarmCount`. Use the retrieval API in Finding 27 for the full set.
+
+**Confirmed per-alarm field surface** (union across 50 records, with occurrence
+counts — fields are sparse):
+
+| Field | Present | Notes |
+| --- | --- | --- |
+| `aid` | 50/50 | Alarm id, **string**; used as `alarmID` in commands |
+| `alarmTimestamp` | 50/50 | When the alarm fired, **epoch as a string** |
+| `timestamp` | 50/50 | A **second, different** timestamp (typically earlier) |
+| `device` | 50/50 | Device name, or an IP for VPN-origin alarms |
+| `message` | 50/50 | Human-readable, or an info constant like `INFO_ALARM_VPN_CLIENT_CONNECTION` |
+| `state` | 50/50 | Only `active` observed — **even for archived alarms** |
+| `type` | 50/50 | `ALARM_*` class (see Finding 30) |
+| `p.cloud.decision` | 50/50 | `alarm` |
+| `p.fi` | 50/50 | Feature id |
+| `p.device.name` / `.mac` | 50/50 | `p.device.mac` is the command's `device` scope |
+| `p.id`-family (`p.device.id`, `.ip`) | 49/50 | |
+| `p.intf.name` / `.desc` / `.id` / `.subnet` | 50/50 | Originating interface |
+| `p.dest.*` | 33–44/50 | Destination: `.app`, `.app.id`, `.category`, `.country`, `.domain`, `.id`, `.ip`, `.latitude`, `.longitude`, `.name`, `.name.suffix`, `.port` |
+| `p.protocol` | 43/50 | |
+| `p.tag.ids` / `.names`, `p.utag.ids` / `.names`, `p.dtag.ids` / `.names` | 35–46/50 | Group / user / device tag membership |
+| `p.timestampTimezone` | 34/50 | Display-formatted local time |
+| `p.showMap` | 34/50 | |
+| `p.action.block`, `p.alarm.trigger`, `p.local_is_client`, `p.from`, `p.security.*`, `result`, `result_policy`, `p.severity` | 9/50 | Present only on **security/blocked** alarms (`ALARM_INTEL`) |
+| `p.begin.ts`, `p.end.ts`, `p.duration`, `p.flows`, `p.percentage`, `p.totalUsage` | 5/50 | Present only on **bandwidth** alarms |
+| `p.quarantine`, `p.vpnType`, `p.dest.wg.peer`, `p.device.wgPeer` | 1–2/50 | VPN-specific |
+
+**Important field conventions:**
+
+- **`p.*` keys are literally flat dotted strings**, not nested objects. Parse
+  them as a map, not a hierarchy.
+- **`p.dest.latitude` / `p.dest.longitude` are present on ~44/50 records** and
+  give precise destination geolocation. Treat as sensitive.
+- **`p.severity` is sparse** (9/50) and observed only as `minor`, alongside
+  `p.severity.score`. It is not a reliable required field.
+- **`state` does NOT indicate archived** — archived records still report
+  `state: "active"`. Only membership in the `archivedAlarms` list distinguishes
+  them.
+
+**Artifacts:**
+
+- `.artifacts/alarm-verify/*/runtime_init.json` (live pulls)
+- `.tmp/live_gold/20260910-165331/runtime_init.json` (older pull; line 2 count,
+  line 45611 `newAlarms`)
+
+### Finding 27: Alarm retrieval uses `item=alarms`, `item=archivedAlarms` and `item=alarmDetail`
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) with the stored HA config-entry credentials.
+- The init payload's `newAlarms` is capped at 50, so full retrieval needs these
+  dedicated reads.
+
+**Confirmed read contracts:**
+
+```
+# Active alarms
+mtype: get
+target: 0.0.0.0
+data:
+  item: alarms
+  value: {count: <page size>, offset: <n>}
+
+# Archived alarms
+mtype: get
+target: 0.0.0.0
+data:
+  item: archivedAlarms
+  value: {limit: <page size>, offset: <n>}
+
+# One alarm with full detail
+mtype: get
+target: 0.0.0.0
+data:
+  item: alarmDetail
+  value: {alarmID: "<aid>"}
+```
+
+**Confirmed response shape:** `{"count": <n>, "alarms": [ ... ]}`. The
+response's `count` is the **number of records in this page**, not a total — use
+`activeAlarmCount` / `archivedAlarmCount` from the init payload for totals.
+
+**The two items accept DIFFERENT page-size keys — this is a real trap.**
+
+> **Corrected 2026-09-30 (later the same day).** An earlier revision of this
+> finding stated that `count` was the page-size key and `limit` was ignored.
+> That is **only true for `alarms`**. Testing with a large archived set proved
+> `archivedAlarms` is the opposite. Both behaviours are now measured
+> separately below; do not generalise one to the other.
+
+**`item=archivedAlarms` uses `limit` (+ `offset`) and ignores `count`.**
+Measured with 243 archived records:
+
+| `value` | Returned |
+| --- | --- |
+| `{}` (bare) | 50 (default page) |
+| `{"count": 1000}` | **50** — `count` ignored |
+| `{"count": 243}` | **50** — ignored |
+| `{"limit": 10}` | 10 |
+| `{"limit": 100}` | 100 |
+| `{"limit": 250}` | **243** — full set |
+| `{"limit": 500}` | 243 |
+| `{"limit": 1000}` | 243 |
+
+**`offset` pages correctly for `archivedAlarms`** — verified contiguous,
+non-overlapping pages of 50:
+
+| `value` | Returned | Newest → oldest |
+| --- | --- | --- |
+| `{"limit": 50, "offset": 0}` | 50 | 1732 → 1680 |
+| `{"limit": 50, "offset": 50}` | 50 | 1679 → 1630 |
+| `{"limit": 50, "offset": 100}` | 50 | 1629 → 1580 |
+| `{"limit": 50, "offset": 200}` | 43 | 1529 → 1487 |
+| `{"limit": 50, "offset": 240}` | 3 | 1489 → 1487 |
+
+**`item=alarms` used `count` and ignored `limit`.** Measured earlier the same
+day with 243 active records:
+
+| `value` | Returned |
+| --- | --- |
+| `{}` (bare) | 50 |
+| `{"limit": 200}` | **50** — `limit` ignored |
+| `{"count": 200}` | **200** |
+| `{"count": 1000}` | **243** — full set |
+| `{"count": 5000}` | 243 |
+
+> **Re-verification pending.** The `alarms` matrix above was measured while 243
+> active alarms existed. The active set has since been archived (Finding 32), so
+> `alarms` currently returns 0 and the behaviour could not be re-confirmed
+> alongside `archivedAlarms`. Re-run the matrix for `alarms` once new alarms
+> accumulate, to confirm the asymmetry is real and not an artifact of the two
+> tests being run at different times.
+
+**Practical guidance:** because the two handlers disagree, **send both keys** —
+`{"count": N, "limit": N, "offset": M}`. Unknown keys are ignored, so each item
+reads the one it understands and the caller does not have to know which. This is
+what `utils/probe_alarm_control.py::_fetch_alarms` does.
+
+**`item=alarmDetail` adds enrichment the list view does not carry:**
+
+Extra keys observed on a detail read (~51 keys vs ~15 in the list view):
+
+- `e.dest.ip.range`, `e.dest.ip.cidr`, `e.dest.ip.country`, `e.dest.ip.city`,
+  `e.dest.ip.org` — IP-range, CIDR and **ISP/organisation** enrichment
+- `e.transfer`
+- `p.utag.names`, `p.tag.names` — tag names as `{uid, name}` objects
+
+`alarmDetail` works for **archived** alarms as well as active ones, so a detail
+lookup by `aid` does not need the alarm to be active.
+
+**Cost note:** `alarmDetail` is **one request per alarm**. Fanning it out over
+243 alarms is 243 requests; make it opt-in rather than default.
+
+**Aids are non-contiguous** in the active list (…1729, **1727**, 1726…), because
+an archived alarm's aid is removed from the active set. Sequence gaps are
+therefore normal, not corruption.
+
+**Artifacts:** captured in the alarm verification session (2026-09-30).
+
+### Finding 28: Alarm mutations are `cmd` messages with an `alarmID` value
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) by sending each command to the gold box.
+- All six operations were executed and their effects verified against the
+  `activeAlarmCount` / `archivedAlarmCount` / `exceptionRules` / `policyRules`
+  containers.
+
+**Confirmed command contracts** (`mtype=cmd`, `target=0.0.0.0`,
+`value.alarmID` is the alarm's `aid`):
+
+| Operation | `item` | `value` | Observed response |
+| --- | --- | --- | --- |
+| Archive (dismiss) | `alarm:ignore` | `{alarmID}` | `{"ignoreIds": ["<aid>"]}` |
+| Archive all | `alarm:ignoreAll` | — | — |
+| Delete | `alarm:delete` | `{alarmID}` | — |
+| Delete all active | `alarm:deleteActiveAll` | — | — |
+| Delete all archived | `alarm:deleteArchivedAll` | — | — |
+| Mute | `alarm:allow` | `{alarmID, matchAll, info{...}}` | `{"exception": {..., "eid": "<n>"}}` |
+| Unmute | `alarm:unallow` | `{alarmID}` | `{}` |
+| Block | `alarm:block` | `{alarmID, matchAll, info{...}}` | `{"policy": {"pid": "<n>", ...}, "otherAlarms": [], "alreadyExists": false, "updated": false}` |
+| Unblock | `alarm:unblock` | `{alarmID}` | `{}` |
+
+The command builder is `ku7.m14063c` (simple id-only commands) and
+`ku7.m14064d` (mute/block with scope). `l33` maps `GET`=1 and `CMD`=3, matching
+the pairing already used across this document.
+
+**`alarmID` is the alarm's `aid`** — confirmed at `fx2.java` (~line 1626):
+`optString("aid")` is stored in the field later used as `alarmID`.
+
+**The `device` scope is `p.device.mac`** — confirmed at `fx2.java` (~line 1622).
+Note this can be a synthetic value such as
+`wg_peer:wWDLO7vE+dpUiwDONgXorPyR/e6YAKme+aLmgVIlRn8=` for VPN-origin alarms,
+not a real MAC.
+
+**Measured effects (live):**
+
+| Step | `activeAlarmCount` | `archivedAlarmCount` | `exceptionRules` | `policyRules` |
+| --- | --- | --- | --- | --- |
+| Baseline | 248 | 0 | 99 | 306 |
+| After `alarm:ignore` | **247** | — | 99 | 306 |
+| After `alarm:allow` (mute) | **246** | — | **100** | 306 |
+| After `alarm:block` | **244** | — | 100 | **307** |
+| After `alarm:unallow` | 244 | — | 99 | 307 |
+| After `alarm:unblock` | 244 | — | 99 | **306** |
+| After `alarm:delete` ×2 | 243 | 5 → **3** | 99 | 306 |
+
+**Archive decrements the count immediately** — there is no lag. Every operation
+was reflected in the next payload.
+
+**`unallow` / `unblock` do NOT un-archive.** After muting and un-muting, and
+after blocking and unblocking, the alarm remained in `archivedAlarms`. Removing
+the exception or block rule restores the *rule/exception* state only. **There is
+no un-archive command**; only `alarm:delete` removes the record.
+
+**Consequence: archive, mute and block are all effectively one-way on the alarm
+record.** Only `delete` removes it from `archivedAlarms`. Any test that targets a
+real alarm permanently alters the user's alarm history.
+
+**Artifacts:** `utils/probe_alarm_control.py` (dry-run by default; `--confirm`
+required to write).
+
+### Finding 29: Mute/block scope and the three mute durations
+
+**Scenario:**
+
+- Confirmed from `AlarmMuteScheduleDialog`, `AlarmMuteDialog`,
+  `AlarmActionHelper.getMuteApplyToItems` and `cd0.m2349a`; mute durations were
+  also verified live.
+
+**The app exposes exactly three mute durations** (`AlarmMuteScheduleDialog`):
+
+| Option | `expireTs` computation |
+| --- | --- |
+| 1 hour | `(System.currentTimeMillis() / 1000) + 3600` |
+| Today | `ZonedDateTime.now(boxTz).plusDays(1).truncatedTo(DAYS).toEpochSecond()` — **start of tomorrow in the box's timezone** |
+| Always | `-1` sentinel ⇒ `expireTs` is **omitted from the payload entirely** |
+
+The box's timezone is reported in the init payload as `timezone` (observed
+`America/New_York`). Verified live: a 1-hour mute stored `expireTs` on the
+resulting exception rule, and a “today” mute resolved to midnight local.
+
+**This mirrors the existing `pause_rule` idiom.** `pause_rule` already computes
+`int(dt_util.utcnow().timestamp()) + seconds`, and `_RAW_RULE_EXPIRE_TS_KEY`
+(`"expireTs"`) is already defined in `helpers/runtime_inventory.py`. Reuse both;
+do not add a second expiry convention.
+
+**Mute is broad by default — `matchAll: 1` means global.**
+
+Verified live: a `dns` mute on `epicgames.com` issued with `matchAll: 1` silenced
+that domain for **every device**, not just the alarm's device. The app constrains
+this with an “apply to” picker (`AlarmActionHelper.getMuteApplyToItems`) offering
+**device / user / network / global (`null`)**.
+
+**Any mute exposed by the integration must require an explicit scope.** Defaulting
+to match-all silently silences alarms the user did not intend to silence.
+
+**`alarm:block` payload differences** (`ku7.m14064d` + `cd0.m2349a`):
+
+- Same envelope as `allow`, but for `type` in (`dns`, `category`) it adds
+  **`dnsmasq_only: true`** to `info`.
+- **Blocks carry no `expireTs`** — the app never sets one for a block.
+- For `category` blocks the app also adds a `customizedKeys` object with
+  `app_uid` and `app_name`; for allows it sets `p.dest.app.id` instead.
+
+**`matchAll` is always written** as `1` or `0` in both allow and block payloads.
+
+### Finding 30: Alarm types and the app's filter grouping
+
+**Scenario:**
+
+- Recovered from `AlarmFiltersHelper.filterCategories` and
+  `AlarmsHelper.allFilterTypesWithImplicit`.
+- **Filtering is purely client-side**: these are `type` strings already present
+  in the alarm list, so no additional box call is required to filter.
+
+**Full type list** (`", "` separated in `filterCategories`):
+
+`ALARM_INTEL`, `ALARM_LARGE_UPLOAD`, `ALARM_UPNP`,
+`ALARM_LARGE_UPLOAD_2` (feature-gated behind `vf0.f34745H1`),
+`ALARM_NEW_DEVICE`, `ALARM_VPN_CLIENT_CONNECTION`, `ALARM_VIDEO`,
+`ALARM_GAME`, `ALARM_PORN`, `ALARM_DEVICE_BACK_ONLINE`,
+`ALARM_ABNORMAL_BANDWIDTH_USAGE`, `ALARM_OVER_DATA_PLAN_USAGE`,
+`ALARM_VPN_DISCONNECT`, `ALARM_DUAL_WAN`.
+
+**Implicit companions** — the app folds related types into a filter category so
+filtering matches user expectations. **A filter that ignores these will
+under-report versus the app:**
+
+- `ALARM_INTEL` → also `ALARM_BRO_NOTICE`, `ALARM_CUSTOMIZED_SECURITY`,
+  `ALARM_SURICATA_NOTICE`
+- `ALARM_DEVICE_BACK_ONLINE` → also `ALARM_DEVICE_OFFLINE`
+- `ALARM_VPN_DISCONNECT` → also `ALARM_VPN_RESTORE`, `ALARM_VWG_CONN`
+
+So the app's user-facing filters map as: **security → `ALARM_INTEL` (+3)**,
+**abnormal upload → `ALARM_LARGE_UPLOAD`**, **open port → `ALARM_UPNP`**.
+
+**MSP-only filter values** exist in `MspAlarmFilterType` with query values
+`create`, `ignore` and `review` (Behavioural / Archived / Needs review). These
+are **MSP API concepts**, not local runtime items, and are out of scope for the
+local integration.
+
+**Orphan types worth noting:** `ALARM_GAME`, `ALARM_VIDEO` and
+`ALARM_ABNORMAL_BANDWIDTH_USAGE` were all observed in live data but
+`ALARM_DEVICE_BACK_ONLINE`, `ALARM_VPN_DISCONNECT` and `ALARM_DUAL_WAN` were
+not, so some listed categories may be dormant on this hardware.
+
+### Finding 31: Alarm blocks create ordinary policy rules
+
+**Scenario:**
+
+- Confirmed live (2026-09-30): a block on `vimeo.com` for one MAC incremented
+  `policyRules` from 306 to **307** and returned `{"policy": {"pid": "652", ...}}`.
+
+**The created rule is a normal policy rule** and is already parsed by
+`RuleManager`. Observed rule fields:
+
+```json
+{
+  "pid": "652",
+  "action": "block",
+  "aid": "1728",
+  "alarm_type": "ALARM_VIDEO",
+  "reason": "ALARM_VIDEO",
+  "type": "dns",
+  "target": "vimeo.com",
+  "target_name": "player.vimeo.com",
+  "target_ip": "162.159.128.61",
+  "if.type": "dns",
+  "if.target": "vimeo.com",
+  "dnsmasq_only": true,
+  "scope": ["0C:85:E1:B0:1D:1C"],
+  "direction": "bidirection",
+  "activatedTime": "1790732668.522",
+  "lastActivatedTime": "1790732668.522"
+}
+```
+
+**Consequences:**
+
+- The rule carries an **`aid` back-reference** to the alarm that created it, so
+  alarm-created blocks are identifiable within the rule inventory.
+- `alarm:unblock` removed the rule and `policyRules` returned to 306.
+- **Do not build a separate rule layer for alarm blocks** — surface them through
+  the existing rule machinery (`RuleManager`, `_COMMAND_POLICY_CREATE` /
+  `_COMMAND_POLICY_DELETE`).
+- Blocking therefore consumes a **policy rule slot** (`policyRuleNumber`), which
+  is a finite resource worth noting for a bulk-block design.
+
+### Finding 32: Bulk alarm commands (`ignoreAll`, `deleteArchivedAll`, `deleteActiveAll`)
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) against the gold box.
+- These are the app's "clear all" style operations. Unlike the single-record
+  commands in Finding 28, they take an **empty value object** and no `alarmID`.
+
+**Confirmed command contracts** (`mtype=cmd`, `target=0.0.0.0`, empty value):
+
+| Operation | `item` | `value` | Response |
+| --- | --- | --- | --- |
+| Archive all active | `alarm:ignoreAll` | `{}` | `{}` |
+| Delete all archived | `alarm:deleteArchivedAll` | `{}` | `{}` |
+| Delete all active | `alarm:deleteActiveAll` | `{}` | **not tested** |
+
+The builder is `ku7.m14063c`-adjacent: the app routes these through
+`n03.m15334c0(item, cont)`, which builds an **empty** `JSONObject` and dispatches
+via `n03.m15316F(box, item, {}, null, cont)` — i.e. `{"item": item, "value": {}}`.
+`n03.m15318H` shows the same `{"item", "value"}` envelope for the `GET` variant.
+
+**Measured effects:**
+
+`alarm:ignoreAll` — archives every active alarm:
+
+| | Before | After |
+| --- | --- | --- |
+| `activeAlarmCount` | 243 | **0** |
+| `archivedAlarmCount` | 0 | **243** |
+| `pendingAlarmCount` | 0 | 0 |
+| `exceptionRules` | 99 | 99 (unchanged) |
+| `policyRules` | 306 | 306 (unchanged) |
+
+Spot-checked that previously-active aids (`1727`–`1732`, `1487`) all appear in
+the `archivedAlarms` list afterwards, so the records **move** rather than being
+discarded. `newAlarms` also dropped to 0.
+
+`alarm:deleteArchivedAll` — deletes every archived alarm:
+
+| | Before | After |
+| --- | --- | --- |
+| `activeAlarmCount` | 243 | 243 (unchanged) |
+| `archivedAlarmCount` | **3** | **0** |
+| `archivedAlarms` list | `['1723','1728','1733']` | `[]` |
+
+Both return an empty `{}` body — the response carries **no confirmation**, so the
+only way to verify success is to re-read the counts.
+
+**Both are irreversible.** `ignoreAll` is the more recoverable of the two: the
+alarms move to the archive where they remain visible and retrievable via
+`item=archivedAlarms`. `deleteArchivedAll` destroys them permanently. There is
+no un-archive command (Finding 28), so `ignoreAll` followed by
+`deleteArchivedAll` is equivalent to a permanent bulk wipe.
+
+**Side effect during this investigation:** running `ignoreAll` archived the
+owner's entire active alarm history (243 records). This was explicitly
+authorised for testing, and the alarms remain in the archive rather than being
+lost — but it is a good illustration of why these commands need a confirmation
+gate and should never be wired to a bare button.
+
+**Still untested: `alarm:deleteActiveAll`.** It is documented in the APK
+(`AlarmViewDelegate$setupMoreOperations$1$d$1$1$r$1`, the `$deleteAllArchived ==
+false` branch) but was not executed because it is a permanent bulk delete of
+every active alarm. Treat its payload as `{"item": "alarm:deleteActiveAll",
+"value": {}}` by analogy with the other two, and mark it unverified until
+someone runs it on a disposable box.
+
+**Artifacts:** `utils/probe_alarm_control.py --action {archive-all,
+delete-archived-all, delete-active-all}` (dry-run by default).
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
@@ -2481,6 +2930,48 @@ When a new capture is completed:
 - record the implementation impact if the new family changes switch behavior
 
 Do not summarize away payload fields that may later matter for the protocol.
+
+**Where to look for prior evidence.** When this document is silent on a payload,
+check `.tmp/` **before** concluding the shape is unknown. `.tmp/` is gitignored,
+so it does not appear in normal repository searches, yet it holds a large corpus
+of decoded captures, live runtime pulls and two decompiled APK trees:
+
+- `.tmp/live_gold/<timestamp>/runtime_init.json` — full init payloads
+- `.tmp/firewalla_*_capture.decoded.txt` — decoded command/response captures
+- `.tmp/capture_*.json` — before/after mutation captures
+- `.tmp/Firewalla_1.69.1+(27)_jadx/` and `..._jadx_debug/` — decompiled sources
+  (the `_debug` tree sometimes yields readable bodies where the other does not)
+
+Finding 26 is the worked example: `newAlarms` and `activeAlarmCount` were
+initially recorded here as undocumented, then recovered in full from
+`.tmp/config_entry-*.json` and `.tmp/live_gold/`. Record the **artifact path** in
+every finding so the evidence is reproducible rather than re-derived.
+
+**Live pulls are the preferred evidence source** for shape confirmation:
+`python utils/pull_runtime.py --artifact-dir <dir>` reads the working credentials
+from the Home Assistant config entry, so it needs no re-pairing and no packet
+capture. For write contracts, `utils/probe_alarm_control.py` (and similar
+probes) send real commands and are dry-run by default.
+
+**Warn about side effects.** Some commands are not reversible. Alarm
+archive/mute/block leave the alarm archived permanently (Finding 28); only
+`alarm:delete` removes it. Any finding that documents a write command must state
+whether it is reversible, and probes that write should target a value the user
+can afford to lose — ideally confirming first with the owner.
+
+**Treat bulk commands as a separate risk class.** `alarm:ignoreAll` and
+`alarm:deleteArchivedAll` (Finding 32) return an empty `{}` **whether or not they
+succeeded**, so the response is no confirmation at all — success can only be
+established by re-reading the counts. They also act on everything, so there is no
+blast-radius limit. Document them with an explicit irreversibility warning, verify
+via counts, and never infer success from the response body.
+
+**Correct your own earlier findings explicitly.** When a later measurement
+overturns an earlier one, edit the original finding and mark the correction in
+place rather than silently rewriting it — see the `count`/`limit` correction in
+Finding 27, which is the second time a first-pass claim in this section proved
+wrong. Recording *that* a claim was wrong is as useful as the corrected claim,
+because it tells the next reader which conclusions were single-observation.
 
 ## Appendix: APK reverse engineering
 
@@ -2549,6 +3040,14 @@ handles most ProGuard / R8 obfuscation.
 | `fy3.java` | Main message hub / router — sends messages via cloud (`a()`) and local (`b()`) paths. Contains obfuscated methods. |
 | `ue3.java` | Symmetric key entry parser — extracts `key` (RSA-encrypted) and `rkey` (rotation key JSON) from the cloud group response. |
 | `s97.java` | Crypto utilities — AES-256-CBC encrypt/decrypt, RSA decrypt, and the `m18101c()` / `m18106q()` helpers used by the key derivation chain. |
+| `ku7.java` | Alarm (and related) action command builder. `m14063c(item, box, alarm, cont)` builds id-only commands (`alarm:ignore`, `alarm:delete`, `alarm:unallow`, `alarm:unblock`); `m14064d(applyTo, item, type, target, box, alarm, expireTs, archiveByType, app, cont)` builds scoped mute/block payloads. `m14068k(...)` builds the `alarmDetail` read. See Findings 28–29. |
+| `fx2.java` | Alarm model. Field mapping confirmed: `optString("aid")` → the value used as `alarmID`, and `optString("p.device.mac")` → the mute/block `device` scope. The parser `m10449j0(JSONObject)` did **not** decompile, so field names were recovered from live payloads. See Finding 26. |
+| `gx2.java` | Alarm container — holds `ArrayList<fx2>`; `m11206b(JSONArray)` parses the `newAlarms` array. |
+| `AlarmMuteScheduleDialog.java` | Defines the three mute durations and their `expireTs` computations. See Finding 29. |
+| `AlarmFiltersHelper.java` | `filterCategories()` returns the alarm type list used by the app's filters. See Finding 30. |
+| `AlarmsHelper.java` | `allFilterTypesWithImplicit()` adds the implicit companion types folded into each filter category. See Finding 30. |
+| `cd0.java` | `m2349a(info, action)` adds `dnsmasq_only` to `dns`/`category` block payloads. See Finding 29. |
+| `l33.java` | Message-type enum — `GET`=1, `SET`=2, `CMD`=3, `INIT`=4. Confirms alarms use `get` for reads and `cmd` for writes. |
 
 ### Confirmed outer payload format (Android app v1.69.1)
 
@@ -2790,6 +3289,10 @@ The type column shows how the app reads the field.
 | `mspData.targetlists` | `optJSONArray` | **Partial** — see below |
 | `profiles` | `optJSONObject` (system alarm profiles) | No |
 | `userConfig` | `optJSONObject` → user profiles | No |
+| `activeAlarmCount` | `optInt` | **Planned** — Finding 26 |
+| `archivedAlarmCount` | `optInt` | **Planned** — Finding 26 |
+| `pendingAlarmCount` | `optInt` | **Planned** — Finding 26 |
+| `newAlarms` | `optJSONArray` → `gx2` of `fx2` | **Planned** — Finding 26; **capped at 50** |
 | `model` | `optString` | Yes |
 | `mode` | `optString` | Yes |
 | `localDomainSuffix` | `optString` | No |
