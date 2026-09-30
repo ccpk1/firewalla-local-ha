@@ -14,6 +14,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
+    ATTR_ALARM_ACTIVE_COUNT,
+    ATTR_ALARM_ARCHIVED_COUNT,
+    ATTR_ALARM_CATEGORY_COUNTS,
+    ATTR_ALARM_CATEGORY_COUNTS_COMPLETE,
+    ATTR_ALARM_PENDING_COUNT,
     ATTR_INTERNET_QUALITY_PING_LATENCY,
     ATTR_INTERNET_QUALITY_PING_LATENCY_MAX,
     ATTR_INTERNET_QUALITY_PING_LATENCY_MEDIAN,
@@ -49,12 +54,14 @@ from .const import (
     ATTR_WATCHED_USER_LAST_ACTIVE,
     ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     ENTITY_SUFFIX_SENSOR,
+    TRANS_KEY_ENTITY_SENSOR_ALARM_COUNT,
     TRANS_KEY_ENTITY_SENSOR_WAN_INTERNET_QUALITY_LATENCY,
     TRANS_KEY_ENTITY_SENSOR_WAN_INTERNET_QUALITY_PACKET_LOSS,
     TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_DOWNLOAD,
     TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_LATENCY,
     TRANS_KEY_ENTITY_SENSOR_WAN_SPEED_TEST_UPLOAD,
     TRANS_KEY_ENTITY_SENSOR_WATCHED_USER_TODAY_USAGE,
+    TRANS_KEY_PURPOSE_ALARM_ACTIVITY,
     TRANS_KEY_PURPOSE_INTERNET_QUALITY,
     TRANS_KEY_PURPOSE_SPEED_TEST,
     TRANS_KEY_PURPOSE_WATCHED_USER_USAGE,
@@ -93,6 +100,7 @@ async def async_setup_entry(
 
     async_add_entities(
         [
+            FirewallaAlarmCountSensor(entry),
             *speed_test_entities,
             *[
                 FirewallaWatchedUserTodayUsageSensor(entry, user_id)
@@ -102,6 +110,41 @@ async def async_setup_entry(
             ],
         ]
     )
+
+
+class FirewallaAlarmCountSensor(FirewallaEntity, SensorEntity):
+    """Expose Firewalla's authoritative active-alarm count."""
+
+    _attr_translation_key = TRANS_KEY_ENTITY_SENSOR_ALARM_COUNT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, entry: FirewallaConfigEntry) -> None:
+        """Initialize the alarm-count sensor."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._attr_native_unit_of_measurement = None
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id="alarm_count",
+            suffix=ENTITY_SUFFIX_SENSOR,
+        )
+
+    @property
+    def native_value(self) -> int:
+        """Return the active alarm count from the latest init payload."""
+        return self.alarm_manager.active_count
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return bounded count summaries for active alarms."""
+        return {
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_ALARM_ACTIVITY),
+            ATTR_ALARM_ACTIVE_COUNT: self.alarm_manager.active_count,
+            ATTR_ALARM_ARCHIVED_COUNT: self.alarm_manager.archived_count,
+            ATTR_ALARM_PENDING_COUNT: self.alarm_manager.pending_count,
+            ATTR_ALARM_CATEGORY_COUNTS: self.alarm_manager.active_by_category,
+            ATTR_ALARM_CATEGORY_COUNTS_COMPLETE: (
+                self.alarm_manager.active_category_counts_complete
+            ),
+        }
 
 
 class FirewallaWanSpeedTestSensor(FirewallaEntity, SensorEntity):

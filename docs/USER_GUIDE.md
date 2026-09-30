@@ -11,6 +11,7 @@ This guide is organized around the main jobs you can do with the integration:
 - choose which monitoring surfaces you want exposed
 - understand the main Firewalla device entities and refresh behavior
 - monitor watched devices, watched users, and device trackers
+- monitor active and archived Firewalla alarms
 - operate hosts and rules from Home Assistant
 - call the local report services added after 1.0.0
 
@@ -27,6 +28,7 @@ Firewalla Local can expose these main surface areas:
   when Firewalla AP7 access points are present
 - watched-device binary sensors for selected endpoints
 - watched-user usage sensors for selected Firewalla users
+- alarm-active and active-alarm-count entities with bounded category summaries
 - router-based `device_tracker` entities for selected MAC-backed LAN clients
 - rule-backed switches for supported persistent Firewalla rules
 - operator services for hosts, networks, WANs, and reports
@@ -59,7 +61,13 @@ Services added after 1.0.0:
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
 - `firewalla_local.get_wireless_status`
+- `firewalla_local.get_alarms`
 - `firewalla_local.set_ssid_paused`
+- `firewalla_local.archive_alarms`
+- `firewalla_local.delete_alarms`
+- `firewalla_local.mute_alarm`
+- `firewalla_local.unmute_alarm`
+- `firewalla_local.delete_rule`
 
 ## Installation
 
@@ -494,9 +502,10 @@ Temporary rules:
   paused rule
 - are not treated as switch candidates by this integration
 
-The Firewalla app remains the normal place to create or delete rules. The
-integration is primarily built to expose supported persistent rules, and to
-pause or resume those existing rules cleanly.
+The Firewalla app remains the normal place to create rules. Rules created by
+alarm block/unblock actions are ordinary policy rules, not a separate alarm
+control surface. Use the rule switches and services below to manage the
+resulting rules from Home Assistant.
 
 ## Services
 
@@ -505,6 +514,7 @@ three groups:
 
 - inspection and report services
 - host and network operator actions
+- alarm services
 - rule control services
 
 The report-style services in this section were built primarily to help model,
@@ -531,6 +541,7 @@ Inspection and report services:
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
 - `firewalla_local.get_wireless_status`
+- `firewalla_local.get_alarms`
 
 Host and network operator actions:
 
@@ -548,20 +559,57 @@ Wireless control services:
 
 - `firewalla_local.set_ssid_paused`
 
+Alarm control services:
+
+- `firewalla_local.archive_alarms`
+- `firewalla_local.delete_alarms`
+- `firewalla_local.mute_alarm`
+- `firewalla_local.unmute_alarm`
+
 Rule control services:
 
 - `firewalla_local.pause_rule`
 - `firewalla_local.resume_rule`
+- `firewalla_local.delete_rule`
 
-**Requires an administrator.** This action is registered as an admin-only
-service. Automations and scripts are unaffected — Home Assistant only enforces
-the check for calls made by a signed-in user, so a non-admin user cannot invoke
-it directly.
+Alarm block and unblock actions in the Firewalla app create or remove ordinary
+policy rules. There are no `block_alarm` or `unblock_alarm` services. Use a
+selected rule switch to enable or disable a supported persistent rule, or use
+`pause_rule` and `resume_rule` for temporary control. Use `delete_rule` to
+permanently remove a rule from Home Assistant.
+
+### Administrator access
+
+The following services are registered as admin-only. Home Assistant enforces
+this restriction for calls made by a signed-in user; automations, scripts, and
+other calls without a user context are unaffected.
 
 This note applies to `get_runtime_inventory`, `run_internet_speed_test`,
 `wake_host`, `delete_host`, all host-setting services, `set_ssid_paused`,
-`pause_rule`, and `resume_rule`. Rule switch entities use a separate control
+`pause_rule`, `resume_rule`, `archive_alarms`, `delete_alarms`, `mute_alarm`,
+`unmute_alarm`, and `delete_rule`. Rule switch entities use a separate control
 path and remain available to users who can access the exposed entity.
+
+### Get alarms
+
+Use `firewalla_local.get_alarms` to retrieve the newest active alarms and,
+optionally, archived alarms.
+
+- `limit` defaults to 10 and is capped at 500; it returns the newest matching
+  records rather than a cursor page
+- set `include_archived` to include archived alarms in the result
+- `type` accepts a raw `ALARM_*` identifier or the supported `security`,
+  `abnormal_upload`, and `open_port` groups; the `security` group includes its
+  implicit companion types
+- `detail` is opt-in and makes one additional local request per returned alarm
+- entity `active_by_category` counts come from the init payload, whose alarm list
+  is capped at 50; check `active_by_category_complete` before treating a missing
+  category as absent, and use this service when the summary is incomplete
+- the box retains roughly 30 days of alarms; it does not support a server-side
+  time filter
+- the response includes normalized destination details, discovered silence
+  exceptions, authoritative active/archive/pending counts, and shared report
+  metadata
 
 ### Get rule and runtime inventory
 
@@ -807,6 +855,66 @@ events.
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
 - use `limit` and `offset` to page through older events
 
+### Archive alarms
+
+Use `firewalla_local.archive_alarms` to move one active alarm or all active
+alarms into the archive. Archiving is recoverable; the records remain visible
+through `get_alarms` with `include_archived: true`.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+- set `mode` to `this` and provide `alarm_id` to archive one alarm
+- set `mode` to `all_active` to archive every active alarm
+
+### Delete alarms
+
+Use `firewalla_local.delete_alarms` to permanently delete one alarm or a selected
+active/archive set. Deletion cannot be undone.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+- `mode` is `this`, `all_active`, or `all_archived`; `alarm_id` is required for
+  `this`
+- set `confirm: true` to acknowledge permanent deletion
+
+### Mute alarm
+
+Use `firewalla_local.mute_alarm` to create an alarm silence. The required
+`scope_kind` prevents an omitted scope from silently becoming a box-wide mute.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+- `target_type` is `alarm_type`, `domain`, or `ip`
+- for `alarm_type`, set `target_value` to the raw alarm type such as
+  `ALARM_GAME`; for `domain` or `ip`, provide the matching destination value or
+  an `alarm_id` from which it can be resolved
+- choose `scope_kind` from `device`, `group`, `user`, `network`, or `all`; all
+  but `all` require `scope_target`
+- `duration` is `1h`, `today` in the Firewalla box's timezone, or `always`
+- standalone mutes can be removed by the `exception_id` returned by
+  `get_alarms`; mutes created from an active alarm may also be located by its
+  `alarm_id`
+
+### Unmute alarm
+
+Use `firewalla_local.unmute_alarm` to remove a silence by `exception_id`, or an
+alarm-linked silence by `alarm_id`. Provide exactly one identifier. Use
+`get_alarms` to discover silence exception IDs.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 ### Pause rule
 
 Use `firewalla_local.pause_rule` to pause a managed rule.
@@ -832,6 +940,20 @@ it directly.
 
 Like `pause_rule`, this operates on an existing persistent rule rather than
 creating a new rule for you.
+
+### Delete rule
+
+Use `firewalla_local.delete_rule` to permanently remove one live policy rule by
+its `rule_id`. This also removes a rule created by an alarm block action because
+that action is represented as an ordinary policy rule.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+Set `confirm: true` to acknowledge that rule deletion removes its enforcement
+and cannot be undone.
 
 ### Get wireless status
 

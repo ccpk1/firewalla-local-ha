@@ -1144,6 +1144,293 @@ set_ssid_paused:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
+get_alarms:
+  name: Get alarms
+  description: Return the newest active alarms and optionally archived alarms with normalized details, silence records, and shared report metadata. The box retains roughly 30 days and provides no time-window or cursor filter.
+  fields:
+    limit:
+      required: false
+      example: 10
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box
+      name: Limit
+      description: Optional. Defaults to 10. Return the newest matching alarms, up to 500.
+    include_archived:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Include archived
+      description: Optional. Include archived alarm records.
+    type:
+      required: false
+      example: "security"
+      selector:
+        text:
+      name: Alarm type
+      description: Optional raw ALARM_* type or supported group security, abnormal_upload, or open_port.
+    detail:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Fetch detail
+      description: Optional. Fetch extended detail with one additional request per returned alarm.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if names are unique. If names repeat, use Config Entry ID.
+
+archive_alarms:
+  name: Archive alarms
+  description: Archive one active alarm or all active alarms. Archived alarms remain retrievable.
+  fields:
+    mode:
+      required: true
+      example: "this"
+      selector:
+        select:
+          options:
+            - value: "this"
+              label: One alarm
+            - value: "all_active"
+              label: All active alarms
+      name: Mode
+      description: Choose one alarm or the entire active set.
+    alarm_id:
+      required: false
+      example: "1728"
+      selector:
+        text:
+      name: Alarm ID
+      description: Required when mode is this.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if setup names are unique. If names repeat, use Config Entry ID.
+
+delete_alarms:
+  name: Delete alarms
+  description: Permanently delete one alarm or a selected active/archive set. This cannot be undone.
+  fields:
+    mode:
+      required: true
+      example: "this"
+      selector:
+        select:
+          options:
+            - value: "this"
+              label: One alarm
+            - value: "all_active"
+              label: All active alarms
+            - value: "all_archived"
+              label: All archived alarms
+      name: Mode
+      description: Select which alarm set to permanently delete.
+    alarm_id:
+      required: false
+      example: "1728"
+      selector:
+        text:
+      name: Alarm ID
+      description: Required when mode is this.
+    confirm:
+      required: true
+      example: true
+      selector:
+        boolean:
+      name: Confirm permanent deletion
+      description: Set to true to acknowledge that deletion cannot be undone.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if setup names are unique. If names repeat, use Config Entry ID.
+
+mute_alarm:
+  name: Mute alarm
+  description: Create a scoped silence for an alarm type, DNS domain, or IP address. Scope is explicit to prevent an accidental global mute.
+  fields:
+    alarm_id:
+      required: false
+      example: "1728"
+      selector:
+        text:
+      name: Alarm ID (Optional)
+      description: Use an alarm to infer an omitted target value where available.
+    target_type:
+      required: true
+      example: "domain"
+      selector:
+        select:
+          options:
+            - value: "alarm_type"
+              label: Alarm type
+            - value: "domain"
+              label: DNS domain
+            - value: "ip"
+              label: IP address
+      name: Target type
+      description: Choose the type of silence to create.
+    target_value:
+      required: false
+      example: "example.com"
+      selector:
+        text:
+      name: Target value
+      description: Raw ALARM_* type, domain, or IP. May be inferred from alarm_id where available.
+    scope_kind:
+      required: true
+      example: "device"
+      selector:
+        select:
+          options:
+            - value: "device"
+              label: Device
+            - value: "group"
+              label: Group
+            - value: "user"
+              label: User
+            - value: "network"
+              label: Network
+            - value: "all"
+              label: All devices
+      name: Scope kind
+      description: Required. Choose all explicitly to create a box-wide silence.
+    scope_target:
+      required: false
+      example: "00:11:22:33:44:55"
+      selector:
+        text:
+      name: Scope target
+      description: Required unless scope kind is all. Provide the target ID for the selected scope.
+    duration:
+      required: true
+      example: "1h"
+      selector:
+        select:
+          options:
+            - value: "1h"
+              label: One hour
+            - value: "today"
+              label: Until midnight in the Firewalla timezone
+            - value: "always"
+              label: Always
+      name: Duration
+      description: Choose how long the silence remains active.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if setup names are unique. If names repeat, use Config Entry ID.
+
+unmute_alarm:
+  name: Unmute alarm
+  description: Remove a silence by exception ID or an alarm-linked silence by alarm ID. Provide exactly one identifier.
+  fields:
+    alarm_id:
+      required: false
+      example: "1728"
+      selector:
+        text:
+      name: Alarm ID (Optional)
+      description: Use the originating alarm ID for an alarm-linked silence.
+    exception_id:
+      required: false
+      example: "106"
+      selector:
+        text:
+      name: Exception ID (Optional)
+      description: Use the silence ID returned by get_alarms.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if setup names are unique. If names repeat, use Config Entry ID.
+
+delete_rule:
+  name: Delete rule
+  description: Permanently delete one live policy rule, including a rule created by an alarm block action.
+  fields:
+    rule_id:
+      required: true
+      example: "652"
+      selector:
+        text:
+      name: Rule ID
+      description: ID of a live rule from the runtime inventory.
+    confirm:
+      required: true
+      example: true
+      selector:
+        boolean:
+      name: Confirm deletion
+      description: Set to true to acknowledge permanent rule deletion.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if setup names are unique. If names repeat, use Config Entry ID.
+
 get_wireless_status:
   name: Get wireless status
   description: Returns the current Firewalla wireless configuration (SSID profiles and access points) as structured data.

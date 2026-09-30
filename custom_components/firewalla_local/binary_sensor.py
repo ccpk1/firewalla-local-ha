@@ -13,6 +13,16 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
+    ATTR_ALARM_ACTIVE_COUNT,
+    ATTR_ALARM_ARCHIVED_COUNT,
+    ATTR_ALARM_CATEGORY_COUNTS,
+    ATTR_ALARM_CATEGORY_COUNTS_COMPLETE,
+    ATTR_ALARM_DEVICE_NAME,
+    ATTR_ALARM_FIRED_AT,
+    ATTR_ALARM_ID,
+    ATTR_ALARM_MESSAGE,
+    ATTR_ALARM_PENDING_COUNT,
+    ATTR_ALARM_TYPE,
     ATTR_AP_CHANNEL_2G,
     ATTR_AP_CHANNEL_5G,
     ATTR_AP_CLIENT_COUNT,
@@ -90,11 +100,13 @@ from .const import (
     ATTR_WATCHED_DEVICE_WIFI_SSID,
     ENTITY_SUFFIX_BINARY_SENSOR,
     MANUFACTURER,
+    TRANS_KEY_ENTITY_BINARY_SENSOR_ALARM_ACTIVE,
     TRANS_KEY_ENTITY_BINARY_SENSOR_AP_STATUS,
     TRANS_KEY_ENTITY_BINARY_SENSOR_NETWORK,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SSID,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SYSTEM_STATUS,
     TRANS_KEY_ENTITY_BINARY_SENSOR_WATCHED_DEVICE,
+    TRANS_KEY_PURPOSE_ALARM_ACTIVITY,
     TRANS_KEY_PURPOSE_AP_STATUS,
     TRANS_KEY_PURPOSE_NETWORK,
     TRANS_KEY_PURPOSE_SSID,
@@ -140,11 +152,12 @@ def _serialize_usage_window(window: object) -> dict[str, int | None]:
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
+    _hass: HomeAssistant,
     entry: FirewallaConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Firewalla Local binary sensors from a config entry."""
+    del _hass
     network_entities = []
     if get_enabled_network_entities(entry.options):
         network_entities = [
@@ -167,6 +180,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             FirewallaSystemStatusBinarySensor(entry),
+            FirewallaAlarmActiveBinarySensor(entry),
             *network_entities,
             *ssid_entities,
             *ap_entities,
@@ -574,6 +588,51 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
             "range_end": getattr(dhcp, "range_end", None),
             "name_servers": list(getattr(dhcp, "name_servers", ())),
             "search_domains": list(getattr(dhcp, "search_domains", ())),
+        }
+
+
+class FirewallaAlarmActiveBinarySensor(FirewallaEntity, BinarySensorEntity):
+    """Expose whether the Firewalla box reports any active alarms."""
+
+    # Alarm presence is a problem signal, not a connectivity state.
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_translation_key = TRANS_KEY_ENTITY_BINARY_SENSOR_ALARM_ACTIVE
+
+    def __init__(self, entry: FirewallaConfigEntry) -> None:
+        """Initialize the alarm-active binary sensor."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id="alarm_active",
+            suffix=ENTITY_SUFFIX_BINARY_SENSOR,
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the box reports one or more active alarms."""
+        return self.alarm_manager.active_count > 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return bounded alarm counts and metadata for the newest active alarm."""
+        latest_alarm = max(
+            self.alarm_manager.active_alarms,
+            key=lambda alarm: alarm.fired_at or 0,
+            default=None,
+        )
+        return {
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_ALARM_ACTIVITY),
+            ATTR_ALARM_ACTIVE_COUNT: self.alarm_manager.active_count,
+            ATTR_ALARM_ARCHIVED_COUNT: self.alarm_manager.archived_count,
+            ATTR_ALARM_PENDING_COUNT: self.alarm_manager.pending_count,
+            ATTR_ALARM_CATEGORY_COUNTS: self.alarm_manager.active_by_category,
+            ATTR_ALARM_CATEGORY_COUNTS_COMPLETE: (
+                self.alarm_manager.active_category_counts_complete
+            ),
+            ATTR_ALARM_TYPE: latest_alarm.alarm_type if latest_alarm else None,
+            ATTR_ALARM_DEVICE_NAME: latest_alarm.device_name if latest_alarm else None,
+            ATTR_ALARM_MESSAGE: latest_alarm.message if latest_alarm else None,
+            ATTR_ALARM_FIRED_AT: latest_alarm.fired_at if latest_alarm else None,
+            ATTR_ALARM_ID: latest_alarm.alarm_id if latest_alarm else None,
         }
 
 

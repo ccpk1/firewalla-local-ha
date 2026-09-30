@@ -4,6 +4,7 @@ from __future__ import annotations
 
 # pylint: disable=too-many-lines
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import AsyncMock, patch
@@ -19,7 +20,7 @@ from homeassistant.exceptions import (
 )
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.firewalla_local.api import FirewallaApiError
+from custom_components.firewalla_local.api import FirewallaApiClient, FirewallaApiError
 from custom_components.firewalla_local.const import (
     CONF_AID,
     CONF_EID,
@@ -30,14 +31,19 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DOMAIN,
+    SERVICE_ARCHIVE_ALARMS,
+    SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
+    SERVICE_DELETE_RULE,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_DNS_HOSTNAME,
+    SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
+    SERVICE_FIELD_EXCEPTION_ID,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
@@ -45,6 +51,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
+    SERVICE_FIELD_INCLUDE_ARCHIVED,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_MODE,
     SERVICE_FIELD_NETWORK_NAME,
@@ -54,10 +61,14 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_DURATION,
+    SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
+    SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
+    SERVICE_FIELD_TARGET_TYPE,
+    SERVICE_FIELD_TARGET_VALUE,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
@@ -68,6 +79,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_GET_ALARMS,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -77,6 +89,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
     SERVICE_GET_WIRELESS_STATUS,
+    SERVICE_MUTE_ALARM,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -87,6 +100,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_SET_SSID_PAUSED,
+    SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
@@ -105,6 +119,7 @@ from custom_components.firewalla_local.models import (
 from custom_components.firewalla_local.services import (
     _async_register_service,
     _get_loaded_entry,
+    async_setup_services,
 )
 
 
@@ -6105,3 +6120,195 @@ async def test_admin_service_allows_automation_call(hass: HomeAssistant) -> None
     await hass.services.async_call(DOMAIN, service, blocking=True)
 
     handler.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("service", "service_data"),
+    (
+        pytest.param(
+            SERVICE_ARCHIVE_ALARMS,
+            {SERVICE_FIELD_MODE: "all_active"},
+            id="archive-alarms",
+        ),
+        pytest.param(
+            SERVICE_DELETE_ALARMS,
+            {SERVICE_FIELD_MODE: "all_active", SERVICE_FIELD_CONFIRM: True},
+            id="delete-alarms",
+        ),
+        pytest.param(
+            SERVICE_MUTE_ALARM,
+            {
+                SERVICE_FIELD_DURATION: "always",
+                SERVICE_FIELD_SCOPE_KIND: "all",
+                SERVICE_FIELD_TARGET_TYPE: "alarm_type",
+                SERVICE_FIELD_TARGET_VALUE: "ALARM_GAME",
+            },
+            id="mute-alarm",
+        ),
+        pytest.param(
+            SERVICE_UNMUTE_ALARM,
+            {SERVICE_FIELD_EXCEPTION_ID: "exception-1"},
+            id="unmute-alarm",
+        ),
+        pytest.param(
+            SERVICE_DELETE_RULE,
+            {SERVICE_FIELD_RULE_ID: "rule-1", SERVICE_FIELD_CONFIRM: True},
+            id="delete-rule",
+        ),
+    ),
+)
+async def test_phase_two_write_services_reject_non_admin_users(
+    hass: HomeAssistant,
+    service: str,
+    service_data: dict[str, object],
+) -> None:
+    """New alarm and rule write services enforce the Phase 1 admin gate."""
+    await async_setup_services(hass)
+    await hass.auth.async_create_user("Owner")
+    user = await hass.auth.async_create_user("User")
+
+    with pytest.raises(Unauthorized):
+        await hass.services.async_call(
+            DOMAIN,
+            service,
+            service_data,
+            context=Context(user_id=user.id),
+            blocking=True,
+        )
+
+
+async def test_get_alarms_is_not_admin_gated(hass: HomeAssistant) -> None:
+    """The read-only alarm service is available to non-admin users."""
+    await async_setup_services(hass)
+    await hass.auth.async_create_user("Owner")
+    user = await hass.auth.async_create_user("User")
+
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_ALARMS,
+            {SERVICE_FIELD_INCLUDE_ARCHIVED: False},
+            context=Context(user_id=user.id),
+            blocking=True,
+            return_response=True,
+        )
+
+    assert err.value.translation_key == "multiple_entries_loaded"
+
+
+async def test_get_alarms_returns_normalized_data_and_report_metadata(
+    hass: HomeAssistant,
+) -> None:
+    """The alarm service combines both sets and uses the shared report envelope."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    snapshot = replace(_snapshot(), active_alarm_count=1, archived_alarm_count=1)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+        patch.object(
+            FirewallaApiClient,
+            "async_get_alarms",
+            new=AsyncMock(
+                return_value=(
+                    {
+                        "aid": "active-1",
+                        "type": "ALARM_VIDEO",
+                        "alarmTimestamp": "1789047961.2",
+                        "p.dest.category": "av",
+                    },
+                )
+            ),
+        ),
+        patch.object(
+            FirewallaApiClient,
+            "async_get_archived_alarms",
+            new=AsyncMock(
+                return_value=(
+                    {
+                        "aid": "archived-1",
+                        "type": "ALARM_GAME",
+                        "alarmTimestamp": "1789047962.2",
+                        "p.dest.category": "games",
+                    },
+                )
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_ALARMS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_INCLUDE_ARCHIVED: True,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert [alarm["alarm_id"] for alarm in response["alarms"]] == [
+        "archived-1",
+        "active-1",
+    ]
+    assert response["alarms"][0]["is_archived"] is True
+    assert response["active_count"] == 1
+    assert response["archived_count"] == 1
+    assert response["metadata"]["warnings"] == []
+    assert response["metadata"]["provenance"]["alarms"]["source_field"] == (
+        "alarms / archivedAlarms"
+    )
+    assert response["time_basis"]["kind"] == "box_retained_history"
+
+
+@pytest.mark.parametrize(
+    ("service", "service_data", "translation_key"),
+    (
+        pytest.param(
+            SERVICE_DELETE_ALARMS,
+            {SERVICE_FIELD_MODE: "all_active", SERVICE_FIELD_CONFIRM: False},
+            "delete_alarms_confirm_required",
+            id="alarm-delete",
+        ),
+        pytest.param(
+            SERVICE_DELETE_RULE,
+            {SERVICE_FIELD_RULE_ID: "rule-1", SERVICE_FIELD_CONFIRM: False},
+            "delete_rule_confirm_required",
+            id="rule-delete",
+        ),
+    ),
+)
+async def test_destructive_delete_services_require_confirmation(
+    hass: HomeAssistant,
+    service: str,
+    service_data: dict[str, object],
+    translation_key: str,
+) -> None:
+    """Alarm and rule deletion fail closed unless confirm is true."""
+    await async_setup_services(hass)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(DOMAIN, service, service_data, blocking=True)
+
+    assert err.value.translation_key == translation_key

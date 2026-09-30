@@ -8,6 +8,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import ATTR_INTEGRATION, ATTR_PURPOSE, DOMAIN
 from .coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from .managers import (
+    FirewallaAlarmManager,
     FirewallaHostManager,
     FirewallaIntegrationManager,
     FirewallaRuleManager,
@@ -40,6 +41,11 @@ class FirewallaEntity(CoordinatorEntity[FirewallaDataUpdateCoordinator]):
     def integration_manager(self) -> FirewallaIntegrationManager:
         """Return the entry-scoped integration manager."""
         return self._entry.runtime_data.integration_manager
+
+    @property
+    def alarm_manager(self) -> FirewallaAlarmManager:
+        """Return the entry-scoped alarm manager."""
+        return self._entry.runtime_data.alarm_manager
 
     @property
     def host_manager(self) -> FirewallaHostManager:

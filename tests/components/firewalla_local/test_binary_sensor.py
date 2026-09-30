@@ -590,7 +590,9 @@ async def test_watched_device_binary_sensor_unique_ids_are_entry_scoped(
             + er.async_entries_for_config_entry(registry, second_entry.entry_id)
         )
         if entity_entry.entity_id.startswith("binary_sensor.")
-        and not entity_entry.unique_id.endswith("_system_status_binary_sensor")
+        and not entity_entry.unique_id.endswith(
+            ("_system_status_binary_sensor", "_alarm_active_binary_sensor")
+        )
     ]
 
     assert len(watched_entries) == 2

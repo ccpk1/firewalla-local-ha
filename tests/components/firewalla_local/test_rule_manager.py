@@ -7,6 +7,7 @@ from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.firewalla_local.api.client import FirewallaApiClient
+from custom_components.firewalla_local.const import CONF_SELECTED_RULE_TEMPLATES
 from custom_components.firewalla_local.coordinator import (
     FirewallaConfigEntry,
     FirewallaDataUpdateCoordinator,
@@ -433,3 +434,27 @@ async def test_async_pause_rule_ignores_missing_targets() -> None:
     assert update_rule_control_only.await_count == 0
     optimistic.assert_not_called()
     assert coordinator.data.policy_rules[0].rule_id == "744"
+
+
+async def test_async_delete_rule_updates_index_and_preserves_template() -> None:
+    """Delete one indexed rule while retaining its selected template record."""
+    rule = _build_rule("744")
+    snapshot = _build_snapshot(rule)
+    template = FirewallaRuleTemplate.from_rule(rule)
+    manager, coordinator, _, _ = _build_manager(
+        snapshot,
+        options={CONF_SELECTED_RULE_TEMPLATES: [template.to_dict()]},
+    )
+    manager.handle_refresh({"policyRules": [rule.raw_update_payload]}, snapshot)
+    delete_rule = AsyncMock()
+    manager.client.async_delete_rule = delete_rule
+
+    assert await manager.async_delete_rule("744")
+    assert not await manager.async_delete_rule("missing")
+
+    delete_rule.assert_awaited_once_with("744")
+    assert coordinator.data.policy_rules == ()
+    assert manager.selected_templates == (template,)
+    selected_view = manager.get_selected_rule_view("744")
+    assert selected_view is not None
+    assert selected_view.matching_rules == ()

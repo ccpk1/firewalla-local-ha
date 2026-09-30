@@ -1316,6 +1316,54 @@ class FirewallaRuntimeSnapshot:
     groups: tuple[FirewallaGroupRuntime, ...] = ()
     users: tuple[FirewallaUserRuntime, ...] = ()
     speed_test_results: tuple[FirewallaSpeedTestRecord, ...] = ()
+    alarms: tuple[FirewallaAlarm, ...] = ()
+    alarm_exceptions: tuple[FirewallaAlarmException, ...] = ()
+    active_alarm_count: int = 0
+    archived_alarm_count: int = 0
+    pending_alarm_count: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaAlarm:
+    """Normalized alarm record from the Firewalla local runtime.
+
+    ``fired_at`` uses the alarm-specific ``alarmTimestamp`` rather than the
+    underlying event ``timestamp``. ``remote_region`` is the ISO alpha-2
+    value exposed as ``p.dest.country`` by the local payload.
+    """
+
+    alarm_id: str
+    alarm_type: str | None
+    device_name: str | None
+    message: str | None
+    state: str | None
+    is_archived: bool
+    fired_at: float | None
+    remote_category: str | None
+    remote_host: str | None
+    remote_ip: str | None
+    remote_app: str | None
+    remote_region: str | None
+    remote_latitude: str | None
+    remote_longitude: str | None
+    interface_name: str | None
+    protocol: str | None
+    severity: str | None
+    raw_payload: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaAlarmException:
+    """Normalized local mute/exception record."""
+
+    exception_id: str
+    alarm_id: str | None
+    alarm_type: str | None
+    target_type: str | None
+    target: str | None
+    target_name: str | None
+    expires_at: int | None
+    raw_payload: dict[str, object] = field(default_factory=dict)
 
 
 def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:

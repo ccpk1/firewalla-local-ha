@@ -610,6 +610,29 @@ class FirewallaRuleManager(FirewallaBaseManager):
             tuple(rule.rule_id for rule in rules), enabled=True, idle_ts=None
         )
 
+    async def async_delete_rule(self, rule_id: str) -> bool:
+        """Delete one rule resolved from the live rule index by its ID."""
+        rule = self._rule_index.get(rule_id)
+        if rule is None:
+            return False
+
+        await self.client.async_delete_rule(rule.rule_id)
+        del self._rule_index[rule.rule_id]
+        if rule.rule_id in self._matching_rules_by_source_id:
+            self._matching_rules_by_source_id[rule.rule_id] = ()
+        if (snapshot := self.coordinator.data) is not None:
+            self.coordinator.async_set_updated_data(
+                replace(
+                    snapshot,
+                    policy_rules=tuple(
+                        current
+                        for current in snapshot.policy_rules
+                        if current.rule_id != rule.rule_id
+                    ),
+                )
+            )
+        return True
+
     def _resolve_rules_for_target(
         self, rule_target: str
     ) -> tuple[FirewallaPolicyRule, ...]:

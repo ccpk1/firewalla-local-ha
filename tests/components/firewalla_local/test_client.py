@@ -393,7 +393,39 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
                             },
                         }
                     },
-                    "exceptionRules": [{"aid": "1"}, {"aid": "2"}],
+                    "exceptionRules": [
+                        {
+                            "eid": "mute-1",
+                            "aid": "alarm-1",
+                            "alarm_type": "ALARM_VIDEO",
+                        },
+                        {"aid": "2"},
+                    ],
+                    "activeAlarmCount": 1,
+                    "archivedAlarmCount": 2,
+                    "pendingAlarmCount": 3,
+                    "newAlarms": [
+                        {
+                            "aid": "alarm-1",
+                            "alarmTimestamp": "1789047961.229",
+                            "timestamp": "1789047799.2",
+                            "device": "phone",
+                            "message": "phone is watching video",
+                            "state": "active",
+                            "type": "ALARM_VIDEO",
+                            "p.dest.category": "av",
+                            "p.dest.domain": "example.com",
+                            "p.dest.ip": "203.0.113.1",
+                            "p.dest.app": "video-app",
+                            "p.dest.country": "US",
+                            "p.dest.latitude": "40.1",
+                            "p.dest.longitude": "-73.9",
+                            "p.intf.name": "Home",
+                            "p.protocol": "tcp",
+                            "p.severity": "high",
+                        },
+                        {"device": "malformed-without-id"},
+                    ],
                     "policyRules": [
                         {
                             "pid": "739",
@@ -470,6 +502,21 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
         software_version="1.0.0",
     )
     assert snapshot.exception_rule_count == 2
+    assert len(snapshot.alarm_exceptions) == 1
+    assert snapshot.alarm_exceptions[0].exception_id == "mute-1"
+    assert snapshot.alarm_exceptions[0].alarm_id == "alarm-1"
+    assert snapshot.active_alarm_count == 1
+    assert snapshot.archived_alarm_count == 2
+    assert snapshot.pending_alarm_count == 3
+    assert len(snapshot.alarms) == 1
+    alarm = snapshot.alarms[0]
+    assert alarm.alarm_id == "alarm-1"
+    assert alarm.alarm_type == "ALARM_VIDEO"
+    assert alarm.fired_at == 1789047961.229
+    assert alarm.remote_category == "av"
+    assert alarm.remote_host == "example.com"
+    assert alarm.remote_ip == "203.0.113.1"
+    assert alarm.raw_payload["p.dest.latitude"] == "40.1"
     assert snapshot.appliance_runtime.booting_complete is True
     assert snapshot.appliance_runtime.dist_codename == "bionic"
     assert snapshot.appliance_runtime.cloud_connected is True
@@ -1922,6 +1969,150 @@ async def test_get_usage_history_payload_sends_scoped_get_request() -> None:
         },
         "target": "10",
     }
+
+
+@pytest.mark.asyncio
+async def test_get_alarms_sends_both_page_size_keys() -> None:
+    """The active alarm item reads count while tolerating other page keys."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"alarms": [{"aid": "alarm-1"}, "invalid"]}),
+        ) as mock_send:
+            alarms = await client.async_get_alarms(limit=17, offset=4)
+
+    assert alarms == ({"aid": "alarm-1"},)
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "alarms",
+            "value": {"count": 17, "limit": 17, "offset": 4},
+        },
+        "target": "0.0.0.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_archived_alarms_uses_archived_item_and_offset() -> None:
+    """The archived alarm item accepts limit and offset on the local runtime."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"alarms": [{"aid": "archived-1"}]}),
+        ) as mock_send:
+            alarms = await client.async_get_archived_alarms(limit=23, offset=46)
+
+    assert alarms == ({"aid": "archived-1"},)
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "archivedAlarms",
+            "value": {"count": 23, "limit": 23, "offset": 46},
+        },
+        "target": "0.0.0.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_alarm_detail_uses_alarm_id() -> None:
+    """The per-alarm enrichment item is queried by the aid field."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"aid": "alarm-1", "p.severity": "high"}),
+        ) as mock_send:
+            detail = await client.async_get_alarm_detail("alarm-1")
+
+    assert detail["p.severity"] == "high"
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {"item": "alarmDetail", "value": {"alarmID": "alarm-1"}},
+        "target": "0.0.0.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_alarm_commands_use_verified_command_items() -> None:
+    """Alarm writes use the confirmed command item names and payloads."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={}),
+        ) as mock_send:
+            await client.async_archive_alarm("alarm-1")
+            await client.async_delete_all_alarms(archived=True)
+            await client.async_create_alarm_exception({"type": "ALARM_GAME"})
+            await client.async_delete_alarm_exception("exception-1")
+
+    assert [call.kwargs for call in mock_send.await_args_list] == [
+        {
+            "message_type": "cmd",
+            "data": {"item": "alarm:ignore", "value": {"alarmID": "alarm-1"}},
+            "target": "0.0.0.0",
+        },
+        {
+            "message_type": "cmd",
+            "data": {"item": "alarm:deleteArchivedAll", "value": {}},
+            "target": "0.0.0.0",
+        },
+        {
+            "message_type": "cmd",
+            "data": {"item": "exception:create", "value": {"type": "ALARM_GAME"}},
+            "target": "0.0.0.0",
+        },
+        {
+            "message_type": "cmd",
+            "data": {
+                "item": "exception:delete",
+                "value": {"exceptionID": "exception-1"},
+            },
+            "target": "0.0.0.0",
+        },
+    ]
 
 
 @pytest.mark.asyncio
