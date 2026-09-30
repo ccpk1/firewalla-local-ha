@@ -3338,6 +3338,120 @@ looking like an oversight.
 **Units are decimal, not binary:** `KB = 1000 B`, `MB = 1000 KB`, `GB = 1000 MB`,
 `TB = 1000 GB`. Relevant if any byte thresholding is ever exposed.
 
+### Finding 37: Alarm data-model terminology — align to MSP and to our own existing names
+
+**Scenario:**
+
+- Reviewed MSP's published Alarm data model
+  (`docs.firewalla.net/data-models/alarm/`) against the local `p.*` keys
+  enumerated in Finding 26 and against naming already present in this codebase.
+
+**The local payload carries nearly everything MSP models — under different names.**
+
+| Concept | MSP field | Local raw key | Local normalized name today |
+| --- | --- | --- | --- |
+| Destination host | `remote.domain` | `p.dest.domain` / `.name` | **`remote_host`** ✔ already aligned |
+| Destination IP | `remote.ip` | `p.dest.ip` | **`remote_ip`** ✔ already aligned |
+| Destination region | `remote.region` | `p.dest.country` | *(not modelled)* |
+| Destination category | `remote.category` | `p.dest.category` | *(not modelled)* |
+| Destination app | *(none — local only)* | `p.dest.app` / `.app.id` | *(not modelled)* |
+| LAN device | `device.name` / `.id` / `.ip` | `p.device.name` / `.mac` / `.ip` | *(no alarm model yet)* |
+| Network | `device.network` | `p.intf.name` / `.desc` / `.id` / `.subnet` | *(not modelled)* |
+| Group / user | `device.group` | `p.tag.*` / `p.utag.*` | *(not modelled)* |
+| Transport | `protocol` | `p.protocol` | ✔ same word |
+| Timestamp | `ts` | `timestamp` **and** `alarmTimestamp` | *(two candidates)* |
+| Status | `status` (1 active / 2 archived) | `state` (always `"active"`) | *(no equivalent)* |
+
+**`remote_*` is already our word — `dest` is not.** Measured: `dest` appears
+**zero times** in `models.py`, and `remote_host` / `remote_ip` already exist on
+`FirewallaNetworkHostRanking`, populated in `integration_manager.py` and
+serialized in `services.py`. MSP also calls it `remote`. **So the alarm model
+should use `remote_*`.** Using `dest_*` would be a third vocabulary for a concept
+we already name, against both our own precedent and Firewalla's.
+
+**Values agree where names differ.** `p.dest.country` holds ISO 3166 alpha-2
+codes — observed `US` (204), `GB` (2), `DE` (1) across 231 records — which is
+exactly MSP's `remote.region` definition (*"Region of the remote IP, a 2-letter
+ISO 3166 code"*). Only the **name** diverges: `country` locally, `region` in MSP.
+Both are defensible; `region` matches Firewalla's model, `country` is more
+plainly understood. **Pick one and document it** rather than leaving a raw
+passthrough.
+
+**`p.protocol` matches MSP exactly** — observed `tcp` (150) and `udp` (55), the
+same two values MSP documents.
+
+**Category vocabulary genuinely diverges — and has an internal inconsistency.**
+
+MSP `Category` is: `ad edu games gamble intel p2p porn private social shopping
+video vpn`. Observed locally across 231 records: `games` (125), **`av` (71)**,
+`intel` (9).
+
+- `games` and `intel` **match** MSP.
+- **`av` does not exist in MSP's list** — MSP's equivalent is `video`.
+
+Separately, the local vocabulary is **internally inconsistent about number**: the
+category is plural (`games`) while the alarm *type* is singular (`ALARM_GAME`).
+And the category says `av` while the type says `ALARM_VIDEO` — two words for the
+same idea within one payload.
+
+**This is unresolved and should not be guessed at.** Options are that MSP maps
+`av → video` in its own API layer, or that the two vocabularies are genuinely
+different. **Recommendation: keep local category values raw for now** (consistent
+with the raw-`ALARM_*`-type decision), document `av` as the box's audio/video
+value, and do not build a mapping table to MSP's vocabulary without evidence that
+one is needed.
+
+**Two timestamps where MSP has one.** MSP models a single `ts`. Locally
+`timestamp` and `alarmTimestamp` are both present and **differ** (observed gaps
+of seconds to minutes). **Recommendation: treat `alarmTimestamp` as the MSP `ts`
+equivalent** — it is the later, alarm-specific value, while `timestamp` appears
+to be the underlying flow or detection time. Decide once, document the choice on
+the field, and surface only one by default.
+
+**`status` has no local equivalent, and should not be invented.** MSP reports
+1 = active / 2 = archived as a field. Locally `state` is **always `"active"`** —
+observed on all 231 records including archived ones — and archived-ness is
+expressed only by **list membership** (`archivedAlarms`). If the integration
+needs to expose archived state, derive it and name it as such
+(`is_archived` from list membership); do **not** add a `status` field implying a
+payload source that does not exist.
+
+**MSP models some things the local payload does not carry at all.** Worth knowing
+so their absence is not mistaken for a parsing gap:
+
+- **`direction`** (`inbound` / `outbound` / `local`) — no `direction` key observed
+  in any alarm record. Rules carry `direction: bidirection`; alarms do not
+  appear to.
+- **`dataPlan`** (`quota`, `begin`, `end`) — for MSP type 4. No `quota` key
+  observed; the nearest local evidence is `p.totalUsage` on bandwidth alarms.
+- **`wan`** (`name`, `status`, `active`, `switched`, `type`, `ready`) — for MSP
+  type 15. Locally WAN state lives in the separate `events` timeline
+  (`FirewallaWanEvent`), not on alarms.
+- **`port`** (`devicePort`, `protocol`, `publicPort`, `description`) — for MSP
+  type 14. Local `p.device.port` exists on security alarms but is a bare value,
+  not the structured object.
+- **`vpn`** (`id`, `name`, `type`, `subType`, `deviceCount`, `strict`) — local has
+  only `p.vpnType` and the peer keys, not the full object.
+
+**Fields local to the box with no MSP equivalent** (do not expect to map them):
+`p.cloud.decision`, `p.severity` / `p.severity.score`, `p.quarantine`,
+`p.fi`, `p.showMap`, `p.timestampTimezone`, `p.action.block`, `p.alarm.trigger`,
+`p.security.*`, `result` / `result_policy` / `result_method`,
+`p.local_is_client`, `p.from`, `p.dest.app` / `.app.id`, `p.begin.ts` / `p.end.ts`
+/ `p.duration` / `p.flows` / `p.percentage` / `p.totalUsage`.
+
+**Alignment summary — what to adopt before building:**
+
+1. **`remote_*`, not `dest_*`** — matches MSP and our own existing model.
+2. **`remote_region`, not `remote_country`** — matches MSP's name for identical
+   ISO alpha-2 data. *(Or keep `country`; but choose deliberately.)*
+3. **`alarmTimestamp` is the `ts` equivalent.** Surface one timestamp by default.
+4. **No `status` field.** Derive `is_archived` from list membership if needed.
+5. **Keep `ALARM_*` types and category values raw**, and document `av` as the
+   box's audio/video category.
+6. **Do not invent MSP sub-objects** (`transfer`, `vpn`, `wan`, `port`,
+   `dataPlan`) unless a real need appears; the flat local keys work.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
