@@ -207,13 +207,16 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 
   **Alarms are primary state with stable, automatable identity** — a dedicated binary sensor is correct, not an attribute on `system_status`. Do **not** create per-alarm entities; alarms are transient events and would churn the entity registry. Do **not** derive an alarm "severity" attribute — `p.severity` is sparse (~9/50) and belongs in the service response only.
 - [ ] **Alarm service — required, per the owner's request.** Add a response-returning service (mirroring the existing report services) that returns alarms with detail, optionally including the archived set. Backed directly by the verified fetch API above:
-  - **Default page size 10** (most recent), with a user-settable `count` for a larger pull (owner decision). Cap the configurable maximum to avoid an unbounded websocket payload and a large LLM token load in Phase 4.
+  - **Default page size 10** (most recent), with a user-settable **`limit`** for a larger pull (owner decision). Cap the configurable maximum to avoid an unbounded websocket payload and a large LLM token load in Phase 4. **Name it `limit`, not `count`** — `limit` is the MSP-canonical name (default 200, max 500) and is also what the local `archivedAlarms` item honours; the local `alarms` item's `count` is the outlier (Finding 36). Send both keys on the wire, expose only `limit`.
   - `include_archived` to append the archived set; `type` filter; optional `detail` for per-alarm `alarmDetail` enrichment.
   - **`severity` appears in the service response only** (owner decision) — never as an entity attribute, since it is sparse and not worth permanent recorder cost.
   - Active set via `item="alarms"`, archived via `item="archivedAlarms"`, enrichment via `item="alarmDetail"`.
   - Reuse the **shared report envelope** (`provenance`/`warnings`/`time_basis`) rather than inventing a response shape.
   - **`detail` must stay opt-in.** `alarmDetail` is one request per alarm, so fanning it out over a large page is a request storm.
   - Honour the type taxonomy plus the **implicit companions** so a `security` filter matches the app.
+  - **Filtering is a deliberate subset of MSP's qualifier surface (Finding 36).** MSP supports `type`, `device.name`, `remote.domain`, `remote.category`, `remote.region`, `transfer.*`, `ts` range and more, with a full query grammar. **The local runtime takes no query grammar**, so this service exposes named filter parameters only. Document it as a deliberate subset rather than leaving users to wonder why a query string is not accepted.
+  - **Consider a `ts` window parameter.** MSP defaults alarm search to the **last 30 days** when no `ts` qualifier is given; the local `alarms` item has no such bound (`limit: 1000` returned all 243 regardless of age). A documented default window would keep large-history boxes sane and matches MSP's behaviour users may expect.
+  - **No cursor pagination.** MSP is cursor-based (`next_cursor` / `cursor`); the local runtime is not — `alarms` ignores `offset` entirely and `archivedAlarms` uses a numeric offset. Expose no cursor, and document that `limit` returns the newest N rather than a page to walk.
   - **Entry scoping is mandatory** (architecture compliance): accept `config_entry_id` / `config_entry_name` and resolve exactly one target entry, matching every existing service. `docs/ARCHITECTURE.md` forbids relying on first-loaded-entry behavior.
   - **Alarm type values stay raw `ALARM_*` strings** (owner decision). No translation layer now; revisit only if users ask. Document them as raw identifiers so the raw form is clearly intentional rather than an oversight.
 - [ ] **Mute/unmute — TWO create paths and TWO delete paths (see Finding 33).** This is more capable than the earlier draft recorded, and the extra path settles how archived alarms are silenced.
@@ -243,12 +246,12 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 
   | # | Service | Parameters | Notes |
   |---|---|---|---|
-  | 1 | `get_alarms` | `count` (default 10), `include_archived`, `type`, `detail` | Read; details below |
+  | 1 | `get_alarms` | `limit` (default 10), `include_archived`, `type`, `detail` | Read; details below |
   | 2 | `archive_alarms` | `selection`, `alarm_id` | `selection`: `this` \| `all_active`. No `all_archived` — archiving an already-archived alarm is meaningless |
   | 3 | `delete_alarms` | `selection`, `alarm_id`, **`confirm`** | `selection`: `this` \| `all_active` \| `all_archived`. Absorbs both bulk deletes |
-  | 4 | `mute_alarm` | `alarm_id` *(optional)*, `target_type`, `target_value` *(optional)*, **`scope` (required)**, `scope_value` *(required unless `scope=all`)*, `duration` | Covers `alarm:allow` **and** standalone `exception:create`. `target_type=alarm_type` ⇒ whole-type mute. `scope=all` ⇒ every device |
+  | 4 | `mute_alarm` | `alarm_id` *(optional)*, `target_type`, `target_value` *(optional)*, **`scope_kind` (required)**, `scope_target` *(required unless `scope_kind=all`)*, `duration` | Covers `alarm:allow` **and** standalone `exception:create`. `target_type=alarm_type` ⇒ whole-type mute |
   | 5 | `unmute_alarm` | `alarm_id` **or** `exception_id` | Covers `alarm:unallow` and universal `exception:delete` |
-  | 6 | `block_alarm` | `alarm_id`, `target_type`, `target_value`, `scope`, `scope_value` | Creates a policy rule (Finding 34) |
+  | 6 | `block_alarm` | `alarm_id`, `target_type`, `target_value`, `scope_kind`, `scope_target` | Creates a policy rule (Finding 34) |
   | 7 | `unblock_alarm` | `alarm_id` | Removes the rule the block created |
 
   **Parameter naming — these are three different things, not one renamed.**
@@ -261,7 +264,11 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 
   **`selection` is deliberately not `scope`.** MSP uses `scope` for *which devices* a mute applies to, and we keep that meaning. The alarm-set axis needs its own word; reusing `scope` for both would put two unrelated meanings on one name.
 
-  **`scope` must be required with an explicit `all` value — mirror MSP, not the wire format.** The local runtime reaches "every device" by *omitting* the scope keys, so an accidental global mute is what a caller gets by forgetting a field. MSP's mute body requires `scope` and models `all` as a first-class value (`device` / `group` / `user` / `network` / `all`), which is the safer contract. **Adopt MSP's model:** `scope` is a required enum, `scope_value` is required unless `scope=all`, and `all` translates to key omission internally. Same reasoning for the target — expose `alarm_type` explicitly rather than treating an omitted target as a whole-type mute.
+  **`scope_kind` + `scope_target` — reuse the existing convention, do NOT invent one (Finding 35).** An earlier draft proposed `scope` + `scope_value`; that would have been a **third** form of a concept the codebase already expresses twice. `get_time_usage_report` already uses exactly `scope_kind` + `scope_target`, with the const names `SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND` / `_SCOPE_TARGET`, and its enum is `("device", "group", "user")` — **already a subset of MSP's alarm scope vocabulary**, in the same order.
+
+  **So alarms only extend the existing enum** to add `network` and `all`. Keep `scope_kind` required even when the value is `all`, mirroring MSP's stricter contract: the local runtime reaches all-devices by *omitting* the scope keys, so an accidental global mute is what a caller gets by forgetting a field. Requiring the value makes it a deliberate choice. Translation to the flat wire keys (`p.device.mac` / `p.tag.ids` / `p.intf.id`, or omission for `all`) belongs in the manager, not the service schema.
+
+  **Do not name any parameter `scope`.** `scope` already means the flat rule-identifier list (`_CREATE_PAYLOAD_SCOPE_KEY` in `models.py`), so reusing the word would collide two meanings.
 
   **Guardrails, applied together:**
   1. **Admin-gated** via the Phase 1 `admin=True` path.

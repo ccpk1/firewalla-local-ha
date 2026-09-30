@@ -3211,6 +3211,133 @@ video vpn` — the last maps to our `p.dest.category`.
 **Artifacts:** live session 2026-09-30; MSP alarm docs at
 `docs.firewalla.net/api-reference/alarm/`.
 
+### Finding 35: `scope` is one concept across rules, silences and usage history — do not invent a fourth form
+
+**Scenario:**
+
+- Raised during alarm service design as a duplication risk. Confirmed by
+  comparing MSP's data model against existing integration code.
+
+**MSP models scope identically for rules and alarms.** The Searching reference
+documents the Rule qualifier as returning
+`scope: {"type": "device", "value": "AA:BB:CC:DD:EE:FF"}` — the **same**
+structured shape as the alarm Mute Scope. So MSP has **one** scope concept, and
+applies it wherever a target set is needed.
+
+**Locally the same concept already exists in two forms, and a third was about to
+be invented:**
+
+| Where | Shape | Status |
+| --- | --- | --- |
+| Rule create payload (`models.py`) | `scope: list[str]` — flat identifiers, e.g. `["0C:85:E1:B0:1D:1C"]` | **Existing** |
+| Usage history (`get_time_usage_report`) | `scope_kind` + `scope_target` — kind enum plus one value | **Existing** |
+| Alarm mute (proposed) | `scope` + `scope_value` | ❌ **Would have been a duplicate of the row above** |
+
+**The established convention is `scope_kind` + `scope_target`.** Used verbatim:
+
+```python
+SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: Final = "scope_kind"
+SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: Final = "scope_target"
+```
+
+```python
+vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND): vol.In(("device", "group", "user")),
+vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET): cv.string,
+```
+
+**The vocabularies already agree.** MSP's alarm scope types are
+`device, group, user, network, all`. The local usage-history enum is
+`device, group, user` — **a subset of the same three values, in the same order**.
+That is not a coincidence; the local surface was already built to match MSP's
+scope vocabulary.
+
+**Alarms therefore need only extend the existing enum**, not introduce anything
+new:
+
+| `scope_kind` | Local protocol translation |
+| --- | --- |
+| `device` | `p.device.mac` |
+| `group` | `p.tag.ids` |
+| `user` | `p.tag.ids` |
+| `network` | `p.intf.id` |
+| `all` | omit every scope key |
+
+This mirrors the existing internal mapping already in `services.py`, which
+translates `scope_kind=device → request_scope_type=host` and
+`scope_kind=user → request_scope_type=tag` — a kind→protocol-type seam that
+alarms can reuse rather than re-implement.
+
+**Conclusion: use `scope_kind` + `scope_target` for alarm mute and block, and
+extend the enum with `network` and `all`.** Do **not** introduce `scope` /
+`scope_value`, and do **not** reuse the MSP wire name `scope` for a parameter —
+`scope` already means the flat rule identifier list elsewhere in the codebase.
+
+**Why the shapes differ at all.** The structured `{type, value}` form is MSP's
+API-layer abstraction. Locally every write path uses flat keys or lists
+(`p.device.mac`, `p.tag.ids`, `p.intf.id` for silences; a flat list for rule
+create). The structured form is therefore a **service-contract** concern, and the
+translation to flat keys belongs in the manager — not in the service schema and
+not in the model.
+
+### Finding 36: MSP search and pagination conventions
+
+**Scenario:**
+
+- Reviewed because the local page-size behaviour was previously unclear
+  (Finding 27 recorded that local `alarms` honours `count` while `archivedAlarms`
+  honours `limit`).
+
+**Pagination is cursor-based, not offset.**
+
+- Every paged response except the last carries a base64 **`next_cursor`**.
+- Every request after the first must echo it back as **`cursor`**.
+- The canonical loop is `while (1) { fetch; push results; if (!next_cursor) break; params.cursor = next_cursor; }`.
+
+**`limit` is the documented page-size name: default 200, maximum 500.**
+
+This resolves the earlier local confusion. **`limit` is the MSP-canonical name**,
+which explains why the local `archivedAlarms` handler honours it — that item is
+MSP-shaped. The local `alarms` item honouring `count` is the **outlier**, not the
+norm.
+
+**Design consequence:** name our service parameter **`limit`**, not `count` —
+it matches MSP, matches the local `archivedAlarms` item, and matches what a user
+familiar with Firewalla will expect. Send both keys on the wire (Finding 27), but
+expose only `limit` in the service contract.
+
+**A `ts` default window exists in MSP and has no local equivalent.** From the
+Alarm qualifiers: *"If no `ts` qualifier is provided, results default to the last
+30 days."* The local `alarms` item has no such window — `count: 1000` returned
+all 243 regardless of age. Worth knowing when sizing a default page.
+
+**Alarm search exposes a documented qualifier surface** (MSP Searching → Alarm
+Qualifiers), considerably richer than a simple type filter:
+
+| Qualifier | Alias | Example |
+| --- | --- | --- |
+| `ts` | — | `ts:<1695196894.395` — with `sortBy` for ordering |
+| `type` | `AlarmType` | `type:1,2,3` or by name |
+| `status` | — | `status:active` |
+| `box.id`, `box.name` | `Box` | |
+| `box.group.id` | — | |
+| `device.id` | `Mac` | `"AA:BB:CC:DD:EE:FF"` |
+| `device.name` | `Device` | `device.name:iphone` |
+| `device.network.id`, `device.network.name` | `Network` | |
+| `remote.category` | `Category` | `remote.category:porn,game` |
+| `remote.domain` | `Domain` | `remote.domain:google.com` |
+| `remote.region` | `Region` | 2-letter ISO code |
+| `transfer.download` / `.upload` / `.total` | `Download`/`Upload`/`Total` | `>10MB`, with units |
+
+Query syntax supports literals, wildcards (`*iphone*`), quoted strings,
+exclusion (`-status:active`), numeric comparisons (`>`, `>=`, `<`, `<=`) and
+ranges (`n-m`), across space-separated terms. **Syntax is MSP-only** — the local
+runtime takes no query grammar, as established earlier. Recorded only so our
+service's simple filters can be documented as a deliberate subset rather than
+looking like an oversight.
+
+**Units are decimal, not binary:** `KB = 1000 B`, `MB = 1000 KB`, `GB = 1000 MB`,
+`TB = 1000 GB`. Relevant if any byte thresholding is ever exposed.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
