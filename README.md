@@ -51,8 +51,13 @@ This isn't just a wrapper for a few scripts. It was built from the ground up to 
 Firewalla Local has evolved beyond simple monitoring into a comprehensive **local operator toolkit**.
 
 ### **Dynamic Network Control**
-* **Rule-Backed Switches & Timed Pauses:** Toggle your most-used rules (Internet Block, Social, Gaming) instantly. Use the `pause_rule` and `resume_rule` services to grant duration-based access (e.g., "Give the kids 30 more minutes of gaming") via any HA automation or voice assistant.
+* **Rule-Backed Switches & Timed Pauses:** Toggle your most-used rules (Internet Block, Social, Gaming) instantly. Use the `pause_rule` and `resume_rule` services to grant duration-based access (e.g., "Give the kids 30 more minutes of gaming") via any HA automation or voice assistant. Use `delete_rule` when a rule should be removed for good.
 * **Host Operator Actions:** Act as the network admin directly from Home Assistant. Wake devices (WOL), rename hosts, set/clear DHCP reservations, and toggle "notify when online/offline" settings seamlessly via actions (services).
+
+### **Alarm Monitoring & Triage**
+* **Native Alarm Entities:** See at a glance whether the box has active alarms through a dedicated binary sensor plus an active-alarm count sensor. Both carry a bounded per-category summary so automations can gate on "any gaming alarms?" without a service call, and a completeness flag tells you when the box's 50-record snapshot limit means the summary is partial rather than empty.
+* **Alarm Triage Services:** Query the newest active and archived alarms (with optional per-alarm detail), archive them, permanently delete them, and create or remove scoped silences — all admin-gated, with explicit confirmation required for irreversible deletes.
+* **Blocks Stay Rules:** A Firewalla "block" action on an alarm is ordinary policy-rule creation, so blocked targets appear in the normal rule inventory and are cleaned up with `delete_rule`. There is deliberately no separate alarm block/unblock service, so the rule surface remains the single place enforcement is managed.
 
 ### **Presence & Usage Tracking**
 * **Router-Based Device Trackers:** Expose highly reliable Home Assistant `device_tracker` entities for your MAC-backed LAN clients for rock-solid "Home/Away" presence automations.
@@ -65,7 +70,7 @@ Firewalla Local has evolved beyond simple monitoring into a comprehensive **loca
 * **Per-Network Entities:** Expose every Firewalla network (LAN, VLAN, VPN, WAN) as a native binary sensor carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, device count, advanced options (mDNS/SSDP Relay, Block ICMP), and usage — including current-month WAN usage.
 * **Per-SSID Wireless Entities (AP7):** When Firewalla AP7 access points are present, expose every wireless network (SSID) as a native binary sensor (status + band, encryption, WPA3, VLAN, interface) and a toggle switch to pause/resume it — all under the Firewalla box device.
 * **Per-AP Device Monitoring (AP7):** Each Firewalla AP7 access point becomes its own Home Assistant device (linked to the box), with a system-status binary sensor exposing channel, LED, TX power, country, mesh mode, timezone, pause-WiFi/ACL state, and live client count.
-* **Rich Local Reporting:** Leverage over a dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, and WAN event timelines—all pulled directly from the local data plane without touching the cloud.
+* **Rich Local Reporting:** Leverage over two dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, WAN event timelines, and current or archived alarms with their silences—all pulled directly from the local data plane without touching the cloud.
 
 ## **Supported Hardware & Prerequisites**
 * **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. Confirmed working on the following models running the Firewalla Box software that supports the local API:
@@ -130,12 +135,14 @@ It covers:
 - pairing expectations
 - options-flow management for rule switches (allow, block, disturb, QoS, and route), watched devices, device trackers, watched users, network entities, SSID entities, and polling
 - refresh behavior
-- appliance monitoring, watched-device monitoring, device-tracker monitoring, watched-user monitoring, per-SSID wireless monitoring, and per-AP device monitoring
+- appliance monitoring, watched-device monitoring, device-tracker monitoring, watched-user monitoring, per-SSID wireless monitoring, per-AP device monitoring, and alarm monitoring
 - internet-quality monitoring (per-WAN ping latency and packet loss)
-- runtime inventory, network, time-usage, speed-test, internet-quality, and WAN report services
+- runtime inventory, network, time-usage, speed-test, internet-quality, WAN report, and alarm report services
 - host operator actions including Wake-on-LAN, rename, notification toggles, and DHCP reservations
 - wireless services including `get_wireless_status` and `set_ssid_paused`
-- pause and resume services
+- pause and resume services, plus `delete_rule` for permanent rule removal
+- alarm services including `get_alarms`, `archive_alarms`, `delete_alarms`, `mute_alarm`, and `unmute_alarm`
+- which actions require an administrator, and why automations and scripts are unaffected
 
 ## 🏗️ **Development & Architecture Docs**
 

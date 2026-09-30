@@ -1006,6 +1006,10 @@ it directly.
   is not yet proven in the local contract
 - current WAN usage is exposed as a status-sensor attribute for summary and
   automation use, not as separate per-WAN entities
+- per-WAN top-talker rankings are not available from the local runtime: WAN
+  interfaces do not expose flow rankings, and rankings are also absent on some
+  LAN/VLAN/VPN interfaces depending on activity. `get_network_segment_usage`
+  returns rankings for the interfaces that do expose them
 - broader mutation surfaces remain intentionally out of scope until they are
   proven by protocol evidence
 - this is a community integration and not an official Firewalla support
