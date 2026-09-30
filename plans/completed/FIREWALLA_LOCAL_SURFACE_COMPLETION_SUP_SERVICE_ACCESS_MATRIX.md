@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provide the complete classification of Firewalla Local services for Phase 1 of `FIREWALLA_LOCAL_SURFACE_COMPLETION_IN-PROCESS.md`, and record the gating decision and its rationale in one place so the gate is declared rather than implied.
+Provide the complete classification of Firewalla Local services for Phase 1 of `FIREWALLA_LOCAL_SURFACE_COMPLETION_COMPLETED.md`, and record the gating decision and its rationale in one place so the gate is declared rather than implied.
 
 Source of truth for the live catalog: `_SERVICE_REGISTRATIONS` in `custom_components/firewalla_local/services.py` (22 services at time of writing). Verify the count before implementing — do not treat this table as authoritative if the registry differs.
 

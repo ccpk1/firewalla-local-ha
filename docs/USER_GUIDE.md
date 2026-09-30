@@ -1133,6 +1133,10 @@ it directly.
   `appTimeUsageToday` user payloads
 - watched-user entities do not expose a last-app-used field because that value
   is not yet proven in the local contract
+- human-readable target list names are not available: Firewalla resolves those
+  from cloud MSP subscription data (`mspData.targetlists`) that this integration
+  never requests, so rules that target a `TL-` list show the raw
+  `TL-` identifier instead of a friendly name
 - current WAN usage is exposed as a status-sensor attribute for summary and
   automation use, not as separate per-WAN entities
 - WAN networks never report `top_talkers`: the box assigns no hosts to a WAN
