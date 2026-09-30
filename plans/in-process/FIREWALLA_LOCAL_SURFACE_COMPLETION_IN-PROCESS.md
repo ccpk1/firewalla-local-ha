@@ -112,6 +112,15 @@ Reference: `FIREWALLA_LOCAL_SURFACE_COMPLETION_SUP_SERVICE_ACCESS_MATRIX.md`
 - [ ] **Leave the other 9 reads open — decision made.** **`get_runtime_inventory` IS gated** (it returns the full rule/group/user inventory). **`get_host_name_mapping` is NOT gated** — it stays open, because host identity records are already effectively public through the exposed entities and gating would break dashboards and LLM/display consumers for no real gain. Record the asymmetry and its rationale in the access-matrix note so it does not look accidental. **Consequence for Phase 4.2:** `get_runtime_inventory` will require admin at the service layer, so its tool can only succeed for an admin caller — that is consistent, not broken, and should be stated in the tool description.
 - [ ] **Tests** in `tests/components/firewalla_local/`: admin user context is allowed; non-admin user context raises `Unauthorized`; **no user context (automation-style call) is allowed**. The third case is the one that protects existing automations — assert it explicitly.
 - [ ] **Docs + quality scale.** Note the access model in `docs/USER_GUIDE.md`, add a release/breaking-change note if any user-facing call could newly be rejected, and update the `action-setup` / `action-exceptions` comments in `custom_components/firewalla_local/quality_scale.yaml`.
+- [ ] **Tag every admin-gated service in the usage guide (owner request).** `docs/USER_GUIDE.md` documents each service as its own `###` section under `## Services`. Add a short, consistent admin note to each of the 13 gated services so a reader can tell at a glance which calls need an administrator. Recommended wording, applied verbatim to every gated entry:
+
+  > **Requires an administrator.** This action is registered as an admin-only service. Automations and scripts are unaffected — Home Assistant only enforces the check for calls made by a signed-in user, so a non-admin user cannot invoke it directly.
+
+  Apply to: `pause_rule`, `resume_rule`, `run_internet_speed_test`, `wake_host`, `delete_host`, `set_host_name`, `set_host_dns_hostname`, `set_host_device_type`, `set_host_notify_when_next_online`, `set_host_notify_when_next_offline`, `set_host_dhcp_reservation`, `set_ssid_paused`, `get_runtime_inventory`.
+
+  Also add a companion line to the **service-group lists** in the same section (`### Service groups`) marking the gated members, so the grouping itself conveys the distinction without the reader visiting each entry. Keep the note identical across services rather than varying the wording — a consistent phrase is what makes it greppable and scannable.
+
+  **There is no Home Assistant mechanism that publishes this.** `homeassistant/core.py::Service` (`__slots__`: `job`, `schema`, `supports_response`, `description_placeholders`) carries **no admin or permission metadata**, and `async_register_admin_service` wraps the handler without recording the fact anywhere discoverable. `services.yaml` has no admin key either, and hassfest would reject an invented one. So a `services.yaml` note is **not** an option — the usage guide is the only place this can live, which is exactly why it matters that it is consistent.
 
 #### Traps and opportunities (found during review)
 
@@ -210,7 +219,19 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 - [ ] **Mute/block control services — with mandatory scope.** Mute must require an explicit scope (device / user / network / all) rather than defaulting to `matchAll: 1`. Durations are the app's three options (1 hour / today / always) and should reuse `parse_duration_to_seconds` plus the pause-rule expiry convention for the offset form.
 - [ ] **Reuse the block → rule path — for reading, not writing.** `alarm:block` creates an ordinary policy rule that `RuleManager` already parses. Do not build a parallel rule layer for blocks; **surface** them through the existing rule inventory. Note the direction: `RuleManager` discovers the rule on refresh. `AlarmManager` must **not** push rule state into `RuleManager` — see the cross-manager write note above.
 - [ ] **Filtering — confirmed unnecessary.** The box removes muted alarms from `newAlarms` itself (live-verified), so implement **no** client-side filtering and document that muted alarms never reach the entity. Do not build cloud-parity filtering.
-- [ ] **Bulk commands — open decision, resolve at the end of this phase (owner, 2026-09-30).** All three bulk commands are now **live-verified** (see the table below), so the question is scope rather than feasibility. **Default position: exclude them from v1.** They are irreversible, act on everything, and return `{}` whether or not they succeeded — so a caller cannot tell success from failure without re-reading counts. If they are ever exposed, require an explicit confirmation parameter (as `delete_host` already does) and an admin gate (Phase 1). Record the decision and rationale explicitly when Phase 2 closes; do not ship them silently, and do not leave the item open.
+- [ ] **Bulk commands — open decision, resolve at the end of this phase (owner, 2026-09-30).** All three bulk commands are now **live-verified** (see the table below), so the question is purely scope.
+
+  **The question, stated plainly: do we expose `ignoreAll` / `deleteArchivedAll` / `deleteActiveAll` to users at all as Home Assistant services in v1?**
+
+  It is not about feasibility or protocol — both are settled. It is about whether an irreversible, unbounded operation belongs in the service surface given three verified properties:
+
+  1. **No confirmation in the response.** `{}` comes back whether or not the call succeeded, so a caller cannot distinguish success from failure without re-reading the counts. An automation cannot detect a bad call.
+  2. **Unbounded blast radius.** They act on *everything*. `deleteActiveAll` permanently erased an alarm that then appeared in **neither** the active nor the archived list — unrecoverable.
+  3. **No undo.** No un-archive command exists, and archive/mute/block never restore an alarm.
+
+  **Recommendation: exclude all three from v1.** Reasoning: the same outcome is reachable without us — one archive or mute per alarm is bounded, verifiable, and already lands the alarm in the archived list where it stays visible. The bulk variants add convenience but remove every guardrail at once, and the failure mode is silent data loss. If they are ever added, they need an explicit confirmation parameter (as `delete_host` already requires) **and** the Phase 1 admin gate, since the admin gate is the only real protection.
+
+  **Record the decision and rationale explicitly when Phase 2 closes.** Do not ship them silently or leave the item open.
 
 #### Alarm control syntax — LIVE-VERIFIED (2026-09-30)
 
