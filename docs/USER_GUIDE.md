@@ -8,6 +8,7 @@ Firewalla box over the verified local protocol.
 This guide is organized around the main jobs you can do with the integration:
 
 - install and pair the box
+- use the data across Home Assistant (dashboards, automations, history, APIs)
 - choose which monitoring surfaces you want exposed
 - understand the main Firewalla device entities and refresh behavior
 - monitor watched devices, watched users, and device trackers
@@ -32,6 +33,79 @@ Firewalla Local can expose these main surface areas:
 - router-based `device_tracker` entities for selected MAC-backed LAN clients
 - rule-backed switches for supported persistent Firewalla rules
 - operator services for hosts, networks, WANs, and reports
+
+## Using your data across Home Assistant
+
+Pairing the box is step one. The payoff is that Home Assistant then serves the
+data on your own network, using the same tools you already use for everything
+else in your home. Every entity this integration creates behaves like any other
+Home Assistant entity, so the rest comes for free:
+
+- **Dashboards and cards.** Put box health, per-network usage, or your top
+  talkers on a wall display or a phone dashboard.
+- **Automations.** React to a state or an attribute. Notify on a new alarm,
+  alert when a WAN drops, or flag a device that has gone quiet.
+- **History and statistics.** Entities are recorded automatically, so trends and
+  charts come with them.
+- **Assist and voice.** Expose what you want and ask about it.
+- **REST and WebSocket APIs.** Read any state over HTTP. This is what makes Home
+  Assistant the hub for your other tools: a Grafana panel, a wall display, a
+  status page, or a script on another machine all read Firewalla data from one
+  place you already run, secure, and back up.
+- **Local and authenticated.** There is no cloud hop. Access goes through Home
+  Assistant's own users, tokens, and audit log.
+
+No paid service or separate app is needed to reach any of this.
+
+### Example: read the online device count over REST
+
+The system-status entity reports how many devices are currently online in its
+`devices_online` attribute. To read it from anywhere on your network, create a
+token under **Profile → Security → Long-lived access tokens**, then:
+
+```bash
+curl -s -H "Authorization: Bearer $HA_TOKEN" \
+  http://homeassistant.local:8123/api/states/binary_sensor.firewalla_system_status \
+  | jq '.attributes.devices_online'
+```
+
+That prints a plain number you can drop into a script, a status page, or any
+other tool. The same value inside Home Assistant is:
+
+```jinja
+{{ state_attr('binary_sensor.firewalla_system_status', 'devices_online') }}
+```
+
+The entity ID follows your box's name, so yours may differ from the example.
+Open **Developer Tools → States** to copy the exact one.
+
+### Example: call a service and read structured data
+
+Services work over REST too, which is handy when you want a set of values rather
+than a single state. `get_runtime_inventory` returns a summary that includes the
+same device counts the entity reports:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" \
+  -d '{}' "http://homeassistant.local:8123/api/services/firewalla_local/get_runtime_inventory?return_response" \
+  | jq '.service_response.inventory.summary | {devices_online, devices_offline}'
+```
+
+```json
+{
+  "devices_online": 42,
+  "devices_offline": 176
+}
+```
+
+Add `?return_response` so Home Assistant sends the result back, and note that
+this service requires an administrator token. The summary also carries
+`devices_total`, `host_count`, rule counts, and network counts, so one call can
+feed a dashboard or a monitoring script.
+
+One difference worth knowing: the REST API hands back every attribute, while
+Assist and LLM tools only see a small approved set. When you want the full
+detail in a model's context, that is what the report services are for.
 
 ## Service catalog at a glance
 
@@ -674,6 +748,10 @@ it directly.
 - useful for rule discovery, group and user correlation, and debugging the
   normalized runtime model
 - returns structured `inventory` data plus a rendered `markdown` summary
+- the `summary` block includes `devices_total`, `devices_online`, and
+  `devices_offline`, which use the same online definition as the system-status
+  entity, plus `host_count` (the raw host records the box reported) and rule,
+  group, user, and network counts
 - unlike the newer report services, it predates the shared report envelope
 
 ### Get host name mapping

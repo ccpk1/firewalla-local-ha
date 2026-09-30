@@ -2182,7 +2182,12 @@ async def test_options_flow_fallback_matches_runtime_inventory_candidates(
     option_ids = list(
         preview_result["data_schema"].schema[CONF_SELECTED_RULE_IDS].options
     )
-    report = build_runtime_inventory_report(payload, snapshot.policy_rules)
+    report = build_runtime_inventory_report(
+        payload,
+        snapshot.policy_rules,
+        hosts=(),
+        online_window_seconds=300,
+    )
     report_ids = [
         candidate["rule_id"] for candidate in report["rule_switch_candidates"]
     ]

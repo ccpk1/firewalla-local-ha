@@ -715,7 +715,17 @@ class FirewallaRuleManager(FirewallaBaseManager):
 
         payload = await self.client.async_get_runtime_init_payload()
         snapshot = self.client.build_runtime_snapshot(payload)
-        report = build_runtime_inventory_report(payload, snapshot.policy_rules)
+        host_manager = self.coordinator.host_manager
+        report = build_runtime_inventory_report(
+            payload,
+            snapshot.policy_rules,
+            hosts=snapshot.hosts,
+            online_window_seconds=(
+                host_manager.watched_device_online_window_seconds
+                if host_manager is not None
+                else 0
+            ),
+        )
         return {
             "inventory": report,
             "markdown": render_runtime_inventory_markdown(report),

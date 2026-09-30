@@ -50,6 +50,21 @@ This isn't just a wrapper for a few scripts. It was built from the ground up to 
 ## ✨ **What it Enables**
 Firewalla Local has evolved beyond simple monitoring into a comprehensive **local operator toolkit**.
 
+### **Your Data, Native to Home Assistant**
+Everything Firewalla Local exposes is a standard Home Assistant entity, so it works with the tools you already use: dashboards, automations, history and statistics, Assist, and the REST and WebSocket APIs. No cloud hop, no subscription, no separate app to check.
+
+It also makes Home Assistant the hub your *other* tools read from. Because everything is served over standard REST and WebSocket APIs, anything on your network can pull Firewalla data straight out of Home Assistant — a Grafana chart, a wall display, a status page, a Node-RED flow, a script on another machine. Rather than every tool learning Firewalla's API or signing up for yet another cloud service, they all read from one place you already run, secure, and back up.
+
+Reading state is one option; you can also call a service and get structured data back. Here is the current device count straight from the runtime inventory:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" \
+  -d '{}' "http://homeassistant.local:8123/api/services/firewalla_local/get_runtime_inventory?return_response" \
+  | jq '.service_response.inventory.summary | {devices_online, devices_offline}'
+```
+
+The [User Guide](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md) has worked examples.
+
 ### **Dynamic Network Control**
 * **Rule-Backed Switches & Timed Pauses:** Toggle your most-used rules (Internet Block, Social, Gaming) instantly. Use the `pause_rule` and `resume_rule` services to grant duration-based access (e.g., "Give the kids 30 more minutes of gaming") via any HA automation or voice assistant. Use `delete_rule` when a rule should be removed for good.
 * **Host Operator Actions:** Act as the network admin directly from Home Assistant. Wake devices (WOL), rename hosts, set/clear DHCP reservations, and toggle "notify when online/offline" settings seamlessly via actions (services).
