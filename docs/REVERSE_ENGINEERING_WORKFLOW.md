@@ -2775,16 +2775,51 @@ build behaviour on it.
 
 | `info` key present | Scope granted |
 | --- | --- |
-| `device` | that device MAC |
-| `tag` / `p.tag.ids` | a group or user tag |
-| `intf` / `p.intf.id` | a network |
-| **none of the above** | **global — every device** |
+| `p.device.mac` | that device |
+| `p.tag.ids` | a group or user tag |
+| `p.intf.id` | a network |
+| **none of the above** | **all — every device on the box** |
 
-So the app's "apply to" picker (`AlarmActionHelper.getMuteApplyToItems`, offering
-**device / user / network / global**) maps exactly onto which key it writes.
+Measured on the mute path (`exception:create`), confirming the key-driven
+behaviour and that `matchAll` is stored but does not affect scope:
 
-**Any mute the integration exposes must require an explicit scope**, because
-omitting the keys — not `matchAll` — silently silences alarms for every device.
+| `value` | Stored scope keys |
+| --- | --- |
+| no scope key, no `matchAll` | *(none)* — all devices |
+| `matchAll: 1` + `p.device.mac` | `matchAll`, `p.device.mac` |
+| `matchAll: 0` + `p.device.mac` | `matchAll`, `p.device.mac` — **identical to `matchAll: 1`** |
+| `matchAll: 1`, no device | `matchAll` only — all devices |
+
+**The MSP data model is explicit where the local wire format is implicit.**
+`docs.firewalla.net/data-models/alarm/` defines **five** scope types and — the
+important part — models `all` as a **first-class value**, not as absence:
+
+| MSP `scope.type` | `scope.value` | Local `info` key |
+| --- | --- | --- |
+| `device` | device ID | `p.device.mac` |
+| `group` | group ID | `p.tag.ids` |
+| `user` | user ID | `p.tag.ids` |
+| `network` | network ID | `p.intf.id` |
+| `all` | — *(not used)* | **no scope key at all** |
+
+**`scope` is a required field in the MSP mute body.** MSP therefore forces the
+caller to state a scope, and `all` is an intentional selection. Locally the same
+outcome is reached by *omitting* the keys — identical on the wire, but it means an
+unintended global mute is what a caller gets by forgetting a field.
+
+**Design consequence — mirror MSP's model, not the local wire format.** The
+integration's mute service should take **`scope` as a required enum with an
+explicit `all` value**, then translate `all` into key omission internally. That
+makes "silence everything" a deliberate choice rather than a default. Do **not**
+expose the local omission behaviour directly.
+
+The same applies to the target: MSP requires `target` (`alarmType` / `domain` /
+`ip`), while locally an omitted target is a whole-alarm-type mute. Expose
+`alarmType` explicitly rather than leaning on absence — see Finding 34.
+
+The app's "apply to" picker (`AlarmActionHelper.getMuteApplyToItems`, offering
+**device / user / network / global**) already presents the choice explicitly, and
+its `global` option is the `null` case that writes no key.
 
 
 **`alarm:block` payload differences** (`ku7.m14064d` + `cd0.m2349a`):
@@ -3122,8 +3157,56 @@ absence of the device/tag/intf keys (Finding 29).
 
 **Design consequence:** the local silence API is **a superset of MSP's mute
 capability**, and one `exception:create` path expresses every variant MSP needs
-three endpoints' worth of parameters for. A single mute service parameterised on
-(target type, target value, scope) covers the whole surface.
+three documented parameter combinations for. A single mute service parameterised
+on (target type, target value, scope) covers the whole surface.
+
+**There is one thing MSP does better, and it should be copied.** MSP requires
+**both** `target` and `scope` in the mute body. Locally both are optional, with
+omission meaning "whole alarm type" and "all devices" respectively — so the
+broadest possible mute is what a caller gets by leaving fields out. MSP's
+strictness is the safer design. **Mirror it: make `scope` required with an
+explicit `all` value, and expose `alarmType` as an explicit target type rather
+than relying on an omitted target.** The wire format stays identical; only the
+service contract is stricter.
+
+### MSP data model reference (for parity checks)
+
+Recorded because it is a stable published contract and a useful cross-check when
+a local field's meaning is unclear.
+
+**Mute target types:** `alarmType` *(no value — silences every future alarm of
+that type regardless of destination)*, `domain` *(wildcard matching applied
+automatically, so `example.com` also matches `sub.example.com`)*, `ip`.
+
+**Mute scope types:** `device`, `group`, `user`, `network`, `all` — see the table
+in Finding 29.
+
+**Alarm type is a NUMBER in MSP**, not the local `ALARM_*` string:
+
+| MSP | Meaning | | MSP | Meaning |
+| --- | --- | --- | --- | --- |
+| 1 | Security Activity | | 9 | Gaming Activity |
+| 2 | Abnormal Upload | | 10 | Porn Activity |
+| 3 | Large Bandwidth Usage | | 11 | VPN Activity |
+| 4 | Monthly Data Plan | | 12 | VPN Connection Restored |
+| 5 | New Device | | 13 | VPN Connection Error |
+| 6 | Device Back Online | | 14 | Open Port |
+| 7 | Device Offline | | 15 | Internet Connectivity Update |
+| 8 | Video Activity | | 16 | Large Upload |
+
+This confirms the "Security Activity / Abnormal Upload / Open Port" filters the
+app exposes map to MSP types 1, 2 and 14 — consistent with the `ALARM_INTEL`,
+`ALARM_LARGE_UPLOAD` and `ALARM_UPNP` local strings plus their implicit
+companions (Finding 30).
+
+**Alarm status is a NUMBER in MSP: 1 = active, 2 = archived.** Note the
+divergence — locally there is no status field, `state` is always `"active"`, and
+archived is determined by **list membership** (`archivedAlarms`). Do not expect a
+local status field to appear; the two models represent the same idea differently.
+
+**Remote/category enums worth noting:** `Region` is a 2-letter ISO 3166 code, and
+`Category` is one of `ad edu games gamble intel p2p porn private social shopping
+video vpn` — the last maps to our `p.dest.category`.
 
 **Artifacts:** live session 2026-09-30; MSP alarm docs at
 `docs.firewalla.net/api-reference/alarm/`.

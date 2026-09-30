@@ -246,9 +246,9 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
   | 1 | `get_alarms` | `count` (default 10), `include_archived`, `type`, `detail` | Read; details below |
   | 2 | `archive_alarms` | `selection`, `alarm_id` | `selection`: `this` \| `all_active`. No `all_archived` — archiving an already-archived alarm is meaningless |
   | 3 | `delete_alarms` | `selection`, `alarm_id`, **`confirm`** | `selection`: `this` \| `all_active` \| `all_archived`. Absorbs both bulk deletes |
-  | 4 | `mute_alarm` | `alarm_id` *(optional)*, `target_type`, `target_value` *(optional)*, **`scope`**, `duration` | Covers `alarm:allow` **and** standalone `exception:create`. No `target_value` ⇒ whole-type mute (Finding 34) |
+  | 4 | `mute_alarm` | `alarm_id` *(optional)*, `target_type`, `target_value` *(optional)*, **`scope` (required)**, `scope_value` *(required unless `scope=all`)*, `duration` | Covers `alarm:allow` **and** standalone `exception:create`. `target_type=alarm_type` ⇒ whole-type mute. `scope=all` ⇒ every device |
   | 5 | `unmute_alarm` | `alarm_id` **or** `exception_id` | Covers `alarm:unallow` and universal `exception:delete` |
-  | 6 | `block_alarm` | `alarm_id`, `target_type`, `target_value`, `scope` | Creates a policy rule (Finding 34) |
+  | 6 | `block_alarm` | `alarm_id`, `target_type`, `target_value`, `scope`, `scope_value` | Creates a policy rule (Finding 34) |
   | 7 | `unblock_alarm` | `alarm_id` | Removes the rule the block created |
 
   **Parameter naming — these are three different things, not one renamed.**
@@ -260,6 +260,8 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
   So `delete_alarms` takes `selection` **plus** `alarm_id`, where `alarm_id` is required only when `selection=this` and ignored otherwise. `unmute_alarm` takes an identifier with no `selection`, because no bulk unmute command exists. `alarm_id` and `exception_id` are alternatives **to each other**, never alternatives to `selection`.
 
   **`selection` is deliberately not `scope`.** MSP uses `scope` for *which devices* a mute applies to, and we keep that meaning. The alarm-set axis needs its own word; reusing `scope` for both would put two unrelated meanings on one name.
+
+  **`scope` must be required with an explicit `all` value — mirror MSP, not the wire format.** The local runtime reaches "every device" by *omitting* the scope keys, so an accidental global mute is what a caller gets by forgetting a field. MSP's mute body requires `scope` and models `all` as a first-class value (`device` / `group` / `user` / `network` / `all`), which is the safer contract. **Adopt MSP's model:** `scope` is a required enum, `scope_value` is required unless `scope=all`, and `all` translates to key omission internally. Same reasoning for the target — expose `alarm_type` explicitly rather than treating an omitted target as a whole-type mute.
 
   **Guardrails, applied together:**
   1. **Admin-gated** via the Phase 1 `admin=True` path.
