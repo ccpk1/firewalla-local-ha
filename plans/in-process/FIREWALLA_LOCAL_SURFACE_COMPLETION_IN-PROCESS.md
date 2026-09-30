@@ -203,14 +203,38 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 - [ ] **No cross-manager writes for block (architecture compliance).** `docs/ARCHITECTURE.md` forbids direct cross-manager writes. `alarm:block` creates a policy rule, so the tempting shortcut is `AlarmManager` calling into `RuleManager`. **Do not do that.** `AlarmManager` issues `alarm:block` as an alarm-domain command; `RuleManager` independently discovers the resulting rule on the next refresh, exactly as it would a rule created in the app. This keeps each manager the sole writer for its own domain and avoids hidden mutation coupling.
 - [ ] **Entities — narrow by design.** Box-level `binary_sensor` (alarm active) plus `sensor` (active count) in `binary_sensor.py` / `sensor.py`.
 
-  **Attribute recommendation (owner asked; narrow is the goal).** Home Assistant records state attributes, so a bounded list multiplied by every poll interval is real recorder cost for data nobody can template on usefully. Recommended attribute sets, and nothing more:
+  **Attribute recommendation (owner asked; narrow is the goal).** Home Assistant records state attributes, so anything unbounded multiplied by every poll interval is real recorder cost. Recommended attribute sets:
 
   | Entity | State | Attributes |
   |---|---|---|
-  | `binary_sensor.alarm_active` | `activeAlarmCount > 0` | `active_count`, `archived_count`, `pending_count`, and the **latest** alarm's `alarm_type`, `device_name`, `message`, `fired_at`, `alarm_id` |
-  | `sensor.alarm_count` | `activeAlarmCount` | `archived_count`, `pending_count` |
+  | `binary_sensor.alarm_active` | `activeAlarmCount > 0` | `active_count`, `archived_count`, `pending_count`, **`active_by_category`** (see below), and the **latest** alarm's `alarm_type`, `device_name`, `message`, `fired_at`, `alarm_id` |
+  | `sensor.alarm_count` | `activeAlarmCount` | `archived_count`, `pending_count`, **`active_by_category`** |
 
-  **Deliberately excluded from attributes:** any recent-alarm list, per-type counts, destination/geo fields, and `severity`. The full set lives in the service response. This supersedes the earlier "bounded recent list (≈5 entries)" note — the list is dropped entirely rather than bounded, because the service already serves that need better and attributes carry a permanent recorder cost.
+  **`active_by_category` — recommended, and it is the high-value one (owner raised).** A mapping of category to active count, e.g. `{"games": 4, "av": 2, "intel": 1}`. Purpose: let an automation **gate cheaply on a template without a service call** —
+
+  ```yaml
+  condition: "{{ state_attr('binary_sensor.alarm_active', 'active_by_category').get('intel', 0) > 0 }}"
+  ```
+
+  This is worth including because it is a fundamentally different shape from the list I excluded:
+
+  | | `active_by_category` | recent-5 list |
+  |---|---|---|
+  | Cardinality | bounded by category count (3–5 typical, ≤13) | fixed 5, but each is a multi-field object |
+  | Changes when | a category count changes | **every new alarm** |
+  | Recorder cost | tiny, low churn | moderate, high churn |
+  | Automation value | **high** — replaces a service call | low — the service does it better |
+  | Kind of thing | a **summary** | a **data sample** |
+
+  A summary of a stable small key set is a good attribute; a rolling sample of records is not. That distinction is why one is in and the other is out.
+
+  **Recent-5 list — still excluded, deliberately.** The latest alarm is already surfaced (top-1). A five-entry list would churn on every alarm and duplicates what `get_alarms(limit=5)` returns properly. **If a "recent alarms" view is wanted later, add it to the service, not to attributes.** Revisit only if a real automation need appears that the service cannot serve.
+
+  **Also excluded:** destination/geo fields and `severity` (sparse, ~9/50). Both live in the service response only.
+
+  Compliance notes: use **`activeAlarmCount`** for state, never `len(newAlarms)` (capped at 50); unique IDs must encode entry scope (`build_entity_unique_id` already does); names must be translation-owned with no `_attr_name`; these entities have **static** labels so they need no `_attr_translation_placeholders` refresh (worth stating, since a reviewer may otherwise look for it); and both belong to **no** entity category, matching the existing convention that categories are reserved for genuinely diagnostic surfaces.
+
+  **Note on key naming:** `active_by_category` uses the raw category values (`games`, `av`, `intel`) as keys, consistent with the raw-values decision. Keys are therefore **not** translation-owned, which is deliberate — they are data identifiers, not user-facing labels.
 
   Compliance notes: use **`activeAlarmCount`** for state, never `len(newAlarms)` (capped at 50); unique IDs must encode entry scope (`build_entity_unique_id` already does); names must be translation-owned with no `_attr_name`; these entities have **static** labels so they need no `_attr_translation_placeholders` refresh (worth stating, since a reviewer may otherwise look for it); and both belong to **no** entity category, matching the existing convention that categories are reserved for genuinely diagnostic surfaces.
 
@@ -224,7 +248,7 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
   - **`detail` must stay opt-in.** `alarmDetail` is one request per alarm, so fanning it out over a large page is a request storm.
   - Honour the type taxonomy plus the **implicit companions** so a `security` filter matches the app.
   - **Filtering is a deliberate subset of MSP's qualifier surface (Finding 36).** MSP supports `type`, `device.name`, `remote.domain`, `remote.category`, `remote.region`, `transfer.*`, `ts` range and more, with a full query grammar. **The local runtime takes no query grammar**, so this service exposes named filter parameters only. Document it as a deliberate subset rather than leaving users to wonder why a query string is not accepted.
-  - **Consider a `ts` window parameter.** MSP defaults alarm search to the **last 30 days** when no `ts` qualifier is given; the local `alarms` item has no such bound (`limit: 1000` returned all 243 regardless of age). A documented default window would keep large-history boxes sane and matches MSP's behaviour users may expect.
+  - **Consider a `ts` window parameter.** **DECIDED: default to the last 30 days**, matching MSP's alarm-search default. Add a `ts_from` parameter so a caller can widen it deliberately. The local `alarms` item has no inherent bound (`limit: 1000` returned all 243 regardless of age), so an unbounded default would return arbitrarily old alarms and surprise a caller who expects recent activity.
   - **No cursor pagination.** MSP is cursor-based (`next_cursor` / `cursor`); the local runtime is not — `alarms` ignores `offset` entirely and `archivedAlarms` uses a numeric offset. Expose no cursor, and document that `limit` returns the newest N rather than a page to walk.
   - **Entry scoping is mandatory** (architecture compliance): accept `config_entry_id` / `config_entry_name` and resolve exactly one target entry, matching every existing service. `docs/ARCHITECTURE.md` forbids relying on first-loaded-entry behavior.
   - **Alarm type values stay raw `ALARM_*` strings** (owner decision). No translation layer now; revisit only if users ask. Document them as raw identifiers so the raw form is clearly intentional rather than an oversight.
@@ -255,9 +279,9 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 
   | # | Service | Parameters | Notes |
   |---|---|---|---|
-  | 1 | `get_alarms` | `limit` (default 10), `include_archived`, `type`, `detail` | Read; details below |
-  | 2 | `archive_alarms` | `selection`, `alarm_id` | `selection`: `this` \| `all_active`. No `all_archived` — archiving an already-archived alarm is meaningless |
-  | 3 | `delete_alarms` | `selection`, `alarm_id`, **`confirm`** | `selection`: `this` \| `all_active` \| `all_archived`. Absorbs both bulk deletes |
+  | 1 | `get_alarms` | `limit` (default 10), `include_archived`, `type`, `detail`, `ts_from` *(default 30 days)* | Read; details below |
+  | 2 | `archive_alarms` | `mode`, `alarm_id` | `mode`: `this` \| `all_active`. No `all_archived` — archiving an already-archived alarm is meaningless |
+  | 3 | `delete_alarms` | `mode`, `alarm_id`, **`confirm`** | `mode`: `this` \| `all_active` \| `all_archived`. Absorbs both bulk deletes |
   | 4 | `mute_alarm` | `alarm_id` *(optional)*, `target_type`, `target_value` *(optional)*, **`scope_kind` (required)**, `scope_target` *(required unless `scope_kind=all`)*, `duration` | Covers `alarm:allow` **and** standalone `exception:create`. `target_type=alarm_type` ⇒ whole-type mute |
   | 5 | `unmute_alarm` | `alarm_id` **or** `exception_id` | Covers `alarm:unallow` and universal `exception:delete` |
   | 6 | `block_alarm` | `alarm_id`, `target_type`, `target_value`, `scope_kind`, `scope_target` | Creates a policy rule (Finding 34) |
@@ -265,13 +289,13 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
 
   **Parameter naming — these are three different things, not one renamed.**
 
-  - **`selection`** is an *enum* choosing **which set** to act on: `this`, `all_active`, `all_archived`. It picks a scope of operation.
+  - **`mode`** is an *enum* choosing **which set** to act on: `this`, `all_active`, `all_archived`. It picks a scope of operation. **Named `mode`, not `selection`** — `set_host_dhcp_reservation` already uses this exact shape (`SERVICE_FIELD_MODE` with `vol.In(("dynamic", "static"))`), so `mode` is the established convention for an enum that selects an operation variant.
   - **`alarm_id`** is the **identity of one alarm** (the `aid`).
   - **`exception_id`** is the **identity of one silence** (the `eid`).
 
-  So `delete_alarms` takes `selection` **plus** `alarm_id`, where `alarm_id` is required only when `selection=this` and ignored otherwise. `unmute_alarm` takes an identifier with no `selection`, because no bulk unmute command exists. `alarm_id` and `exception_id` are alternatives **to each other**, never alternatives to `selection`.
+  So `delete_alarms` takes `mode` **plus** `alarm_id`, where `alarm_id` is required only when `mode=this` and ignored otherwise. `unmute_alarm` takes an identifier with no `mode`, because no bulk unmute command exists. `alarm_id` and `exception_id` are alternatives **to each other**, never alternatives to `mode`.
 
-  **`selection` is deliberately not `scope`.** MSP uses `scope` for *which devices* a mute applies to, and we keep that meaning. The alarm-set axis needs its own word; reusing `scope` for both would put two unrelated meanings on one name.
+  **`mode` is deliberately not `scope`.** MSP uses `scope` for *which devices* a mute applies to, and we keep that meaning. The alarm-set axis needs its own word; reusing `scope` for both would put two unrelated meanings on one name. `mode` also matches the existing `host_dhcp_reservation` precedent rather than inventing a new term.
 
   **`scope_kind` + `scope_target` — reuse the existing convention, do NOT invent one (Finding 35).** An earlier draft proposed `scope` + `scope_value`; that would have been a **third** form of a concept the codebase already expresses twice. `get_time_usage_report` already uses exactly `scope_kind` + `scope_target`, with the const names `SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND` / `_SCOPE_TARGET`, and its enum is `("device", "group", "user")` — **already a subset of MSP's alarm scope vocabulary**, in the same order.
 
@@ -284,7 +308,7 @@ This is better than an admin flag anyway, because Home Assistant entity permissi
   2. **`confirm` required on `delete_alarms`**, matching the `delete_host` precedent. Bulk paths are irreversible and return `{}` regardless of outcome, so confirmation is the only pre-flight signal available.
   3. **Tier C for MCP** — no alarm control tool is exposed to an LLM. Channel-specific: an agent could neither confirm intent beforehand nor detect success afterwards.
 
-  **State irreversibility in user-facing text.** `archive_alarms(selection=this)` is recoverable (the alarm moves to the archive); every delete path destroys records permanently. The service descriptions and usage-guide entries must say so.
+  **State irreversibility in user-facing text.** `archive_alarms(mode=this)` is recoverable (the alarm moves to the archive); every delete path destroys records permanently. The service descriptions and usage-guide entries must say so.
 
   **Add all seven to the Phase 1 admin note list in `docs/USER_GUIDE.md`.**
 
