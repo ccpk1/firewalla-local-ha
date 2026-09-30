@@ -2603,17 +2603,38 @@ day with 243 active records:
 | `{"count": 1000}` | **243** — full set |
 | `{"count": 5000}` | 243 |
 
-> **Re-verification pending.** The `alarms` matrix above was measured while 243
-> active alarms existed. The active set has since been archived (Finding 32), so
-> `alarms` currently returns 0 and the behaviour could not be re-confirmed
-> alongside `archivedAlarms`. Re-run the matrix for `alarms` once new alarms
-> accumulate, to confirm the asymmetry is real and not an artifact of the two
-> tests being run at different times.
+**The asymmetry is confirmed — resolved 2026-09-30 (same day, later test).**
 
-**Practical guidance:** because the two handlers disagree, **send both keys** —
-`{"count": N, "limit": N, "offset": M}`. Unknown keys are ignored, so each item
+> An earlier note here flagged the `alarms` row as needing re-verification. That
+> is now closed. `alarms` genuinely uses `count` and genuinely ignores both
+> `limit` and `offset`, while `archivedAlarms` uses `limit` and honours `offset`.
+> The two items are **not** interchangeable, and the disagreement is real rather
+> than an artifact of running the two tests at different times.
+
+**`item=alarms` ignores `offset` entirely.** Measured with exactly one active
+alarm present, so any applied offset would have returned zero records:
+
+| `value` | Returned |
+| --- | --- |
+| `{"offset": 0}` | 1 |
+| `{"offset": 1}` | **1** — offset not applied |
+| `{"offset": 2}` | **1** — offset not applied |
+| `{"limit": 50, "offset": 1}` | 1 |
+| `{"count": 50, "offset": 1}` | 1 |
+
+Compare `archivedAlarms`, where `{"limit": 50, "offset": 243}` correctly returned
+**0** — a clean boundary check proving `offset` *is* implemented there.
+
+**Consequence:** the active alarm list has **no working pagination**. The only way
+to retrieve more than the default 50 is a large `count`, which returns the whole
+set in one response. That is acceptable because the active set is inherently
+bounded in practice, but it means a caller cannot page the active list.
+
+**Practical guidance:** because the two handlers disagree, **send all three keys**
+— `{"count": N, "limit": N, "offset": M}`. Unknown keys are ignored, so each item
 reads the one it understands and the caller does not have to know which. This is
-what `utils/probe_alarm_control.py::_fetch_alarms` does.
+what `utils/probe_alarm_control.py::_fetch_alarms` does. Note that `offset` is
+still useful to send for `archivedAlarms`; for `alarms` it is harmlessly ignored.
 
 **`item=alarmDetail` adds enrichment the list view does not carry:**
 
@@ -2886,12 +2907,25 @@ authorised for testing, and the alarms remain in the archive rather than being
 lost — but it is a good illustration of why these commands need a confirmation
 gate and should never be wired to a bare button.
 
-**Still untested: `alarm:deleteActiveAll`.** It is documented in the APK
-(`AlarmViewDelegate$setupMoreOperations$1$d$1$1$r$1`, the `$deleteAllArchived ==
-false` branch) but was not executed because it is a permanent bulk delete of
-every active alarm. Treat its payload as `{"item": "alarm:deleteActiveAll",
-"value": {}}` by analogy with the other two, and mark it unverified until
-someone runs it on a disposable box.
+**`alarm:deleteActiveAll` — confirmed 2026-09-30.** Now verified, closing the last
+unverified alarm command. APK reference: `AlarmViewDelegate$setupMoreOperations$1$d$1$1$r$1`,
+the `$deleteAllArchived == false` branch.
+
+| | Before | After |
+| --- | --- | --- |
+| `activeAlarmCount` | 1 | **0** |
+| `archivedAlarmCount` | 243 | 243 (unchanged) |
+| `archivedAlarms` contains the deleted aid | — | **No** |
+
+**It permanently deletes rather than archiving.** The single active alarm (`aid`
+1735) disappeared from **both** the active and the archived lists. So the two
+bulk deletes are complementary and neither is recoverable:
+
+- `deleteActiveAll` → permanently removes every active alarm
+- `deleteArchivedAll` → permanently removes every archived alarm
+
+**All nine alarm commands are now live-verified.** No alarm operation remains
+documented-from-APK-only.
 
 **Artifacts:** `utils/probe_alarm_control.py --action {archive-all,
 delete-archived-all, delete-active-all}` (dry-run by default).

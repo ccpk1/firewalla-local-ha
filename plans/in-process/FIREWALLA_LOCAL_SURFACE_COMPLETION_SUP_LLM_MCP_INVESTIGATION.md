@@ -463,7 +463,34 @@ These are far enough out not to change the design, but they fix the boundary: **
 
 - Should `get_runtime_inventory` / `get_host_inventory` be exposed as tools at all, given they enumerate every device and user? (Ties to the Phase 1 inventory-read decision.)
 - Is a `meta.units` block ever needed, or does the field-name convention make it redundant?
-- Does the alarm work (Phase 2) introduce a tool, and does it need its own mute/exception caveats?
+- **Alarm tools — now answerable from Phase 2's verified work.** The alarm surface is known, so the question is no longer "does it introduce a tool" but "which tier". See §12.
 - Do tool messages need translation, given every other user-facing surface is translation-backed?
 - Does the field-name audit risk changing any field an existing consumer reads? Verify before editing response fields.
 - Should the MCP section live inside `docs/SURFACE_INVENTORY.md` or as a sibling doc that reuses its format?
+
+## 12. Alarm surface — tiering (added 2026-09-30, from Phase 2 verification)
+
+Phase 2 confirmed the complete alarm read and write API (see `docs/REVERSE_ENGINEERING_WORKFLOW.md` Findings 26–32). That makes the tool tiering straightforward, and the §5.1 rule applies directly:
+
+**Read (Tier A — read-only, default on):**
+
+| Proposed tool | Backs onto |
+|---|---|
+| `firewalla_local__get_alarms` | the Phase 2 alarm service — most recent 10 by default, `count` to widen |
+
+The **default page size of 10 matters more here than for the websocket service.** A tool response is not just a payload, it is context: 243 alarms with ~50 keys each would be an enormous token load and would likely crowd out the user's actual question. Default 10 is the right number for an LLM, and the tool description should say the cap can be raised rather than leaving the model to assume it has everything.
+
+**Control — tiered by the existing rule:**
+
+| Tool | Tier | Reasoning |
+|---|---|---|
+| `set_alarm_muted` (mute / unmute) | **A** | Reversible — `alarm:unallow` works, verified |
+| `block_alarm_target` (block / unblock) | **A** | Reversible — `alarm:unblock` removes the created rule, verified |
+| `archive_alarm` | **B** | **Not reversible.** Verified that `unallow`/`unblock` do *not* un-archive, and no un-archive command exists. The description must state that the alarm stays in the archive permanently |
+| `delete_alarm` | **C — exclude** | Irreversible, as `delete_host` |
+| `ignore_all_alarms` / `delete_all_alarms` | **C — exclude** | Irreversible, act on everything, **and return `{}` whether or not they succeeded**, so the model cannot even detect failure. There is no confirmation channel over MCP, so these are exactly the case Tier C exists for |
+
+**Two caveats the mute tool must carry in its description**, both from Phase 2 findings:
+
+- **Scope is mandatory.** The integration must require an explicit scope (device / user / network / all). A default of `matchAll: 1` silently mutes a target for every device — verified live. An LLM left to choose would likely pick the broadest option.
+- **Durations are the app's three fixed values** (1 hour / today / always). State them as an enum rather than accepting free text.
