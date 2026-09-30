@@ -1094,7 +1094,7 @@ async def test_unloading_device_tracker_entry_preserves_registry_for_reload(
 async def test_setup_multiple_entries_registers_domain_services_once(
     hass: HomeAssistant,
 ) -> None:
-    """Test domain services register once even when two entries load."""
+    """Test domain services re-register when two entries load."""
     first_entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -1201,6 +1201,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_WAKE_HOST),
             (DOMAIN, SERVICE_DELETE_HOST),
         ]
+        * 3
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
         SERVICE_GET_HOST_NAME_MAPPING,

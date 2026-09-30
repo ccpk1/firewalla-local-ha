@@ -1,6 +1,10 @@
 rules:
   # Bronze
-  action-setup: done
+  action-setup:
+    status: done
+    comment: Service registration declares administrator-only actions centrally
+      and re-registers them on setup so updated access gates cannot be masked by
+      stale handlers.
   appropriate-polling: done
   brands:
     status: done
@@ -34,7 +38,10 @@ rules:
   # Silver
   action-exceptions:
     status: done
-    comment: Runtime inventory and pause_rule validate entry scope, duration, and rule targets with specific service errors.
+    comment:
+      Runtime inventory and pause_rule validate entry scope, duration, and rule targets with specific service errors.
+      Mutating services and runtime inventory are administrator-only while
+      automation calls without a user context remain supported.
   config-entry-unloading: done
   docs-data-update:
     status: done

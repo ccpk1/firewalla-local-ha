@@ -553,9 +553,24 @@ Rule control services:
 - `firewalla_local.pause_rule`
 - `firewalla_local.resume_rule`
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+This note applies to `get_runtime_inventory`, `run_internet_speed_test`,
+`wake_host`, `delete_host`, all host-setting services, `set_ssid_paused`,
+`pause_rule`, and `resume_rule`. Rule switch entities use a separate control
+path and remain available to users who can access the exposed entity.
+
 ### Get rule and runtime inventory
 
 Use `firewalla_local.get_runtime_inventory` to inspect the current runtime data.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - useful for rule discovery, group and user correlation, and debugging the
   normalized runtime model
@@ -602,6 +617,11 @@ report for a single network segment.
 
 Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - choose the WAN with `wan_uuid` or `wan_name`
 - if only one WAN is available, you can omit the WAN selector
 - the service returns an acknowledgement and does not wait for the completed
@@ -612,6 +632,11 @@ Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
 ### Wake host
 
 Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - `host_mac` is best for deterministic automations
@@ -624,6 +649,11 @@ Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
 Use `firewalla_local.delete_host` to permanently remove one or more host
 devices from the Firewalla box. It is a destructive action and requires
 explicit acknowledgement.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - **destructive confirmation:** you must set `confirm: true`; without it the
   service aborts. There is no undo — the device is permanently removed and
@@ -644,6 +674,11 @@ explicit acknowledgement.
 
 Use `firewalla_local.set_host_name` to send one host-scoped rename command.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide the exact `new_name` string you want Firewalla to store
 - this writes the Firewalla custom host name, not the DNS hostname override
@@ -653,6 +688,11 @@ Use `firewalla_local.set_host_name` to send one host-scoped rename command.
 
 Use `firewalla_local.set_host_dns_hostname` to send one host-scoped DNS
 hostname override through the captured `hostDomain` path.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide the exact `dns_hostname` string you want Firewalla to store
@@ -664,6 +704,11 @@ hostname override through the captured `hostDomain` path.
 
 Use `firewalla_local.set_host_device_type` to set one Firewalla host device
 type through the captured `feedback.device.detect` path.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide one supported `host_device_type` value from the current runtime
@@ -681,6 +726,11 @@ Use `firewalla_local.set_host_notify_when_next_online` and
 `firewalla_local.set_host_notify_when_next_offline` to control host-scoped
 notification toggles.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - both services reuse the same host selectors as `wake_host`
 - set `enabled` to `true` or `false`
 - `refresh` defaults to `true`
@@ -689,6 +739,11 @@ notification toggles.
 
 Use `firewalla_local.set_host_dhcp_reservation` to set or clear one
 host-scoped DHCP reservation on one Firewalla network.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - choose one network with `network_uuid` or `network_name`
@@ -756,6 +811,11 @@ events.
 
 Use `firewalla_local.pause_rule` to pause a managed rule.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - intended for an existing persistent rule that already exists on the box
 - provide `rule_target`
 - optionally provide `duration` or `resume_at`
@@ -764,6 +824,11 @@ Use `firewalla_local.pause_rule` to pause a managed rule.
 ### Resume rule
 
 Use `firewalla_local.resume_rule` to resume a paused managed rule immediately.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 Like `pause_rule`, this operates on an existing persistent rule rather than
 creating a new rule for you.
@@ -781,7 +846,12 @@ wireless configuration as structured data.
 
 ### Set SSID paused
 
-Use `firewalla_local.set_ssid_paused` to pause or resume one wireless network
+Use `firewalla_local.set_ssid_paused` to pause or resume one wireless network.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 (SSID profile).
 
 - provide `ssid_profile_id` — either the profile UUID or the SSID name (e.g.

@@ -17,6 +17,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 from homeassistant.util.json import JsonObjectType, JsonValueType
 
@@ -4239,6 +4240,7 @@ type FirewallaServiceRegistration = tuple[
     FirewallaServiceHandler,
     vol.Schema,
     SupportsResponse,
+    bool,
 ]
 
 _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
@@ -4247,132 +4249,154 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         _async_handle_get_runtime_inventory,
         GET_RUNTIME_INVENTORY_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_GET_HOST_NAME_MAPPING,
         _async_handle_get_host_name_mapping,
         GET_HOST_NAME_MAPPING_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_NETWORK_SEGMENT_REPORT,
         _async_handle_get_network_segment_report,
         GET_NETWORK_SEGMENT_REPORT_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_NETWORK_SEGMENT_USAGE,
         _async_handle_get_network_segment_usage,
         GET_NETWORK_SEGMENT_USAGE_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_RUN_INTERNET_SPEED_TEST,
         _async_handle_run_internet_speed_test,
         RUN_INTERNET_SPEED_TEST_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_WAKE_HOST,
         _async_handle_wake_host,
         WAKE_HOST_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_DELETE_HOST,
         _async_handle_delete_host,
         DELETE_HOST_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_NAME,
         _async_handle_set_host_name,
         SET_HOST_NAME_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_DNS_HOSTNAME,
         _async_handle_set_host_dns_hostname,
         SET_HOST_DNS_HOSTNAME_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_DEVICE_TYPE,
         _async_handle_set_host_device_type,
         SET_HOST_DEVICE_TYPE_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
         _async_handle_set_host_notify_when_next_online,
         SET_HOST_NOTIFY_WHEN_NEXT_ONLINE_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
         _async_handle_set_host_notify_when_next_offline,
         SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_DHCP_RESERVATION,
         _async_handle_set_host_dhcp_reservation,
         SET_HOST_DHCP_RESERVATION_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_GET_SPEED_TEST_RESULTS,
         _async_handle_get_speed_test_results,
         GET_SPEED_TEST_RESULTS_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_INTERNET_QUALITY_REPORT,
         _async_handle_get_internet_quality_report,
         GET_INTERNET_QUALITY_REPORT_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_TIME_USAGE_REPORT,
         _async_handle_get_time_usage_report,
         GET_TIME_USAGE_REPORT_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_WAN_DATA_USAGE,
         _async_handle_get_wan_data_usage,
         GET_WAN_DATA_USAGE_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_WAN_EVENTS,
         _async_handle_get_wan_events,
         GET_WAN_EVENTS_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_PAUSE_RULE,
         _async_handle_pause_rule,
         PAUSE_RULE_SCHEMA,
         SupportsResponse.NONE,
+        True,
     ),
     (
         SERVICE_RESUME_RULE,
         _async_handle_resume_rule,
         RESUME_RULE_SCHEMA,
         SupportsResponse.NONE,
+        True,
     ),
     (
         SERVICE_SET_SSID_PAUSED,
         _async_handle_set_ssid_paused,
         SET_SSID_PAUSED_SCHEMA,
         SupportsResponse.NONE,
+        True,
     ),
     (
         SERVICE_GET_WIRELESS_STATUS,
         _async_handle_get_wireless_status,
         GET_WIRELESS_STATUS_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
 )
 
@@ -4384,9 +4408,18 @@ def _async_register_service(
     handler: FirewallaServiceHandler,
     schema: vol.Schema,
     supports_response: SupportsResponse,
+    admin: bool,
 ) -> None:
-    """Register one Firewalla Local service when it is not already present."""
-    if hass.services.has_service(DOMAIN, service):
+    """Register one Firewalla Local service."""
+    if admin:
+        async_register_admin_service(
+            hass,
+            DOMAIN,
+            service,
+            handler,
+            schema=schema,
+            supports_response=supports_response,
+        )
         return
 
     hass.services.async_register(
@@ -4400,18 +4433,19 @@ def _async_register_service(
 
 async def async_setup_services(hass: HomeAssistant) -> None:
     """Register Firewalla Local services."""
-    for service, handler, schema, supports_response in _SERVICE_REGISTRATIONS:
+    for service, handler, schema, supports_response, admin in _SERVICE_REGISTRATIONS:
         _async_register_service(
             hass,
             service=service,
             handler=handler,
             schema=schema,
             supports_response=supports_response,
+            admin=admin,
         )
 
 
 def async_remove_services(hass: HomeAssistant) -> None:
     """Remove Firewalla Local services."""
-    for service, _, _, _ in _SERVICE_REGISTRATIONS:
+    for service, _, _, _, _ in _SERVICE_REGISTRATIONS:
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

@@ -11,8 +11,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.core import Context, HomeAssistant, SupportsResponse
+from homeassistant.exceptions import (
+    HomeAssistantError,
+    ServiceValidationError,
+    Unauthorized,
+)
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.api import FirewallaApiError
@@ -98,7 +102,10 @@ from custom_components.firewalla_local.models import (
     FirewallaSpeedTestRecord,
     FirewallaUserRuntime,
 )
-from custom_components.firewalla_local.services import _get_loaded_entry
+from custom_components.firewalla_local.services import (
+    _async_register_service,
+    _get_loaded_entry,
+)
 
 
 def _box_host() -> FirewallaHostRuntime:
@@ -6030,3 +6037,71 @@ async def test_get_wireless_status_service_returns_profiles(
     assert guest["interface"] == "br1"
     assert response["access_points"][0]["name"] == "Upstairs"
     assert response["access_points"][0]["model"] == "fwap-D"
+
+
+async def test_admin_service_allows_admin_user(hass: HomeAssistant) -> None:
+    """Admin services allow calls from administrator users."""
+    handler = AsyncMock()
+    service = "permission_admin"
+    _async_register_service(
+        hass,
+        service=service,
+        handler=handler,
+        schema={},
+        supports_response=SupportsResponse.NONE,
+        admin=True,
+    )
+    user = await hass.auth.async_create_user("Admin")
+
+    await hass.services.async_call(
+        DOMAIN,
+        service,
+        context=Context(user_id=user.id),
+        blocking=True,
+    )
+
+    handler.assert_awaited_once()
+
+
+async def test_admin_service_rejects_non_admin_user(hass: HomeAssistant) -> None:
+    """Admin services reject calls from non-administrator users."""
+    handler = AsyncMock()
+    service = "permission_non_admin"
+    _async_register_service(
+        hass,
+        service=service,
+        handler=handler,
+        schema={},
+        supports_response=SupportsResponse.NONE,
+        admin=True,
+    )
+    await hass.auth.async_create_user("Owner")
+    user = await hass.auth.async_create_user("User")
+
+    with pytest.raises(Unauthorized):
+        await hass.services.async_call(
+            DOMAIN,
+            service,
+            context=Context(user_id=user.id),
+            blocking=True,
+        )
+
+    handler.assert_not_awaited()
+
+
+async def test_admin_service_allows_automation_call(hass: HomeAssistant) -> None:
+    """Admin services allow calls without a signed-in user."""
+    handler = AsyncMock()
+    service = "permission_automation"
+    _async_register_service(
+        hass,
+        service=service,
+        handler=handler,
+        schema={},
+        supports_response=SupportsResponse.NONE,
+        admin=True,
+    )
+
+    await hass.services.async_call(DOMAIN, service, blocking=True)
+
+    handler.assert_awaited_once()
