@@ -3452,6 +3452,115 @@ so their absence is not mistaken for a parsing gap:
 6. **Do not invent MSP sub-objects** (`transfer`, `vpn`, `wan`, `port`,
    `dataPlan`) unless a real need appears; the flat local keys work.
 
+### Finding 38: Rule data model cross-check — what it clarifies for alarms
+
+**Scenario:**
+
+- Reviewed MSP's Rule data model (`docs.firewalla.net/data-models/rule/`) against
+  Finding 37's open alarm-alignment questions and against the existing local rule
+  implementation. Purpose: see whether the second model resolves anything the
+  first left ambiguous.
+
+**Six things it clarifies.**
+
+**1. MSP does not have one canonical category list — it has two.** This resolves
+the `av` question's framing:
+
+| Model | Categories |
+| --- | --- |
+| MSP **Rule** target | `drugs games gamble p2p porn social shopping video violence vpn` |
+| MSP **Alarm** remote | `ad edu games gamble intel p2p porn private social shopping video vpn` |
+
+Against a 213-bit intersection of games / gamble / p2p / porn / social / shopping /
+video / vpn, each model adds its own: Rule adds `drugs`, `violence`; Alarm adds
+`ad`, `edu`, `intel`, `private`.
+
+**Consequence:** there is no single upstream vocabulary to align to, and the
+integration already targets both surfaces. Keeping category values **raw** — the
+existing decision — is now clearly correct rather than merely convenient. The
+local `av` value remains local-only with no MSP counterpart in either list.
+
+**2. `region` has cross-model precedent; `country` has none.** MSP uses
+`region` in **both** the Rule target (`region`, 2-letter ISO 3166) and the Alarm
+remote (`remote.region`, also 2-letter ISO 3166). The word `country` appears
+nowhere in either MSP model, yet the local payload key is `p.dest.country`.
+
+**Consequence:** strengthens the recommendation to normalize to
+`remote_region`. `country` stays as the raw key name only.
+
+**3. The `all` scope value is alarm-mute-specific, not a general scope concept.**
+MSP defines:
+
+| Model | Scope types |
+| --- | --- |
+| Rule | `device group user network` — *"unset for all devices"* |
+| Alarm mute | `device group user network all` |
+
+So rules express "all devices" by **absence**, exactly like the local wire format,
+while alarm mute is the one place MSP models `all` explicitly.
+
+**Consequence:** keep `all` in the **alarm** service enum only. Do not push it into
+a shared scope helper that rules also use, since rules legitimately mean
+"all" by omission. This also confirms the local usage-history enum
+(`device, group, user`) is correctly a subset.
+
+**4. Derived status is already the local pattern — so `is_archived` fits.**
+MSP Rule carries `status: active | paused` and `resumeTs`. Locally
+`FirewallaPolicyRule` has **no status field**: it holds `enabled` plus an
+`idle_ts` property read from the raw payload, and derives the display value:
+
+```python
+status = _STATUS_ENABLED if rule.enabled else _STATUS_DISABLED
+```
+
+**Consequence:** deriving alarm archived-state rather than expecting a payload
+field is **consistent with how rules already work**, not an alarm-specific
+workaround. It also explains why alarms have no status field — the local runtime
+consistently represents state as a boolean plus an auxiliary timestamp rather
+than a status enum.
+
+*(Note the vocabulary differs anyway: local rules say `enabled`/`disabled`, MSP
+says `active`/`paused`. Not worth changing, but do not treat MSP's strings as
+authoritative for our surfaces.)*
+
+**5. Multiple timestamps is a pattern, not an anomaly.** MSP Rule carries `ts`
+(created), `updateTs` (last update) and `resumeTs` (auto-resume); MSP Alarm
+carries only `ts`. Locally the alarm has **two** (`timestamp` and
+`alarmTimestamp`) and rules carry `last_activated_time` plus `idle_ts`.
+
+**Consequence:** the two alarm timestamps are unremarkable in context, and
+`alarmTimestamp` mapping to `fired_at` remains the sensible choice. Expect more
+than one timestamp per record and name each explicitly rather than picking a
+generic `timestamp` field.
+
+**6. `direction` genuinely does not exist on alarms.** MSP Rule defines
+`direction: bidirection | inbound | outbound`, and local rules already carry
+`direction: bidirection`. MSP Alarm has no `direction` field, and no `direction`
+key was observed in any local alarm record.
+
+**Consequence:** confirmed as a real payload difference. Do not add a `direction`
+field to the alarm model.
+
+**Two divergences worth noting without acting on them:**
+
+- **`dnsOnly` vs `dnsmasq_only`.** MSP models DNS-only as a **boolean flag** on
+  a target (`dnsOnly`, defaulting true for block rules on `category`/`app`/
+  `targetlist`/`domain`). Locally, `dns` is a **target *type*** and the payload
+  key is `dnsmasq_only`. Structural difference, not just a name: MSP qualifies a
+  target, we select one. Both are valid; do not force alignment.
+- **Time limits use different models.** MSP has an `action: "timelimit"` with a
+  `timeUsage` object (`quota`, `used` in minutes). Locally, time limits are
+  expressed through `disturbLevel` / `disturbMethod` / `appTimeUsage` and the
+  `disturb` action. MSP's documented action list is
+  `allow | block | timelimit`; ours is `allow | block | disturb | qos | route` —
+  **the local set is wider and differently shaped.** Treat MSP's list as
+  incomplete for local purposes, not as the target vocabulary.
+
+**Summary of what the rule model settles:** all six of Finding 37's alignment
+decisions stand, four of them with stronger evidence than the alarm model alone
+provided. It also removes a possible over-correction — do **not** generalise the
+`all` scope value beyond alarm mute.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
