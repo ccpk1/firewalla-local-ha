@@ -237,7 +237,7 @@ and UUID. You do not need a service call to read any of it.
 | System status binary sensor | uptime, boot/cloud state, firmware release type, DDNS, WAN IP(s), per-port link/speed/MAC, Bluetooth MAC, box timezone, CPU/memory/disk, device counts, `runtime_data_updated_at` |
 | WAN speed-test sensors | full test result: upload, latency, jitter, packet loss, server detail, ISP, public IP, timestamp, WAN identity |
 | WAN internet-quality sensors | ping target, sampled time, mean/max/median/min latency, packet loss, WAN identity |
-| Per-network binary sensor | kind, VLAN ID, ports, IPv4/IPv6 addresses and subnets, gateway, DNS, DHCP config, device count, mDNS/SSDP relay, Block ICMP, usage windows |
+| Per-network binary sensor | kind, VLAN ID, ports, IPv4/IPv6 addresses and subnets, gateway, DNS, DHCP config, device count, mDNS/SSDP relay, Block ICMP, usage windows, and ranked `top_talkers` (top 5 by combined up/down traffic) |
 | Per-SSID and per-AP entities | band, encryption, WPA3, VLAN, interface, paused state; AP channels, LED, TX power, country, mesh mode, client count |
 | Watched-device binary sensor | IP, device group, network name, connection type, download and upload usage, last-active, and conditional Wi-Fi details (SSID, band, RSSI, AP) when wireless |
 | Watched-user sensor | associated device group and names, device count, unique usage, per-app usage, derived last-active |
@@ -347,6 +347,11 @@ The per-network attributes include:
 - device count
 - advanced options such as mDNS/SSDP Relay and Block ICMP
 - a compact usage summary, including current-month WAN usage where available
+- `top_talkers`: the top 5 hosts on that network ranked by combined download
+  and upload traffic, each entry carrying `device_name`, `download_bytes`, and
+  `upload_bytes`. It is an empty list when nothing has transferred. LAN, VLAN,
+  and VPN networks can populate it; WAN networks always return an empty list
+  because the box assigns no hosts to a WAN interface
 
 Use these entities for a live, per-network health and usage view on your
 dashboards. For a deeper configuration or usage drill-down, use the
@@ -1052,10 +1057,10 @@ it directly.
   is not yet proven in the local contract
 - current WAN usage is exposed as a status-sensor attribute for summary and
   automation use, not as separate per-WAN entities
-- per-WAN top-talker rankings are not available from the local runtime: WAN
-  interfaces do not expose flow rankings, and rankings are also absent on some
-  LAN/VLAN/VPN interfaces depending on activity. `get_network_segment_usage`
-  returns rankings for the interfaces that do expose them
+- WAN networks never report `top_talkers`: the box assigns no hosts to a WAN
+  interface, so the attribute is always an empty list. LAN, VLAN, and VPN
+  networks report the top 5 hosts by combined traffic; hosts that have
+  transferred nothing are not ranked
 - broader mutation surfaces remain intentionally out of scope until they are
   proven by protocol evidence
 - this is a community integration and not an official Firewalla support

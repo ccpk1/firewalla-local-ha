@@ -339,6 +339,9 @@
           "network_usage": {
             "name": "Network usage"
           },
+          "top_talkers": {
+            "name": "Top talkers"
+          },
           "enabled": {
             "name": "Enabled"
           },

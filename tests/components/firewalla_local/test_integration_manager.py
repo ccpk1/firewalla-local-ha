@@ -87,6 +87,142 @@ def _build_manager(
     return manager
 
 
+def _talker_host(
+    mac: str,
+    *,
+    host_name: str,
+    network_uuid: str | None,
+    download_bytes: int | None,
+    upload_bytes: int | None,
+) -> FirewallaHostRuntime:
+    """Return one host with flowsummary totals and a network assignment."""
+    return FirewallaHostRuntime(
+        mac=mac,
+        host_name=host_name,
+        ip_address=None,
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=None,
+        download_bytes=download_bytes,
+        upload_bytes=upload_bytes,
+        stale=False,
+        network_uuid=network_uuid,
+    )
+
+
+def _talker_snapshot(*hosts: FirewallaHostRuntime) -> FirewallaRuntimeSnapshot:
+    """Return a runtime snapshot carrying the requested host totals."""
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name=None,
+            device_name=None,
+            model=None,
+            serial_number=None,
+            software_version=None,
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=hosts,
+    )
+
+
+def test_network_top_talkers_rank_by_combined_traffic_and_cap_at_five() -> None:
+    """Talkers rank by download plus upload, cap at five, and skip empties."""
+    vlan_uuid = "vlan-1"
+    manager = _build_manager(
+        _talker_snapshot(
+            _talker_host(
+                "AA:00:00:00:00:01",
+                host_name="nas1",
+                network_uuid=vlan_uuid,
+                download_bytes=7_600_000_000,
+                upload_bytes=563_000_000,
+            ),
+            _talker_host(
+                "AA:00:00:00:00:02",
+                host_name="gaming-pc",
+                network_uuid=vlan_uuid,
+                download_bytes=3_900_000_000,
+                upload_bytes=1_500_000_000,
+            ),
+            _talker_host(
+                "AA:00:00:00:00:03",
+                host_name="clsrazer",
+                network_uuid=vlan_uuid,
+                download_bytes=1_017_664_978,
+                upload_bytes=216_289_236,
+            ),
+            _talker_host(
+                "AA:00:00:00:00:04",
+                host_name="cvsrazer",
+                network_uuid=vlan_uuid,
+                download_bytes=822_337_690,
+                upload_bytes=55_448_354,
+            ),
+            _talker_host(
+                "AA:00:00:00:00:05",
+                host_name="nas2",
+                network_uuid=vlan_uuid,
+                download_bytes=100,
+                upload_bytes=0,
+            ),
+            _talker_host(
+                "AA:00:00:00:00:06",
+                host_name="printer",
+                network_uuid=vlan_uuid,
+                download_bytes=50,
+                upload_bytes=0,
+            ),
+            _talker_host(
+                "AA:00:00:00:00:07",
+                host_name="idle-host",
+                network_uuid=vlan_uuid,
+                download_bytes=0,
+                upload_bytes=0,
+            ),
+            _talker_host(
+                "AA:00:00:00:00:08",
+                host_name="unknown-network",
+                network_uuid=None,
+                download_bytes=9_000_000_000,
+                upload_bytes=0,
+            ),
+        )
+    )
+
+    manager.handle_refresh(manager.coordinator.data)
+
+    talkers = manager.get_network_top_talkers(vlan_uuid)
+
+    assert [talker.device_name for talker in talkers] == [
+        "nas1",
+        "gaming-pc",
+        "clsrazer",
+        "cvsrazer",
+        "nas2",
+    ]
+    assert talkers[0].download_bytes == 7_600_000_000
+    assert talkers[0].upload_bytes == 563_000_000
+    assert talkers[0].total_bytes == 8_163_000_000
+    # gaming-pc has a larger combined total than gaming traffic alone suggests.
+    assert talkers[1].total_bytes == 5_400_000_000
+    # A zero-traffic host is never ranked, and a host with no network is skipped.
+    assert "idle-host" not in {talker.device_name for talker in talkers}
+    assert "unknown-network" not in {talker.device_name for talker in talkers}
+
+
+def test_network_top_talkers_empty_for_network_without_hosts() -> None:
+    """A network with no assigned hosts reports no talkers."""
+    manager = _build_manager(_talker_snapshot())
+
+    manager.handle_refresh(manager.coordinator.data)
+
+    assert manager.get_network_top_talkers("wan-1") == ()
+
+
 def test_handle_refresh_shapes_appliance_views() -> None:
     """Test the manager shapes appliance identity, status, and speed-test views."""
     snapshot = FirewallaRuntimeSnapshot(

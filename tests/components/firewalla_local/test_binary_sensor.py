@@ -38,6 +38,7 @@ from custom_components.firewalla_local.const import (
     ATTR_NETWORK_MDNS_RELAY,
     ATTR_NETWORK_PORTS,
     ATTR_NETWORK_SSDP_RELAY,
+    ATTR_NETWORK_TOP_TALKERS,
     ATTR_NETWORK_USAGE,
     ATTR_NETWORK_VLAN_ID,
     ATTR_PURPOSE,
@@ -791,6 +792,9 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
     assert wan_state.attributes[ATTR_NETWORK_PORTS] == ["eth0"]
     # WAN keeps the dns_servers attribute (empty here as the fixture has none).
     assert wan_state.attributes[ATTR_NETWORK_DNS_SERVERS] == []
+    # WAN has no host assignment, so no talkers can be ranked.
+    assert wan_state.attributes[ATTR_NETWORK_TOP_TALKERS] == []
+    assert vlan_state.attributes[ATTR_NETWORK_TOP_TALKERS] == []
     assert wan_state.attributes[ATTR_NETWORK_USAGE] == {
         "last_24h": {"download_bytes": None, "upload_bytes": None},
         "last_60m": {"download_bytes": None, "upload_bytes": None},
@@ -798,6 +802,100 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
         "last_12m": {"download_bytes": None, "upload_bytes": None},
         "monthly": {"download_bytes": 2048, "upload_bytes": 512},
     }
+
+
+async def test_network_binary_sensor_exposes_ranked_top_talkers(
+    hass: HomeAssistant,
+) -> None:
+    """Test the network attribute ranks up/down talkers and skips idle hosts."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    vlan_uuid = "95169e6a-a7c9-4d6a-8e83-6061b4812bf2"
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(
+                _box_host(),
+                FirewallaHostRuntime(
+                    mac="AA:00:00:00:00:01",
+                    host_name="nas1",
+                    ip_address="192.168.10.5",
+                    group_name=None,
+                    network_name="VLAN10 CORE",
+                    connection_type=None,
+                    last_active=None,
+                    download_bytes=7_600_000_000,
+                    upload_bytes=563_000_000,
+                    stale=False,
+                    network_uuid=vlan_uuid,
+                ),
+                FirewallaHostRuntime(
+                    mac="AA:00:00:00:00:02",
+                    host_name="clsrazer",
+                    ip_address="192.168.10.6",
+                    group_name=None,
+                    network_name="VLAN10 CORE",
+                    connection_type=None,
+                    last_active=None,
+                    download_bytes=1_017_664_978,
+                    upload_bytes=216_289_236,
+                    stale=False,
+                    network_uuid=vlan_uuid,
+                ),
+                # An idle host must never appear in the ranked list.
+                FirewallaHostRuntime(
+                    mac="AA:00:00:00:00:03",
+                    host_name="idle-host",
+                    ip_address="192.168.10.7",
+                    group_name=None,
+                    network_name="VLAN10 CORE",
+                    connection_type=None,
+                    last_active=None,
+                    download_bytes=0,
+                    upload_bytes=0,
+                    stale=False,
+                    network_uuid=vlan_uuid,
+                ),
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    vlan_state = _binary_sensor_state_for_unique_suffix(
+        hass, f"_network_{vlan_uuid}_binary_sensor"
+    )
+
+    assert vlan_state is not None
+    assert vlan_state.attributes[ATTR_NETWORK_TOP_TALKERS] == [
+        {
+            "device_name": "nas1",
+            "download_bytes": 7_600_000_000,
+            "upload_bytes": 563_000_000,
+        },
+        {
+            "device_name": "clsrazer",
+            "download_bytes": 1_017_664_978,
+            "upload_bytes": 216_289_236,
+        },
+    ]
 
 
 async def test_network_binary_sensor_name_uses_kind_and_name(

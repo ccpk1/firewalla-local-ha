@@ -1898,6 +1898,7 @@ class FirewallaApiClient:
                         if interface_id is not None
                         else None
                     ),
+                    network_uuid=interface_id,
                     connection_type="vpn",
                     last_active=self._coerce_float(
                         raw_peer.get(_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY)
@@ -1987,6 +1988,7 @@ class FirewallaApiClient:
                         if interface_id is not None
                         else None
                     ),
+                    network_uuid=interface_id,
                     connection_type=self._resolve_host_connection_type(
                         raw_host,
                         device_tags=device_tag_lookup,

@@ -49,6 +49,7 @@ from .const import (
     ATTR_NETWORK_MDNS_RELAY,
     ATTR_NETWORK_PORTS,
     ATTR_NETWORK_SSDP_RELAY,
+    ATTR_NETWORK_TOP_TALKERS,
     ATTR_NETWORK_USAGE,
     ATTR_NETWORK_VLAN_ID,
     ATTR_SSID_BAND,
@@ -535,6 +536,7 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_NETWORK_USAGE: (
                 self._serialize_usage(network.usage) if network is not None else None
             ),
+            ATTR_NETWORK_TOP_TALKERS: self._serialize_top_talkers(),
             ATTR_NETWORK_ENABLED: (network.enabled if network is not None else None),
             ATTR_NETWORK_MDNS_RELAY: (
                 network.mdns_relay if network is not None else None
@@ -589,6 +591,23 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
             "name_servers": list(getattr(dhcp, "name_servers", ())),
             "search_domains": list(getattr(dhcp, "search_domains", ())),
         }
+
+    def _serialize_top_talkers(self) -> list[dict[str, object]]:
+        """Serialize ranked up/down talkers for this network.
+
+        Returns an empty list when the network has no traffic to rank (which is
+        always the case for WAN, where the box assigns no hosts).
+        """
+        return [
+            {
+                "device_name": talker.device_name,
+                "download_bytes": talker.download_bytes,
+                "upload_bytes": talker.upload_bytes,
+            }
+            for talker in self.integration_manager.get_network_top_talkers(
+                self._network_uuid
+            )
+        ]
 
 
 class FirewallaAlarmActiveBinarySensor(FirewallaEntity, BinarySensorEntity):

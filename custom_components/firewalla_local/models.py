@@ -681,6 +681,21 @@ class FirewallaNetworkHostRanking:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaNetworkTopTalker:
+    """One ranked per-network talker combining both traffic directions."""
+
+    host_id: str
+    device_name: str
+    download_bytes: int = 0
+    upload_bytes: int = 0
+
+    @property
+    def total_bytes(self) -> int:
+        """Return combined upstream and downstream bytes for ranking."""
+        return self.download_bytes + self.upload_bytes
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaNetworkHostIpAssignment:
     """One normalized host IP assignment for a network segment report."""
 
@@ -807,6 +822,7 @@ class FirewallaHostRuntime:
     vpn_client: FirewallaHostVpnClient | None = None
     group_ids: tuple[str, ...] = ()
     user_ids: tuple[str, ...] = ()
+    network_uuid: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
