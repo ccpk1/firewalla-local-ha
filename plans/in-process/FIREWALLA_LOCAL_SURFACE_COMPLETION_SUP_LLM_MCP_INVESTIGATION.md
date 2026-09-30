@@ -488,7 +488,9 @@ The **default page size of 10 matters more here than for the websocket service.*
 | `block_alarm_target` (block / unblock) | **A** | Reversible — `alarm:unblock` removes the created rule, verified |
 | `archive_alarm` | **B** | **Not reversible.** Verified that `unallow`/`unblock` do *not* un-archive, and no un-archive command exists. The description must state that the alarm stays in the archive permanently |
 | `delete_alarm` | **C — exclude** | Irreversible, as `delete_host` |
-| `ignore_all_alarms` / `delete_all_alarms` | **C — exclude** | Irreversible, act on everything, **and return `{}` whether or not they succeeded**, so the model cannot even detect failure. There is no confirmation channel over MCP, so these are exactly the case Tier C exists for |
+| `ignore_all_alarms` / `delete_all_alarms` | **C — exclude from MCP** | **These ship as services** (owner decision) — admin-gated with a confirmation parameter. They are excluded from **MCP only**, and the reason is channel-specific: a bulk command returns `{}` whether or not it succeeded, and MCP has no confirmation channel, so an agent could neither confirm intent beforehand nor detect success afterwards. The `confirm` parameter helps a human caller but is a thin guard when a model fills it in. Users still reach them from automations and the UI |
+
+**A note on the service-versus-tool distinction.** "Excluded from MCP" no longer implies "not built" — the bulk commands exist as services and are simply not exposed as tools. Expect this pattern to recur: a capability can be right for the service surface and wrong for an agent, and the two decisions should be recorded separately rather than collapsed.
 
 **Two caveats the mute tool must carry in its description**, both from Phase 2 findings:
 
