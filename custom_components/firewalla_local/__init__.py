@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
@@ -26,6 +27,7 @@ from .coordinator import (
     get_enabled_ssid_entities,
 )
 from .managers import (
+    FirewallaAlarmManager,
     FirewallaHostManager,
     FirewallaIntegrationManager,
     FirewallaRuleManager,
@@ -41,6 +43,9 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -68,6 +73,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     host_manager = FirewallaHostManager(coordinator, entry, client)
     integration_manager = FirewallaIntegrationManager(coordinator, entry, client)
     rule_manager = FirewallaRuleManager(coordinator, entry, client)
+    alarm_manager = FirewallaAlarmManager(coordinator, entry, client)
     user_manager = FirewallaUserManager(coordinator, entry, client)
     wireless_manager = FirewallaWirelessManager(coordinator, entry, client)
     coordinator.attach_managers(
@@ -76,6 +82,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         rule_manager=rule_manager,
         user_manager=user_manager,
         wireless_manager=wireless_manager,
+        alarm_manager=alarm_manager,
     )
 
     await coordinator.async_config_entry_first_refresh()
@@ -119,6 +126,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         rule_manager=rule_manager,
         user_manager=user_manager,
         wireless_manager=wireless_manager,
+        alarm_manager=alarm_manager,
     )
     entry.async_on_unload(
         entry.add_update_listener(coordinator.async_handle_entry_reload_requested)

@@ -41,6 +41,7 @@ _PENDING_PAIRING_INIT_PAYLOADS: str = "pending_pairing_init_payloads"
 
 if TYPE_CHECKING:
     from .managers import (
+        FirewallaAlarmManager,
         FirewallaHostManager,
         FirewallaIntegrationManager,
         FirewallaRuleManager,
@@ -194,6 +195,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self.rule_manager: FirewallaRuleManager | None = None
         self.user_manager: FirewallaUserManager | None = None
         self.wireless_manager: FirewallaWirelessManager | None = None
+        self.alarm_manager: FirewallaAlarmManager | None = None
         self._enable_network_entities = get_enabled_network_entities(
             config_entry.options
         )
@@ -215,6 +217,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         rule_manager: FirewallaRuleManager,
         user_manager: FirewallaUserManager,
         wireless_manager: FirewallaWirelessManager,
+        alarm_manager: FirewallaAlarmManager,
     ) -> None:
         """Attach the entry-scoped manager objects to refresh routing."""
         self.host_manager = host_manager
@@ -222,6 +225,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self.rule_manager = rule_manager
         self.user_manager = user_manager
         self.wireless_manager = wireless_manager
+        self.alarm_manager = alarm_manager
 
     async def _async_update_data(self) -> FirewallaRuntimeSnapshot:
         """Fetch data from Firewalla Local."""
@@ -267,6 +271,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
             self.rule_manager.handle_refresh(self.last_init_payload or {}, snapshot)
         if self.wireless_manager is not None:
             self.wireless_manager.handle_refresh(self.last_init_payload or {})
+        if self.alarm_manager is not None:
+            self.alarm_manager.handle_refresh(snapshot)
 
         self.last_runtime_data_updated_at = dt_util.utcnow()
 
@@ -342,6 +348,7 @@ class FirewallaRuntimeData:
     rule_manager: FirewallaRuleManager
     user_manager: FirewallaUserManager
     wireless_manager: FirewallaWirelessManager
+    alarm_manager: FirewallaAlarmManager
 
 
 type FirewallaConfigEntry = ConfigEntry[FirewallaRuntimeData]

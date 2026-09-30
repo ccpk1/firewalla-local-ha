@@ -1,6 +1,14 @@
 {
   "entity": {
+    "binary_sensor": {
+      "alarm_active": {
+        "default": "mdi:shield-alert"
+      }
+    },
     "sensor": {
+      "alarm_count": {
+        "default": "mdi:counter"
+      },
       "wan_speed_test_download": {
         "default": "mdi:download-network"
       },

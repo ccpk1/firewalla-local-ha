@@ -8,9 +8,11 @@ Firewalla box over the verified local protocol.
 This guide is organized around the main jobs you can do with the integration:
 
 - install and pair the box
+- use the data across Home Assistant (dashboards, automations, history, APIs)
 - choose which monitoring surfaces you want exposed
 - understand the main Firewalla device entities and refresh behavior
 - monitor watched devices, watched users, and device trackers
+- monitor active and archived Firewalla alarms
 - operate hosts and rules from Home Assistant
 - call the local report services added after 1.0.0
 
@@ -27,9 +29,83 @@ Firewalla Local can expose these main surface areas:
   when Firewalla AP7 access points are present
 - watched-device binary sensors for selected endpoints
 - watched-user usage sensors for selected Firewalla users
+- alarm-active and active-alarm-count entities with bounded category summaries
 - router-based `device_tracker` entities for selected MAC-backed LAN clients
 - rule-backed switches for supported persistent Firewalla rules
 - operator services for hosts, networks, WANs, and reports
+
+## Using your data across Home Assistant
+
+Pairing the box is step one. The payoff is that Home Assistant then serves the
+data on your own network, using the same tools you already use for everything
+else in your home. Every entity this integration creates behaves like any other
+Home Assistant entity, so the rest comes for free:
+
+- **Dashboards and cards.** Put box health, per-network usage, or your top
+  talkers on a wall display or a phone dashboard.
+- **Automations.** React to a state or an attribute. Notify on a new alarm,
+  alert when a WAN drops, or flag a device that has gone quiet.
+- **History and statistics.** Entities are recorded automatically, so trends and
+  charts come with them.
+- **Assist and voice.** Expose what you want and ask about it.
+- **REST and WebSocket APIs.** Read any state over HTTP. This is what makes Home
+  Assistant the hub for your other tools: a Grafana panel, a wall display, a
+  status page, or a script on another machine all read Firewalla data from one
+  place you already run, secure, and back up.
+- **Local and authenticated.** There is no cloud hop. Access goes through Home
+  Assistant's own users, tokens, and audit log.
+
+No paid service or separate app is needed to reach any of this.
+
+### Example: read the online device count over REST
+
+The system-status entity reports how many devices are currently online in its
+`devices_online` attribute. To read it from anywhere on your network, create a
+token under **Profile → Security → Long-lived access tokens**, then:
+
+```bash
+curl -s -H "Authorization: Bearer $HA_TOKEN" \
+  http://homeassistant.local:8123/api/states/binary_sensor.firewalla_system_status \
+  | jq '.attributes.devices_online'
+```
+
+That prints a plain number you can drop into a script, a status page, or any
+other tool. The same value inside Home Assistant is:
+
+```jinja
+{{ state_attr('binary_sensor.firewalla_system_status', 'devices_online') }}
+```
+
+The entity ID follows your box's name, so yours may differ from the example.
+Open **Developer Tools → States** to copy the exact one.
+
+### Example: call a service and read structured data
+
+Services work over REST too, which is handy when you want a set of values rather
+than a single state. `get_runtime_inventory` returns a summary that includes the
+same device counts the entity reports:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" \
+  -d '{}' "http://homeassistant.local:8123/api/services/firewalla_local/get_runtime_inventory?return_response" \
+  | jq '.service_response.inventory.summary | {devices_online, devices_offline}'
+```
+
+```json
+{
+  "devices_online": 42,
+  "devices_offline": 176
+}
+```
+
+Add `?return_response` so Home Assistant sends the result back, and note that
+this service requires an administrator token. The summary also carries
+`devices_total`, `host_count`, rule counts, and network counts, so one call can
+feed a dashboard or a monitoring script.
+
+One difference worth knowing: the REST API hands back every attribute, while
+Assist and LLM tools only see a small approved set. When you want the full
+detail in a model's context, that is what the report services are for.
 
 ## Service catalog at a glance
 
@@ -59,7 +135,13 @@ Services added after 1.0.0:
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
 - `firewalla_local.get_wireless_status`
+- `firewalla_local.get_alarms`
 - `firewalla_local.set_ssid_paused`
+- `firewalla_local.archive_alarms`
+- `firewalla_local.delete_alarms`
+- `firewalla_local.mute_alarm`
+- `firewalla_local.unmute_alarm`
+- `firewalla_local.delete_rule`
 
 ## Installation
 
@@ -200,6 +282,52 @@ Home Assistant.
 - **General options:** Adjust the local polling interval and timing settings
   without re-pairing the box.
 
+## Rich data lives in entity attributes
+
+**Read this before assuming a sensor is "just a number."** Most Firewalla Local
+entities expose far more than their state value. The state is the headline
+metric; the full detail sits in the entity's **attributes**, which Home
+Assistant surfaces alongside the state.
+
+For example, the WAN speed-test download sensor shows one number as its state,
+but that same entity carries upload speed, latency, jitter, packet loss, server
+country/host/location/sponsor, ISP, public IP, test timestamp, and the WAN name
+and UUID. You do not need a service call to read any of it.
+
+### How to see the attributes
+
+- **In the UI:** open the entity's more-info dialog (**Settings → Devices &
+  Services → [your Firewalla entry] → Entities**, or click any entity on a
+  dashboard). Attributes are listed under the state, with the names and
+  descriptions this integration defines.
+- **In a template:** use `state_attr('sensor.entity_id', 'attribute_name')`.
+- **Exhaustively:** **Developer Tools → States** lists every entity and every
+  attribute with live values. This is the definitive, always-current reference.
+
+### Where the richest attributes are
+
+| Entity | What else it carries |
+| --- | --- |
+| System status binary sensor | uptime, boot/cloud state, firmware release type, DDNS, WAN IP(s), per-port link/speed/MAC, Bluetooth MAC, box timezone, CPU/memory/disk, device counts, `runtime_data_updated_at` |
+| WAN speed-test sensors | full test result: upload, latency, jitter, packet loss, server detail, ISP, public IP, timestamp, WAN identity |
+| WAN internet-quality sensors | ping target, sampled time, mean/max/median/min latency, packet loss, WAN identity |
+| Per-network binary sensor | kind, VLAN ID, ports, IPv4/IPv6 addresses and subnets, gateway, DNS, DHCP config, device count, mDNS/SSDP relay, Block ICMP, usage windows, and ranked `top_talkers` (top 5 by combined up/down traffic) |
+| Per-SSID and per-AP entities | band, encryption, WPA3, VLAN, interface, paused state; AP channels, LED, TX power, country, mesh mode, client count |
+| Watched-device binary sensor | IP, device group, network name, connection type, download and upload usage, last-active, and conditional Wi-Fi details (SSID, band, RSSI, AP) when wireless |
+| Watched-user sensor | associated device group and names, device count, unique usage, per-app usage, derived last-active |
+| Alarm entities | active/archived/pending counts, per-category counts, and the latest alarm's type, device, message, time, and ID |
+
+Attributes are also translation-named, so the UI shows readable labels rather
+than raw keys.
+
+### Why rich data is in attributes rather than separate entities
+
+Rankings, per-app breakdowns, and detail rows change constantly. Giving each one
+its own entity would create unstable identities that churn the recorder and
+break automations. Attributes keep that detail available without polluting your
+entity registry. Use the report services when you need a full, queryable
+payload rather than a summary.
+
 ## Main Firewalla device
 
 The main Firewalla router device is the anchor device for appliance monitoring
@@ -293,6 +421,11 @@ The per-network attributes include:
 - device count
 - advanced options such as mDNS/SSDP Relay and Block ICMP
 - a compact usage summary, including current-month WAN usage where available
+- `top_talkers`: the top 5 hosts on that network ranked by combined download
+  and upload traffic, each entry carrying `device_name`, `download_bytes`, and
+  `upload_bytes`. It is an empty list when nothing has transferred. LAN, VLAN,
+  and VPN networks can populate it; WAN networks always return an empty list
+  because the box assigns no hosts to a WAN interface
 
 Use these entities for a live, per-network health and usage view on your
 dashboards. For a deeper configuration or usage drill-down, use the
@@ -494,9 +627,10 @@ Temporary rules:
   paused rule
 - are not treated as switch candidates by this integration
 
-The Firewalla app remains the normal place to create or delete rules. The
-integration is primarily built to expose supported persistent rules, and to
-pause or resume those existing rules cleanly.
+The Firewalla app remains the normal place to create rules. Rules created by
+alarm block/unblock actions are ordinary policy rules, not a separate alarm
+control surface. Use the rule switches and services below to manage the
+resulting rules from Home Assistant.
 
 ## Services
 
@@ -505,6 +639,7 @@ three groups:
 
 - inspection and report services
 - host and network operator actions
+- alarm services
 - rule control services
 
 The report-style services in this section were built primarily to help model,
@@ -531,6 +666,7 @@ Inspection and report services:
 - `firewalla_local.get_wan_data_usage`
 - `firewalla_local.get_wan_events`
 - `firewalla_local.get_wireless_status`
+- `firewalla_local.get_alarms`
 
 Host and network operator actions:
 
@@ -548,18 +684,74 @@ Wireless control services:
 
 - `firewalla_local.set_ssid_paused`
 
+Alarm control services:
+
+- `firewalla_local.archive_alarms`
+- `firewalla_local.delete_alarms`
+- `firewalla_local.mute_alarm`
+- `firewalla_local.unmute_alarm`
+
 Rule control services:
 
 - `firewalla_local.pause_rule`
 - `firewalla_local.resume_rule`
+- `firewalla_local.delete_rule`
+
+Alarm block and unblock actions in the Firewalla app create or remove ordinary
+policy rules. There are no `block_alarm` or `unblock_alarm` services. Use a
+selected rule switch to enable or disable a supported persistent rule, or use
+`pause_rule` and `resume_rule` for temporary control. Use `delete_rule` to
+permanently remove a rule from Home Assistant.
+
+### Administrator access
+
+The following services are registered as admin-only. Home Assistant enforces
+this restriction for calls made by a signed-in user; automations, scripts, and
+other calls without a user context are unaffected.
+
+This note applies to `get_runtime_inventory`, `run_internet_speed_test`,
+`wake_host`, `delete_host`, all host-setting services, `set_ssid_paused`,
+`pause_rule`, `resume_rule`, `archive_alarms`, `delete_alarms`, `mute_alarm`,
+`unmute_alarm`, and `delete_rule`. Rule switch entities use a separate control
+path and remain available to users who can access the exposed entity.
+
+### Get alarms
+
+Use `firewalla_local.get_alarms` to retrieve the newest active alarms and,
+optionally, archived alarms.
+
+- `limit` defaults to 10 and is capped at 500; it returns the newest matching
+  records rather than a cursor page
+- set `include_archived` to include archived alarms in the result
+- `type` accepts a raw `ALARM_*` identifier or the supported `security`,
+  `abnormal_upload`, and `open_port` groups; the `security` group includes its
+  implicit companion types
+- `detail` is opt-in and makes one additional local request per returned alarm
+- entity `active_by_category` counts come from the init payload, whose alarm list
+  is capped at 50; check `active_by_category_complete` before treating a missing
+  category as absent, and use this service when the summary is incomplete
+- the box retains roughly 30 days of alarms; it does not support a server-side
+  time filter
+- the response includes normalized destination details, discovered silence
+  exceptions, authoritative active/archive/pending counts, and shared report
+  metadata
 
 ### Get rule and runtime inventory
 
 Use `firewalla_local.get_runtime_inventory` to inspect the current runtime data.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - useful for rule discovery, group and user correlation, and debugging the
   normalized runtime model
 - returns structured `inventory` data plus a rendered `markdown` summary
+- the `summary` block includes `devices_total`, `devices_online`, and
+  `devices_offline`, which use the same online definition as the system-status
+  entity, plus `host_count` (the raw host records the box reported) and rule,
+  group, user, and network counts
 - unlike the newer report services, it predates the shared report envelope
 
 ### Get host name mapping
@@ -602,6 +794,11 @@ report for a single network segment.
 
 Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - choose the WAN with `wan_uuid` or `wan_name`
 - if only one WAN is available, you can omit the WAN selector
 - the service returns an acknowledgement and does not wait for the completed
@@ -612,6 +809,11 @@ Use `firewalla_local.run_internet_speed_test` to start a speed test on one WAN.
 ### Wake host
 
 Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - `host_mac` is best for deterministic automations
@@ -624,6 +826,11 @@ Use `firewalla_local.wake_host` to send a Wake-on-LAN command to one host.
 Use `firewalla_local.delete_host` to permanently remove one or more host
 devices from the Firewalla box. It is a destructive action and requires
 explicit acknowledgement.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - **destructive confirmation:** you must set `confirm: true`; without it the
   service aborts. There is no undo — the device is permanently removed and
@@ -644,6 +851,11 @@ explicit acknowledgement.
 
 Use `firewalla_local.set_host_name` to send one host-scoped rename command.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide the exact `new_name` string you want Firewalla to store
 - this writes the Firewalla custom host name, not the DNS hostname override
@@ -653,6 +865,11 @@ Use `firewalla_local.set_host_name` to send one host-scoped rename command.
 
 Use `firewalla_local.set_host_dns_hostname` to send one host-scoped DNS
 hostname override through the captured `hostDomain` path.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide the exact `dns_hostname` string you want Firewalla to store
@@ -664,6 +881,11 @@ hostname override through the captured `hostDomain` path.
 
 Use `firewalla_local.set_host_device_type` to set one Firewalla host device
 type through the captured `feedback.device.detect` path.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide one supported `host_device_type` value from the current runtime
@@ -681,6 +903,11 @@ Use `firewalla_local.set_host_notify_when_next_online` and
 `firewalla_local.set_host_notify_when_next_offline` to control host-scoped
 notification toggles.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 - both services reuse the same host selectors as `wake_host`
 - set `enabled` to `true` or `false`
 - `refresh` defaults to `true`
@@ -689,6 +916,11 @@ notification toggles.
 
 Use `firewalla_local.set_host_dhcp_reservation` to set or clear one
 host-scoped DHCP reservation on one Firewalla network.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - choose one network with `network_uuid` or `network_name`
@@ -752,9 +984,74 @@ events.
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
 - use `limit` and `offset` to page through older events
 
+### Archive alarms
+
+Use `firewalla_local.archive_alarms` to move one active alarm or all active
+alarms into the archive. Archiving is recoverable; the records remain visible
+through `get_alarms` with `include_archived: true`.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+- set `mode` to `this` and provide `alarm_id` to archive one alarm
+- set `mode` to `all_active` to archive every active alarm
+
+### Delete alarms
+
+Use `firewalla_local.delete_alarms` to permanently delete one alarm or a selected
+active/archive set. Deletion cannot be undone.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+- `mode` is `this`, `all_active`, or `all_archived`; `alarm_id` is required for
+  `this`
+- set `confirm: true` to acknowledge permanent deletion
+
+### Mute alarm
+
+Use `firewalla_local.mute_alarm` to create an alarm silence. The required
+`scope_kind` prevents an omitted scope from silently becoming a box-wide mute.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+- `target_type` is `alarm_type`, `domain`, or `ip`
+- for `alarm_type`, set `target_value` to the raw alarm type such as
+  `ALARM_GAME`; for `domain` or `ip`, provide the matching destination value or
+  an `alarm_id` from which it can be resolved
+- choose `scope_kind` from `device`, `group`, `user`, `network`, or `all`; all
+  but `all` require `scope_target`
+- `duration` is `1h`, `today` in the Firewalla box's timezone, or `always`
+- standalone mutes can be removed by the `exception_id` returned by
+  `get_alarms`; mutes created from an active alarm may also be located by its
+  `alarm_id`
+
+### Unmute alarm
+
+Use `firewalla_local.unmute_alarm` to remove a silence by `exception_id`, or an
+alarm-linked silence by `alarm_id`. Provide exactly one identifier. Use
+`get_alarms` to discover silence exception IDs.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 ### Pause rule
 
 Use `firewalla_local.pause_rule` to pause a managed rule.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 
 - intended for an existing persistent rule that already exists on the box
 - provide `rule_target`
@@ -765,8 +1062,27 @@ Use `firewalla_local.pause_rule` to pause a managed rule.
 
 Use `firewalla_local.resume_rule` to resume a paused managed rule immediately.
 
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
 Like `pause_rule`, this operates on an existing persistent rule rather than
 creating a new rule for you.
+
+### Delete rule
+
+Use `firewalla_local.delete_rule` to permanently remove one live policy rule by
+its `rule_id`. This also removes a rule created by an alarm block action because
+that action is represented as an ordinary policy rule.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+Set `confirm: true` to acknowledge that rule deletion removes its enforcement
+and cannot be undone.
 
 ### Get wireless status
 
@@ -781,7 +1097,12 @@ wireless configuration as structured data.
 
 ### Set SSID paused
 
-Use `firewalla_local.set_ssid_paused` to pause or resume one wireless network
+Use `firewalla_local.set_ssid_paused` to pause or resume one wireless network.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
 (SSID profile).
 
 - provide `ssid_profile_id` — either the profile UUID or the SSID name (e.g.
@@ -812,8 +1133,16 @@ Use `firewalla_local.set_ssid_paused` to pause or resume one wireless network
   `appTimeUsageToday` user payloads
 - watched-user entities do not expose a last-app-used field because that value
   is not yet proven in the local contract
+- human-readable target list names are not available: Firewalla resolves those
+  from cloud MSP subscription data (`mspData.targetlists`) that this integration
+  never requests, so rules that target a `TL-` list show the raw
+  `TL-` identifier instead of a friendly name
 - current WAN usage is exposed as a status-sensor attribute for summary and
   automation use, not as separate per-WAN entities
+- WAN networks never report `top_talkers`: the box assigns no hosts to a WAN
+  interface, so the attribute is always an empty list. LAN, VLAN, and VPN
+  networks report the top 5 hosts by combined traffic; hosts that have
+  transferred nothing are not ranked
 - broader mutation surfaces remain intentionally out of scope until they are
   proven by protocol evidence
 - this is a community integration and not an official Firewalla support

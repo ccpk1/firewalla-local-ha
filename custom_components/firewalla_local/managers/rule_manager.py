@@ -610,6 +610,29 @@ class FirewallaRuleManager(FirewallaBaseManager):
             tuple(rule.rule_id for rule in rules), enabled=True, idle_ts=None
         )
 
+    async def async_delete_rule(self, rule_id: str) -> bool:
+        """Delete one rule resolved from the live rule index by its ID."""
+        rule = self._rule_index.get(rule_id)
+        if rule is None:
+            return False
+
+        await self.client.async_delete_rule(rule.rule_id)
+        del self._rule_index[rule.rule_id]
+        if rule.rule_id in self._matching_rules_by_source_id:
+            self._matching_rules_by_source_id[rule.rule_id] = ()
+        if (snapshot := self.coordinator.data) is not None:
+            self.coordinator.async_set_updated_data(
+                replace(
+                    snapshot,
+                    policy_rules=tuple(
+                        current
+                        for current in snapshot.policy_rules
+                        if current.rule_id != rule.rule_id
+                    ),
+                )
+            )
+        return True
+
     def _resolve_rules_for_target(
         self, rule_target: str
     ) -> tuple[FirewallaPolicyRule, ...]:
@@ -692,7 +715,17 @@ class FirewallaRuleManager(FirewallaBaseManager):
 
         payload = await self.client.async_get_runtime_init_payload()
         snapshot = self.client.build_runtime_snapshot(payload)
-        report = build_runtime_inventory_report(payload, snapshot.policy_rules)
+        host_manager = self.coordinator.host_manager
+        report = build_runtime_inventory_report(
+            payload,
+            snapshot.policy_rules,
+            hosts=snapshot.hosts,
+            online_window_seconds=(
+                host_manager.watched_device_online_window_seconds
+                if host_manager is not None
+                else 0
+            ),
+        )
         return {
             "inventory": report,
             "markdown": render_runtime_inventory_markdown(report),

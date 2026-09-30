@@ -98,6 +98,25 @@ _SPEEDTEST_SENSITIVE_KEYS: Final = frozenset(
     }
 )
 
+_ALARM_SENSITIVE_KEYS: Final = frozenset(
+    {
+        "device",
+        "message",
+        "p.device.name",
+        "p.device.mac",
+        "p.device.ip",
+        "p.device.real.ip",
+        "p.device.guid",
+        "p.device.macvendor",
+        "p.dest.domain",
+        "p.dest.name",
+        "p.dest.app",
+        "p.dest.ip",
+        "p.dest.latitude",
+        "p.dest.longitude",
+    }
+)
+
 # Top-level sections that are not relevant to the wireless/AP7 investigation
 # and carry a large amount of sensitive data (personal names, traffic flows,
 # usage history, metrics). These are dropped entirely from the export rather
@@ -122,7 +141,6 @@ _EXCLUDED_TOP_LEVEL_KEYS: Final = frozenset(
         "monthlydatausage",
         "monthlydatausageonwans",
         "networkmetrics",
-        "newalarms",
     }
 )
 
@@ -180,6 +198,20 @@ def _redact_speedtest(record: Mapping[str, Any]) -> dict[str, Any]:
             _REDACTED
             if key.lower() in _SPEEDTEST_SENSITIVE_KEYS
             else _redact_payload(value, _is_speedtest=True)
+        )
+        for key, value in record.items()
+    }
+
+
+def _redact_alarm(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Redact sensitive alarm values while retaining useful identifiers."""
+    return {
+        key: (
+            value
+            if key.lower() in {"aid", "type", "state"}
+            else _REDACTED
+            if key.lower() in _ALARM_SENSITIVE_KEYS
+            else _redact_payload(value)
         )
         for key, value in record.items()
     }
@@ -306,6 +338,12 @@ def redact_runtime_init_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
             redacted[key] = [
                 _redact_speedtest(record) if isinstance(record, Mapping) else record
                 for record in value
+            ]
+            continue
+        if key_lower == "newalarms":
+            redacted[key] = [
+                _redact_alarm(alarm) if isinstance(alarm, Mapping) else alarm
+                for alarm in value
             ]
             continue
 

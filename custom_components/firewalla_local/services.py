@@ -17,23 +17,32 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 from homeassistant.util.json import JsonObjectType, JsonValueType
 
 from .api import FirewallaApiError
 from .const import (
+    ALARM_SERVICE_MAX_LIMIT,
     DEFAULT_INIT_TARGET,
     DOMAIN,
     HOST_DEVICE_TYPE_OPTIONS,
     LOGGER,
+    SERVICE_ARCHIVE_ALARMS,
+    SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
+    SERVICE_DELETE_RULE,
+    SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_TYPE,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_DNS_HOSTNAME,
+    SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
+    SERVICE_FIELD_EXCEPTION_ID,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
@@ -41,6 +50,7 @@ from .const import (
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
+    SERVICE_FIELD_INCLUDE_ARCHIVED,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_MODE,
     SERVICE_FIELD_NETWORK_NAME,
@@ -50,10 +60,15 @@ from .const import (
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_DURATION,
+    SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
+    SERVICE_FIELD_SCOPE_KIND,
+    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
+    SERVICE_FIELD_TARGET_TYPE,
+    SERVICE_FIELD_TARGET_VALUE,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
@@ -64,6 +79,7 @@ from .const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_GET_ALARMS,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -74,6 +90,7 @@ from .const import (
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
     SERVICE_GET_WIRELESS_STATUS,
+    SERVICE_MUTE_ALARM,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -84,13 +101,21 @@ from .const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_SET_SSID_PAUSED,
+    SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
+    TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+    TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED,
+    TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_LOADED,
+    TRANS_KEY_EXCEPTION_DELETE_ALARMS_CONFIRM_REQUIRED,
     TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
     TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED,
+    TRANS_KEY_EXCEPTION_DELETE_RULE_CONFIRM_REQUIRED,
+    TRANS_KEY_EXCEPTION_DELETE_RULE_FAILED,
     TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
     TRANS_KEY_EXCEPTION_HOST_REQUIRED,
@@ -114,6 +139,7 @@ from .const import (
     TRANS_KEY_EXCEPTION_NETWORK_USAGE_WINDOW_REQUIRED,
     TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT,
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
+    TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED,
@@ -150,6 +176,8 @@ from .const import (
 )
 from .coordinator import FirewallaConfigEntry
 from .models import (
+    FirewallaAlarm,
+    FirewallaAlarmException,
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaInternetQualitySample,
@@ -205,6 +233,77 @@ _TIME_USAGE_REPORT_SUMMARY_SECTIONS = (
 
 GET_RUNTIME_INVENTORY_SCHEMA = vol.Schema(
     {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_ALARMS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_LIMIT, default=10): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=ALARM_SERVICE_MAX_LIMIT)
+        ),
+        vol.Optional(SERVICE_FIELD_INCLUDE_ARCHIVED, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_ALARM_TYPE): cv.string,
+        vol.Optional(SERVICE_FIELD_DETAIL, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+ARCHIVE_ALARMS_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_MODE): vol.In(("this", "all_active")),
+        vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+DELETE_ALARMS_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_MODE): vol.In(
+            ("this", "all_active", "all_archived")
+        ),
+        vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        vol.Required(SERVICE_FIELD_CONFIRM): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+_ALARM_SCOPE_SCHEMA_FIELDS: dict[object, object] = {
+    vol.Required(SERVICE_FIELD_SCOPE_KIND): vol.In(
+        ("device", "group", "user", "network", "all")
+    ),
+    vol.Optional(SERVICE_FIELD_SCOPE_TARGET): cv.string,
+}
+
+MUTE_ALARM_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        vol.Required(SERVICE_FIELD_TARGET_TYPE): vol.In(("alarm_type", "domain", "ip")),
+        vol.Optional(SERVICE_FIELD_TARGET_VALUE): cv.string,
+        **_ALARM_SCOPE_SCHEMA_FIELDS,
+        vol.Required(SERVICE_FIELD_DURATION): vol.In(("1h", "today", "always")),
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+UNMUTE_ALARM_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_EXCEPTION_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+DELETE_RULE_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_RULE_ID): cv.string,
+        vol.Required(SERVICE_FIELD_CONFIRM): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -886,6 +985,49 @@ def _serialize_report_metadata(
             }
             for item in provenance
         },
+    }
+
+
+def _serialize_alarm(
+    alarm: FirewallaAlarm, *, exception_id: str | None
+) -> JsonObjectType:
+    """Serialize one normalized alarm and its associated silence identity."""
+    detail = alarm.raw_payload.get("detail")
+    return {
+        "alarm_id": alarm.alarm_id,
+        "alarm_type": alarm.alarm_type,
+        "device_name": alarm.device_name,
+        "message": alarm.message,
+        "state": alarm.state,
+        "is_archived": alarm.is_archived,
+        "fired_at": alarm.fired_at,
+        "remote_category": alarm.remote_category,
+        "remote_host": alarm.remote_host,
+        "remote_ip": alarm.remote_ip,
+        "remote_app": alarm.remote_app,
+        "remote_region": alarm.remote_region,
+        "remote_latitude": alarm.remote_latitude,
+        "remote_longitude": alarm.remote_longitude,
+        "interface_name": alarm.interface_name,
+        "protocol": alarm.protocol,
+        "severity": alarm.severity,
+        "exception_id": exception_id,
+        "detail": cast(JsonValueType, detail) if isinstance(detail, dict) else None,
+    }
+
+
+def _serialize_alarm_exception(
+    exception: FirewallaAlarmException,
+) -> JsonObjectType:
+    """Serialize one discovered silence record for universal unmute workflows."""
+    return {
+        "exception_id": exception.exception_id,
+        "alarm_id": exception.alarm_id,
+        "alarm_type": exception.alarm_type,
+        "target_type": exception.target_type,
+        "target": exception.target,
+        "target_name": exception.target_name,
+        "expires_at": exception.expires_at,
     }
 
 
@@ -2929,6 +3071,244 @@ async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectTy
     }
 
 
+async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
+    """Return active and optionally archived alarms with shared report metadata."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    limit = cast(int, call.data[SERVICE_FIELD_LIMIT])
+    include_archived = cast(bool, call.data[SERVICE_FIELD_INCLUDE_ARCHIVED])
+    alarm_type = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_TYPE))
+    detail = cast(bool, call.data[SERVICE_FIELD_DETAIL])
+    try:
+        alarms = await entry.runtime_data.alarm_manager.async_get_alarms(
+            limit=limit,
+            include_archived=include_archived,
+            alarm_type=alarm_type,
+            detail=detail,
+        )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Unable to retrieve Firewalla alarms",
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+        )
+
+    manager = entry.runtime_data.alarm_manager
+    _, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    exceptions_by_alarm = {
+        exception.alarm_id: exception.exception_id
+        for exception in manager.exceptions
+        if exception.alarm_id is not None
+    }
+    now = int(dt_util.utcnow().timestamp())
+    provenance = (
+        FirewallaReportProvenance(
+            section="alarms",
+            source="firewalla_local",
+            source_field="alarms / archivedAlarms",
+            note="The local runtime returns the newest records from its retained set.",
+        ),
+    )
+    return {
+        "config_entry_id": entry.entry_id,
+        "alarms": [
+            _serialize_alarm(
+                alarm,
+                exception_id=exceptions_by_alarm.get(alarm.alarm_id),
+            )
+            for alarm in alarms
+        ],
+        "exceptions": [
+            _serialize_alarm_exception(exception) for exception in manager.exceptions
+        ],
+        "returned_count": len(alarms),
+        "active_count": manager.active_count,
+        "archived_count": manager.archived_count,
+        "pending_count": manager.pending_count,
+        "query": {
+            "limit": limit,
+            "include_archived": include_archived,
+            "type": alarm_type,
+            "detail": detail,
+        },
+        "metadata": _serialize_report_metadata(
+            applied={
+                "limit": limit,
+                "include_archived": include_archived,
+                "type": alarm_type,
+                "detail": detail,
+            },
+            provenance=provenance,
+        ),
+        "time_basis": _serialize_report_time_basis(
+            FirewallaReportTimeBasis(
+                kind="box_retained_history",
+                label="Newest records from the box-retained alarm history",
+                anchor_timestamp=now,
+                is_partial=True,
+                boundary_source="Firewalla local runtime retention",
+                time_zone=time_zone_name,
+            )
+        ),
+    }
+
+
+def _get_alarm_scope_target(call: ServiceCall) -> tuple[str, str | None]:
+    """Validate and return one explicitly selected alarm scope."""
+    scope_kind = cast(str, call.data[SERVICE_FIELD_SCOPE_KIND])
+    scope_target = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_TARGET))
+    if scope_kind != "all" and not scope_target:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED,
+            translation_placeholders={SERVICE_FIELD_SCOPE_KIND: scope_kind},
+        )
+    return scope_kind, scope_target
+
+
+async def _async_handle_archive_alarms(call: ServiceCall) -> None:
+    """Archive one alarm or the complete active set."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    mode = cast(str, call.data[SERVICE_FIELD_MODE])
+    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
+    if mode == "this" and alarm_id is None:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
+        )
+    try:
+        await entry.runtime_data.alarm_manager.async_archive_alarms(
+            mode=mode, alarm_id=alarm_id
+        )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Unable to archive Firewalla alarms",
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+        )
+
+
+async def _async_handle_delete_alarms(call: ServiceCall) -> None:
+    """Permanently delete selected alarms after explicit confirmation."""
+    if not cast(bool, call.data[SERVICE_FIELD_CONFIRM]):
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_DELETE_ALARMS_CONFIRM_REQUIRED
+        )
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    mode = cast(str, call.data[SERVICE_FIELD_MODE])
+    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
+    if mode == "this" and alarm_id is None:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
+        )
+    try:
+        await entry.runtime_data.alarm_manager.async_delete_alarms(
+            mode=mode, alarm_id=alarm_id
+        )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Unable to delete Firewalla alarms",
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+        )
+
+
+async def _async_handle_mute_alarm(call: ServiceCall) -> None:
+    """Create a silence for one alarm pattern and explicit box scope."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    scope_kind, scope_target = _get_alarm_scope_target(call)
+    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
+    target_type = cast(str, call.data[SERVICE_FIELD_TARGET_TYPE])
+    target_value = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_VALUE))
+    if target_value is None and alarm_id is None:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
+        )
+    try:
+        await entry.runtime_data.alarm_manager.async_mute_alarm(
+            alarm_id=alarm_id,
+            target_type=target_type,
+            target_value=target_value,
+            scope_kind=scope_kind,
+            scope_target=scope_target,
+            duration=cast(str, call.data[SERVICE_FIELD_DURATION]),
+        )
+    except ValueError as err:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND
+        ) from err
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Unable to mute Firewalla alarm",
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+        )
+
+
+async def _async_handle_unmute_alarm(call: ServiceCall) -> None:
+    """Remove one alarm silence by alarm ID or exception ID."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
+    exception_id = cast(str | None, call.data.get(SERVICE_FIELD_EXCEPTION_ID))
+    if (alarm_id is None) == (exception_id is None):
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
+        )
+    try:
+        await entry.runtime_data.alarm_manager.async_unmute_alarm(
+            alarm_id=alarm_id, exception_id=exception_id
+        )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Unable to unmute Firewalla alarm",
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+        )
+
+
+async def _async_handle_delete_rule(call: ServiceCall) -> None:
+    """Delete one indexed policy rule after explicit confirmation."""
+    if not cast(bool, call.data[SERVICE_FIELD_CONFIRM]):
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_DELETE_RULE_CONFIRM_REQUIRED
+        )
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    try:
+        if not await entry.runtime_data.rule_manager.async_delete_rule(
+            cast(str, call.data[SERVICE_FIELD_RULE_ID])
+        ):
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_RULE_NOT_FOUND
+            )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Unable to delete Firewalla rule",
+            translation_key=TRANS_KEY_EXCEPTION_DELETE_RULE_FAILED,
+        )
+
+
 async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectType:
     """Return the current host identity mapping for Firewalla hosts."""
     entry = _get_loaded_entry(
@@ -4239,6 +4619,7 @@ type FirewallaServiceRegistration = tuple[
     FirewallaServiceHandler,
     vol.Schema,
     SupportsResponse,
+    bool,
 ]
 
 _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
@@ -4247,132 +4628,196 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         _async_handle_get_runtime_inventory,
         GET_RUNTIME_INVENTORY_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_GET_HOST_NAME_MAPPING,
         _async_handle_get_host_name_mapping,
         GET_HOST_NAME_MAPPING_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_NETWORK_SEGMENT_REPORT,
         _async_handle_get_network_segment_report,
         GET_NETWORK_SEGMENT_REPORT_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_NETWORK_SEGMENT_USAGE,
         _async_handle_get_network_segment_usage,
         GET_NETWORK_SEGMENT_USAGE_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_RUN_INTERNET_SPEED_TEST,
         _async_handle_run_internet_speed_test,
         RUN_INTERNET_SPEED_TEST_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_WAKE_HOST,
         _async_handle_wake_host,
         WAKE_HOST_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_DELETE_HOST,
         _async_handle_delete_host,
         DELETE_HOST_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_NAME,
         _async_handle_set_host_name,
         SET_HOST_NAME_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_DNS_HOSTNAME,
         _async_handle_set_host_dns_hostname,
         SET_HOST_DNS_HOSTNAME_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_DEVICE_TYPE,
         _async_handle_set_host_device_type,
         SET_HOST_DEVICE_TYPE_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
         _async_handle_set_host_notify_when_next_online,
         SET_HOST_NOTIFY_WHEN_NEXT_ONLINE_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
         _async_handle_set_host_notify_when_next_offline,
         SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_SET_HOST_DHCP_RESERVATION,
         _async_handle_set_host_dhcp_reservation,
         SET_HOST_DHCP_RESERVATION_SCHEMA,
         SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_GET_SPEED_TEST_RESULTS,
         _async_handle_get_speed_test_results,
         GET_SPEED_TEST_RESULTS_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_INTERNET_QUALITY_REPORT,
         _async_handle_get_internet_quality_report,
         GET_INTERNET_QUALITY_REPORT_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_TIME_USAGE_REPORT,
         _async_handle_get_time_usage_report,
         GET_TIME_USAGE_REPORT_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_WAN_DATA_USAGE,
         _async_handle_get_wan_data_usage,
         GET_WAN_DATA_USAGE_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_GET_WAN_EVENTS,
         _async_handle_get_wan_events,
         GET_WAN_EVENTS_SCHEMA,
         SupportsResponse.ONLY,
+        False,
     ),
     (
         SERVICE_PAUSE_RULE,
         _async_handle_pause_rule,
         PAUSE_RULE_SCHEMA,
         SupportsResponse.NONE,
+        True,
     ),
     (
         SERVICE_RESUME_RULE,
         _async_handle_resume_rule,
         RESUME_RULE_SCHEMA,
         SupportsResponse.NONE,
+        True,
     ),
     (
         SERVICE_SET_SSID_PAUSED,
         _async_handle_set_ssid_paused,
         SET_SSID_PAUSED_SCHEMA,
         SupportsResponse.NONE,
+        True,
     ),
     (
         SERVICE_GET_WIRELESS_STATUS,
         _async_handle_get_wireless_status,
         GET_WIRELESS_STATUS_SCHEMA,
         SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_GET_ALARMS,
+        _async_handle_get_alarms,
+        GET_ALARMS_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_ARCHIVE_ALARMS,
+        _async_handle_archive_alarms,
+        ARCHIVE_ALARMS_SCHEMA,
+        SupportsResponse.NONE,
+        True,
+    ),
+    (
+        SERVICE_DELETE_ALARMS,
+        _async_handle_delete_alarms,
+        DELETE_ALARMS_SCHEMA,
+        SupportsResponse.NONE,
+        True,
+    ),
+    (
+        SERVICE_MUTE_ALARM,
+        _async_handle_mute_alarm,
+        MUTE_ALARM_SCHEMA,
+        SupportsResponse.NONE,
+        True,
+    ),
+    (
+        SERVICE_UNMUTE_ALARM,
+        _async_handle_unmute_alarm,
+        UNMUTE_ALARM_SCHEMA,
+        SupportsResponse.NONE,
+        True,
+    ),
+    (
+        SERVICE_DELETE_RULE,
+        _async_handle_delete_rule,
+        DELETE_RULE_SCHEMA,
+        SupportsResponse.NONE,
+        True,
     ),
 )
 
@@ -4384,9 +4829,18 @@ def _async_register_service(
     handler: FirewallaServiceHandler,
     schema: vol.Schema,
     supports_response: SupportsResponse,
+    admin: bool,
 ) -> None:
-    """Register one Firewalla Local service when it is not already present."""
-    if hass.services.has_service(DOMAIN, service):
+    """Register one Firewalla Local service."""
+    if admin:
+        async_register_admin_service(
+            hass,
+            DOMAIN,
+            service,
+            handler,
+            schema=schema,
+            supports_response=supports_response,
+        )
         return
 
     hass.services.async_register(
@@ -4400,18 +4854,19 @@ def _async_register_service(
 
 async def async_setup_services(hass: HomeAssistant) -> None:
     """Register Firewalla Local services."""
-    for service, handler, schema, supports_response in _SERVICE_REGISTRATIONS:
+    for service, handler, schema, supports_response, admin in _SERVICE_REGISTRATIONS:
         _async_register_service(
             hass,
             service=service,
             handler=handler,
             schema=schema,
             supports_response=supports_response,
+            admin=admin,
         )
 
 
 def async_remove_services(hass: HomeAssistant) -> None:
     """Remove Firewalla Local services."""
-    for service, _, _, _ in _SERVICE_REGISTRATIONS:
+    for service, _, _, _, _ in _SERVICE_REGISTRATIONS:
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

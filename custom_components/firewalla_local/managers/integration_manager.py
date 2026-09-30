@@ -43,6 +43,7 @@ from ..models import (
     FirewallaNetworkMetricSeries,
     FirewallaNetworkSegment,
     FirewallaNetworkSegmentView,
+    FirewallaNetworkTopTalker,
     FirewallaNetworkUsageBucket,
     FirewallaNetworkUsageSummary,
     FirewallaNetworkUsageWindow,
@@ -88,6 +89,7 @@ _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
 _RAW_NETWORK_USAGE_DOWNLOAD_KEY: Final = "totalDownload"
 _RAW_NETWORK_USAGE_UPLOAD_KEY: Final = "totalUpload"
 _WEEK_START_MONDAY: Final = 0
+_TOP_TALKER_LIMIT: Final = 5
 _SUPPORTED_WAN_EVENT_STATE_FAMILIES: Final = frozenset(
     {"wan_state", "overall_wan_state", "dualwan_state", "dns"}
 )
@@ -178,6 +180,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self._system_status: FirewallaSystemStatus | None = None
         self._latest_speed_test: FirewallaSpeedTestResult | None = None
         self._network_usage_by_uuid: dict[str, FirewallaNetworkUsageSummary] = {}
+        self._top_talkers_by_uuid: dict[str, tuple[FirewallaNetworkTopTalker, ...]] = {}
         self._internet_quality_samples: tuple[FirewallaInternetQualitySample, ...] = ()
 
     def handle_refresh(self, snapshot: FirewallaRuntimeSnapshot) -> None:
@@ -187,6 +190,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self._latest_speed_test = self._build_latest_speed_test(
             snapshot.speed_test_results
         )
+        self._top_talkers_by_uuid = self._build_network_top_talkers(snapshot)
         if (
             host_manager := getattr(self.coordinator, "host_manager", None)
         ) is not None:
@@ -562,6 +566,55 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             self._network_usage_by_uuid[network.uuid] = self._build_network_usage(
                 result
             )
+
+    def get_network_top_talkers(
+        self, network_uuid: str
+    ) -> tuple[FirewallaNetworkTopTalker, ...]:
+        """Return ranked talkers for one network, newest refresh wins.
+
+        The cache is rebuilt on every refresh from the normalized host snapshot,
+        so this read is synchronous and costs no box request. WAN networks have
+        no host assignment in the local payload and therefore always return an
+        empty tuple.
+        """
+        return self._top_talkers_by_uuid.get(network_uuid, ())
+
+    @staticmethod
+    def _build_network_top_talkers(
+        snapshot: FirewallaRuntimeSnapshot,
+    ) -> dict[str, tuple[FirewallaNetworkTopTalker, ...]]:
+        """Group non-zero host totals per network and keep the top talkers."""
+        active_hosts: dict[str, list[FirewallaHostRuntime]] = {}
+        for host in snapshot.hosts:
+            network_uuid = host.network_uuid
+            if network_uuid is None:
+                continue
+            if not ((host.download_bytes or 0) or (host.upload_bytes or 0)):
+                continue
+            active_hosts.setdefault(network_uuid, []).append(host)
+
+        return {
+            network_uuid: tuple(
+                FirewallaNetworkTopTalker(
+                    host_id=host.mac,
+                    device_name=host.host_name,
+                    download_bytes=host.download_bytes or 0,
+                    upload_bytes=host.upload_bytes or 0,
+                )
+                for host in sorted(
+                    hosts,
+                    key=lambda candidate: (
+                        -(
+                            (candidate.download_bytes or 0)
+                            + (candidate.upload_bytes or 0)
+                        ),
+                        candidate.host_name.casefold(),
+                        candidate.mac,
+                    ),
+                )[:_TOP_TALKER_LIMIT]
+            )
+            for network_uuid, hosts in active_hosts.items()
+        }
 
     @staticmethod
     def _build_network_usage(

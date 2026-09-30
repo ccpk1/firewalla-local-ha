@@ -6,7 +6,76 @@ from custom_components.firewalla_local.helpers.runtime_inventory import (
     build_runtime_inventory_report,
     render_runtime_inventory_markdown,
 )
-from custom_components.firewalla_local.models import FirewallaPolicyRule
+from custom_components.firewalla_local.models import (
+    FirewallaHostRuntime,
+    FirewallaPolicyRule,
+)
+
+
+def _activity_host(
+    mac: str,
+    *,
+    last_active: float | None,
+    stale: bool | None = False,
+) -> FirewallaHostRuntime:
+    """Return one normalized host for device-count assertions."""
+    return FirewallaHostRuntime(
+        mac=mac,
+        host_name=mac,
+        ip_address=None,
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=last_active,
+        download_bytes=None,
+        upload_bytes=None,
+        stale=stale,
+    )
+
+
+def test_runtime_inventory_reports_device_counts_with_entity_definition() -> None:
+    """Device counts use the same relative online rule as the entities."""
+    # Freshest host is 1000. Only hosts within the 300s window count as online.
+    hosts = (
+        _activity_host("AA:00:00:00:00:01", last_active=1000.0),
+        # 500s behind the reference, so outside the 300s window.
+        _activity_host("AA:00:00:00:00:02", last_active=500.0),
+        _activity_host("AA:00:00:00:00:03", last_active=None),
+        _activity_host("AA:00:00:00:00:04", last_active=1000.0, stale=True),
+    )
+
+    report = build_runtime_inventory_report(
+        {"hosts": [], "policyRules": []},
+        (),
+        hosts=hosts,
+        online_window_seconds=300,
+    )
+
+    summary = report["summary"]
+    assert summary["devices_total"] == 4
+    assert summary["devices_online"] == 1
+    assert summary["devices_offline"] == 3
+    assert (
+        summary["devices_online"] + summary["devices_offline"]
+        == summary["devices_total"]
+    )
+
+
+def test_runtime_inventory_device_counts_are_zero_without_host_timestamps() -> None:
+    """A host inventory with no activity reports zero online rather than guessing."""
+    hosts = (_activity_host("AA:00:00:00:00:01", last_active=None, stale=None),)
+
+    report = build_runtime_inventory_report(
+        {"hosts": [], "policyRules": []},
+        (),
+        hosts=hosts,
+        online_window_seconds=300,
+    )
+
+    summary = report["summary"]
+    assert summary["devices_total"] == 1
+    assert summary["devices_online"] == 0
+    assert summary["devices_offline"] == 1
 
 
 def test_build_runtime_inventory_report() -> None:
@@ -96,7 +165,12 @@ def test_build_runtime_inventory_report() -> None:
         ),
     )
 
-    report = build_runtime_inventory_report(payload, rules)
+    report = build_runtime_inventory_report(
+        payload,
+        rules,
+        hosts=(),
+        online_window_seconds=300,
+    )
 
     assert report["summary"]["group_count"] == 2
     assert report["summary"]["group_policy_control_count"] == 3
@@ -452,7 +526,12 @@ def test_build_runtime_inventory_report_exposes_custom_name() -> None:
         ),
     )
 
-    report = build_runtime_inventory_report(payload, rules)
+    report = build_runtime_inventory_report(
+        payload,
+        rules,
+        hosts=(),
+        online_window_seconds=300,
+    )
 
     assert report["rules"][0]["name"] == "ChoreOps Custom Allow"
     assert report["rules"][0]["custom_name"] == "ChoreOps Custom Allow"
@@ -522,7 +601,12 @@ def test_build_runtime_inventory_report_promotes_rule_metadata() -> None:
         ),
     )
 
-    report = build_runtime_inventory_report(payload, rules)
+    report = build_runtime_inventory_report(
+        payload,
+        rules,
+        hosts=(),
+        online_window_seconds=300,
+    )
 
     rule = report["rules"][0]
     assert rule["local_port"] == "7777"
@@ -611,7 +695,12 @@ def test_build_runtime_inventory_report_promotes_disturb_method() -> None:
         ),
     )
 
-    report = build_runtime_inventory_report(payload, rules)
+    report = build_runtime_inventory_report(
+        payload,
+        rules,
+        hosts=(),
+        online_window_seconds=300,
+    )
 
     rule = report["rules"][0]
     assert rule["disturb_level"] is None

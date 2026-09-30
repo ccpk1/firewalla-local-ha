@@ -10,10 +10,12 @@ from custom_components.firewalla_local.managers.rule_manager import (
     build_switch_rule_evaluations,
 )
 from custom_components.firewalla_local.models import (
+    FirewallaHostRuntime,
     FirewallaPolicyRule,
     format_policy_rule_label,
     format_policy_rule_name,
 )
+from custom_components.firewalla_local.utils.host_activity import count_online_hosts
 from custom_components.firewalla_local.utils.network import build_network_inventory
 
 _RAW_POLICY_STATE_KEY: Final = "state"
@@ -515,8 +517,16 @@ def _build_target_list_references(
 def build_runtime_inventory_report(
     payload: dict[str, object],
     policy_rules: tuple[FirewallaPolicyRule, ...],
+    *,
+    hosts: tuple[FirewallaHostRuntime, ...],
+    online_window_seconds: int,
 ) -> dict[str, object]:
-    """Build a mapping report for groups, users, and normalized rules."""
+    """Build a mapping report for groups, users, and normalized rules.
+
+    ``hosts`` is the normalized host inventory and ``online_window_seconds`` is
+    the configured activity window, so the device counts reported here use the
+    exact same online definition as the entities rather than a second one.
+    """
     raw_policy_rules = payload.get(_RAW_POLICY_RULES_KEY)
     raw_rule_index: dict[str, dict[str, object]] = {}
     if isinstance(raw_policy_rules, list):
@@ -583,6 +593,11 @@ def build_runtime_inventory_report(
 
     group_policy_controls = _build_group_policy_controls(groups)
     target_list_references = _build_target_list_references(rules)
+    devices_total = len(hosts)
+    devices_online = count_online_hosts(
+        hosts,
+        online_window_seconds=online_window_seconds,
+    )
 
     return {
         "summary": {
@@ -600,6 +615,9 @@ def build_runtime_inventory_report(
             "rules_needing_review_count": len(rules_needing_review),
             "target_list_reference_count": len(target_list_references),
             "host_count": host_count,
+            "devices_total": devices_total,
+            "devices_online": devices_online,
+            "devices_offline": devices_total - devices_online,
             "network_count": network_count,
         },
         "groups": groups,
@@ -653,6 +671,9 @@ def render_runtime_inventory_markdown(report: dict[str, object]) -> str:
             "rules_needing_review_count",
             "target_list_reference_count",
             "host_count",
+            "devices_total",
+            "devices_online",
+            "devices_offline",
             "network_count",
         ):
             lines.append(f"- {key}: {summary.get(key)}")

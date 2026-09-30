@@ -114,6 +114,50 @@
   },
   "entity": {
     "binary_sensor": {
+      "alarm_active": {
+        "name": "Alarm active",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_alarm_activity": "Shows whether Firewalla reports active alarms and summarizes the latest alarm"
+            }
+          },
+          "active_count": {
+            "name": "Active alarms"
+          },
+          "archived_count": {
+            "name": "Archived alarms"
+          },
+          "pending_count": {
+            "name": "Pending alarms"
+          },
+          "active_by_category": {
+            "name": "Active alarms by category"
+          },
+          "active_by_category_complete": {
+            "name": "Category counts complete"
+          },
+          "alarm_type": {
+            "name": "Latest alarm type"
+          },
+          "device_name": {
+            "name": "Latest alarm device"
+          },
+          "message": {
+            "name": "Latest alarm message"
+          },
+          "fired_at": {
+            "name": "Latest alarm time"
+          },
+          "alarm_id": {
+            "name": "Latest alarm ID"
+          }
+        }
+      },
       "system_status": {
         "name": "System Status",
         "state_attributes": {
@@ -295,6 +339,9 @@
           "network_usage": {
             "name": "Network usage"
           },
+          "top_talkers": {
+            "name": "Top talkers"
+          },
           "enabled": {
             "name": "Enabled"
           },
@@ -443,6 +490,35 @@
       }
     },
     "sensor": {
+      "alarm_count": {
+        "name": "Active alarms",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_alarm_activity": "Shows the number of active Firewalla alarms"
+            }
+          },
+          "active_count": {
+            "name": "Active alarms"
+          },
+          "archived_count": {
+            "name": "Archived alarms"
+          },
+          "pending_count": {
+            "name": "Pending alarms"
+          },
+          "active_by_category": {
+            "name": "Active alarms by category"
+          },
+          "active_by_category_complete": {
+            "name": "Category counts complete"
+          }
+        }
+      },
       "wan_speed_test_download": {
         "name": "{wan_name} Speed test download",
         "state_attributes": {
@@ -1141,6 +1217,30 @@
     "delete_host_confirm_required": {
       "message": "Deleting a host is destructive. Set confirm to true to proceed."
     },
+    "delete_alarms_confirm_required": {
+      "message": "Alarm deletion is permanent. Set confirm to true to proceed."
+    },
+    "delete_rule_confirm_required": {
+      "message": "Rule deletion permanently removes its enforcement. Set confirm to true to proceed."
+    },
+    "delete_rule_failed": {
+      "message": "The integration could not delete the rule. Check the Firewalla connection and try again."
+    },
+    "rule_not_found": {
+      "message": "No live Firewalla rule matched that rule ID. Refresh the runtime inventory and try again."
+    },
+    "alarm_not_found": {
+      "message": "No active or archived alarm matched that alarm ID."
+    },
+    "alarm_scope_target_required": {
+      "message": "A target is required for the {scope_kind} scope."
+    },
+    "alarm_selector_required": {
+      "message": "Provide the required alarm target or identifier for this operation."
+    },
+    "alarm_operation_failed": {
+      "message": "The integration could not complete the alarm operation. Check the Firewalla connection and try again."
+    },
     "wan_data_usage_failed": {
       "message": "The integration could not read WAN data usage. Check the Firewalla connection and try again."
     },
@@ -1155,6 +1255,166 @@
     }
   },
   "services": {
+    "get_alarms": {
+      "name": "Get alarms",
+      "description": "Return the newest active alarms and optionally archived alarms with normalized details and silence records.",
+      "fields": {
+        "limit": {
+          "name": "Limit",
+          "description": "Optional. Defaults to 10, maximum 500. Returns the newest matching records; the local runtime has no cursor or time-window filter."
+        },
+        "include_archived": {
+          "name": "Include archived",
+          "description": "Optional. Include archived alarms in the result."
+        },
+        "type": {
+          "name": "Alarm type",
+          "description": "Optional raw ALARM_* identifier or supported group such as security, abnormal_upload, or open_port."
+        },
+        "detail": {
+          "name": "Fetch detail",
+          "description": "Optional. Fetch extended details with one additional request per returned alarm."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "archive_alarms": {
+      "name": "Archive alarms",
+      "description": "Move one or all active alarms to the archive. Archived alarms remain retrievable.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Choose this alarm or all active alarms."
+        },
+        "alarm_id": {
+          "name": "Alarm ID",
+          "description": "Required when mode is this."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "delete_alarms": {
+      "name": "Delete alarms",
+      "description": "Permanently delete one alarm or all active/archived alarms. This cannot be undone.",
+      "fields": {
+        "mode": {
+          "name": "Mode",
+          "description": "Choose this, all_active, or all_archived."
+        },
+        "alarm_id": {
+          "name": "Alarm ID",
+          "description": "Required when mode is this."
+        },
+        "confirm": {
+          "name": "Confirm permanent deletion",
+          "description": "Set to true to acknowledge that alarm records will be permanently deleted."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "mute_alarm": {
+      "name": "Mute alarm",
+      "description": "Create a scoped silence for an alarm type, domain, or IP address.",
+      "fields": {
+        "alarm_id": {
+          "name": "Alarm ID (Optional)",
+          "description": "Use an active or archived alarm to resolve an omitted domain/IP target."
+        },
+        "target_type": {
+          "name": "Target type",
+          "description": "Choose alarm_type, domain, or ip."
+        },
+        "target_value": {
+          "name": "Target value (Optional)",
+          "description": "Raw ALARM_* identifier, domain, or IP. May be resolved from alarm_id where available."
+        },
+        "scope_kind": {
+          "name": "Scope kind",
+          "description": "Required. Choose device, group, user, network, or all. Global scope must be selected explicitly."
+        },
+        "scope_target": {
+          "name": "Scope target (Optional)",
+          "description": "Required unless scope_kind is all. Use the ID for the selected device, group, user, or network."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Choose 1h, today in the Firewalla box timezone, or always."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "unmute_alarm": {
+      "name": "Unmute alarm",
+      "description": "Remove a silence by exception ID or an alarm-linked silence by alarm ID. Provide exactly one identifier.",
+      "fields": {
+        "alarm_id": {
+          "name": "Alarm ID (Optional)",
+          "description": "Use the originating alarm ID for an alarm-linked silence."
+        },
+        "exception_id": {
+          "name": "Exception ID (Optional)",
+          "description": "Use the silence ID returned by get_alarms."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "delete_rule": {
+      "name": "Delete rule",
+      "description": "Permanently delete one live policy rule, including a rule created by an alarm block action.",
+      "fields": {
+        "rule_id": {
+          "name": "Rule ID",
+          "description": "ID of the live rule from the runtime inventory."
+        },
+        "confirm": {
+          "name": "Confirm deletion",
+          "description": "Set to true to acknowledge permanent rule deletion."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "get_host_name_mapping": {
       "name": "Get host name mapping",
       "description": "Return current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.",

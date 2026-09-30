@@ -2447,6 +2447,1185 @@ Conclusion:
   `networkProfiles` fallback, so fixing the collection does not churn existing
   registry entries — only the display name/ports update
 
+## Alarm findings
+
+### Finding 26: Alarm state arrives in the init payload as two fields plus three counts
+
+**Scenario:**
+
+- Confirmed by a live pull (`utils/pull_runtime.py`) on the connected dev box
+  (2026-09-30), and cross-checked against the Firewalla app's own alarm count.
+- The integration parses **neither** field today; alarms are currently unused.
+
+**Confirmed `mtype=init` response fields:**
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `activeAlarmCount` | `optInt` | Authoritative active total. **This is what the app displays** |
+| `archivedAlarmCount` | `optInt` | Archived total |
+| `pendingAlarmCount` | `optInt` | Pending total (observed `0`) |
+| `newAlarms` | `JSONArray` | The active alarm records — **capped at 50** |
+
+APK references: `xz2.java` line ~4295 reads `activeAlarmCount` via `optInt`;
+line ~4054 reads `newAlarms` via `getJSONArray` and hands it to a `gx2`
+container of `fx2` alarm objects. The alarm parser itself
+(`fx2.m10449j0(JSONObject)`) **failed to decompile** (“Method not decompiled”),
+so field names were recovered from live payloads instead of the APK.
+
+**Critical: `newAlarms` is capped at 50 and is NOT the count.**
+
+Observed live: `activeAlarmCount = 243` while `len(newAlarms) = 50`, and
+`archivedAlarmCount = 5`. **Never derive the alarm total from `len(newAlarms)`.**
+Use `activeAlarmCount`. Use the retrieval API in Finding 27 for the full set.
+
+**Confirmed per-alarm field surface** (union across 50 records, with occurrence
+counts — fields are sparse):
+
+| Field | Present | Notes |
+| --- | --- | --- |
+| `aid` | 50/50 | Alarm id, **string**; used as `alarmID` in commands |
+| `alarmTimestamp` | 50/50 | When the alarm fired, **epoch as a string** |
+| `timestamp` | 50/50 | A **second, different** timestamp (typically earlier) |
+| `device` | 50/50 | Device name, or an IP for VPN-origin alarms |
+| `message` | 50/50 | Human-readable, or an info constant like `INFO_ALARM_VPN_CLIENT_CONNECTION` |
+| `state` | 50/50 | Only `active` observed — **even for archived alarms** |
+| `type` | 50/50 | `ALARM_*` class (see Finding 30) |
+| `p.cloud.decision` | 50/50 | `alarm` |
+| `p.fi` | 50/50 | Feature id |
+| `p.device.name` / `.mac` | 50/50 | `p.device.mac` is the command's `device` scope |
+| `p.id`-family (`p.device.id`, `.ip`) | 49/50 | |
+| `p.intf.name` / `.desc` / `.id` / `.subnet` | 50/50 | Originating interface |
+| `p.dest.*` | 33–44/50 | Destination: `.app`, `.app.id`, `.category`, `.country`, `.domain`, `.id`, `.ip`, `.latitude`, `.longitude`, `.name`, `.name.suffix`, `.port` |
+| `p.protocol` | 43/50 | |
+| `p.tag.ids` / `.names`, `p.utag.ids` / `.names`, `p.dtag.ids` / `.names` | 35–46/50 | Group / user / device tag membership |
+| `p.timestampTimezone` | 34/50 | Display-formatted local time |
+| `p.showMap` | 34/50 | |
+| `p.action.block`, `p.alarm.trigger`, `p.local_is_client`, `p.from`, `p.security.*`, `result`, `result_policy`, `p.severity` | 9/50 | Present only on **security/blocked** alarms (`ALARM_INTEL`) |
+| `p.begin.ts`, `p.end.ts`, `p.duration`, `p.flows`, `p.percentage`, `p.totalUsage` | 5/50 | Present only on **bandwidth** alarms |
+| `p.quarantine`, `p.vpnType`, `p.dest.wg.peer`, `p.device.wgPeer` | 1–2/50 | VPN-specific |
+
+**Important field conventions:**
+
+- **`p.*` keys are literally flat dotted strings**, not nested objects. Parse
+  them as a map, not a hierarchy.
+- **`p.dest.latitude` / `p.dest.longitude` are present on ~44/50 records** and
+  give precise destination geolocation. Treat as sensitive.
+- **`p.severity` is sparse** (9/50) and observed only as `minor`, alongside
+  `p.severity.score`. It is not a reliable required field.
+- **`state` does NOT indicate archived** — archived records still report
+  `state: "active"`. Only membership in the `archivedAlarms` list distinguishes
+  them.
+
+**Artifacts:**
+
+- `.artifacts/alarm-verify/*/runtime_init.json` (live pulls)
+- `.tmp/live_gold/20260910-165331/runtime_init.json` (older pull; line 2 count,
+  line 45611 `newAlarms`)
+
+### Finding 27: Alarm retrieval uses `item=alarms`, `item=archivedAlarms` and `item=alarmDetail`
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) with the stored HA config-entry credentials.
+- The init payload's `newAlarms` is capped at 50, so full retrieval needs these
+  dedicated reads.
+
+**Confirmed read contracts:**
+
+```
+# Active alarms
+mtype: get
+target: 0.0.0.0
+data:
+  item: alarms
+  value: {count: <page size>, offset: <n>}
+
+# Archived alarms
+mtype: get
+target: 0.0.0.0
+data:
+  item: archivedAlarms
+  value: {limit: <page size>, offset: <n>}
+
+# One alarm with full detail
+mtype: get
+target: 0.0.0.0
+data:
+  item: alarmDetail
+  value: {alarmID: "<aid>"}
+```
+
+**Confirmed response shape:** `{"count": <n>, "alarms": [ ... ]}`. The
+response's `count` is the **number of records in this page**, not a total — use
+`activeAlarmCount` / `archivedAlarmCount` from the init payload for totals.
+
+**The two items accept DIFFERENT page-size keys — this is a real trap.**
+
+> **Corrected 2026-09-30 (later the same day).** An earlier revision of this
+> finding stated that `count` was the page-size key and `limit` was ignored.
+> That is **only true for `alarms`**. Testing with a large archived set proved
+> `archivedAlarms` is the opposite. Both behaviours are now measured
+> separately below; do not generalise one to the other.
+
+**`item=archivedAlarms` uses `limit` (+ `offset`) and ignores `count`.**
+Measured with 243 archived records:
+
+| `value` | Returned |
+| --- | --- |
+| `{}` (bare) | 50 (default page) |
+| `{"count": 1000}` | **50** — `count` ignored |
+| `{"count": 243}` | **50** — ignored |
+| `{"limit": 10}` | 10 |
+| `{"limit": 100}` | 100 |
+| `{"limit": 250}` | **243** — full set |
+| `{"limit": 500}` | 243 |
+| `{"limit": 1000}` | 243 |
+
+**`offset` pages correctly for `archivedAlarms`** — verified contiguous,
+non-overlapping pages of 50:
+
+| `value` | Returned | Newest → oldest |
+| --- | --- | --- |
+| `{"limit": 50, "offset": 0}` | 50 | 1732 → 1680 |
+| `{"limit": 50, "offset": 50}` | 50 | 1679 → 1630 |
+| `{"limit": 50, "offset": 100}` | 50 | 1629 → 1580 |
+| `{"limit": 50, "offset": 200}` | 43 | 1529 → 1487 |
+| `{"limit": 50, "offset": 240}` | 3 | 1489 → 1487 |
+
+**`item=alarms` used `count` and ignored `limit`.** Measured earlier the same
+day with 243 active records:
+
+| `value` | Returned |
+| --- | --- |
+| `{}` (bare) | 50 |
+| `{"limit": 200}` | **50** — `limit` ignored |
+| `{"count": 200}` | **200** |
+| `{"count": 1000}` | **243** — full set |
+| `{"count": 5000}` | 243 |
+
+**The asymmetry is confirmed — resolved 2026-09-30 (same day, later test).**
+
+> An earlier note here flagged the `alarms` row as needing re-verification. That
+> is now closed. `alarms` genuinely uses `count` and genuinely ignores both
+> `limit` and `offset`, while `archivedAlarms` uses `limit` and honours `offset`.
+> The two items are **not** interchangeable, and the disagreement is real rather
+> than an artifact of running the two tests at different times.
+
+**`item=alarms` ignores `offset` entirely.** Measured with exactly one active
+alarm present, so any applied offset would have returned zero records:
+
+| `value` | Returned |
+| --- | --- |
+| `{"offset": 0}` | 1 |
+| `{"offset": 1}` | **1** — offset not applied |
+| `{"offset": 2}` | **1** — offset not applied |
+| `{"limit": 50, "offset": 1}` | 1 |
+| `{"count": 50, "offset": 1}` | 1 |
+
+Compare `archivedAlarms`, where `{"limit": 50, "offset": 243}` correctly returned
+**0** — a clean boundary check proving `offset` *is* implemented there.
+
+**Consequence:** the active alarm list has **no working pagination**. The only way
+to retrieve more than the default 50 is a large `count`, which returns the whole
+set in one response. That is acceptable because the active set is inherently
+bounded in practice, but it means a caller cannot page the active list.
+
+**Practical guidance:** because the two handlers disagree, **send all three keys**
+— `{"count": N, "limit": N, "offset": M}`. Unknown keys are ignored, so each item
+reads the one it understands and the caller does not have to know which. This is
+what `utils/probe_alarm_control.py::_fetch_alarms` does. Note that `offset` is
+still useful to send for `archivedAlarms`; for `alarms` it is harmlessly ignored.
+
+**`item=alarmDetail` adds enrichment the list view does not carry:**
+
+Extra keys observed on a detail read (~51 keys vs ~15 in the list view):
+
+- `e.dest.ip.range`, `e.dest.ip.cidr`, `e.dest.ip.country`, `e.dest.ip.city`,
+  `e.dest.ip.org` — IP-range, CIDR and **ISP/organisation** enrichment
+- `e.transfer`
+- `p.utag.names`, `p.tag.names` — tag names as `{uid, name}` objects
+
+`alarmDetail` works for **archived** alarms as well as active ones, so a detail
+lookup by `aid` does not need the alarm to be active.
+
+**Cost note:** `alarmDetail` is **one request per alarm**. Fanning it out over
+243 alarms is 243 requests; make it opt-in rather than default.
+
+**Aids are non-contiguous** in the active list (…1729, **1727**, 1726…), because
+an archived alarm's aid is removed from the active set. Sequence gaps are
+therefore normal, not corruption.
+
+**Artifacts:** captured in the alarm verification session (2026-09-30).
+
+### Finding 28: Alarm mutations are `cmd` messages with an `alarmID` value
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) by sending each command to the gold box.
+- All six operations were executed and their effects verified against the
+  `activeAlarmCount` / `archivedAlarmCount` / `exceptionRules` / `policyRules`
+  containers.
+
+**Confirmed command contracts** (`mtype=cmd`, `target=0.0.0.0`,
+`value.alarmID` is the alarm's `aid`):
+
+| Operation | `item` | `value` | Observed response |
+| --- | --- | --- | --- |
+| Archive (dismiss) | `alarm:ignore` | `{alarmID}` | `{"ignoreIds": ["<aid>"]}` |
+| Archive all | `alarm:ignoreAll` | — | — |
+| Delete | `alarm:delete` | `{alarmID}` | — |
+| Delete all active | `alarm:deleteActiveAll` | — | — |
+| Delete all archived | `alarm:deleteArchivedAll` | — | — |
+| Mute | `alarm:allow` | `{alarmID, matchAll, info{...}}` | `{"exception": {..., "eid": "<n>"}}` |
+| Unmute | `alarm:unallow` | `{alarmID}` | `{}` |
+| Block | `alarm:block` | `{alarmID, matchAll, info{...}}` | `{"policy": {"pid": "<n>", ...}, "otherAlarms": [], "alreadyExists": false, "updated": false}` |
+| Unblock | `alarm:unblock` | `{alarmID}` | `{}` |
+
+The command builder is `ku7.m14063c` (simple id-only commands) and
+`ku7.m14064d` (mute/block with scope). `l33` maps `GET`=1 and `CMD`=3, matching
+the pairing already used across this document.
+
+**`alarmID` is the alarm's `aid`** — confirmed at `fx2.java` (~line 1626):
+`optString("aid")` is stored in the field later used as `alarmID`.
+
+**The `device` scope is `p.device.mac`** — confirmed at `fx2.java` (~line 1622).
+Note this can be a synthetic value such as
+`wg_peer:wWDLO7vE+dpUiwDONgXorPyR/e6YAKme+aLmgVIlRn8=` for VPN-origin alarms,
+not a real MAC.
+
+**Measured effects (live):**
+
+| Step | `activeAlarmCount` | `archivedAlarmCount` | `exceptionRules` | `policyRules` |
+| --- | --- | --- | --- | --- |
+| Baseline | 248 | 0 | 99 | 306 |
+| After `alarm:ignore` | **247** | — | 99 | 306 |
+| After `alarm:allow` (mute) | **246** | — | **100** | 306 |
+| After `alarm:block` | **244** | — | 100 | **307** |
+| After `alarm:unallow` | 244 | — | 99 | 307 |
+| After `alarm:unblock` | 244 | — | 99 | **306** |
+| After `alarm:delete` ×2 | 243 | 5 → **3** | 99 | 306 |
+
+**Archive decrements the count immediately** — there is no lag. Every operation
+was reflected in the next payload.
+
+**`unallow` / `unblock` do NOT un-archive.** After muting and un-muting, and
+after blocking and unblocking, the alarm remained in `archivedAlarms`. Removing
+the exception or block rule restores the *rule/exception* state only. **There is
+no un-archive command**; only `alarm:delete` removes the record.
+
+**Consequence: archive, mute and block are all effectively one-way on the alarm
+record.** Only `delete` removes it from `archivedAlarms`. Any test that targets a
+real alarm permanently alters the user's alarm history.
+
+**Artifacts:** `utils/probe_alarm_control.py` (dry-run by default; `--confirm`
+required to write).
+
+### Finding 29: Mute/block scope and the three mute durations
+
+**Scenario:**
+
+- Confirmed from `AlarmMuteScheduleDialog`, `AlarmMuteDialog`,
+  `AlarmActionHelper.getMuteApplyToItems` and `cd0.m2349a`; mute durations were
+  also verified live.
+
+**The app exposes exactly three mute durations** (`AlarmMuteScheduleDialog`):
+
+| Option | `expireTs` computation |
+| --- | --- |
+| 1 hour | `(System.currentTimeMillis() / 1000) + 3600` |
+| Today | `ZonedDateTime.now(boxTz).plusDays(1).truncatedTo(DAYS).toEpochSecond()` — **start of tomorrow in the box's timezone** |
+| Always | `-1` sentinel ⇒ `expireTs` is **omitted from the payload entirely** |
+
+The box's timezone is reported in the init payload as `timezone` (observed
+`America/New_York`). Verified live: a 1-hour mute stored `expireTs` on the
+resulting exception rule, and a “today” mute resolved to midnight local.
+
+**This mirrors the existing `pause_rule` idiom.** `pause_rule` already computes
+`int(dt_util.utcnow().timestamp()) + seconds`, and `_RAW_RULE_EXPIRE_TS_KEY`
+(`"expireTs"`) is already defined in `helpers/runtime_inventory.py`. Reuse both;
+do not add a second expiry convention.
+
+**Scope comes from the `info` keys, NOT from `matchAll`.**
+
+> **Corrected 2026-09-30 (third correction to this section).** An earlier revision
+> claimed that `matchAll: 1` meant a global mute. **That was wrong** — it was an
+> inference from a single observation, not a measurement. A direct four-way test
+> (below) shows `matchAll` changing nothing. The scope decision is entirely
+> governed by whether the device/tag/interface key is present in `info`.
+
+Measured by blocking on an archived alarm and inspecting the resulting rule's
+`scope` array, which is the same scope resolution a mute uses:
+
+| `value` | Resulting `scope` |
+| --- | --- |
+| `matchAll: 1` + `info.device` | `["0C:85:E1:EB:6A:AF"]` — device-scoped |
+| `matchAll: 0` + `info.device` | `["0C:85:E1:EB:6A:AF"]` — **identical** |
+| `matchAll: 1`, no `info.device` | `null` — **global** |
+| `matchAll: 0`, no `info.device` | `null` — **identical** |
+
+**`matchAll` made no observable difference in any tested path.** It is always
+written as `1` or `0` by the app (`ku7.m14064d`), but its effect is **not
+determined**. Possibilities are that it governs something untested (matching
+multiple alarm instances), or that it is a legacy field the box ignores. Treat it
+as **required-but-inert**: keep sending it for fidelity with the app, and do not
+build behaviour on it.
+
+**What actually determines scope** (from `cua.m8202c`, which a mute shares with
+`exception:create`):
+
+| `info` key present | Scope granted |
+| --- | --- |
+| `p.device.mac` | that device |
+| `p.tag.ids` | a group or user tag |
+| `p.intf.id` | a network |
+| **none of the above** | **all — every device on the box** |
+
+Measured on the mute path (`exception:create`), confirming the key-driven
+behaviour and that `matchAll` is stored but does not affect scope:
+
+| `value` | Stored scope keys |
+| --- | --- |
+| no scope key, no `matchAll` | *(none)* — all devices |
+| `matchAll: 1` + `p.device.mac` | `matchAll`, `p.device.mac` |
+| `matchAll: 0` + `p.device.mac` | `matchAll`, `p.device.mac` — **identical to `matchAll: 1`** |
+| `matchAll: 1`, no device | `matchAll` only — all devices |
+
+**The MSP data model is explicit where the local wire format is implicit.**
+`docs.firewalla.net/data-models/alarm/` defines **five** scope types and — the
+important part — models `all` as a **first-class value**, not as absence:
+
+| MSP `scope.type` | `scope.value` | Local `info` key |
+| --- | --- | --- |
+| `device` | device ID | `p.device.mac` |
+| `group` | group ID | `p.tag.ids` |
+| `user` | user ID | `p.tag.ids` |
+| `network` | network ID | `p.intf.id` |
+| `all` | — *(not used)* | **no scope key at all** |
+
+**`scope` is a required field in the MSP mute body.** MSP therefore forces the
+caller to state a scope, and `all` is an intentional selection. Locally the same
+outcome is reached by *omitting* the keys — identical on the wire, but it means an
+unintended global mute is what a caller gets by forgetting a field.
+
+**Design consequence — mirror MSP's model, not the local wire format.** The
+integration's mute service should take **`scope` as a required enum with an
+explicit `all` value**, then translate `all` into key omission internally. That
+makes "silence everything" a deliberate choice rather than a default. Do **not**
+expose the local omission behaviour directly.
+
+The same applies to the target: MSP requires `target` (`alarmType` / `domain` /
+`ip`), while locally an omitted target is a whole-alarm-type mute. Expose
+`alarmType` explicitly rather than leaning on absence — see Finding 34.
+
+The app's "apply to" picker (`AlarmActionHelper.getMuteApplyToItems`, offering
+**device / user / network / global**) already presents the choice explicitly, and
+its `global` option is the `null` case that writes no key.
+
+
+**`alarm:block` payload differences** (`ku7.m14064d` + `cd0.m2349a`):
+
+- Same envelope as `allow`, but for `type` in (`dns`, `category`) it adds
+  **`dnsmasq_only: true`** to `info`.
+- **Blocks carry no `expireTs`** — the app never sets one for a block.
+- For `category` blocks the app also adds a `customizedKeys` object with
+  `app_uid` and `app_name`; for allows it sets `p.dest.app.id` instead.
+
+**`matchAll` is always written** as `1` or `0` in both allow and block payloads.
+
+### Finding 30: Alarm types and the app's filter grouping
+
+**Scenario:**
+
+- Recovered from `AlarmFiltersHelper.filterCategories` and
+  `AlarmsHelper.allFilterTypesWithImplicit`.
+- **Filtering is purely client-side**: these are `type` strings already present
+  in the alarm list, so no additional box call is required to filter.
+
+**Full type list** (`", "` separated in `filterCategories`):
+
+`ALARM_INTEL`, `ALARM_LARGE_UPLOAD`, `ALARM_UPNP`,
+`ALARM_LARGE_UPLOAD_2` (feature-gated behind `vf0.f34745H1`),
+`ALARM_NEW_DEVICE`, `ALARM_VPN_CLIENT_CONNECTION`, `ALARM_VIDEO`,
+`ALARM_GAME`, `ALARM_PORN`, `ALARM_DEVICE_BACK_ONLINE`,
+`ALARM_ABNORMAL_BANDWIDTH_USAGE`, `ALARM_OVER_DATA_PLAN_USAGE`,
+`ALARM_VPN_DISCONNECT`, `ALARM_DUAL_WAN`.
+
+**Implicit companions** — the app folds related types into a filter category so
+filtering matches user expectations. **A filter that ignores these will
+under-report versus the app:**
+
+- `ALARM_INTEL` → also `ALARM_BRO_NOTICE`, `ALARM_CUSTOMIZED_SECURITY`,
+  `ALARM_SURICATA_NOTICE`
+- `ALARM_DEVICE_BACK_ONLINE` → also `ALARM_DEVICE_OFFLINE`
+- `ALARM_VPN_DISCONNECT` → also `ALARM_VPN_RESTORE`, `ALARM_VWG_CONN`
+
+So the app's user-facing filters map as: **security → `ALARM_INTEL` (+3)**,
+**abnormal upload → `ALARM_LARGE_UPLOAD`**, **open port → `ALARM_UPNP`**.
+
+**MSP-only filter values** exist in `MspAlarmFilterType` with query values
+`create`, `ignore` and `review` (Behavioural / Archived / Needs review). These
+are **MSP API concepts**, not local runtime items, and are out of scope for the
+local integration.
+
+**Orphan types worth noting:** `ALARM_GAME`, `ALARM_VIDEO` and
+`ALARM_ABNORMAL_BANDWIDTH_USAGE` were all observed in live data but
+`ALARM_DEVICE_BACK_ONLINE`, `ALARM_VPN_DISCONNECT` and `ALARM_DUAL_WAN` were
+not, so some listed categories may be dormant on this hardware.
+
+### Finding 31: Alarm blocks create ordinary policy rules
+
+**Scenario:**
+
+- Confirmed live (2026-09-30): a block on `vimeo.com` for one MAC incremented
+  `policyRules` from 306 to **307** and returned `{"policy": {"pid": "652", ...}}`.
+
+**The created rule is a normal policy rule** and is already parsed by
+`RuleManager`. Observed rule fields:
+
+```json
+{
+  "pid": "652",
+  "action": "block",
+  "aid": "1728",
+  "alarm_type": "ALARM_VIDEO",
+  "reason": "ALARM_VIDEO",
+  "type": "dns",
+  "target": "vimeo.com",
+  "target_name": "player.vimeo.com",
+  "target_ip": "162.159.128.61",
+  "if.type": "dns",
+  "if.target": "vimeo.com",
+  "dnsmasq_only": true,
+  "scope": ["0C:85:E1:B0:1D:1C"],
+  "direction": "bidirection",
+  "activatedTime": "1790732668.522",
+  "lastActivatedTime": "1790732668.522"
+}
+```
+
+**Consequences:**
+
+- The rule carries an **`aid` back-reference** to the alarm that created it, so
+  alarm-created blocks are identifiable within the rule inventory.
+- `alarm:unblock` removed the rule and `policyRules` returned to 306.
+- **Do not build a separate rule layer for alarm blocks** — surface them through
+  the existing rule machinery (`RuleManager`, `_COMMAND_POLICY_CREATE` /
+  `_COMMAND_POLICY_DELETE`).
+- Blocking therefore consumes a **policy rule slot** (`policyRuleNumber`), which
+  is a finite resource worth noting for a bulk-block design.
+
+### Finding 32: Bulk alarm commands (`ignoreAll`, `deleteArchivedAll`, `deleteActiveAll`)
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) against the gold box.
+- These are the app's "clear all" style operations. Unlike the single-record
+  commands in Finding 28, they take an **empty value object** and no `alarmID`.
+
+**Confirmed command contracts** (`mtype=cmd`, `target=0.0.0.0`, empty value):
+
+| Operation | `item` | `value` | Response |
+| --- | --- | --- | --- |
+| Archive all active | `alarm:ignoreAll` | `{}` | `{}` |
+| Delete all archived | `alarm:deleteArchivedAll` | `{}` | `{}` |
+| Delete all active | `alarm:deleteActiveAll` | `{}` | **not tested** |
+
+The builder is `ku7.m14063c`-adjacent: the app routes these through
+`n03.m15334c0(item, cont)`, which builds an **empty** `JSONObject` and dispatches
+via `n03.m15316F(box, item, {}, null, cont)` — i.e. `{"item": item, "value": {}}`.
+`n03.m15318H` shows the same `{"item", "value"}` envelope for the `GET` variant.
+
+**Measured effects:**
+
+`alarm:ignoreAll` — archives every active alarm:
+
+| | Before | After |
+| --- | --- | --- |
+| `activeAlarmCount` | 243 | **0** |
+| `archivedAlarmCount` | 0 | **243** |
+| `pendingAlarmCount` | 0 | 0 |
+| `exceptionRules` | 99 | 99 (unchanged) |
+| `policyRules` | 306 | 306 (unchanged) |
+
+Spot-checked that previously-active aids (`1727`–`1732`, `1487`) all appear in
+the `archivedAlarms` list afterwards, so the records **move** rather than being
+discarded. `newAlarms` also dropped to 0.
+
+`alarm:deleteArchivedAll` — deletes every archived alarm:
+
+| | Before | After |
+| --- | --- | --- |
+| `activeAlarmCount` | 243 | 243 (unchanged) |
+| `archivedAlarmCount` | **3** | **0** |
+| `archivedAlarms` list | `['1723','1728','1733']` | `[]` |
+
+Both return an empty `{}` body — the response carries **no confirmation**, so the
+only way to verify success is to re-read the counts.
+
+**Both are irreversible.** `ignoreAll` is the more recoverable of the two: the
+alarms move to the archive where they remain visible and retrievable via
+`item=archivedAlarms`. `deleteArchivedAll` destroys them permanently. There is
+no un-archive command (Finding 28), so `ignoreAll` followed by
+`deleteArchivedAll` is equivalent to a permanent bulk wipe.
+
+**Side effect during this investigation:** running `ignoreAll` archived the
+owner's entire active alarm history (243 records). This was explicitly
+authorised for testing, and the alarms remain in the archive rather than being
+lost — but it is a good illustration of why these commands need a confirmation
+gate and should never be wired to a bare button.
+
+**`alarm:deleteActiveAll` — confirmed 2026-09-30.** Now verified, closing the last
+unverified alarm command. APK reference: `AlarmViewDelegate$setupMoreOperations$1$d$1$1$r$1`,
+the `$deleteAllArchived == false` branch.
+
+| | Before | After |
+| --- | --- | --- |
+| `activeAlarmCount` | 1 | **0** |
+| `archivedAlarmCount` | 243 | 243 (unchanged) |
+| `archivedAlarms` contains the deleted aid | — | **No** |
+
+**It permanently deletes rather than archiving.** The single active alarm (`aid`
+1735) disappeared from **both** the active and the archived lists. So the two
+bulk deletes are complementary and neither is recoverable:
+
+- `deleteActiveAll` → permanently removes every active alarm
+- `deleteArchivedAll` → permanently removes every archived alarm
+
+**All nine alarm commands are now live-verified.** No alarm operation remains
+documented-from-APK-only.
+
+**Artifacts:** `utils/probe_alarm_control.py --action {archive-all,
+delete-archived-all, delete-active-all}` (dry-run by default).
+
+### Finding 33: Silences are a separate object with two create paths and two delete paths
+
+**Scenario:**
+
+- Confirmed live (2026-09-30) after an initial partial reading of the app missed
+  the standalone paths. The owner confirmed the app can mute and unmute an
+  **archived** alarm, which does not fit `alarm:allow` — investigation found a
+  second, alarm-independent mechanism.
+- MSP documentation corroborates the model:
+  *"muting … archives the alarm and instructs the box to create a silence
+  exception"*, while *"archiving does not create a silence exception"*.
+
+**A silence is its own object, not a flag on an alarm.**
+
+Exception records live in the top-level `exceptionRules` array. Two identifier
+fields matter and they are **not interchangeable**:
+
+| Field | Identity | Used by |
+| --- | --- | --- |
+| `aid` | the originating alarm | `alarm:unallow` |
+| `eid` | the exception itself | `exception:delete` |
+
+**Confirmed: `fx2.java` reads `optString("eid")` into the field used as
+`exceptionID`.** An exception created standalone has **no `aid` at all**.
+
+**Two create paths:**
+
+| Path | `item` | value | Requires |
+| --- | --- | --- | --- |
+| Mute from an alarm | `alarm:allow` | `{alarmID, matchAll, info{...}}` | an **active** alarm |
+| Standalone mute | `exception:create` | see payload below | **nothing** |
+
+`alarm:allow` operates on an active alarm — it archives that alarm *and* creates
+the silence. **It returns HTTP 500 against an archived alarm**, because there is
+no active record to act on. This is not a limitation on muting archived alarms;
+it means `alarm:allow` is simply the wrong command in that context.
+
+`exception:create` is the standalone path and needs no alarm:
+
+```json
+{
+  "item": "exception:create",
+  "value": {
+    "type": "ALARM_GAME",
+    "if.target": "example-mute-test.com",
+    "if.type": "dns",
+    "p.dest.name": "example-mute-test.com",
+    "target_name": "example-mute-test.com"
+  }
+}
+```
+
+- `p.dest.name` is used for `if.type: "dns"`; `p.dest.ip` for `if.type: "ip"`
+  (`AlarmSettingCategoryMuteDialog`, via `cua.m8202c`).
+- Device scoping is added by `cua.m8202c`: **`p.device.mac`** for a device,
+  **`p.tag.ids`** for a group/user tag, **`p.intf.id`** for a network. Omit all
+  three for a global silence.
+- Builders: `cua.m8200a` / `cua.m8201b`; item constant in `n33` (`EF77`).
+
+Measured live: `exception:create` returned the created record with a fresh
+`eid` (`106`) and `exceptionRules` grew 99 → 100. **No `aid` was present**, which
+is what makes it independent of any alarm.
+
+**Two delete paths:**
+
+| Path | `item` | value | Scope |
+| --- | --- | --- | --- |
+| Alarm-tied unmute | `alarm:unallow` | `{alarmID: <aid>}` | **only** exceptions carrying that `aid` |
+| Universal unmute | `exception:delete` | `{exceptionID: <eid>}` | **any** exception |
+
+Measured live: `exception:delete` with `{"exceptionID": "106"}` removed the
+standalone silence (exceptions 100 → 99) and returned `{}`.
+
+Measured live: `alarm:unallow` with an **`eid`** passed as `alarmID` returned
+**HTTP 500** and the silence remained. So `alarm:unallow` genuinely resolves by
+alarm, not by exception.
+
+**Why the app needs both:** `AlarmUnDoListener` issues `alarm:unallow` when the
+user undoes a mute from the alarm feed (the alarm is known). `AlarmSettingsView`
+and `am4.java` choose `alarm:unallow` when a matching alarm still exists, and
+fall back to `exception:delete` when it does not. That fallback is what makes
+mute-then-unmute work for **archived** alarms.
+
+**Design consequence — `exception:delete` is the more general primitive.**
+Any exception can be removed by `eid`, so a caller that already holds the
+exception record never needs `alarm:unallow`. `alarm:unallow` is a convenience
+that resolves alarm → exception internally. An integration that reads
+`exceptionRules` and exposes `eid` can implement unmute with `exception:delete`
+alone.
+
+**The mute-scope caveat from Finding 29 still applies to both paths:** the
+device/tag/network scope must be explicit. Omitting the scope keys produces a
+**global** silence, which is the broadest possible action.
+
+**Artifacts:** live session 2026-09-30; `AlarmSettingCategoryMuteDialog$saveDestinationRule$1$r$1.java`,
+`cua.java`, `am4.java`, `AlarmSettingsView.java`, `AlarmUnDoListener.java`.
+
+**Related MSP documentation** (`docs.firewalla.net/api-reference/alarm/`) confirms
+the same model and adds: archive and mute require MSP 2.11.0+, `limit` caps at
+500 with a default of 200 and cursor pagination, and mute takes an explicit
+`target` (`alarmType` / `domain` / `ip`) plus `scope` (`all` / `device` / …).
+The local runtime uses the equivalent `matchAll` + `info` envelope instead.
+
+### Finding 34: Blocking is pure rule creation; silences support a target-less whole-type mute
+
+**Scenario:**
+
+- Confirmed live (2026-09-30). Two questions were open: whether block needs an
+  active alarm, and whether the whole-alarm-type mute the MSP docs describe
+  (`target: {type: "alarmType"}`) exists locally.
+
+**Blocking does NOT need an active alarm — it is pure rule creation.**
+
+The MSP API exposes **no** "block an alarm" or "unblock an alarm" endpoint. Its
+alarm surface is only get / delete / archive / mute. That is a strong signal that
+blocking is not an alarm feature at all: the app's block button creates an
+ordinary policy rule, and the alarm's `aid` is merely recorded on it as a
+back-reference.
+
+Tested by blocking an **archived** alarm (`aid` 1726, `live-video.net`, scoped to
+one MAC):
+
+| | |
+| --- | --- |
+| Result | `{"policy": {"pid": "653", ...}}` — a new policy rule |
+| `policyRules` | 321 → **322** |
+| `alarm:unblock` | 322 → **321**, rule removed |
+
+Note the `alarm:` prefix on the command is a UI-level naming choice, not
+evidence of alarm ownership — the created object is a plain rule, and `RuleManager`
+already parses it. **The MSP API's omission of a block endpoint is consistent with
+this and is now explained.**
+
+**A target-less silence is a whole-alarm-type mute.**
+
+MSP's `target: {type: "alarmType"}` (silence every future alarm of this type,
+whatever the destination) maps locally to `exception:create` with **`type` and no
+target**:
+
+```json
+{ "item": "exception:create", "value": { "type": "ALARM_GAME" } }
+```
+
+Stored minimally as `{"type": "ALARM_GAME", "timestamp": ..., "eid": "108"}` —
+no `if.target`, no `if.type`, no device keys. Verified: exceptions 99 → 100, then
+removed by `exception:delete` back to 99.
+
+This means the local silence surface covers **all three** MSP target forms:
+
+| MSP `target.type` | Local equivalent |
+| --- | --- |
+| `alarmType` | `exception:create` with `type` only, no target |
+| `domain` | `exception:create` with `if.type: "dns"` + `if.target` + `p.dest.name` |
+| `ip` | `exception:create` with `if.type: "ip"` + `if.target` + `p.dest.ip` |
+
+and all three MSP `scope` forms (`all` / `device` / group) via the presence or
+absence of the device/tag/intf keys (Finding 29).
+
+**Design consequence:** the local silence API is **a superset of MSP's mute
+capability**, and one `exception:create` path expresses every variant MSP needs
+three documented parameter combinations for. A single mute service parameterised
+on (target type, target value, scope) covers the whole surface.
+
+**There is one thing MSP does better, and it should be copied.** MSP requires
+**both** `target` and `scope` in the mute body. Locally both are optional, with
+omission meaning "whole alarm type" and "all devices" respectively — so the
+broadest possible mute is what a caller gets by leaving fields out. MSP's
+strictness is the safer design. **Mirror it: make `scope` required with an
+explicit `all` value, and expose `alarmType` as an explicit target type rather
+than relying on an omitted target.** The wire format stays identical; only the
+service contract is stricter.
+
+### MSP data model reference (for parity checks)
+
+Recorded because it is a stable published contract and a useful cross-check when
+a local field's meaning is unclear.
+
+**Mute target types:** `alarmType` *(no value — silences every future alarm of
+that type regardless of destination)*, `domain` *(wildcard matching applied
+automatically, so `example.com` also matches `sub.example.com`)*, `ip`.
+
+**Mute scope types:** `device`, `group`, `user`, `network`, `all` — see the table
+in Finding 29.
+
+**Alarm type is a NUMBER in MSP**, not the local `ALARM_*` string:
+
+| MSP | Meaning | | MSP | Meaning |
+| --- | --- | --- | --- | --- |
+| 1 | Security Activity | | 9 | Gaming Activity |
+| 2 | Abnormal Upload | | 10 | Porn Activity |
+| 3 | Large Bandwidth Usage | | 11 | VPN Activity |
+| 4 | Monthly Data Plan | | 12 | VPN Connection Restored |
+| 5 | New Device | | 13 | VPN Connection Error |
+| 6 | Device Back Online | | 14 | Open Port |
+| 7 | Device Offline | | 15 | Internet Connectivity Update |
+| 8 | Video Activity | | 16 | Large Upload |
+
+This confirms the "Security Activity / Abnormal Upload / Open Port" filters the
+app exposes map to MSP types 1, 2 and 14 — consistent with the `ALARM_INTEL`,
+`ALARM_LARGE_UPLOAD` and `ALARM_UPNP` local strings plus their implicit
+companions (Finding 30).
+
+**Alarm status is a NUMBER in MSP: 1 = active, 2 = archived.** Note the
+divergence — locally there is no status field, `state` is always `"active"`, and
+archived is determined by **list membership** (`archivedAlarms`). Do not expect a
+local status field to appear; the two models represent the same idea differently.
+
+**Remote/category enums worth noting:** `Region` is a 2-letter ISO 3166 code, and
+`Category` is one of `ad edu games gamble intel p2p porn private social shopping
+video vpn` — the last maps to our `p.dest.category`.
+
+**Artifacts:** live session 2026-09-30; MSP alarm docs at
+`docs.firewalla.net/api-reference/alarm/`.
+
+### Finding 35: `scope` is one concept across rules, silences and usage history — do not invent a fourth form
+
+**Scenario:**
+
+- Raised during alarm service design as a duplication risk. Confirmed by
+  comparing MSP's data model against existing integration code.
+
+**MSP models scope identically for rules and alarms.** The Searching reference
+documents the Rule qualifier as returning
+`scope: {"type": "device", "value": "AA:BB:CC:DD:EE:FF"}` — the **same**
+structured shape as the alarm Mute Scope. So MSP has **one** scope concept, and
+applies it wherever a target set is needed.
+
+**Locally the same concept already exists in two forms, and a third was about to
+be invented:**
+
+| Where | Shape | Status |
+| --- | --- | --- |
+| Rule create payload (`models.py`) | `scope: list[str]` — flat identifiers, e.g. `["0C:85:E1:B0:1D:1C"]` | **Existing** |
+| Usage history (`get_time_usage_report`) | `scope_kind` + `scope_target` — kind enum plus one value | **Existing** |
+| Alarm mute (proposed) | `scope` + `scope_value` | ❌ **Would have been a duplicate of the row above** |
+
+**The established convention is `scope_kind` + `scope_target`.** Used verbatim:
+
+```python
+SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: Final = "scope_kind"
+SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: Final = "scope_target"
+```
+
+```python
+vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND): vol.In(("device", "group", "user")),
+vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET): cv.string,
+```
+
+**The vocabularies already agree.** MSP's alarm scope types are
+`device, group, user, network, all`. The local usage-history enum is
+`device, group, user` — **a subset of the same three values, in the same order**.
+That is not a coincidence; the local surface was already built to match MSP's
+scope vocabulary.
+
+**Alarms therefore need only extend the existing enum**, not introduce anything
+new:
+
+| `scope_kind` | Local protocol translation |
+| --- | --- |
+| `device` | `p.device.mac` |
+| `group` | `p.tag.ids` |
+| `user` | `p.tag.ids` |
+| `network` | `p.intf.id` |
+| `all` | omit every scope key |
+
+This mirrors the existing internal mapping already in `services.py`, which
+translates `scope_kind=device → request_scope_type=host` and
+`scope_kind=user → request_scope_type=tag` — a kind→protocol-type seam that
+alarms can reuse rather than re-implement.
+
+**Conclusion: use `scope_kind` + `scope_target` for alarm mute and block, and
+extend the enum with `network` and `all`.** Do **not** introduce `scope` /
+`scope_value`, and do **not** reuse the MSP wire name `scope` for a parameter —
+`scope` already means the flat rule identifier list elsewhere in the codebase.
+
+**Why the shapes differ at all.** The structured `{type, value}` form is MSP's
+API-layer abstraction. Locally every write path uses flat keys or lists
+(`p.device.mac`, `p.tag.ids`, `p.intf.id` for silences; a flat list for rule
+create). The structured form is therefore a **service-contract** concern, and the
+translation to flat keys belongs in the manager — not in the service schema and
+not in the model.
+
+### Finding 36: MSP search and pagination conventions
+
+**Scenario:**
+
+- Reviewed because the local page-size behaviour was previously unclear
+  (Finding 27 recorded that local `alarms` honours `count` while `archivedAlarms`
+  honours `limit`).
+
+**Pagination is cursor-based, not offset.**
+
+- Every paged response except the last carries a base64 **`next_cursor`**.
+- Every request after the first must echo it back as **`cursor`**.
+- The canonical loop is `while (1) { fetch; push results; if (!next_cursor) break; params.cursor = next_cursor; }`.
+
+**`limit` is the documented page-size name: default 200, maximum 500.**
+
+This resolves the earlier local confusion. **`limit` is the MSP-canonical name**,
+which explains why the local `archivedAlarms` handler honours it — that item is
+MSP-shaped. The local `alarms` item honouring `count` is the **outlier**, not the
+norm.
+
+**Design consequence:** name our service parameter **`limit`**, not `count` —
+it matches MSP, matches the local `archivedAlarms` item, and matches what a user
+familiar with Firewalla will expect. Send both keys on the wire (Finding 27), but
+expose only `limit` in the service contract.
+
+**A `ts` default window exists in MSP and has no local equivalent.** From the
+Alarm qualifiers: *"If no `ts` qualifier is provided, results default to the last
+30 days."* The local `alarms` item has no such window — `count: 1000` returned
+all 243 regardless of age. Worth knowing when sizing a default page.
+
+**Alarm search exposes a documented qualifier surface** (MSP Searching → Alarm
+Qualifiers), considerably richer than a simple type filter:
+
+| Qualifier | Alias | Example |
+| --- | --- | --- |
+| `ts` | — | `ts:<1695196894.395` — with `sortBy` for ordering |
+| `type` | `AlarmType` | `type:1,2,3` or by name |
+| `status` | — | `status:active` |
+| `box.id`, `box.name` | `Box` | |
+| `box.group.id` | — | |
+| `device.id` | `Mac` | `"AA:BB:CC:DD:EE:FF"` |
+| `device.name` | `Device` | `device.name:iphone` |
+| `device.network.id`, `device.network.name` | `Network` | |
+| `remote.category` | `Category` | `remote.category:porn,game` |
+| `remote.domain` | `Domain` | `remote.domain:google.com` |
+| `remote.region` | `Region` | 2-letter ISO code |
+| `transfer.download` / `.upload` / `.total` | `Download`/`Upload`/`Total` | `>10MB`, with units |
+
+Query syntax supports literals, wildcards (`*iphone*`), quoted strings,
+exclusion (`-status:active`), numeric comparisons (`>`, `>=`, `<`, `<=`) and
+ranges (`n-m`), across space-separated terms. **Syntax is MSP-only** — the local
+runtime takes no query grammar, as established earlier. Recorded only so our
+service's simple filters can be documented as a deliberate subset rather than
+looking like an oversight.
+
+**Units are decimal, not binary:** `KB = 1000 B`, `MB = 1000 KB`, `GB = 1000 MB`,
+`TB = 1000 GB`. Relevant if any byte thresholding is ever exposed.
+
+### Finding 37: Alarm data-model terminology — align to MSP and to our own existing names
+
+**Scenario:**
+
+- Reviewed MSP's published Alarm data model
+  (`docs.firewalla.net/data-models/alarm/`) against the local `p.*` keys
+  enumerated in Finding 26 and against naming already present in this codebase.
+
+**The local payload carries nearly everything MSP models — under different names.**
+
+| Concept | MSP field | Local raw key | Local normalized name today |
+| --- | --- | --- | --- |
+| Destination host | `remote.domain` | `p.dest.domain` / `.name` | **`remote_host`** ✔ already aligned |
+| Destination IP | `remote.ip` | `p.dest.ip` | **`remote_ip`** ✔ already aligned |
+| Destination region | `remote.region` | `p.dest.country` | *(not modelled)* |
+| Destination category | `remote.category` | `p.dest.category` | *(not modelled)* |
+| Destination app | *(none — local only)* | `p.dest.app` / `.app.id` | *(not modelled)* |
+| LAN device | `device.name` / `.id` / `.ip` | `p.device.name` / `.mac` / `.ip` | *(no alarm model yet)* |
+| Network | `device.network` | `p.intf.name` / `.desc` / `.id` / `.subnet` | *(not modelled)* |
+| Group / user | `device.group` | `p.tag.*` / `p.utag.*` | *(not modelled)* |
+| Transport | `protocol` | `p.protocol` | ✔ same word |
+| Timestamp | `ts` | `timestamp` **and** `alarmTimestamp` | *(two candidates)* |
+| Status | `status` (1 active / 2 archived) | `state` (always `"active"`) | *(no equivalent)* |
+
+**`remote_*` is already our word — `dest` is not.** Measured: `dest` appears
+**zero times** in `models.py`, and `remote_host` / `remote_ip` already exist on
+`FirewallaNetworkHostRanking`, populated in `integration_manager.py` and
+serialized in `services.py`. MSP also calls it `remote`. **So the alarm model
+should use `remote_*`.** Using `dest_*` would be a third vocabulary for a concept
+we already name, against both our own precedent and Firewalla's.
+
+**Values agree where names differ.** `p.dest.country` holds ISO 3166 alpha-2
+codes — observed `US` (204), `GB` (2), `DE` (1) across 231 records — which is
+exactly MSP's `remote.region` definition (*"Region of the remote IP, a 2-letter
+ISO 3166 code"*). Only the **name** diverges: `country` locally, `region` in MSP.
+Both are defensible; `region` matches Firewalla's model, `country` is more
+plainly understood. **Pick one and document it** rather than leaving a raw
+passthrough.
+
+**`p.protocol` matches MSP exactly** — observed `tcp` (150) and `udp` (55), the
+same two values MSP documents.
+
+**Category vocabulary genuinely diverges — and has an internal inconsistency.**
+
+MSP `Category` is: `ad edu games gamble intel p2p porn private social shopping
+video vpn`. Observed locally across 231 records: `games` (125), **`av` (71)**,
+`intel` (9).
+
+- `games` and `intel` **match** MSP.
+- **`av` does not exist in MSP's list** — MSP's equivalent is `video`.
+
+Separately, the local vocabulary is **internally inconsistent about number**: the
+category is plural (`games`) while the alarm *type* is singular (`ALARM_GAME`).
+And the category says `av` while the type says `ALARM_VIDEO` — two words for the
+same idea within one payload.
+
+**This is unresolved and should not be guessed at.** Options are that MSP maps
+`av → video` in its own API layer, or that the two vocabularies are genuinely
+different. **Recommendation: keep local category values raw for now** (consistent
+with the raw-`ALARM_*`-type decision), document `av` as the box's audio/video
+value, and do not build a mapping table to MSP's vocabulary without evidence that
+one is needed.
+
+**Two timestamps where MSP has one.** MSP models a single `ts`. Locally
+`timestamp` and `alarmTimestamp` are both present and **differ** (observed gaps
+of seconds to minutes). **Recommendation: treat `alarmTimestamp` as the MSP `ts`
+equivalent** — it is the later, alarm-specific value, while `timestamp` appears
+to be the underlying flow or detection time. Decide once, document the choice on
+the field, and surface only one by default.
+
+**`status` has no local equivalent, and should not be invented.** MSP reports
+1 = active / 2 = archived as a field. Locally `state` is **always `"active"`** —
+observed on all 231 records including archived ones — and archived-ness is
+expressed only by **list membership** (`archivedAlarms`). If the integration
+needs to expose archived state, derive it and name it as such
+(`is_archived` from list membership); do **not** add a `status` field implying a
+payload source that does not exist.
+
+**MSP models some things the local payload does not carry at all.** Worth knowing
+so their absence is not mistaken for a parsing gap:
+
+- **`direction`** (`inbound` / `outbound` / `local`) — no `direction` key observed
+  in any alarm record. Rules carry `direction: bidirection`; alarms do not
+  appear to.
+- **`dataPlan`** (`quota`, `begin`, `end`) — for MSP type 4. No `quota` key
+  observed; the nearest local evidence is `p.totalUsage` on bandwidth alarms.
+- **`wan`** (`name`, `status`, `active`, `switched`, `type`, `ready`) — for MSP
+  type 15. Locally WAN state lives in the separate `events` timeline
+  (`FirewallaWanEvent`), not on alarms.
+- **`port`** (`devicePort`, `protocol`, `publicPort`, `description`) — for MSP
+  type 14. Local `p.device.port` exists on security alarms but is a bare value,
+  not the structured object.
+- **`vpn`** (`id`, `name`, `type`, `subType`, `deviceCount`, `strict`) — local has
+  only `p.vpnType` and the peer keys, not the full object.
+
+**Fields local to the box with no MSP equivalent** (do not expect to map them):
+`p.cloud.decision`, `p.severity` / `p.severity.score`, `p.quarantine`,
+`p.fi`, `p.showMap`, `p.timestampTimezone`, `p.action.block`, `p.alarm.trigger`,
+`p.security.*`, `result` / `result_policy` / `result_method`,
+`p.local_is_client`, `p.from`, `p.dest.app` / `.app.id`, `p.begin.ts` / `p.end.ts`
+/ `p.duration` / `p.flows` / `p.percentage` / `p.totalUsage`.
+
+**Alignment summary — what to adopt before building:**
+
+1. **`remote_*`, not `dest_*`** — matches MSP and our own existing model.
+2. **`remote_region`, not `remote_country`** — matches MSP's name for identical
+   ISO alpha-2 data. *(Or keep `country`; but choose deliberately.)*
+3. **`alarmTimestamp` is the `ts` equivalent.** Surface one timestamp by default.
+4. **No `status` field.** Derive `is_archived` from list membership if needed.
+5. **Keep `ALARM_*` types and category values raw**, and document `av` as the
+   box's audio/video category.
+6. **Do not invent MSP sub-objects** (`transfer`, `vpn`, `wan`, `port`,
+   `dataPlan`) unless a real need appears; the flat local keys work.
+
+### Finding 38: Rule data model cross-check — what it clarifies for alarms
+
+**Scenario:**
+
+- Reviewed MSP's Rule data model (`docs.firewalla.net/data-models/rule/`) against
+  Finding 37's open alarm-alignment questions and against the existing local rule
+  implementation. Purpose: see whether the second model resolves anything the
+  first left ambiguous.
+
+**Six things it clarifies.**
+
+**1. MSP does not have one canonical category list — it has two.** This resolves
+the `av` question's framing:
+
+| Model | Categories |
+| --- | --- |
+| MSP **Rule** target | `drugs games gamble p2p porn social shopping video violence vpn` |
+| MSP **Alarm** remote | `ad edu games gamble intel p2p porn private social shopping video vpn` |
+
+Against a 213-bit intersection of games / gamble / p2p / porn / social / shopping /
+video / vpn, each model adds its own: Rule adds `drugs`, `violence`; Alarm adds
+`ad`, `edu`, `intel`, `private`.
+
+**Consequence:** there is no single upstream vocabulary to align to, and the
+integration already targets both surfaces. Keeping category values **raw** — the
+existing decision — is now clearly correct rather than merely convenient. The
+local `av` value remains local-only with no MSP counterpart in either list.
+
+**2. `region` has cross-model precedent; `country` has none.** MSP uses
+`region` in **both** the Rule target (`region`, 2-letter ISO 3166) and the Alarm
+remote (`remote.region`, also 2-letter ISO 3166). The word `country` appears
+nowhere in either MSP model, yet the local payload key is `p.dest.country`.
+
+**Consequence:** strengthens the recommendation to normalize to
+`remote_region`. `country` stays as the raw key name only.
+
+**3. The `all` scope value is alarm-mute-specific, not a general scope concept.**
+MSP defines:
+
+| Model | Scope types |
+| --- | --- |
+| Rule | `device group user network` — *"unset for all devices"* |
+| Alarm mute | `device group user network all` |
+
+So rules express "all devices" by **absence**, exactly like the local wire format,
+while alarm mute is the one place MSP models `all` explicitly.
+
+**Consequence:** keep `all` in the **alarm** service enum only. Do not push it into
+a shared scope helper that rules also use, since rules legitimately mean
+"all" by omission. This also confirms the local usage-history enum
+(`device, group, user`) is correctly a subset.
+
+**4. Derived status is already the local pattern — so `is_archived` fits.**
+MSP Rule carries `status: active | paused` and `resumeTs`. Locally
+`FirewallaPolicyRule` has **no status field**: it holds `enabled` plus an
+`idle_ts` property read from the raw payload, and derives the display value:
+
+```python
+status = _STATUS_ENABLED if rule.enabled else _STATUS_DISABLED
+```
+
+**Consequence:** deriving alarm archived-state rather than expecting a payload
+field is **consistent with how rules already work**, not an alarm-specific
+workaround. It also explains why alarms have no status field — the local runtime
+consistently represents state as a boolean plus an auxiliary timestamp rather
+than a status enum.
+
+*(Note the vocabulary differs anyway: local rules say `enabled`/`disabled`, MSP
+says `active`/`paused`. Not worth changing, but do not treat MSP's strings as
+authoritative for our surfaces.)*
+
+**5. Multiple timestamps is a pattern, not an anomaly.** MSP Rule carries `ts`
+(created), `updateTs` (last update) and `resumeTs` (auto-resume); MSP Alarm
+carries only `ts`. Locally the alarm has **two** (`timestamp` and
+`alarmTimestamp`) and rules carry `last_activated_time` plus `idle_ts`.
+
+**Consequence:** the two alarm timestamps are unremarkable in context, and
+`alarmTimestamp` mapping to `fired_at` remains the sensible choice. Expect more
+than one timestamp per record and name each explicitly rather than picking a
+generic `timestamp` field.
+
+**6. `direction` genuinely does not exist on alarms.** MSP Rule defines
+`direction: bidirection | inbound | outbound`, and local rules already carry
+`direction: bidirection`. MSP Alarm has no `direction` field, and no `direction`
+key was observed in any local alarm record.
+
+**Consequence:** confirmed as a real payload difference. Do not add a `direction`
+field to the alarm model.
+
+**Two divergences worth noting without acting on them:**
+
+- **`dnsOnly` vs `dnsmasq_only`.** MSP models DNS-only as a **boolean flag** on
+  a target (`dnsOnly`, defaulting true for block rules on `category`/`app`/
+  `targetlist`/`domain`). Locally, `dns` is a **target *type*** and the payload
+  key is `dnsmasq_only`. Structural difference, not just a name: MSP qualifies a
+  target, we select one. Both are valid; do not force alignment.
+- **Time limits use different models.** MSP has an `action: "timelimit"` with a
+  `timeUsage` object (`quota`, `used` in minutes). Locally, time limits are
+  expressed through `disturbLevel` / `disturbMethod` / `appTimeUsage` and the
+  `disturb` action. MSP's documented action list is
+  `allow | block | timelimit`; ours is `allow | block | disturb | qos | route` —
+  **the local set is wider and differently shaped.** Treat MSP's list as
+  incomplete for local purposes, not as the target vocabulary.
+
+**Summary of what the rule model settles:** all six of Finding 37's alignment
+decisions stand, four of them with stronger evidence than the alarm model alone
+provided. It also removes a possible over-correction — do **not** generalise the
+`all` scope value beyond alarm mute.
+
+### Finding 39: Alarm reads accept NO time filter — and the box already retains roughly 30 days
+
+**Scenario:**
+
+- A 30-day default window was specified for the alarm read service on the
+  assumption that the local runtime accepted a time bound, extrapolated from
+  MSP's `ts` search qualifier. This was **not verified** and the assumption was
+  challenged before implementation. Tested directly.
+
+**Result: no time filter exists. All eight candidate parameter names were
+silently ignored.**
+
+Measured against 230 archived records with a cutoff of `newest - 24h`:
+
+| `value` | Returned |
+| --- | --- |
+| `{"limit": 1000}` (baseline) | 230 |
+| `{"limit": 1000, "tsFrom": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "beginTs": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "from": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "begin": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "since": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "days": 1}` | **230** — ignored |
+| `{"limit": 1000, "ts": <cutoff>}` | **230** — ignored |
+| `{"limit": 1000, "query": "ts:><cutoff>"}` | **230** — ignored |
+
+Unknown keys are **silently discarded**, not rejected — so a caller passing a
+time bound gets no error and no filtering. That is the dangerous shape: the
+parameter appears accepted.
+
+This is consistent with the general finding that **the local runtime takes no
+query grammar**. MSP's `ts` qualifier is a search-API concept with no local
+equivalent. Do not retry this.
+
+**But the 30-day default is satisfied anyway — by the box itself.**
+
+| Item | Records | Oldest record age |
+| --- | --- | --- |
+| `archivedAlarms` | 230 | **29.9 days** |
+| `alarms` | 0 *(no active alarms at test time)* | — |
+
+The oldest alarm the box will return is ~30 days old, and the archive spans the
+full retained history (it contains everything ever archived, including records
+created before the current session). **No alarm older than ~30 days exists to
+retrieve.**
+
+**Interpretation — stated with appropriate caution.** This is **one observation**
+and is consistent with a ~30-day box-side retention policy, but a retention
+policy is *not* proven: the alternative is that no older alarms happen to exist
+on this box. The practical conclusion holds either way:
+
+- **No client-side 30-day filtering is needed**, because the box does not return
+  older records.
+- **No `ts_from` parameter should be added**, because there is nothing to filter
+  and no server-side mechanism to filter with.
+- **`limit` returns the newest N, full stop** — with no window to configure.
+
+**Design consequence:** drop the planned `ts_from` parameter. Document on the
+service that the box retains roughly the last 30 days and that `limit` therefore
+returns the newest records available within that retained set. If a caller needs
+"alarms in the last hour", that is client-side filtering over a small `limit` —
+which is cheap precisely because the retained set is bounded.
+
+**Artifacts:** live session 2026-09-30, `utils/probe_alarm_control.py`.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
@@ -2481,6 +3660,48 @@ When a new capture is completed:
 - record the implementation impact if the new family changes switch behavior
 
 Do not summarize away payload fields that may later matter for the protocol.
+
+**Where to look for prior evidence.** When this document is silent on a payload,
+check `.tmp/` **before** concluding the shape is unknown. `.tmp/` is gitignored,
+so it does not appear in normal repository searches, yet it holds a large corpus
+of decoded captures, live runtime pulls and two decompiled APK trees:
+
+- `.tmp/live_gold/<timestamp>/runtime_init.json` — full init payloads
+- `.tmp/firewalla_*_capture.decoded.txt` — decoded command/response captures
+- `.tmp/capture_*.json` — before/after mutation captures
+- `.tmp/Firewalla_1.69.1+(27)_jadx/` and `..._jadx_debug/` — decompiled sources
+  (the `_debug` tree sometimes yields readable bodies where the other does not)
+
+Finding 26 is the worked example: `newAlarms` and `activeAlarmCount` were
+initially recorded here as undocumented, then recovered in full from
+`.tmp/config_entry-*.json` and `.tmp/live_gold/`. Record the **artifact path** in
+every finding so the evidence is reproducible rather than re-derived.
+
+**Live pulls are the preferred evidence source** for shape confirmation:
+`python utils/pull_runtime.py --artifact-dir <dir>` reads the working credentials
+from the Home Assistant config entry, so it needs no re-pairing and no packet
+capture. For write contracts, `utils/probe_alarm_control.py` (and similar
+probes) send real commands and are dry-run by default.
+
+**Warn about side effects.** Some commands are not reversible. Alarm
+archive/mute/block leave the alarm archived permanently (Finding 28); only
+`alarm:delete` removes it. Any finding that documents a write command must state
+whether it is reversible, and probes that write should target a value the user
+can afford to lose — ideally confirming first with the owner.
+
+**Treat bulk commands as a separate risk class.** `alarm:ignoreAll` and
+`alarm:deleteArchivedAll` (Finding 32) return an empty `{}` **whether or not they
+succeeded**, so the response is no confirmation at all — success can only be
+established by re-reading the counts. They also act on everything, so there is no
+blast-radius limit. Document them with an explicit irreversibility warning, verify
+via counts, and never infer success from the response body.
+
+**Correct your own earlier findings explicitly.** When a later measurement
+overturns an earlier one, edit the original finding and mark the correction in
+place rather than silently rewriting it — see the `count`/`limit` correction in
+Finding 27, which is the second time a first-pass claim in this section proved
+wrong. Recording *that* a claim was wrong is as useful as the corrected claim,
+because it tells the next reader which conclusions were single-observation.
 
 ## Appendix: APK reverse engineering
 
@@ -2549,6 +3770,14 @@ handles most ProGuard / R8 obfuscation.
 | `fy3.java` | Main message hub / router — sends messages via cloud (`a()`) and local (`b()`) paths. Contains obfuscated methods. |
 | `ue3.java` | Symmetric key entry parser — extracts `key` (RSA-encrypted) and `rkey` (rotation key JSON) from the cloud group response. |
 | `s97.java` | Crypto utilities — AES-256-CBC encrypt/decrypt, RSA decrypt, and the `m18101c()` / `m18106q()` helpers used by the key derivation chain. |
+| `ku7.java` | Alarm (and related) action command builder. `m14063c(item, box, alarm, cont)` builds id-only commands (`alarm:ignore`, `alarm:delete`, `alarm:unallow`, `alarm:unblock`); `m14064d(applyTo, item, type, target, box, alarm, expireTs, archiveByType, app, cont)` builds scoped mute/block payloads. `m14068k(...)` builds the `alarmDetail` read. See Findings 28–29. |
+| `fx2.java` | Alarm model. Field mapping confirmed: `optString("aid")` → the value used as `alarmID`, and `optString("p.device.mac")` → the mute/block `device` scope. The parser `m10449j0(JSONObject)` did **not** decompile, so field names were recovered from live payloads. See Finding 26. |
+| `gx2.java` | Alarm container — holds `ArrayList<fx2>`; `m11206b(JSONArray)` parses the `newAlarms` array. |
+| `AlarmMuteScheduleDialog.java` | Defines the three mute durations and their `expireTs` computations. See Finding 29. |
+| `AlarmFiltersHelper.java` | `filterCategories()` returns the alarm type list used by the app's filters. See Finding 30. |
+| `AlarmsHelper.java` | `allFilterTypesWithImplicit()` adds the implicit companion types folded into each filter category. See Finding 30. |
+| `cd0.java` | `m2349a(info, action)` adds `dnsmasq_only` to `dns`/`category` block payloads. See Finding 29. |
+| `l33.java` | Message-type enum — `GET`=1, `SET`=2, `CMD`=3, `INIT`=4. Confirms alarms use `get` for reads and `cmd` for writes. |
 
 ### Confirmed outer payload format (Android app v1.69.1)
 
@@ -2790,6 +4019,10 @@ The type column shows how the app reads the field.
 | `mspData.targetlists` | `optJSONArray` | **Partial** — see below |
 | `profiles` | `optJSONObject` (system alarm profiles) | No |
 | `userConfig` | `optJSONObject` → user profiles | No |
+| `activeAlarmCount` | `optInt` | **Planned** — Finding 26 |
+| `archivedAlarmCount` | `optInt` | **Planned** — Finding 26 |
+| `pendingAlarmCount` | `optInt` | **Planned** — Finding 26 |
+| `newAlarms` | `optJSONArray` → `gx2` of `fx2` | **Planned** — Finding 26; **capped at 50** |
 | `model` | `optString` | Yes |
 | `mode` | `optString` | Yes |
 | `localDomainSuffix` | `optString` | No |

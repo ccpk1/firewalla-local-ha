@@ -1,6 +1,10 @@
 rules:
   # Bronze
-  action-setup: done
+  action-setup:
+    status: done
+    comment: Service registration declares administrator-only actions centrally
+      and re-registers them on setup so updated access gates cannot be masked by
+      stale handlers.
   appropriate-polling: done
   brands:
     status: done
@@ -34,7 +38,12 @@ rules:
   # Silver
   action-exceptions:
     status: done
-    comment: Runtime inventory and pause_rule validate entry scope, duration, and rule targets with specific service errors.
+    comment:
+      Runtime inventory, rule deletion, and alarm services validate entry scope,
+      alarm/rule selectors, mute scope, and destructive confirmations with
+      specific service errors.
+      Mutating services and runtime inventory are administrator-only while
+      automation calls without a user context remain supported.
   config-entry-unloading: done
   docs-data-update:
     status: done
@@ -57,19 +66,19 @@ rules:
     comment: Auto-discovery (mDNS/DHCP) is omitted due to the firewall's stealth network defaults and generic MAC addresses; we instead leverage its native fire.walla DNS intercept for seamless setup.
   entity-category:
     status: done
-    comment: "Primary rule, appliance-monitoring, watched-device, and watched-user entities remain uncategorized, with entity categories reserved for surfaces that are truly diagnostic."
+    comment: "Primary rule, appliance-monitoring, alarm, watched-device, and watched-user entities remain uncategorized, with entity categories reserved for surfaces that are truly diagnostic."
   entity-disabled-by-default:
     status: done
-    comment: "Rule-backed switches plus watched-device and watched-user entities are created only when the user selects them in options, while core appliance-monitoring entities remain always available."
+    comment: "Rule-backed switches plus watched-device and watched-user entities are created only when the user selects them in options, while core appliance-monitoring and alarm entities remain always available."
   entity-translations:
     status: done
-    comment: "Rule-backed switches, appliance-monitoring entities, watched-device entities, and watched-user entities use translation-backed names, states, and attributes without inline user-facing strings."
+    comment: "Rule-backed switches, appliance-monitoring entities, alarm entities, watched-device entities, and watched-user entities use translation-backed names, states, and attributes without inline user-facing strings."
   exception-translations:
     status: done
     comment: Config flow and service validation now use distinct translation keys for host, QR, entry-scope, duration, and rule-target failures.
   icon-translations:
     status: done
-    comment: "Rule-backed switch, appliance-monitoring, watched-device, and watched-user icons are defined in icons.json instead of inline icon strings."
+    comment: "Rule-backed switch, appliance-monitoring, alarm, watched-device, and watched-user icons are defined in icons.json instead of inline icon strings."
   stale-devices:
     status: done
     comment: The integration reconciles tracked-client device-registry entries for selected device trackers, removing stale client devices when they are deselected or no longer owned by the config entry while retaining the primary Firewalla device per entry.

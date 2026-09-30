@@ -20,6 +20,9 @@ from custom_components.firewalla_local.api.exceptions import (
     FirewallaAuthError,
     FirewallaConnectionError,
 )
+from custom_components.firewalla_local.binary_sensor import (
+    FirewallaAlarmActiveBinarySensor,
+)
 from custom_components.firewalla_local.const import (
     ATTR_INTEGRATION,
     ATTR_PURPOSE,
@@ -41,9 +44,13 @@ from custom_components.firewalla_local.const import (
     DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
+    SERVICE_ARCHIVE_ALARMS,
+    SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
+    SERVICE_DELETE_RULE,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
+    SERVICE_GET_ALARMS,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -54,6 +61,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
     SERVICE_GET_WIRELESS_STATUS,
+    SERVICE_MUTE_ALARM,
     SERVICE_PAUSE_RULE,
     SERVICE_RESUME_RULE,
     SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -64,10 +72,12 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_SET_SSID_PAUSED,
+    SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
     TRANS_KEY_PURPOSE_RUNTIME_SYNC_BUTTON,
 )
 from custom_components.firewalla_local.models import (
+    FirewallaAlarm,
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaHostRuntime,
@@ -76,6 +86,7 @@ from custom_components.firewalla_local.models import (
     FirewallaUserAppUsage,
     FirewallaUserRuntime,
 )
+from custom_components.firewalla_local.sensor import FirewallaAlarmCountSensor
 
 
 def _mock_snapshot() -> FirewallaRuntimeSnapshot:
@@ -202,6 +213,78 @@ async def test_setup_entry(hass: HomeAssistant) -> None:
     assert watched_user is not None
     assert watched_user.total_minutes_today == 410
     assert watched_user.associated_host_names == ("WireGuard Kaden",)
+
+
+async def test_alarm_entities_use_authoritative_count_and_bounded_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Alarm entities use the box count and only the planned summary attributes."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    alarm = FirewallaAlarm(
+        alarm_id="alarm-1",
+        alarm_type="ALARM_VIDEO",
+        device_name="phone",
+        message="phone is watching video",
+        state="active",
+        is_archived=False,
+        fired_at=1789047961.2,
+        remote_category="av",
+        remote_host="example.com",
+        remote_ip="203.0.113.1",
+        remote_app="video-app",
+        remote_region="US",
+        remote_latitude="40.1",
+        remote_longitude="-73.9",
+        interface_name="Home",
+        protocol="tcp",
+        severity="high",
+    )
+    snapshot = replace(
+        _mock_snapshot(),
+        alarms=(alarm,),
+        active_alarm_count=12,
+        archived_alarm_count=4,
+        pending_alarm_count=2,
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_mock_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    binary_sensor = FirewallaAlarmActiveBinarySensor(entry)
+    count_sensor = FirewallaAlarmCountSensor(entry)
+    attributes = binary_sensor.extra_state_attributes
+    assert binary_sensor.is_on
+    assert count_sensor.native_value == 12
+    assert attributes["active_count"] == 12
+    assert attributes["archived_count"] == 4
+    assert attributes["pending_count"] == 2
+    assert attributes["active_by_category"] == {"av": 1}
+    assert not attributes["active_by_category_complete"]
+    assert attributes["alarm_id"] == "alarm-1"
+    assert "remote_ip" not in attributes
+    assert "severity" not in attributes
 
 
 async def test_setup_entry_reuses_cached_pairing_payload(hass: HomeAssistant) -> None:
@@ -1094,7 +1177,7 @@ async def test_unloading_device_tracker_entry_preserves_registry_for_reload(
 async def test_setup_multiple_entries_registers_domain_services_once(
     hass: HomeAssistant,
 ) -> None:
-    """Test domain services register once even when two entries load."""
+    """Test domain services re-register when two entries load."""
     first_entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -1178,7 +1261,10 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         (event[ATTR_DOMAIN], event[ATTR_SERVICE]) for event in registered_events
     ) == sorted(
         [
+            (DOMAIN, SERVICE_ARCHIVE_ALARMS),
+            (DOMAIN, SERVICE_DELETE_ALARMS),
             (DOMAIN, SERVICE_GET_HOST_NAME_MAPPING),
+            (DOMAIN, SERVICE_GET_ALARMS),
             (DOMAIN, SERVICE_GET_INTERNET_QUALITY_REPORT),
             (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT),
             (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE),
@@ -1188,6 +1274,8 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_GET_WAN_EVENTS),
             (DOMAIN, SERVICE_GET_WAN_DATA_USAGE),
             (DOMAIN, SERVICE_GET_WIRELESS_STATUS),
+            (DOMAIN, SERVICE_DELETE_RULE),
+            (DOMAIN, SERVICE_MUTE_ALARM),
             (DOMAIN, SERVICE_PAUSE_RULE),
             (DOMAIN, SERVICE_RESUME_RULE),
             (DOMAIN, SERVICE_RUN_INTERNET_SPEED_TEST),
@@ -1199,11 +1287,16 @@ async def test_setup_multiple_entries_registers_domain_services_once(
             (DOMAIN, SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE),
             (DOMAIN, SERVICE_SET_SSID_PAUSED),
             (DOMAIN, SERVICE_WAKE_HOST),
+            (DOMAIN, SERVICE_UNMUTE_ALARM),
             (DOMAIN, SERVICE_DELETE_HOST),
         ]
+        * 3
     )
     assert set(hass.services.async_services()[DOMAIN]) == {
+        SERVICE_ARCHIVE_ALARMS,
+        SERVICE_DELETE_ALARMS,
         SERVICE_GET_HOST_NAME_MAPPING,
+        SERVICE_GET_ALARMS,
         SERVICE_GET_INTERNET_QUALITY_REPORT,
         SERVICE_GET_NETWORK_SEGMENT_REPORT,
         SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -1213,6 +1306,8 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_GET_WAN_EVENTS,
         SERVICE_GET_WAN_DATA_USAGE,
         SERVICE_GET_WIRELESS_STATUS,
+        SERVICE_DELETE_RULE,
+        SERVICE_MUTE_ALARM,
         SERVICE_PAUSE_RULE,
         SERVICE_RESUME_RULE,
         SERVICE_RUN_INTERNET_SPEED_TEST,
@@ -1224,6 +1319,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
         SERVICE_SET_SSID_PAUSED,
         SERVICE_WAKE_HOST,
+        SERVICE_UNMUTE_ALARM,
         SERVICE_DELETE_HOST,
     }
 

@@ -19,6 +19,11 @@ from ..const import (
 )
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from ..models import FirewallaHostRuntime, FirewallaRuntimeSnapshot
+from ..utils.host_activity import (
+    count_online_hosts,
+    is_host_online,
+    reference_last_active,
+)
 from ..utils.mac import normalize_mac_address
 from .base_manager import FirewallaBaseManager
 
@@ -209,23 +214,10 @@ class FirewallaHostManager(FirewallaBaseManager):
         if not hosts:
             return None
 
-        reference_last_active = max(
-            (
-                candidate.last_active
-                for candidate in hosts
-                if candidate.last_active is not None
-            ),
-            default=None,
-        )
-        if reference_last_active is None:
-            return None if host.stale is None else not host.stale
-
-        if host.stale is True or host.last_active is None:
-            return False
-
-        return (
-            reference_last_active - host.last_active
-            <= self.watched_device_online_window_seconds
+        return is_host_online(
+            host,
+            reference_activity=reference_last_active(hosts),
+            online_window_seconds=self.watched_device_online_window_seconds,
         )
 
     def is_device_tracker_home(self, host: FirewallaHostRuntime) -> bool | None:
@@ -241,10 +233,9 @@ class FirewallaHostManager(FirewallaBaseManager):
 
     def count_online_devices(self) -> int:
         """Return the number of hosts that appear online in the latest snapshot."""
-        return sum(
-            1
-            for host in self.get_hosts()
-            if self.is_watched_device_online(host) is True
+        return count_online_hosts(
+            self.get_hosts(),
+            online_window_seconds=self.watched_device_online_window_seconds,
         )
 
     def count_offline_devices(self) -> int:

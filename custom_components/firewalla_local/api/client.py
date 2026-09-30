@@ -22,6 +22,8 @@ from ..const import (
     LOGGER,
 )
 from ..models import (
+    FirewallaAlarm,
+    FirewallaAlarmException,
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
@@ -94,6 +96,15 @@ _COMMAND_POLICY_UPDATE: Final = "policy:update"
 _COMMAND_RUN_INTERNET_SPEED_TEST: Final = "runInternetSpeedtest"
 _COMMAND_WAKE_HOST: Final = "wol:wake"
 _COMMAND_DELETE_HOST: Final = "host:delete"
+_COMMAND_ALARM_ARCHIVE: Final = "alarm:ignore"
+_COMMAND_ALARM_ARCHIVE_ALL: Final = "alarm:ignoreAll"
+_COMMAND_ALARM_DELETE: Final = "alarm:delete"
+_COMMAND_ALARM_DELETE_ACTIVE_ALL: Final = "alarm:deleteActiveAll"
+_COMMAND_ALARM_DELETE_ARCHIVED_ALL: Final = "alarm:deleteArchivedAll"
+_COMMAND_ALARM_MUTE: Final = "alarm:allow"
+_COMMAND_ALARM_UNMUTE: Final = "alarm:unallow"
+_COMMAND_EXCEPTION_CREATE: Final = "exception:create"
+_COMMAND_EXCEPTION_DELETE: Final = "exception:delete"
 _COMMAND_SET_HOST: Final = "host"
 _COMMAND_SET_HOST_DOMAIN: Final = "hostDomain"
 _COMMAND_SET_FEEDBACK: Final = "feedback"
@@ -180,6 +191,26 @@ _RAW_USER_CATEGORY_KEY: Final = "category"
 _RAW_USER_UID_KEY: Final = "uid"
 _RAW_USER_TYPE_KEY: Final = "type"
 _RAW_EXCEPTION_RULES_KEY: Final = "exceptionRules"
+_RAW_ALARMS_KEY: Final = "newAlarms"
+_RAW_ACTIVE_ALARM_COUNT_KEY: Final = "activeAlarmCount"
+_RAW_ARCHIVED_ALARM_COUNT_KEY: Final = "archivedAlarmCount"
+_RAW_PENDING_ALARM_COUNT_KEY: Final = "pendingAlarmCount"
+_RAW_ALARM_ID_KEY: Final = "aid"
+_RAW_ALARM_TIMESTAMP_KEY: Final = "alarmTimestamp"
+_RAW_ALARM_DEVICE_KEY: Final = "device"
+_RAW_ALARM_MESSAGE_KEY: Final = "message"
+_RAW_ALARM_STATE_KEY: Final = "state"
+_RAW_ALARM_TYPE_KEY: Final = "type"
+_RAW_ALARM_REMOTE_CATEGORY_KEY: Final = "p.dest.category"
+_RAW_ALARM_REMOTE_HOST_KEY: Final = "p.dest.domain"
+_RAW_ALARM_REMOTE_IP_KEY: Final = "p.dest.ip"
+_RAW_ALARM_REMOTE_APP_KEY: Final = "p.dest.app"
+_RAW_ALARM_REMOTE_REGION_KEY: Final = "p.dest.country"
+_RAW_ALARM_REMOTE_LATITUDE_KEY: Final = "p.dest.latitude"
+_RAW_ALARM_REMOTE_LONGITUDE_KEY: Final = "p.dest.longitude"
+_RAW_ALARM_INTERFACE_NAME_KEY: Final = "p.intf.name"
+_RAW_ALARM_PROTOCOL_KEY: Final = "p.protocol"
+_RAW_ALARM_SEVERITY_KEY: Final = "p.severity"
 _RAW_POLICY_RULES_KEY: Final = "policyRules"
 _RAW_WG_PEERS_KEY: Final = "wgPeers"
 _RAW_AWG_PEERS_KEY: Final = "awgPeers"
@@ -495,6 +526,109 @@ class FirewallaApiClient:
             },
             target=DEFAULT_INIT_TARGET,
             log_level=log_level,
+        )
+
+    async def async_get_alarms(
+        self, *, limit: int, offset: int = 0
+    ) -> tuple[dict[str, object], ...]:
+        """Fetch the active alarm page from the local runtime."""
+        return await self._async_get_alarm_list(
+            item="alarms", limit=limit, offset=offset
+        )
+
+    async def async_get_archived_alarms(
+        self, *, limit: int, offset: int = 0
+    ) -> tuple[dict[str, object], ...]:
+        """Fetch the archived alarm page from the local runtime."""
+        return await self._async_get_alarm_list(
+            item="archivedAlarms", limit=limit, offset=offset
+        )
+
+    async def _async_get_alarm_list(
+        self, *, item: str, limit: int, offset: int
+    ) -> tuple[dict[str, object], ...]:
+        """Fetch a verified active or archived alarm list item."""
+        payload = await self._async_send_local_message(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: item,
+                _COMMAND_VALUE_KEY: {"count": limit, "limit": limit, "offset": offset},
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+        alarms = payload.get("alarms")
+        if not isinstance(alarms, list):
+            return ()
+        return tuple(alarm for alarm in alarms if isinstance(alarm, dict))
+
+    async def async_get_alarm_detail(self, alarm_id: str) -> dict[str, object]:
+        """Fetch the verified detail item for one active or archived alarm."""
+        return await self._async_send_local_message(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: "alarmDetail",
+                _COMMAND_VALUE_KEY: {"alarmID": alarm_id},
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+
+    async def _async_send_alarm_command(
+        self, item: str, value: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        """Send one verified alarm or exception command."""
+        return await self._async_send_local_message(
+            message_type=_COMMAND_MESSAGE_TYPE,
+            data={_COMMAND_ITEM_KEY: item, _COMMAND_VALUE_KEY: value or {}},
+            target=DEFAULT_INIT_TARGET,
+        )
+
+    async def async_archive_alarm(self, alarm_id: str) -> dict[str, object]:
+        """Archive one active alarm."""
+        return await self._async_send_alarm_command(
+            _COMMAND_ALARM_ARCHIVE, {"alarmID": alarm_id}
+        )
+
+    async def async_archive_all_alarms(self) -> dict[str, object]:
+        """Archive every active alarm."""
+        return await self._async_send_alarm_command(_COMMAND_ALARM_ARCHIVE_ALL)
+
+    async def async_delete_alarm(self, alarm_id: str) -> dict[str, object]:
+        """Permanently delete one alarm."""
+        return await self._async_send_alarm_command(
+            _COMMAND_ALARM_DELETE, {"alarmID": alarm_id}
+        )
+
+    async def async_delete_all_alarms(self, *, archived: bool) -> dict[str, object]:
+        """Permanently delete all active or all archived alarms."""
+        command = (
+            _COMMAND_ALARM_DELETE_ARCHIVED_ALL
+            if archived
+            else _COMMAND_ALARM_DELETE_ACTIVE_ALL
+        )
+        return await self._async_send_alarm_command(command)
+
+    async def async_mute_alarm(self, value: dict[str, object]) -> dict[str, object]:
+        """Mute one active alarm using the app's alarm-scoped command."""
+        return await self._async_send_alarm_command(_COMMAND_ALARM_MUTE, value)
+
+    async def async_create_alarm_exception(
+        self, value: dict[str, object]
+    ) -> dict[str, object]:
+        """Create a standalone alarm silence exception."""
+        return await self._async_send_alarm_command(_COMMAND_EXCEPTION_CREATE, value)
+
+    async def async_delete_alarm_exception(
+        self, exception_id: str
+    ) -> dict[str, object]:
+        """Delete one silence by its exception ID."""
+        return await self._async_send_alarm_command(
+            _COMMAND_EXCEPTION_DELETE, {"exceptionID": exception_id}
+        )
+
+    async def async_unmute_alarm(self, alarm_id: str) -> dict[str, object]:
+        """Remove the silence associated with one alarm ID."""
+        return await self._async_send_alarm_command(
+            _COMMAND_ALARM_UNMUTE, {"alarmID": alarm_id}
         )
 
     async def async_get_pairing_runtime_init_payload(
@@ -1764,6 +1898,7 @@ class FirewallaApiClient:
                         if interface_id is not None
                         else None
                     ),
+                    network_uuid=interface_id,
                     connection_type="vpn",
                     last_active=self._coerce_float(
                         raw_peer.get(_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY)
@@ -1853,6 +1988,7 @@ class FirewallaApiClient:
                         if interface_id is not None
                         else None
                     ),
+                    network_uuid=interface_id,
                     connection_type=self._resolve_host_connection_type(
                         raw_host,
                         device_tags=device_tag_lookup,
@@ -2388,6 +2524,133 @@ class FirewallaApiClient:
             return 0
         return len(raw_exception_rules)
 
+    @classmethod
+    def _normalize_alarm_exceptions(
+        cls, data: dict[str, object]
+    ) -> tuple[FirewallaAlarmException, ...]:
+        """Normalize exception records while retaining their raw payload."""
+        raw_exceptions = data.get(_RAW_EXCEPTION_RULES_KEY)
+        if not isinstance(raw_exceptions, list):
+            return ()
+
+        exceptions: list[FirewallaAlarmException] = []
+        for raw_exception in raw_exceptions:
+            if not isinstance(raw_exception, dict):
+                continue
+            exception_id = cls._normalize_alarm_string(raw_exception.get("eid"))
+            if exception_id is None:
+                continue
+            raw_expiry = raw_exception.get("expireTs")
+            try:
+                expires_at = int(raw_expiry) if raw_expiry is not None else None
+            except TypeError, ValueError:
+                expires_at = None
+            exceptions.append(
+                FirewallaAlarmException(
+                    exception_id=exception_id,
+                    alarm_id=cls._normalize_alarm_string(raw_exception.get("aid")),
+                    alarm_type=cls._normalize_alarm_string(
+                        raw_exception.get("alarm_type")
+                    ),
+                    target_type=cls._normalize_alarm_string(
+                        raw_exception.get("if.type")
+                    ),
+                    target=cls._normalize_alarm_string(raw_exception.get("if.target")),
+                    target_name=cls._normalize_alarm_string(
+                        raw_exception.get("target_name")
+                    ),
+                    expires_at=expires_at,
+                    raw_payload=dict(raw_exception),
+                )
+            )
+        return tuple(exceptions)
+
+    @staticmethod
+    def _normalize_alarm_string(value: object) -> str | None:
+        """Return a non-empty alarm string value."""
+        if not isinstance(value, str):
+            return None
+        return value.strip() or None
+
+    @classmethod
+    def normalize_alarm_record(
+        cls, raw_alarm: dict[str, object], *, is_archived: bool = False
+    ) -> FirewallaAlarm | None:
+        """Normalize one alarm without exposing raw protocol keys as fields."""
+        alarm_id = cls._normalize_alarm_string(raw_alarm.get(_RAW_ALARM_ID_KEY))
+        if alarm_id is None:
+            return None
+        raw_timestamp = raw_alarm.get(_RAW_ALARM_TIMESTAMP_KEY)
+        try:
+            fired_at = (
+                float(raw_timestamp)
+                if isinstance(raw_timestamp, (float, int, str))
+                else None
+            )
+        except TypeError, ValueError:
+            fired_at = None
+        return FirewallaAlarm(
+            alarm_id=alarm_id,
+            alarm_type=cls._normalize_alarm_string(raw_alarm.get(_RAW_ALARM_TYPE_KEY)),
+            device_name=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_DEVICE_KEY)
+            ),
+            message=cls._normalize_alarm_string(raw_alarm.get(_RAW_ALARM_MESSAGE_KEY)),
+            state=cls._normalize_alarm_string(raw_alarm.get(_RAW_ALARM_STATE_KEY)),
+            is_archived=is_archived,
+            fired_at=fired_at,
+            remote_category=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_REMOTE_CATEGORY_KEY)
+            ),
+            remote_host=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_REMOTE_HOST_KEY)
+            ),
+            remote_ip=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_REMOTE_IP_KEY)
+            ),
+            remote_app=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_REMOTE_APP_KEY)
+            ),
+            remote_region=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_REMOTE_REGION_KEY)
+            ),
+            remote_latitude=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_REMOTE_LATITUDE_KEY)
+            ),
+            remote_longitude=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_REMOTE_LONGITUDE_KEY)
+            ),
+            interface_name=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_INTERFACE_NAME_KEY)
+            ),
+            protocol=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_PROTOCOL_KEY)
+            ),
+            severity=cls._normalize_alarm_string(
+                raw_alarm.get(_RAW_ALARM_SEVERITY_KEY)
+            ),
+            raw_payload=dict(raw_alarm),
+        )
+
+    @classmethod
+    def _normalize_alarms(cls, data: dict[str, object]) -> tuple[FirewallaAlarm, ...]:
+        """Normalize active alarms in one init payload."""
+        raw_alarms = data.get(_RAW_ALARMS_KEY)
+        if not isinstance(raw_alarms, list):
+            return ()
+        return tuple(
+            alarm
+            for raw_alarm in raw_alarms
+            if isinstance(raw_alarm, dict)
+            and (alarm := cls.normalize_alarm_record(raw_alarm)) is not None
+        )
+
+    @staticmethod
+    def _alarm_count(data: dict[str, object], key: str) -> int:
+        """Return a non-negative integer alarm count from the init payload."""
+        value = data.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
     def build_runtime_snapshot(
         self, data: dict[str, object]
     ) -> FirewallaRuntimeSnapshot:
@@ -2407,6 +2670,11 @@ class FirewallaApiClient:
             groups=groups,
             users=users,
             speed_test_results=self._extract_speed_test_records(data),
+            alarms=self._normalize_alarms(data),
+            alarm_exceptions=self._normalize_alarm_exceptions(data),
+            active_alarm_count=self._alarm_count(data, _RAW_ACTIVE_ALARM_COUNT_KEY),
+            archived_alarm_count=self._alarm_count(data, _RAW_ARCHIVED_ALARM_COUNT_KEY),
+            pending_alarm_count=self._alarm_count(data, _RAW_PENDING_ALARM_COUNT_KEY),
         )
 
     async def async_get_runtime_snapshot(self) -> FirewallaRuntimeSnapshot:

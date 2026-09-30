@@ -208,7 +208,6 @@ def test_exclude_non_wireless_sections() -> None:
         "internetSpeedtestResults": [{"client": {"publicIp": "1.2.3.4"}}],
         "systemFlows": {"flows": ["imap.gmail.com"]},
         "last60": {"data": "usage"},
-        "newAlarms": [{"device": "kadens-phone-wgvpn"}],
         "customizedCategories": {"dap_1": {"name": "DAP - 00:11:22:33:44:55"}},
         "tags": {"17": {"name": "SVR_PVE"}},
         "networkConfig": {"apc": {"assets_template": {}}},
@@ -223,7 +222,6 @@ def test_exclude_non_wireless_sections() -> None:
         "internetSpeedtestResults",
         "systemFlows",
         "last60",
-        "newAlarms",
         "customizedCategories",
         "tags",
     ):
@@ -231,6 +229,50 @@ def test_exclude_non_wireless_sections() -> None:
     # Kept sections remain.
     assert "networkConfig" in redacted
     assert "hosts" in redacted
+
+
+def test_redact_alarm_records_preserving_diagnostic_identity() -> None:
+    """Alarm ID/type/state remain while personal and destination data are redacted."""
+    payload = {
+        "newAlarms": [
+            {
+                "aid": "alarm-123",
+                "type": "ALARM_VIDEO",
+                "state": "active",
+                "device": "kadens-phone",
+                "message": "kadens-phone watched example.com",
+                "p.device.name": "kadens-phone",
+                "p.device.mac": "00:11:22:33:44:55",
+                "p.device.ip": "192.0.2.5",
+                "p.device.real.ip": "192.0.2.6",
+                "p.device.guid": "device-guid",
+                "p.dest.domain": "example.com",
+                "p.dest.ip": "198.51.100.7",
+                "p.dest.latitude": "40.1",
+                "p.dest.longitude": "-73.9",
+            }
+        ]
+    }
+
+    redacted_alarm = redact_runtime_init_payload(payload)["newAlarms"][0]
+
+    assert redacted_alarm["aid"] == "alarm-123"
+    assert redacted_alarm["type"] == "ALARM_VIDEO"
+    assert redacted_alarm["state"] == "active"
+    for key in (
+        "device",
+        "message",
+        "p.device.name",
+        "p.device.mac",
+        "p.device.ip",
+        "p.device.real.ip",
+        "p.device.guid",
+        "p.dest.domain",
+        "p.dest.ip",
+        "p.dest.latitude",
+        "p.dest.longitude",
+    ):
+        assert redacted_alarm[key] == "**REDACTED**"
 
 
 def test_redact_internal_domain_suffix() -> None:

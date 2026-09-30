@@ -4,11 +4,20 @@
       "path": ".",
     },
     {
+      "name": "core",
       "path": "../core",
     },
   ],
   "settings": {
     "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
+    // Analyse only files that are actually open. Without this, Pylance walks the
+    // whole workspace folder, and the `core` folder alone holds ~23k Python
+    // files. The Python editor diagnostics were the smallest share of the
+    // problem count, but this keeps Pylance predictable.
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    // `exclude` removes paths from indexing, but excluded files are STILL
+    // analysed when imported transitively (our tests import homeassistant.*).
+    // `ignore` suppresses diagnostics that leak in that way, so both are needed.
     "python.analysis.exclude": [
       "**/node_modules",
       "**/__pycache__",
@@ -16,15 +25,69 @@
       "**/.mypy_cache/**",
       "**/.pytest_cache/**",
       "**/.ruff_cache/**",
-      "**/.tmp",
+      "**/.tmp/**",
+      "**/.artifacts/**",
+      "**/.captures/**",
       "**/site-packages/**",
+      "${workspaceFolder:core}/**",
+    ],
+    // Absolute paths are NOT valid in these globs; Pylance resolves them against
+    // each workspace folder, so `core` must be named via ${workspaceFolder:core}
+    // or it is analysed in full.
+    "python.analysis.ignore": [
+      "**/.tmp/**",
+      "**/.artifacts/**",
+      "**/.captures/**",
+      "${workspaceFolder:core}/**",
+    ],
+    // The Java problems were the big ones, and they came from a different
+    // language server entirely. `.tmp` holds the jadx-decompiled APK: ~41,400
+    // .java files. redhat.java did not find a Maven/Gradle project, so it built
+    // an "invisible project" (jdt.ls-java-project, src/defpackage) and started
+    // COMPILING that decompiled code. Partially decompiled R8 output produces
+    // errors by the tens of thousands, which is where the six-figure problem
+    // count came from. `java.import.exclusions` is the setting that stops it.
+    // Its default value is replaced, not merged, so the stock entries are kept
+    // here alongside ours.
+    "java.import.exclusions": [
+      "**/node_modules/**",
+      "**/.metadata/**",
+      "**/archetype-resources/**",
+      "**/META-INF/maven/**",
+      "**/.tmp/**",
       "**/.artifacts/**",
       "**/.captures/**",
     ],
+    // Stop watching the large read-only trees so file events do not trigger
+    // re-indexing work in any language server.
+    "files.watcherExclude": {
+      "**/.tmp/**": true,
+      "**/.artifacts/**": true,
+      "**/.captures/**": true,
+      "**/.mypy_cache/**": true,
+      "**/.pytest_cache/**": true,
+      "**/.ruff_cache/**": true,
+      "**/__pycache__/**": true,
+      "**/node_modules/**": true,
+      "**/site-packages/**": true,
+      "${workspaceFolder:core}/**": true,
+    },
     "search.exclude": {
       "**/node_modules": true,
       "**/__pycache__": true,
       "**/.*": true,
+      "**/.mypy_cache/**": true,
+      "**/.pytest_cache/**": true,
+      "**/.ruff_cache/**": true,
+      "**/.tmp/**": true,
+      "**/.artifacts/**": true,
+      "**/.captures/**": true,
+      "**/site-packages/**": true,
+      "/home/vscode/.local/ha-venv": true,
+    },
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/__pycache__": true,
       "**/.mypy_cache": true,
       "**/.pytest_cache": true,
       "**/.ruff_cache": true,
@@ -34,21 +97,13 @@
       "**/site-packages": true,
       "/home/vscode/.local/ha-venv": true,
     },
-    "files.exclude": {
-      "**/node_modules": true,
-      "**/__pycache__": true,
-      "**/.mypy_cache": true,
-      "**/.pytest_cache": true,
-      "**/.ruff_cache": true,
-      // "**/.tmp": true,
-      "**/site-packages": true,
-      "/home/vscode/.local/ha-venv": true,
-    },
     "pylint.args": [
-      "--ignore-paths=^\\.mypy_cache/.*$,^\\.pytest_cache/.*$,^\\.ruff_cache/.*$,^\\.tmp/.*$,^.*/site-packages/.*$,^/home/vscode/\\.local/ha-venv/.*$,^/workspaces/core/.*$,^poc\\.py$,^utils/poc\\.py$",
+      "--ignore-paths=^\\.mypy_cache/.*$,^\\.pytest_cache/.*$,^\\.ruff_cache/.*$,^\\.tmp/.*$,^\\.artifacts/.*$,^\\.captures/.*$,^.*/site-packages/.*$,^/home/vscode/\\.local/ha-venv/.*$,^/workspaces/core/.*$,^poc\\.py$,^utils/poc\\.py$",
     ],
     "pylint.ignorePatterns": [
       "**/.tmp/**/*.py",
+      "**/.artifacts/**/*.py",
+      "**/.captures/**/*.py",
       "**/site-packages/**/*.py",
       "/home/vscode/.local/ha-venv/**/*.py",
       "/workspaces/core/**/*.py",

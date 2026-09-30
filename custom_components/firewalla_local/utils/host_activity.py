@@ -1,0 +1,63 @@
+"""Pure host activity evaluation for Firewalla Local.
+
+The online/offline definition has to stay identical everywhere it is reported:
+the watched-device entities, the system-status device counts, and the runtime
+inventory summary. Keeping it here means there is one definition rather than
+three that can drift apart.
+
+"Online" is deliberately relative, not wall-clock based. The freshest host in
+the inventory sets the reference point, and other hosts count as online when
+they were active within the configured window of it. A box where nothing has
+been active recently therefore reports no online hosts rather than treating
+stale timestamps as current.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from ..models import FirewallaHostRuntime
+
+
+def reference_last_active(hosts: Sequence[FirewallaHostRuntime]) -> float | None:
+    """Return the most recent activity timestamp across the host inventory."""
+    return max(
+        (host.last_active for host in hosts if host.last_active is not None),
+        default=None,
+    )
+
+
+def is_host_online(
+    host: FirewallaHostRuntime,
+    *,
+    reference_activity: float | None,
+    online_window_seconds: int,
+) -> bool | None:
+    """Return whether one host counts as online for the given reference point."""
+    if reference_activity is None:
+        # No timestamps anywhere: fall back to the box's own stale flag when set.
+        return None if host.stale is None else not host.stale
+
+    if host.stale is True or host.last_active is None:
+        return False
+
+    return reference_activity - host.last_active <= online_window_seconds
+
+
+def count_online_hosts(
+    hosts: Sequence[FirewallaHostRuntime],
+    *,
+    online_window_seconds: int,
+) -> int:
+    """Return how many hosts count as online for the given window."""
+    reference_activity = reference_last_active(hosts)
+    return sum(
+        1
+        for host in hosts
+        if is_host_online(
+            host,
+            reference_activity=reference_activity,
+            online_window_seconds=online_window_seconds,
+        )
+        is True
+    )
