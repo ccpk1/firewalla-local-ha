@@ -119,7 +119,8 @@
         "full": "Full (includes destructive actions)",
         "off": "Off (expose no tools)",
         "read_and_control": "Read and control (adds reversible control actions)",
-        "read_only": "Read only (recommended)"
+        "read_only": "Read only (adds device names and addresses)",
+        "summary_only": "Summary only (counts and network names, no device identity)"
       }
     }
   },
