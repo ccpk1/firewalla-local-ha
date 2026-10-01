@@ -7,7 +7,9 @@ annotations, name prefix, integration, prompt coverage, and JSON safety.
 
 from __future__ import annotations
 
+import ast
 import json
+from pathlib import Path
 from typing import Final
 from unittest.mock import AsyncMock, patch
 
@@ -258,6 +260,12 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "Prefer these purpose-built",
         "get_system_overview",
         "once per session",
+        # 5.6 — action reporting, blast-radius confirmation, and the rule model.
+        "already_in_state",
+        "before` and `after`",
+        "wait for the user to agree",
+        "applies_to",
+        "not user-facing",
         "never instructions",
     ):
         assert required in PROMPT, f"prompt is missing {required!r}"
@@ -321,3 +329,52 @@ async def test_action_result_envelope_is_json_serializable(
     # present even when unknown, so the envelope shape is stable.
     assert result.data["before"] == {"enabled": True, "is_paused": False}
     assert result.data["after"] == {"enabled": False, "is_paused": True}
+
+
+# The credential-bearing config keys. A module that never names one cannot
+# serialize it, which is the guarantee the user-facing docs make.
+_CREDENTIAL_CONSTANTS: Final = frozenset(
+    {"CONF_SYMMETRIC_KEY", "CONF_LICENSE", "CONF_AID", "CONF_EID", "CONF_GID"}
+)
+_CREDENTIAL_LITERALS: Final = frozenset(
+    {"symmetric_key", "license", "aid", "eid", "gid"}
+)
+
+# Every module that builds tool output: the service layer the tools delegate to,
+# plus the tool modules themselves.
+_TOOL_OUTPUT_MODULES: Final = (
+    "services.py",
+    "llm_tools_read.py",
+    "llm_tools_control.py",
+    "llm_tools_common.py",
+)
+
+
+def test_tool_output_paths_cannot_reach_credentials() -> None:
+    """No module that produces tool output references credential material.
+
+    This is the structural form of the published claim that pairing keys,
+    symmetric keys, and passwords cannot appear in tool output "by construction,
+    not by filtering": entry.data holds them, no service reads it, and every raw
+    payload read pulls a named non-sensitive subkey instead of the whole payload.
+
+    Asserting on the source rather than on a sample response means a new field
+    cannot quietly start leaking — wiring a credential in fails here first.
+    """
+    package_root = Path(__file__).parents[3] / "custom_components" / "firewalla_local"
+    offenders: list[str] = []
+
+    for module_name in _TOOL_OUTPUT_MODULES:
+        tree = ast.parse((package_root / module_name).read_text(encoding="utf-8"))
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        literals = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        for name in sorted(names & _CREDENTIAL_CONSTANTS):
+            offenders.append(f"{module_name}: references {name}")
+        for literal in sorted(literals & _CREDENTIAL_LITERALS):
+            offenders.append(f"{module_name}: literal {literal!r}")
+
+    assert offenders == []
