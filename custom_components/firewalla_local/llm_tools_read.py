@@ -186,11 +186,10 @@ class ListHostsTool(_FirewallaReadTool):
                 SERVICE_FIELD_DETAIL,
                 default="summary",
                 description=(
-                    "Optional. Omits the derivable "
-                    "`dns_fqdn`, the unreliable `dhcp_name`, and the nested "
-                    "`ip_assignment` (its useful parts are flattened to "
-                    "`ip_assignment_mode` and `reserved_ipv4`). Use 'full' for "
-                    "the complete record."
+                    "Optional. 'summary' omits the derivable `dns_fqdn`, the "
+                    "unreliable `dhcp_name`, and the nested `ip_assignment` "
+                    "(its useful parts are flattened to `ip_assignment_mode` "
+                    "and `reserved_ipv4`). Use 'full' for the complete record."
                 ),
             ): vol.In(("summary", "full")),
             vol.Optional(
