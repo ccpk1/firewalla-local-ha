@@ -1,13 +1,110 @@
 """Tests for Firewalla Local model helpers."""
 
 from custom_components.firewalla_local.models import (
+    FirewallaAlarm,
     FirewallaNetworkKind,
     FirewallaNetworkSegment,
     FirewallaNetworkSegmentView,
     FirewallaPolicyRule,
+    FirewallaRuleTemplate,
     format_policy_rule_name,
     supports_rule_switch,
 )
+
+
+def _alarm(
+    *,
+    alarm_id: str = "1728",
+    remote_host: str | None = "vimeo.com",
+    remote_ip: str | None = "162.159.128.61",
+    device_mac: str | None = "0C:85:E1:B0:1D:1C",
+) -> FirewallaAlarm:
+    """Return one normalized alarm for block-template tests."""
+    return FirewallaAlarm(
+        alarm_id=alarm_id,
+        alarm_type="ALARM_VIDEO",
+        device_name="Kids-iPad",
+        message=None,
+        state="active",
+        is_archived=False,
+        fired_at=None,
+        remote_category=None,
+        remote_host=remote_host,
+        remote_ip=remote_ip,
+        remote_app=None,
+        remote_region=None,
+        remote_latitude=None,
+        remote_longitude=None,
+        interface_name=None,
+        protocol=None,
+        severity=None,
+        raw_payload={"p.device.mac": device_mac},
+    )
+
+
+def test_rule_template_from_alarm_uses_domain_and_device_scope() -> None:
+    """Test an alarm block template blocks the domain scoped to the device."""
+    template = FirewallaRuleTemplate.from_alarm(_alarm())
+
+    assert template is not None
+    assert template.action == "block"
+    assert template.target == "vimeo.com"
+    assert template.target_type == "dns"
+    assert template.scope == ("0C:85:E1:B0:1D:1C",)
+    assert template.dnsmasq_only is True
+    assert template.alarm_id == "1728"
+
+
+def test_rule_template_from_alarm_falls_back_to_ip() -> None:
+    """Test the template blocks the remote IP when no domain is present."""
+    template = FirewallaRuleTemplate.from_alarm(
+        _alarm(remote_host=None, remote_ip="203.0.113.7")
+    )
+
+    assert template is not None
+    assert template.target == "203.0.113.7"
+    assert template.target_type == "ip"
+    assert template.dnsmasq_only is None
+
+
+def test_rule_template_from_alarm_requires_device_scope() -> None:
+    """Test an alarm without a device MAC cannot produce a block template."""
+    assert FirewallaRuleTemplate.from_alarm(_alarm(device_mac=None)) is None
+
+
+def test_rule_template_roundtrip_preserves_alarm_id() -> None:
+    """Test the alarm reference survives option serialization."""
+    template = FirewallaRuleTemplate.from_alarm(_alarm())
+    assert template is not None
+
+    restored = FirewallaRuleTemplate.from_dict(template.to_dict())
+
+    assert restored is not None
+    assert restored.alarm_id == "1728"
+    assert restored.target == template.target
+
+
+def test_rule_template_serialization_omits_absent_alarm_id() -> None:
+    """Test an ordinary template keeps its prior stored shape (no alarm_id key)."""
+    template = FirewallaRuleTemplate(
+        source_rule_id="744",
+        name="block category social for AV_SMART_TV",
+        action="block",
+        target="social",
+        target_type="category",
+    )
+
+    assert "alarm_id" not in template.to_dict()
+
+
+def test_rule_template_create_value_includes_alarm_id_when_set() -> None:
+    """Test the created payload records the alarm back-reference when present."""
+    template = FirewallaRuleTemplate.from_alarm(_alarm())
+    assert template is not None
+
+    payload = template.build_create_value(updated_time=1.0)
+
+    assert payload["aid"] == "1728"
 
 
 def test_network_kind_display_name_uses_acronyms() -> None:

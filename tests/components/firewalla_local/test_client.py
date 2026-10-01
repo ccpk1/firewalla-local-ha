@@ -1719,6 +1719,41 @@ async def test_create_rule_sends_confirmed_persistent_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_rule_returns_new_rule_id() -> None:
+    """Test rule creation returns the box-reported rule id for undo."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        template = FirewallaRuleTemplate(
+            source_rule_id="1728",
+            name="vimeo.com",
+            action="block",
+            target="vimeo.com",
+            target_type="dns",
+            scope=("0C:85:E1:B0:1D:1C",),
+            dnsmasq_only=True,
+            alarm_id="1728",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"policy": {"pid": "652"}}),
+        ) as mock_send:
+            new_rule_id = await client.async_create_rule(template)
+
+    assert new_rule_id == "652"
+    assert mock_send.await_args.kwargs["data"]["value"]["aid"] == "1728"
+
+
+@pytest.mark.asyncio
 async def test_delete_rule_sends_confirmed_delete_payload() -> None:
     """Test rule deletion uses the confirmed delete mutation shape."""
     async with ClientSession() as session:

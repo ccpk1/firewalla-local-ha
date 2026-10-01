@@ -30,6 +30,7 @@ from .const import (
     SERVICE_FIELD_DNS_HOSTNAME,
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
+    SERVICE_FIELD_EXCEPTION_ID,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_HOST_NAME,
@@ -708,11 +709,16 @@ class SetAlarmMutedTool(_FirewallaControlTool):
             "name": tool_input.tool_args.get(SERVICE_FIELD_TARGET_VALUE),
         }
         await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        undo = (
+            f'firewalla_local__unmute_alarm(alarm_id="{alarm_id}")'
+            if alarm_id
+            else None
+        )
         return self._result(
             status="applied",
             changed=True,
             target=target,
-            undo="firewalla_local__unmute_alarm(...)",
+            undo=undo,
         )
 
 
@@ -733,7 +739,7 @@ class UnmuteAlarmTool(_FirewallaControlTool):
                 description="Optional. The alarm whose silence to remove.",
             ): str,
             vol.Optional(
-                "exception_id",
+                SERVICE_FIELD_EXCEPTION_ID,
                 description="Optional. The silence id to remove directly.",
             ): str,
         }
