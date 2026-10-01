@@ -38,7 +38,7 @@ from custom_components.firewalla_local.models import (
 # Modules that are guard-loaded (imported only when LLM tools are supported) and
 # are therefore allowed to import Core 2026.10-only LLM names at module level.
 _GUARD_LOADED_MODULES: Final = frozenset(
-    {"llm_api.py", "llm_tools_read.py", "llm_tools_control.py"}
+    {"llm_api.py", "llm_tools_read.py", "llm_tools_control.py", "llm_prompt.py"}
 )
 
 _PROBATIO: Final = "probatio"

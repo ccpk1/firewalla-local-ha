@@ -1041,7 +1041,12 @@ def _serialize_alarm(
         "message": alarm.message,
         "state": alarm.state,
         "is_archived": alarm.is_archived,
-        "fired_at": alarm.fired_at,
+        "fired_at": (
+            datetime.fromtimestamp(alarm.fired_at, UTC).isoformat()
+            if alarm.fired_at is not None
+            else None
+        ),
+        "fired_at_timestamp": alarm.fired_at,
         "remote_category": alarm.remote_category,
         "remote_host": alarm.remote_host,
         "remote_ip": alarm.remote_ip,
@@ -1068,7 +1073,12 @@ def _serialize_alarm_exception(
         "target_type": exception.target_type,
         "target": exception.target,
         "target_name": exception.target_name,
-        "expires_at": exception.expires_at,
+        "expires_at": (
+            datetime.fromtimestamp(exception.expires_at, UTC).isoformat()
+            if exception.expires_at is not None
+            else None
+        ),
+        "expires_at_timestamp": exception.expires_at,
     }
 
 

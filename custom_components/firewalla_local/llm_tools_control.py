@@ -772,8 +772,11 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
     title = "Block alarm target"
     description = _PREFERRED_PREFIX + (
         "Block the domain/IP that caused an alarm by creating a firewall rule, "
-        "recording the alarm id on it. This actually blocks traffic (unlike "
-        "set_alarm_muted). Reversible with unblock_alarm_target."
+        "recording the alarm id on it. Provide either `alarm_id`, or "
+        "`target_type` and `target_value` (optionally with `scope_kind` / "
+        "`scope_target`) to widen or narrow where the block applies. This "
+        "actually blocks traffic (unlike set_alarm_muted). Reversible with "
+        "unblock_alarm_target."
     )
     parameters = vol.Schema(
         {

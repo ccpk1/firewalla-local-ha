@@ -6273,6 +6273,12 @@ async def test_get_alarms_returns_normalized_data_and_report_metadata(
         "active-1",
     ]
     assert response["alarms"][0]["is_archived"] is True
+    # fired_at is an ISO 8601 string; fired_at_timestamp is the epoch form.
+    fired_at = response["alarms"][0]["fired_at"]
+    fired_at_timestamp = response["alarms"][0]["fired_at_timestamp"]
+    assert isinstance(fired_at, str)
+    assert "T" in fired_at
+    assert isinstance(fired_at_timestamp, float)
     assert response["active_count"] == 1
     assert response["archived_count"] == 1
     assert response["metadata"]["warnings"] == []
