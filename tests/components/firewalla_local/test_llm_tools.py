@@ -310,10 +310,10 @@ _CONTROL_TOOLS: tuple[str, ...] = (
     "firewalla_local__unmute_alarm",
     "firewalla_local__block_alarm_target",
     "firewalla_local__unblock_alarm_target",
+    "firewalla_local__archive_alarm",
 )
 
 _DESTRUCTIVE_TOOLS: tuple[str, ...] = (
-    "firewalla_local__archive_alarm",
     "firewalla_local__archive_all_alarms",
     "firewalla_local__delete_alarm",
     "firewalla_local__delete_all_alarms",

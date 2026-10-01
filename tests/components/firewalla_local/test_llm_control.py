@@ -365,7 +365,7 @@ async def test_archive_alarm_uses_single_mode(hass: HomeAssistant) -> None:
         "FirewallaAlarmManager.async_archive_alarms",
         new=AsyncMock(return_value={}),
     ) as archive:
-        api_instance = await _setup(hass, mode="full")
+        api_instance = await _setup(hass)
         result = await _call(
             api_instance, ARCHIVE_ALARM, {SERVICE_FIELD_ALARM_ID: "1728"}
         )

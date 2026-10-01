@@ -881,8 +881,8 @@ class ArchiveAlarmTool(_FirewallaControlTool):
     title = "Archive alarm"
     description = _PREFERRED_PREFIX + (
         "Dismiss one alarm from the active list while keeping the record. This "
-        "does NOT stop future matching alarms (use set_alarm_muted). "
-        "Irreversible: there is no un-archive."
+        "does NOT stop future matching alarms (use set_alarm_muted). Note there "
+        "is no un-archive if you change your mind."
     )
     parameters = vol.Schema(
         {
@@ -892,7 +892,6 @@ class ArchiveAlarmTool(_FirewallaControlTool):
             ): str,
         }
     )
-    annotations = _DESTRUCTIVE_ANNOTATIONS
     _service = SERVICE_ARCHIVE_ALARMS
 
     @override
@@ -1146,12 +1145,12 @@ _CONTROL_TOOL_CLASSES: Final = (
     UnmuteAlarmTool,
     BlockAlarmTargetTool,
     UnblockAlarmTargetTool,
+    ArchiveAlarmTool,
 )
 
 # Destructive tools are registered only in the "full" mode. They are
 # irreversible (no undo) or bulk, so they require an explicit, informed opt-in.
 _DESTRUCTIVE_TOOL_CLASSES: Final = (
-    ArchiveAlarmTool,
     ArchiveAllAlarmsTool,
     DeleteAlarmTool,
     DeleteAlarmsTool,

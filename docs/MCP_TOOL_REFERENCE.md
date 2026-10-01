@@ -25,7 +25,7 @@ prefix is required (it disambiguates our tools when several LLM APIs are merged)
 Naming is **intent-over-CRUD** where that is clearer for an agent: the alarm-block
 workflow is `block_alarm_target` / `unblock_alarm_target`, not `create_rule` /
 `delete_rule` (the generic rule operations are deliberately not exposed — see
-[Not exposed](#not-exposed-tier-c)).
+[Not exposed](#not-exposed)).
 
 ### Prefer these tools
 
@@ -53,10 +53,9 @@ A single four-state option controls what is registered:
 
 **Destructive tools** are irreversible (no undo) or bulk, so they require an
 explicit opt-in and close monitoring. The option label says so. The destructive
-set is: `archive_alarm`, `archive_all_alarms`, `delete_alarm`,
-`delete_all_alarms`, `delete_host`, `delete_rule`. (`archive_alarm` is included
-here because archiving cannot be undone; it keeps the record but the state
-change is one-way.)
+set is: `archive_all_alarms`, `delete_alarm`, `delete_all_alarms`,
+`delete_host`, `delete_rule`. (`archive_all_alarms` is included here because it
+is a bulk state change across every active alarm, even though records are kept.)
 
 Requires **Home Assistant Core 2026.10+**. On older Core the integration registers
 no tools and offers no option (the Firewalla features are unaffected).
@@ -177,34 +176,39 @@ resolve it to one host.
 
 ## Tool index
 
-| Group | Tool | Kind | Tier |
+| Group | Tool | Kind | Availability |
 |---|---|---|---|
-| Know my network | `list_hosts` | read | — |
-| Know my network | `list_rules` | read | — |
-| Know my network | `get_network_config` | read | — |
-| Usage & health | `get_network_usage` | read | — |
-| Usage & health | `get_wan_usage` | read | — |
-| Usage & health | `get_wan_events` | read | — |
-| Usage & health | `get_user_usage` | read | — |
-| Usage & health | `get_internet_quality` | read | — |
-| Usage & health | `get_speed_tests` | read | — |
-| Usage & health | `get_wireless_status` | read | — |
-| Usage & health | `run_internet_speed_test` | control | B |
-| Manage devices | `set_host_name` | control | A |
-| Manage devices | `set_host_dhcp_reservation` | control | A |
-| Manage devices | `set_host_dns_hostname` | control | B |
-| Manage devices | `set_host_device_type` | control | A |
-| Manage devices | `set_host_notify_when_next_online` | control | A |
-| Manage devices | `set_host_notify_when_next_offline` | control | A |
-| Manage devices | `wake_host` | control | A |
-| Control access | `pause_rule` | control | A |
-| Control access | `resume_rule` | control | A |
-| Control access | `set_ssid_paused` | control | A |
-| Respond to alarms | `get_alarms` | read | — |
-| Respond to alarms | `set_alarm_muted` | control | A |
-| Respond to alarms | `block_alarm_target` | control | A |
-| Respond to alarms | `unblock_alarm_target` | control | A |
-| Respond to alarms | `archive_alarm` | control | B |
+| Know my network | `list_hosts` | read | read+ |
+| Know my network | `list_rules` | read | read+ |
+| Know my network | `get_network_config` | read | read+ |
+| Usage & health | `get_network_usage` | read | read+ |
+| Usage & health | `get_wan_usage` | read | read+ |
+| Usage & health | `get_wan_events` | read | read+ |
+| Usage & health | `get_user_usage` | read | read+ |
+| Usage & health | `get_internet_quality` | read | read+ |
+| Usage & health | `get_speed_tests` | read | read+ |
+| Usage & health | `get_wireless_status` | read | read+ |
+| Usage & health | `run_internet_speed_test` | control | control+ |
+| Manage devices | `set_host_name` | control | control+ |
+| Manage devices | `set_host_dhcp_reservation` | control | control+ |
+| Manage devices | `set_host_dns_hostname` | control | control+ |
+| Manage devices | `set_host_device_type` | control | control+ |
+| Manage devices | `set_host_notify_when_next_online` | control | control+ |
+| Manage devices | `set_host_notify_when_next_offline` | control | control+ |
+| Manage devices | `wake_host` | control | control+ |
+| Control access | `pause_rule` | control | control+ |
+| Control access | `resume_rule` | control | control+ |
+| Control access | `set_ssid_paused` | control | control+ |
+| Respond to alarms | `get_alarms` | read | read+ |
+| Respond to alarms | `set_alarm_muted` | control | control+ |
+| Respond to alarms | `block_alarm_target` | control | control+ |
+| Respond to alarms | `unblock_alarm_target` | control | control+ |
+| Respond to alarms | `archive_alarm` | control | control+ |
+| Respond to alarms | `archive_all_alarms` | destructive | full |
+| Respond to alarms | `delete_alarm` | destructive | full |
+| Respond to alarms | `delete_all_alarms` | destructive | full |
+| Manage devices | `delete_host` | destructive | full |
+| Control access | `delete_rule` | destructive | full |
 
 ---
 
@@ -225,7 +229,7 @@ Reads that tell you what exists — the first step before any control action.
   `device_type`, online status, and `ip_assignment` (`mode`: `dynamic`/`static`,
   `reserved_ipv4`, `network_uuid`).
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true` (with `refresh`).
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
 
 ### `firewalla_local__list_rules`
 
@@ -251,7 +255,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Inputs:** `network_name` or `network_uuid` (optional — all networks if omitted); `refresh`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result.networks[]` with interface, subnet, DHCP range, VLAN, `block_icmp`, device counts.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true` (with `refresh`).
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
 
 ---
 
@@ -268,7 +272,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `window` (enum: which period — the valid windows differ by source; see the tool description), `top_n` (default 5 — a truncated ranking is flagged in `meta`), `include` (e.g. `"series"` to add raw samples), `refresh`, `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with top talkers, apps, categories, activity; `meta.truncated` when `top_n` cut data.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true` (with `refresh`).
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
 
 ### `firewalla_local__get_wan_usage`
 
@@ -277,7 +281,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `wan_name`/`wan_uuid` (for multi-WAN), `history_count`/`history_period`; `refresh`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with download/upload totals and periods (`*_bytes`/`*_megabytes`).
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__get_wan_events`
 
@@ -286,7 +290,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `refresh`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result.events[]` with type, `*_timestamp`, duration.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__get_user_usage`
 
@@ -297,7 +301,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `scope_kind` (`host`/`tag`/…), `scope_target`, `begin`/`end` (or a period), `granularity` (`day`/`hour`), `sections`, `app_ids`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with internet/app/category time summaries and periods.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__get_internet_quality`
 
@@ -307,7 +311,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `refresh`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with `latency_ms`, `loss_percent`, jitter, samples.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__get_speed_tests`
 
@@ -326,9 +330,9 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with SSIDs (`ssid_profile_id`, name, paused), access points, connected clients.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
-### `firewalla_local__run_internet_speed_test` *(control, Tier B)*
+### `firewalla_local__run_internet_speed_test` *(control)*
 
 - **Answers:** "Run a speed test now."
 - **When to use / not:** an on-demand measurement that **consumes WAN bandwidth** and
@@ -338,14 +342,14 @@ Reads that explain what the network is doing and how it is performing.
 - **Returns:** action-result envelope (`result` carries the fresh measurement).
 - **Availability:** control (behind the toggle).
 - **Reversibility & undo:** not reversible (it is a measurement), but has a cost — stated in the description. No `undo`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=false`.
 
 ---
 
 ## Manage devices (host writes)
 
 Control actions on a single host. All resolve a `host` (name or MAC) to one host and
-echo it in `target`. All are **Tier A** (reversible) except where noted.
+echo it in `target`. All are reversible except where noted.
 
 ### `firewalla_local__set_host_name`
 
@@ -354,7 +358,7 @@ echo it in `target`. All are **Tier A** (reversible) except where noted.
 - **Inputs:** `host` (name/MAC), `new_name`; `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result (`before.name` → `after.name`).
 - **Reversibility & undo:** trivially reversible — `undo` sets the previous name back.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__set_host_dhcp_reservation`
 
@@ -363,16 +367,16 @@ echo it in `target`. All are **Tier A** (reversible) except where noted.
 - **Inputs:** `host` (name/MAC), `mode` (`static`/`dynamic`), `reserved_ipv4`, `network_name`/`network_uuid` (when ambiguous); `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result (`before`/`after.ip_assignment`).
 - **Reversibility & undo:** reversible — `undo` sets `mode` back to `dynamic`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__set_host_dns_hostname`
 
 - **Answers:** "Give this host a stable DNS name."
-- **When to use / not:** Tier B — can **break name resolution** for the host if wrong. Not the display name (`set_host_name`).
+- **When to use / not:** can **break name resolution** for the host if wrong. Not the display name (`set_host_name`), which is cosmetic.
 - **Inputs:** `host`, `dns_hostname`; `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible but disruptive — `undo` restores the prior hostname.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__set_host_device_type`
 
@@ -381,7 +385,7 @@ echo it in `target`. All are **Tier A** (reversible) except where noted.
 - **Inputs:** `host`, `host_device_type` (enum: `desktop`, `phone`, `tablet`, `wearable`, `personal_default`, `console`, `smart speaker`, `tv`, …); `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible — `undo` restores the previous type.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__set_host_notify_when_next_online` / `set_host_notify_when_next_offline`
 
@@ -390,7 +394,7 @@ echo it in `target`. All are **Tier A** (reversible) except where noted.
 - **Inputs:** `host`, `enabled` (bool); `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result (`before`/`after.enabled`).
 - **Reversibility & undo:** reversible — `undo` flips `enabled` back.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__wake_host`
 
@@ -399,7 +403,7 @@ echo it in `target`. All are **Tier A** (reversible) except where noted.
 - **Inputs:** `host`; `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result.
 - **Reversibility & undo:** no persistent change; no `undo`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=false`.
 
 ---
 
@@ -414,7 +418,7 @@ Broad access control. Read the blast radius carefully.
 - **Inputs:** `rule_target` (rule id), `duration` (e.g. `30m`, `4h`, `2d 4h 30m`) **or** `resume_at` (local datetime) — omit both to pause until resumed; `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result (`before`/`after.enabled`, `undo` = `resume_rule`).
 - **Reversibility & undo:** fully reversible — `firewalla_local__resume_rule`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__resume_rule`
 
@@ -423,7 +427,7 @@ Broad access control. Read the blast radius carefully.
 - **Inputs:** `rule_target`; `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible (`pause_rule`).
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__set_ssid_paused`
 
@@ -432,7 +436,7 @@ Broad access control. Read the blast radius carefully.
 - **Inputs:** `ssid_profile_id` (from `get_wireless_status`), `paused` (bool); `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result (`before`/`after.paused`).
 - **Reversibility & undo:** fully reversible — `undo` sets `paused=false`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ---
 
@@ -447,7 +451,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Inputs:** `count` (default 10, max 500), `include_archived` (bool), `type` (filter), `detail` (bool — adds enrichment); `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result.alarms[]` with `aid`, `type`, `*_timestamp`, target, device, `exception_id` when muted.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__set_alarm_muted`
 
@@ -456,7 +460,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Inputs (flat):** `alarm_id` (optional — derive target from it), `target_type` (`alarm_type` | `domain` | `ip`), `target_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`); `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result (`target`, `undo`).
 - **Reversibility & undo:** reversible — `undo` unmutes (removes the silence).
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 - **Caveats (must state):** scope is **mandatory** — a `matchAll`/`all` default mutes for **every** device; durations are the app's three fixed values (not free text).
 
 ### `firewalla_local__block_alarm_target`
@@ -467,7 +471,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Returns:** action-result (`target` = the created rule id + name, `undo`).
 - **Availability:** control (behind the toggle). *(Planned — a thin facade over `create_rule`.)*
 - **Reversibility & undo:** reversible — `firewalla_local__unblock_alarm_target`. Each block consumes a finite rule slot.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 - **Caveats (must state):** auto-archives the alarm (archiving is one-way); scope defaults to the alarm's device — override to widen/narrow deliberately.
 
 ### `firewalla_local__unblock_alarm_target`
@@ -478,16 +482,16 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Returns:** action-result.
 - **Availability:** control (behind the toggle). *(Planned — a thin facade over `delete_rule`.)*
 - **Reversibility & undo:** reversible (`block_alarm_target`).
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__archive_alarm`
 
 - **Answers:** "Dismiss this alarm." / "Clear it from the active list."
-- **When to use / not:** archives **one** alarm — dismisses it but keeps the record (unlike delete, which is not exposed). It does **not** stop future matching alarms (that is `set_alarm_muted`). **Irreversible** — there is no un-archive.
-- **Inputs:** `alarm_id` (single only — bulk archive is not exposed); `config_entry_id` / `config_entry_name`.
+- **When to use / not:** archives **one** alarm — dismisses it but keeps the record (unlike delete, which is not exposed). It does **not** stop future matching alarms (that is `set_alarm_muted`). Normal dismiss operation; there is no un-archive if you change your mind.
+- **Inputs:** `alarm_id` (single only — bulk archive is a Full-mode tool); `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result.
-- **Reversibility & undo:** **not reversible** — stated in the description. No `undo`.
-- **Annotations:** `read_only=false, destructive=true, idempotent=true, open_world=true`.
+- **Reversibility & undo:** the archive itself cannot be undone, but the record is kept. No `undo`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ---
 
@@ -502,7 +506,6 @@ taken back — enable Full only when prepared to monitor closely.
 - `delete_alarm` — permanently delete one alarm record.
 - `delete_all_alarms` — permanently delete every active or every archived alarm (bulk).
 - `archive_all_alarms` — archive every active alarm at once (bulk).
-- `archive_alarm` — archive one alarm (record kept, but no un-archive exists).
 - `delete_rule` — permanently delete a firewall rule. Prefer `pause_rule` to
 disable a rule reversibly.
 
