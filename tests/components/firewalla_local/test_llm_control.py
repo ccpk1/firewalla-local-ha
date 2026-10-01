@@ -26,6 +26,7 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     DOMAIN,
     SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
@@ -450,7 +451,7 @@ async def test_archive_all_alarms_is_bulk(hass: HomeAssistant) -> None:
 
 
 async def test_delete_alarm_uses_single_mode(hass: HomeAssistant) -> None:
-    """delete_alarm deletes exactly one alarm and forces confirmation."""
+    """delete_alarm deletes exactly one alarm when confirmed."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
         "FirewallaAlarmManager.async_delete_alarms",
@@ -458,7 +459,9 @@ async def test_delete_alarm_uses_single_mode(hass: HomeAssistant) -> None:
     ) as delete:
         api_instance = await _setup(hass, mode="full")
         result = await _call(
-            api_instance, DELETE_ALARM, {SERVICE_FIELD_ALARM_ID: "1728"}
+            api_instance,
+            DELETE_ALARM,
+            {SERVICE_FIELD_ALARM_ID: "1728", SERVICE_FIELD_CONFIRM: True},
         )
 
     assert delete.await_args is not None
@@ -482,7 +485,9 @@ async def test_delete_all_alarms_uses_bulk_mode(hass: HomeAssistant, mode: str) 
         new=AsyncMock(return_value={}),
     ) as delete:
         api_instance = await _setup(hass, mode="full")
-        result = await _call(api_instance, DELETE_ALL_ALARMS, {"mode": mode})
+        result = await _call(
+            api_instance, DELETE_ALL_ALARMS, {"mode": mode, SERVICE_FIELD_CONFIRM: True}
+        )
 
     assert delete.await_args is not None
     assert delete.await_args.kwargs["mode"] == mode
@@ -497,7 +502,9 @@ async def test_delete_rule_deletes_rule(hass: HomeAssistant) -> None:
         new=AsyncMock(return_value=True),
     ) as delete_rule:
         api_instance = await _setup(hass, mode="full")
-        result = await _call(api_instance, DELETE_RULE, {"rule_id": "761"})
+        result = await _call(
+            api_instance, DELETE_RULE, {"rule_id": "761", SERVICE_FIELD_CONFIRM: True}
+        )
 
     assert delete_rule.await_args is not None
     assert delete_rule.await_args.args[0] == "761"
@@ -512,7 +519,11 @@ async def test_delete_host_deletes_host(hass: HomeAssistant) -> None:
         new=AsyncMock(return_value={}),
     ) as delete_host:
         api_instance = await _setup(hass, mode="full")
-        result = await _call(api_instance, DELETE_HOST, {"host_mac": _HOST_MAC})
+        result = await _call(
+            api_instance,
+            DELETE_HOST,
+            {SERVICE_FIELD_HOST_MAC: _HOST_MAC, SERVICE_FIELD_CONFIRM: True},
+        )
 
     assert delete_host.await_count == 1
     assert result.data["status"] == "applied"

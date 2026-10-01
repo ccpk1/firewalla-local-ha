@@ -107,6 +107,43 @@ One difference worth knowing: the REST API hands back every attribute, while
 Assist and LLM tools only see a small approved set. When you want the full
 detail in a model's context, that is what the report services are for.
 
+### AI assistants and MCP
+
+Firewalla Local can also expose its data — and, if you choose, its controls — to
+an AI assistant that speaks the Model Context Protocol (Claude, ChatGPT, and
+others). This uses Home Assistant's own **Model Context Protocol Server**
+integration, so there is no extra app or subscription: the assistant connects to
+Home Assistant, and Home Assistant presents the Firewalla tools.
+
+To turn it on:
+
+1. Have the **Model Context Protocol Server** integration set up in Home
+   Assistant and your client pointed at it.
+2. In this integration, open **Configure → System settings** and set
+   **AI assistant (MCP) tool access**.
+
+Four settings are available. The default exposes nothing that can change your
+network:
+
+| Setting | What the assistant can do |
+|---|---|
+| **Off** | No Firewalla tools at all. |
+| **Read only** *(default)* | Ask questions: devices, usage, WAN health, alarms, rules. |
+| **Read and control** | The above, plus reversible actions — pause/resume a rule, pause an SSID, rename a device, set a DHCP reservation, sleep/unmute alarms. |
+| **Full** | The above, plus **destructive** actions: delete a device, rule, or alarm, and bulk archive. |
+
+**Turn on Full only if you are prepared to watch the assistant closely.** Those
+actions cannot be undone, which is why they are a separate, deliberate choice and
+off by default. Every control action requires an administrator, so a non-admin
+user can never change your network through the assistant.
+
+This feature needs **Home Assistant Core 2026.10 or newer**. On older versions
+the integration works exactly as before; the setting is hidden and no tools are
+registered.
+
+The full tool list, with what each one does and how it should be used, is in the
+[MCP tool reference](MCP_TOOL_REFERENCE.md).
+
 ## Service catalog at a glance
 
 Services that already existed in 1.0.0:
@@ -281,6 +318,9 @@ Home Assistant.
   present.
 - **General options:** Adjust the local polling interval and timing settings
   without re-pairing the box.
+- **AI assistant (MCP) tool access:** Choose how much of the integration to
+  expose to AI assistants. Shown only on Home Assistant Core 2026.10 or newer;
+  see [AI assistants and MCP](#ai-assistants-and-mcp).
 
 ## Rich data lives in entity attributes
 

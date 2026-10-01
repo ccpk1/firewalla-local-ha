@@ -11,7 +11,7 @@ service payload in the documented response envelope. The tool injects its own
 
 from __future__ import annotations
 
-from typing import Final, override
+from typing import Any, Final, cast, override
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant
@@ -110,6 +110,15 @@ class _FirewallaReadTool(llm.Tool):
         """Bind the tool to the config entry it was registered for."""
         self._entry_id = entry_id
 
+    def _args(self, tool_input: llm.ToolInput) -> dict[str, Any]:
+        """Return tool args validated against the declared schema.
+
+        The LLM provider validates args, but an MCP client can call directly, so
+        validate here to turn a missing or unknown argument into a clean error
+        instead of a bare KeyError.
+        """
+        return cast(dict[str, Any], self.parameters(tool_input.tool_args))
+
     @override
     async def async_call(
         self,
@@ -118,7 +127,7 @@ class _FirewallaReadTool(llm.Tool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Call the backing service and return the wrapped payload."""
-        service_data = dict(tool_input.tool_args)
+        service_data = self._args(tool_input)
         service_data[SERVICE_FIELD_CONFIG_ENTRY_ID] = self._entry_id
         result = await hass.services.async_call(
             DOMAIN,

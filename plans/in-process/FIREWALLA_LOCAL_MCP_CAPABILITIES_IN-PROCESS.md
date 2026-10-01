@@ -73,7 +73,7 @@ These were verified during the original investigation. Do not re-derive them; th
 | 4.3 | Control tools | **Complete** — 15 control tools in `llm_tools_control.py` behind `read_and_control`; `create_rule` service + `from_alarm` + `aid` parity; effect tests | Complete | 4.2 |
 | 4.3b | Destructive tier | **Complete** — 4th mode `full`; 5 destructive tools (`archive_all_alarms`, `delete_alarm`, `delete_all_alarms`, `delete_host`, `delete_rule`) with `confirm` + `destructive` annotation | Complete | 4.3 |
 | 4.4 | Prompt fragment and contract tests | **Complete** — `llm_prompt.py` prompt fragment wired as `api_prompt`; consolidated contract tests (`test_llm_contract.py`); alarm timestamp field fix | Complete | 4.0 + 4.2 |
-| 4.5 | Tests, docs and disclosure | per-tool error paths, gating tests, README asterisk, USER_GUIDE MCP section **linking the tool reference** | Not started | 4.1–4.4 |
+| 4.5 | Tests, docs and disclosure | **Complete** — error-path tests, README footnote, USER_GUIDE MCP section; no quality-scale change | Complete | 4.1–4.4 |
 
 Ordering is deliberate: **4.0 defines the spec first** (a design deliverable, not code), so every tool is written to one consistent pattern. Then implementation is risk-ordered — the riskiest constraint (**older-Core safety**, 4.1) is proven **before any tool is built**.
 
@@ -180,12 +180,17 @@ Optional and lower priority: a CI matrix leg on 2025.10. Genuinely thorough, but
 
 ### 4.5 — Tests, docs and user-facing disclosure
 
-- [ ] Per-tool tests: happy path, envelope shape, and at least one error path per tool.
-- [ ] **Gating tests: nothing registers on a simulated pre-2026.10 Core; setup still succeeds.** Implemented per the strategy in 4.1 — guard unit test, mocked-helper wiring test, and the static eager-import assertion.
-- [ ] **No module-level `probatio` or `ToolResult`/`ToolAnnotations` import** — assert via AST, since it is a load-time failure mode that a latest-only CI run will never surface.
-- [ ] Add the **README asterisk and footnote** stating the 2026.10 requirement (exact text in the investigation note §10.2 rule 9), and the USER_GUIDE MCP section — the guide is user-facing prose that **links to `docs/MCP_TOOL_REFERENCE.md`** for the tool catalog rather than duplicating it.
-- [ ] The **MCP tool reference (4.0) is the authoritative surface record** — no separate `SURFACE_INVENTORY.md` (the completed initiative resolved that a hand-maintained inventory would rot). Keep the reference in sync as tools land; the contract tests enforce it.
-- [ ] Update `quality_scale.yaml` if the new surface changes any comment.
+- [x] **Per-tool error paths** (`test_llm_errors.py`, 17 tests): missing required arg, unknown arg, unknown tool, invalid duration, bad reservation mode, missing alarm selector, missing mute scope, and confirm gating. Plus a read-tool error path.
+- [x] **Gating tests** and the **static AST no-eager-import test** shipped in 4.1 and still pass (the guard-loaded module list now includes `llm_prompt.py`).
+- [x] **README asterisk + footnote** added to the Home Assistant requirement line, stating the 2026.10 requirement for AI/MCP tools and that older Core is unaffected.
+- [x] **USER_GUIDE MCP section** ("AI assistants and MCP") added under "Using your data across Home Assistant", covering enablement, the four modes with the destructive warning, the admin gate, and the 2026.10 requirement — **linking `docs/MCP_TOOL_REFERENCE.md`** for the catalog rather than duplicating it. The options-flow list also references it.
+- [x] **The MCP tool reference is the authoritative surface record** — no separate `SURFACE_INVENTORY.md`; the contract tests enforce it.
+- [x] `quality_scale.yaml` **needs no change** — there is no MCP/LLM rule, and the closest rules (`action-setup`, `strict-typing`) are already `done` with comments that remain accurate.
+
+**Two defects found and fixed during 4.5:**
+
+1. **Tools crashed with a bare `KeyError` on a malformed call.** `async_call_tool` does *not* validate args against `tool.parameters` (its docstring claims to, but it does not — verified), and `mcp_server.call_tool` passes client arguments straight through. Tools that indexed `tool_input.tool_args[...]` therefore raised `KeyError` on a missing required argument. Fixed with a `_args()` helper on both tool bases that validates against the declared schema, so a missing/unknown argument is a clean validation error. All direct indexes removed.
+2. **Destructive tools advertised a `confirm` parameter they ignored.** Their schemas declared `confirm` required, but the bodies hard-coded `True`, so the documented "requires `confirm: true`" gate was not real. The destructive tools now honour the caller's `confirm` (absent → clean validation error), matching the reference. `unblock_alarm_target` (the sanctioned undo, control tier) no longer advertises `confirm` and sets it internally.
 
 ### Decisions already made — do not re-litigate
 

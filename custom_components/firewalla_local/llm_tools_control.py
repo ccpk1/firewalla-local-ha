@@ -12,7 +12,7 @@ tool injects its own ``config_entry_id``.
 
 from __future__ import annotations
 
-from typing import Any, Final, override
+from typing import Any, Final, cast, override
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant
@@ -116,6 +116,15 @@ class _FirewallaControlTool(llm.Tool):
         """Bind the tool to the config entry it was registered for."""
         self._entry_id = entry_id
 
+    def _args(self, tool_input: llm.ToolInput) -> dict[str, Any]:
+        """Return tool args validated against the declared schema.
+
+        The LLM provider validates args, but an MCP client can call directly, so
+        validate here to turn a missing or unknown argument into a clean error
+        instead of a bare KeyError.
+        """
+        return cast(dict[str, Any], self.parameters(tool_input.tool_args))
+
     async def _call_service(
         self,
         hass: HomeAssistant,
@@ -203,7 +212,8 @@ class PauseRuleTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Pause one rule, reporting a no-op when it is already paused."""
-        rule_id = tool_input.tool_args[SERVICE_FIELD_RULE_TARGET]
+        args = self._args(tool_input)
+        rule_id = args[SERVICE_FIELD_RULE_TARGET]
         target = {"kind": "rule", "id": rule_id}
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
@@ -212,7 +222,7 @@ class PauseRuleTool(_FirewallaControlTool):
                     status="already_in_state", changed=False, target=target
                 )
 
-        await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        await self._call_service(hass, llm_context, args)
         return self._result(
             status="applied",
             changed=True,
@@ -248,7 +258,8 @@ class ResumeRuleTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Resume one rule, reporting a no-op when it is already enabled."""
-        rule_id = tool_input.tool_args[SERVICE_FIELD_RULE_TARGET]
+        args = self._args(tool_input)
+        rule_id = args[SERVICE_FIELD_RULE_TARGET]
         target = {"kind": "rule", "id": rule_id}
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
@@ -257,7 +268,7 @@ class ResumeRuleTool(_FirewallaControlTool):
                     status="already_in_state", changed=False, target=target
                 )
 
-        await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        await self._call_service(hass, llm_context, args)
         return self._result(
             status="applied",
             changed=True,
@@ -299,10 +310,11 @@ class SetSsidPausedTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Pause or resume one SSID."""
-        profile_id = tool_input.tool_args[SERVICE_FIELD_SSID_PROFILE_ID]
-        paused = tool_input.tool_args[SERVICE_FIELD_ENABLED]
+        args = self._args(tool_input)
+        profile_id = args[SERVICE_FIELD_SSID_PROFILE_ID]
+        paused = args[SERVICE_FIELD_ENABLED]
         target = {"kind": "ssid", "id": profile_id}
-        await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        await self._call_service(hass, llm_context, args)
         return self._result(
             status="applied",
             changed=True,
@@ -349,7 +361,7 @@ class SetHostNameTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Rename one host."""
         target = self._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
         )
@@ -401,7 +413,7 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Set a host DNS hostname."""
         target = SetHostNameTool._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
         )
@@ -442,7 +454,7 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Set a host device type."""
         target = SetHostNameTool._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
         )
@@ -493,7 +505,7 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Set or clear a DHCP reservation."""
         target = SetHostNameTool._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
         )
@@ -513,7 +525,7 @@ class _SetHostNotifyTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Set one host notification preference."""
         target = SetHostNameTool._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
         )
@@ -592,7 +604,7 @@ class WakeHostTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Send a Wake-on-LAN packet."""
         target = SetHostNameTool._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=False, target=target, result=result
         )
@@ -632,13 +644,13 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Run a speed test."""
-        args = tool_input.tool_args
+        args = self._args(tool_input)
         target = {
             "kind": "wan",
             "id": args.get(SERVICE_FIELD_WAN_UUID),
             "name": args.get(SERVICE_FIELD_WAN_NAME),
         }
-        result = await self._call_service(hass, llm_context, dict(args))
+        result = await self._call_service(hass, llm_context, args)
         return self._result(
             status="applied", changed=False, target=target, result=result
         )
@@ -705,13 +717,14 @@ class SetAlarmMutedTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Mute matching alarms."""
-        alarm_id = tool_input.tool_args.get(SERVICE_FIELD_ALARM_ID)
+        args = self._args(tool_input)
+        alarm_id = args.get(SERVICE_FIELD_ALARM_ID)
         target = {
             "kind": "silence",
             "id": alarm_id,
-            "name": tool_input.tool_args.get(SERVICE_FIELD_TARGET_VALUE),
+            "name": args.get(SERVICE_FIELD_TARGET_VALUE),
         }
-        await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        await self._call_service(hass, llm_context, args)
         undo = (
             f'firewalla_local__unmute_alarm(alarm_id="{alarm_id}")'
             if alarm_id
@@ -757,11 +770,12 @@ class UnmuteAlarmTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Remove an alarm silence."""
+        args = self._args(tool_input)
         target = {
             "kind": "silence",
-            "id": tool_input.tool_args.get(SERVICE_FIELD_ALARM_ID),
+            "id": args.get(SERVICE_FIELD_ALARM_ID),
         }
-        await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        await self._call_service(hass, llm_context, args)
         return self._result(status="applied", changed=True, target=target)
 
 
@@ -818,12 +832,13 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Create a block rule for an alarm's target."""
-        result = await self._call_service(hass, llm_context, dict(tool_input.tool_args))
+        args = self._args(tool_input)
+        result = await self._call_service(hass, llm_context, args)
         rule_id = result.get("rule_id") if isinstance(result, dict) else None
         target = {
             "kind": "rule",
             "id": rule_id,
-            "name": tool_input.tool_args.get(SERVICE_FIELD_TARGET_VALUE),
+            "name": args.get(SERVICE_FIELD_TARGET_VALUE),
         }
         undo = (
             f'firewalla_local__unblock_alarm_target(rule_id="{rule_id}")'
@@ -850,10 +865,6 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
                 SERVICE_FIELD_RULE_ID,
                 description="Required. The rule id to remove (from list_rules).",
             ): str,
-            vol.Optional(
-                SERVICE_FIELD_CONFIRM,
-                description="Required. Set true to confirm deleting the rule.",
-            ): bool,
         }
     )
     _service = SERVICE_DELETE_RULE
@@ -867,9 +878,9 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Delete the alarm block rule."""
-        rule_id = tool_input.tool_args[SERVICE_FIELD_RULE_ID]
-        data = dict(tool_input.tool_args)
-        data.setdefault(SERVICE_FIELD_CONFIRM, True)
+        data = self._args(tool_input)
+        rule_id = data[SERVICE_FIELD_RULE_ID]
+        data[SERVICE_FIELD_CONFIRM] = True
         result = await self._call_service(hass, llm_context, data)
         target = {"kind": "rule", "id": rule_id}
         return self._result(
@@ -905,7 +916,7 @@ class ArchiveAlarmTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Archive a single alarm."""
-        alarm_id = tool_input.tool_args[SERVICE_FIELD_ALARM_ID]
+        alarm_id = self._args(tool_input)[SERVICE_FIELD_ALARM_ID]
         data = {SERVICE_FIELD_MODE: "this", SERVICE_FIELD_ALARM_ID: alarm_id}
         await self._call_service(hass, llm_context, data)
         target = {"kind": "alarm", "id": alarm_id}
@@ -978,11 +989,12 @@ class DeleteAlarmTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Delete a single alarm."""
-        alarm_id = tool_input.tool_args[SERVICE_FIELD_ALARM_ID]
+        args = self._args(tool_input)
+        alarm_id = args[SERVICE_FIELD_ALARM_ID]
         data = {
             SERVICE_FIELD_MODE: "this",
             SERVICE_FIELD_ALARM_ID: alarm_id,
-            SERVICE_FIELD_CONFIRM: True,
+            SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
         }
         await self._call_service(hass, llm_context, data)
         return self._result(
@@ -1027,8 +1039,12 @@ class DeleteAlarmsTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Delete all alarms in the chosen set."""
-        mode = tool_input.tool_args[SERVICE_FIELD_MODE]
-        data = {SERVICE_FIELD_MODE: mode, SERVICE_FIELD_CONFIRM: True}
+        args = self._args(tool_input)
+        mode = args[SERVICE_FIELD_MODE]
+        data = {
+            SERVICE_FIELD_MODE: mode,
+            SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
+        }
         await self._call_service(hass, llm_context, data)
         return self._result(
             status="applied",
@@ -1072,10 +1088,11 @@ class DeleteHostTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Delete one host record."""
-        host_mac = tool_input.tool_args[SERVICE_FIELD_HOST_MAC]
+        args = self._args(tool_input)
+        host_mac = args[SERVICE_FIELD_HOST_MAC]
         data = {
             SERVICE_FIELD_HOST_MAC: host_mac,
-            SERVICE_FIELD_CONFIRM: True,
+            SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
             SERVICE_FIELD_REFRESH: True,
         }
         result = await self._call_service(hass, llm_context, data)
@@ -1121,8 +1138,12 @@ class DeleteRuleTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Delete one rule."""
-        rule_id = tool_input.tool_args[SERVICE_FIELD_RULE_ID]
-        data = {SERVICE_FIELD_RULE_ID: rule_id, SERVICE_FIELD_CONFIRM: True}
+        args = self._args(tool_input)
+        rule_id = args[SERVICE_FIELD_RULE_ID]
+        data = {
+            SERVICE_FIELD_RULE_ID: rule_id,
+            SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
+        }
         await self._call_service(hass, llm_context, data)
         return self._result(
             status="applied",

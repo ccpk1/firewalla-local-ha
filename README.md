@@ -85,8 +85,11 @@ You can read state or call services this way, and both return structured data yo
    * Gold Plus
    * Gold SE
    * Purple
-* **Home Assistant:** Requires Home Assistant Core version 2025.10 or newer.
+* **Home Assistant:** Requires Home Assistant Core version 2025.10 or newer.\*
 * **Network:** Your Home Assistant instance must be able to reach the Firewalla's local LAN IP.
+
+\* AI assistant / MCP tool support requires Home Assistant Core 2026.10 or newer.
+On older Core the integration works normally; the AI tools are simply not offered.
 
 ## 🛡️ **A Note on Security & Privacy**
 Connecting any external system to your firewall’s management layer requires a high degree of trust.
