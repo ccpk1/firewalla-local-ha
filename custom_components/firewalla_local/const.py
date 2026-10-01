@@ -10,6 +10,12 @@ DOMAIN: Final = "firewalla_local"
 LOGGER: Final = logging.getLogger(__name__)
 MANUFACTURER: Final = "Firewalla"
 
+# Minimum Home Assistant version that supports the LLM tool contract
+# (llm.ToolResult, llm.ToolAnnotations, Tool.integration). Kept here as a pure
+# tuple so this module stays free of homeassistant imports; the version
+# predicate lives in llm_support.py.
+MIN_LLM_TOOLS_HA_VERSION: Final = (2026, 10)
+
 # Entity state attributes
 ATTR_INTEGRATION: Final = "integration"
 ATTR_PURPOSE: Final = "purpose"
@@ -221,6 +227,7 @@ CONF_WATCHED_DEVICES: Final = "watched_devices"
 CONF_WATCHED_USERS: Final = "watched_users"
 CONF_ENABLE_NETWORK_ENTITIES: Final = "enable_network_entities"
 CONF_ENABLE_SSID_ENTITIES: Final = "enable_ssid_entities"
+CONF_LLM_TOOL_MODE: Final = "llm_tool_mode"
 
 DEFAULT_ENABLE_NETWORK_ENTITIES = True
 DEFAULT_ENABLE_SSID_ENTITIES = True
@@ -237,6 +244,18 @@ FIREWALLA_PROTOCOL_CLIENT_VERSION: Final = "1.68.89"
 DEFAULT_UPDATE_INTERVAL_MINUTES: Final = 3
 DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 15
 DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 5
+
+# LLM/MCP tool exposure. Read tools are the low-risk default; control tools
+# require an explicit opt-in. "off" registers nothing.
+LLM_TOOL_MODE_OFF: Final = "off"
+LLM_TOOL_MODE_READ_ONLY: Final = "read_only"
+LLM_TOOL_MODE_READ_AND_CONTROL: Final = "read_and_control"
+LLM_TOOL_MODES: Final = (
+    LLM_TOOL_MODE_OFF,
+    LLM_TOOL_MODE_READ_ONLY,
+    LLM_TOOL_MODE_READ_AND_CONTROL,
+)
+DEFAULT_LLM_TOOL_MODE: Final = LLM_TOOL_MODE_READ_ONLY
 MIN_UPDATE_INTERVAL_MINUTES: Final = 1
 MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 5
 MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 3

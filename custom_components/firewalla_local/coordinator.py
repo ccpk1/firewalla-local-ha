@@ -21,6 +21,7 @@ from .const import (
     CONF_ENABLE_SSID_ENTITIES,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
     CONF_LOCAL_IP,
     CONF_SELECTED_RULE_IDS,
     CONF_UPDATE_INTERVAL,
@@ -28,9 +29,11 @@ from .const import (
     CONF_WATCHED_USERS,
     DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_ENABLE_SSID_ENTITIES,
+    DEFAULT_LLM_TOOL_MODE,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
+    LLM_TOOL_MODES,
     LOGGER,
     MAX_UPDATE_INTERVAL_MINUTES,
     MIN_UPDATE_INTERVAL_MINUTES,
@@ -110,6 +113,12 @@ def get_enabled_ssid_entities(options: Mapping[str, object]) -> bool:
     """Return whether per-SSID status entities should be created."""
     raw_value = options.get(CONF_ENABLE_SSID_ENTITIES, DEFAULT_ENABLE_SSID_ENTITIES)
     return raw_value if isinstance(raw_value, bool) else DEFAULT_ENABLE_SSID_ENTITIES
+
+
+def get_llm_tool_mode(options: Mapping[str, object]) -> str:
+    """Return the configured LLM tool exposure mode."""
+    raw_value = options.get(CONF_LLM_TOOL_MODE, DEFAULT_LLM_TOOL_MODE)
+    return raw_value if raw_value in LLM_TOOL_MODES else DEFAULT_LLM_TOOL_MODE
 
 
 def get_configured_update_interval(options: Mapping[str, object]) -> timedelta:

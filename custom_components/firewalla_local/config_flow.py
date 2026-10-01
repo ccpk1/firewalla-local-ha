@@ -7,7 +7,7 @@ import ipaddress
 import socket
 import time
 from collections.abc import Mapping
-from typing import Final, Self, TypedDict, cast
+from typing import Final, NotRequired, Self, TypedDict, cast
 
 import voluptuous as vol
 from homeassistant.config_entries import (
@@ -17,6 +17,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import selector
 from homeassistant.helpers import translation as translation_helper
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -42,6 +43,7 @@ from .const import (
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
     CONF_QR_JSON,
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
@@ -59,10 +61,12 @@ from .const import (
     DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_ENABLE_SSID_ENTITIES,
     DEFAULT_FIREWALLA_HOST,
+    DEFAULT_LLM_TOOL_MODE,
     DEFAULT_PAIRING_DEVICE_NAME,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
+    LLM_TOOL_MODES,
     LOGGER,
     MAX_UPDATE_INTERVAL_MINUTES,
     MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
@@ -78,6 +82,7 @@ from .coordinator import (
     async_update_entry_options,
     cache_pending_pairing_init_payload,
 )
+from .helpers.llm_support import llm_tools_supported
 from .managers import (
     FirewallaHostManager,
     FirewallaRuleManager,
@@ -132,6 +137,7 @@ class SystemSettingsOptionsInput(TypedDict):
     watched_device_online_window: int
     enable_network_entities: bool
     enable_ssid_entities: bool
+    llm_tool_mode: NotRequired[str]
 
 
 class DeviceTrackersOptionsInput(TypedDict, total=False):
@@ -761,6 +767,13 @@ class FirewallaOptionsFlow(OptionsFlow):
             return raw_value
         return DEFAULT_ENABLE_SSID_ENTITIES
 
+    def _get_stored_llm_tool_mode(self) -> str:
+        """Return the persisted LLM tool mode or the default when unset."""
+        raw_value = self._config_entry.options.get(
+            CONF_LLM_TOOL_MODE, DEFAULT_LLM_TOOL_MODE
+        )
+        return raw_value if raw_value in LLM_TOOL_MODES else DEFAULT_LLM_TOOL_MODE
+
     def _get_stored_rule_selection(
         self,
     ) -> tuple[list[str], tuple[FirewallaRuleTemplate, ...]]:
@@ -897,6 +910,7 @@ class FirewallaOptionsFlow(OptionsFlow):
         device_tracker_away_window: int | None = None,
         enable_network_entities: bool | None = None,
         enable_ssid_entities: bool | None = None,
+        llm_tool_mode: str | None = None,
         selected_rule_ids: list[str] | None = None,
         selected_rule_templates: tuple[FirewallaRuleTemplate, ...] | None = None,
         watched_devices: list[str] | None = None,
@@ -952,6 +966,11 @@ class FirewallaOptionsFlow(OptionsFlow):
                 self._get_stored_enable_ssid_entities()
                 if enable_ssid_entities is None
                 else enable_ssid_entities
+            ),
+            CONF_LLM_TOOL_MODE: (
+                self._get_stored_llm_tool_mode()
+                if llm_tool_mode is None
+                else llm_tool_mode
             ),
             CONF_UPDATE_INTERVAL: (
                 self._get_stored_update_interval()
@@ -1267,6 +1286,12 @@ class FirewallaOptionsFlow(OptionsFlow):
                     bool, user_input[CONF_ENABLE_NETWORK_ENTITIES]
                 ),
                 enable_ssid_entities=cast(bool, user_input[CONF_ENABLE_SSID_ENTITIES]),
+                llm_tool_mode=cast(
+                    str,
+                    user_input.get(
+                        CONF_LLM_TOOL_MODE, self._get_stored_llm_tool_mode()
+                    ),
+                ),
             )
             if typed_user_input.get(_OPTION_RETURN_TO_MAIN_MENU, False):
                 return await self.async_step_init()
@@ -1286,50 +1311,65 @@ class FirewallaOptionsFlow(OptionsFlow):
                         CONF_ENABLE_NETWORK_ENTITIES
                     ],
                     enable_ssid_entities=typed_user_input[CONF_ENABLE_SSID_ENTITIES],
+                    llm_tool_mode=typed_user_input.get(
+                        CONF_LLM_TOOL_MODE, self._get_stored_llm_tool_mode()
+                    ),
                 )
             )
             return await self.async_step_init()
 
+        schema_fields: dict[object, object] = {
+            vol.Required(
+                CONF_WATCHED_DEVICE_ONLINE_WINDOW,
+                default=self._get_stored_watched_device_online_window(),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES),
+            ),
+            vol.Required(
+                CONF_DEVICE_TRACKER_AWAY_WINDOW,
+                default=self._get_stored_device_tracker_away_window(),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES),
+            ),
+            vol.Required(
+                CONF_UPDATE_INTERVAL,
+                default=self._get_stored_update_interval(),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(
+                    min=MIN_UPDATE_INTERVAL_MINUTES,
+                    max=MAX_UPDATE_INTERVAL_MINUTES,
+                ),
+            ),
+            vol.Required(
+                CONF_ENABLE_NETWORK_ENTITIES,
+                default=self._get_stored_enable_network_entities(),
+            ): bool,
+            vol.Required(
+                CONF_ENABLE_SSID_ENTITIES,
+                default=self._get_stored_enable_ssid_entities(),
+            ): bool,
+            vol.Optional(
+                _OPTION_RETURN_TO_MAIN_MENU,
+                default=False,
+            ): bool,
+        }
+        if llm_tools_supported():
+            schema_fields[
+                vol.Required(
+                    CONF_LLM_TOOL_MODE,
+                    default=self._get_stored_llm_tool_mode(),
+                )
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(LLM_TOOL_MODES),
+                    translation_key=CONF_LLM_TOOL_MODE,
+                )
+            )
+
         return self.async_show_form(
             step_id=_STEP_ID_SYSTEM_SETTINGS,
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_WATCHED_DEVICE_ONLINE_WINDOW,
-                        default=self._get_stored_watched_device_online_window(),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES),
-                    ),
-                    vol.Required(
-                        CONF_DEVICE_TRACKER_AWAY_WINDOW,
-                        default=self._get_stored_device_tracker_away_window(),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES),
-                    ),
-                    vol.Required(
-                        CONF_UPDATE_INTERVAL,
-                        default=self._get_stored_update_interval(),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(
-                            min=MIN_UPDATE_INTERVAL_MINUTES,
-                            max=MAX_UPDATE_INTERVAL_MINUTES,
-                        ),
-                    ),
-                    vol.Required(
-                        CONF_ENABLE_NETWORK_ENTITIES,
-                        default=self._get_stored_enable_network_entities(),
-                    ): bool,
-                    vol.Required(
-                        CONF_ENABLE_SSID_ENTITIES,
-                        default=self._get_stored_enable_ssid_entities(),
-                    ): bool,
-                    vol.Optional(
-                        _OPTION_RETURN_TO_MAIN_MENU,
-                        default=False,
-                    ): bool,
-                }
-            ),
+            data_schema=vol.Schema(schema_fields),
         )

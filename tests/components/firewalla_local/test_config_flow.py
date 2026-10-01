@@ -38,6 +38,7 @@ from custom_components.firewalla_local.const import (
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
     CONF_QR_JSON,
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
@@ -50,6 +51,7 @@ from custom_components.firewalla_local.const import (
     DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_ENABLE_SSID_ENTITIES,
     DEFAULT_FIREWALLA_HOST,
+    DEFAULT_LLM_TOOL_MODE,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
@@ -97,6 +99,7 @@ def _expected_options(overrides: dict[str, object] | None = None) -> dict[str, o
         CONF_WATCHED_USERS: [],
         CONF_ENABLE_NETWORK_ENTITIES: DEFAULT_ENABLE_NETWORK_ENTITIES,
         CONF_ENABLE_SSID_ENTITIES: DEFAULT_ENABLE_SSID_ENTITIES,
+        CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE,
     }
     if overrides:
         payload.update(overrides)
