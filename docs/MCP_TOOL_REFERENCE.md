@@ -82,10 +82,15 @@ Read tools return a JSON object:
 }
 ```
 
-- `result` — the service payload, unchanged (services stay byte-compatible).
+- `result` — the service payload, unchanged (services stay byte-compatible). The
+  payload already carries the service's own `metadata` (`applied`, `warnings`,
+  `unavailable_sections`, `provenance`), so applied limits travel with the data.
 - `meta.response_type` — a stable name for the shape you received.
-- `meta.applied_limit` / `meta.truncated` — present **only** when a limit actually
-  cut data (so a truncated ranking is never mistaken for a complete one).
+- `meta.applied_limit` — present only when the tool passed a limit.
+
+Do **not** emit `meta.truncated`: the read services slice internally and do not
+report a total, so a truncation flag could not be derived honestly. When a
+service gains a total-count signal, add it then.
 
 ### Response shape — control actions
 
@@ -143,8 +148,9 @@ Each tool declares four machine-readable flags (served to MCP clients):
 - `read_only` — true for reads.
 - `destructive` — true only where an action is genuinely destructive.
 - `idempotent` — true where re-calling is a no-op after the pre-check.
-- `open_world` — true where the tool polls the live Firewalla box (results are a
-  snapshot of an external system); false for cached reads.
+- `open_world` — **false on every tool.** These tools operate on the user's own,
+  bounded Firewalla box, not on an open-ended external world. (Polling the box is
+  still a closed world; Home Assistant's built-in tools all use `false` too.)
 
 ### Inputs
 
@@ -223,7 +229,8 @@ Reads that tell you what exists — the first step before any control action.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
   `action`, `is_paused`/`enabled`, target (`type`/`target`), scope, and the `aid`
   alarm back-reference when the rule was created by an alarm block.
-- **Availability:** read, default-on. *(Planned — scoped, non-admin.)*
+- **Availability:** read, default-on. *(Planned — backed by the non-admin
+  `get_rules` service.)*
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false` (coordinator-backed) or `true` (live).
 
 ### `firewalla_local__get_network_config`

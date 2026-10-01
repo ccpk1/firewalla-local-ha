@@ -53,6 +53,7 @@ _RAW_UPDATE_DISTURB_LEVEL_KEY: Final = "disturbLevel"
 _RAW_UPDATE_DISTURB_METHOD_KEY: Final = "disturbMethod"
 _RAW_UPDATE_DURATION_KEY: Final = "duration"
 _RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
+_RAW_UPDATE_ALARM_ID_KEY: Final = "aid"
 _STATUS_DISABLED: Final = "disabled"
 _STATUS_ENABLED: Final = "enabled"
 _TEMPLATE_DATA_ACTION_KEY: Final = "action"
@@ -993,6 +994,17 @@ class FirewallaPolicyRule:
             return None
         stripped_notes = raw_notes.strip()
         return stripped_notes or None
+
+    @property
+    def alarm_id(self) -> str | None:
+        """Return the alarm that created this rule, if it was created from one.
+
+        Firewalla records the originating alarm id on block rules created from an
+        alarm; ordinary rules carry no value.
+        """
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_ALARM_ID_KEY)
+        )
 
     @property
     def custom_name(self) -> str | None:

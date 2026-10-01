@@ -84,6 +84,7 @@ from .const import (
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
+    SERVICE_GET_RULES,
     SERVICE_GET_RUNTIME_INVENTORY,
     SERVICE_GET_SPEED_TEST_RESULTS,
     SERVICE_GET_TIME_USAGE_REPORT,
@@ -196,6 +197,7 @@ from .models import (
     FirewallaNetworkUsageBucket,
     FirewallaNetworkUsageSummary,
     FirewallaNetworkUsageWindow,
+    FirewallaPolicyRule,
     FirewallaReportProvenance,
     FirewallaReportTarget,
     FirewallaReportTimeBasis,
@@ -216,6 +218,7 @@ from .models import (
     FirewallaWanEventFailure,
     FirewallaWanEventStatus,
     FirewallaWanInterface,
+    format_policy_rule_name,
 )
 from .utils.duration import parse_duration_to_seconds
 from .utils.mac import normalize_mac_address
@@ -232,6 +235,13 @@ _TIME_USAGE_REPORT_SUMMARY_SECTIONS = (
 )
 
 GET_RUNTIME_INVENTORY_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_RULES_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
@@ -635,6 +645,22 @@ def _get_loaded_entry(
 async def _async_refresh_runtime_state(entry: FirewallaConfigEntry) -> None:
     """Force a fresh runtime refresh before mutating rules."""
     await entry.runtime_data.coordinator.async_request_refresh()
+
+
+def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
+    """Serialize one live policy rule into the flat, agent-facing shape."""
+    return {
+        "rule_id": rule.rule_id,
+        "name": format_policy_rule_name(rule),
+        "action": rule.action,
+        "enabled": rule.enabled,
+        "is_paused": rule.is_paused,
+        "target": rule.target,
+        "target_name": rule.target_name,
+        "target_type": rule.target_type,
+        "scope": list(rule.scope),
+        "alarm_id": rule.alarm_id,
+    }
 
 
 def _serialize_speed_test_result(
@@ -3071,6 +3097,22 @@ async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectTy
     }
 
 
+async def _async_handle_get_rules(call: ServiceCall) -> JsonObjectType:
+    """Return the current live policy rules as a flat, selectable list."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    return {
+        "config_entry_id": entry.entry_id,
+        "rules": [
+            _serialize_rule_summary(rule)
+            for rule in entry.runtime_data.rule_manager.get_rules()
+        ],
+    }
+
+
 async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     """Return active and optionally archived alarms with shared report metadata."""
     entry = _get_loaded_entry(
@@ -4781,6 +4823,13 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_GET_ALARMS,
         _async_handle_get_alarms,
         GET_ALARMS_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_GET_RULES,
+        _async_handle_get_rules,
+        GET_RULES_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),

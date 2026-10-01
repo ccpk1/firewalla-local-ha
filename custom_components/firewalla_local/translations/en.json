@@ -1295,6 +1295,20 @@
         }
       }
     },
+    "get_rules": {
+      "name": "Get rules",
+      "description": "Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, and any originating alarm. Use this to resolve the rule target for pause_rule and resume_rule.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "archive_alarms": {
       "name": "Archive alarms",
       "description": "Move one or all active alarms to the archive. Archived alarms remain retrievable.",

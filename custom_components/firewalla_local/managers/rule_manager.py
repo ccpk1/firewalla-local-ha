@@ -493,6 +493,10 @@ class FirewallaRuleManager(FirewallaBaseManager):
             )
         )
 
+    def get_rules(self) -> tuple[FirewallaPolicyRule, ...]:
+        """Return every live policy rule known to the manager, ordered by id."""
+        return tuple(sorted(self._rule_index.values(), key=lambda rule: rule.rule_id))
+
     def get_switch_candidate_choices(self) -> dict[str, str]:
         """Return selectable rule choices for the options flow."""
         return {

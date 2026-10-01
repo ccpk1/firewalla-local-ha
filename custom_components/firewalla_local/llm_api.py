@@ -17,6 +17,8 @@ from homeassistant.helpers import llm
 from homeassistant.util import slugify
 
 from .const import DOMAIN
+from .coordinator import get_llm_tool_mode
+from .llm_tools import build_read_tools
 
 
 class FirewallaLocalAPI(llm.API):
@@ -26,9 +28,19 @@ class FirewallaLocalAPI(llm.API):
     tools are added in a later phase and gated by the options toggle.
     """
 
-    def __init__(self, hass: HomeAssistant, *, api_id: str, name: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        api_id: str,
+        name: str,
+        entry_id: str,
+        mode: str,
+    ) -> None:
         """Initialize the API."""
         super().__init__(hass=hass, id=api_id, name=name)
+        self._entry_id = entry_id
+        self._mode = mode
 
     async def async_get_api_instance(
         self, llm_context: llm.LLMContext
@@ -38,7 +50,7 @@ class FirewallaLocalAPI(llm.API):
             api=self,
             api_prompt="",
             llm_context=llm_context,
-            tools=[],
+            tools=build_read_tools(entry_id=self._entry_id),
         )
 
 
@@ -68,5 +80,7 @@ def async_register_firewalla_api(
         hass,
         api_id=_resolve_api_id(hass, entry),
         name=entry.title,
+        entry_id=entry.entry_id,
+        mode=get_llm_tool_mode(entry.options),
     )
     return llm.async_register_api(hass, api)
