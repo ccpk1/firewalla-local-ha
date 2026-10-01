@@ -1196,7 +1196,7 @@ get_alarms:
 
 get_rules:
   name: Get rules
-  description: Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, applies_to, tag_refs, purpose, and any originating alarm. Defaults to user-visible rules; product-owned DAP and family rules are hidden unless requested via include_purpose. Use this to resolve the rule target for pause_rule and resume_rule.
+  description: Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, applies_to, tag_refs, purpose, and any originating alarm. Defaults to user-visible rules: product-owned DAP and family rules, and rules owned by a Firewalla subsystem, are hidden unless requested via include_purpose or include_system_managed. Use this to resolve the rule target for pause_rule and resume_rule.
   fields:
     enabled:
       required: false
@@ -1248,6 +1248,13 @@ get_rules:
               label: Family rules
       name: Include purpose
       description: Optional. Include product-owned rules that are hidden by default.
+    include_system_managed:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Include system-managed
+      description: Optional. Include rules owned by a Firewalla subsystem, such as alarm-intel auto-blocks. Hidden by default with the product-owned purposes.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

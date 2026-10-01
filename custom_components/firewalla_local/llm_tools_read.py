@@ -37,6 +37,7 @@ from .const import (
     SERVICE_FIELD_INCLUDE_ARCHIVED,
     SERVICE_FIELD_INCLUDE_DNS,
     SERVICE_FIELD_INCLUDE_PURPOSE,
+    SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
     SERVICE_FIELD_KIND,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_NETWORK_NAME,
@@ -258,8 +259,9 @@ class ListRulesTool(_FirewallaReadTool):
         "a rule covers a specific device.\n"
         "\n"
         "Defaults to user-visible rules. The box also carries large numbers of "
-        "product-owned DAP and family rules that users do not manage; those are "
-        "hidden unless requested via include_purpose."
+        "product-owned DAP and family rules, plus rules owned by a Firewalla "
+        "subsystem (the alarm-intel auto-blocks); those are hidden unless "
+        "requested via include_purpose or include_system_managed."
     )
     parameters = vol.Schema(
         {
@@ -295,6 +297,13 @@ class ListRulesTool(_FirewallaReadTool):
                 cv.ensure_list,
                 [vol.In(("dap", "family"))],
             ),
+            vol.Optional(
+                SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
+                description=(
+                    "Optional. Include rules owned by a Firewalla subsystem, "
+                    "such as alarm-intel auto-blocks. Hidden by default."
+                ),
+            ): bool,
         }
     )
     _service = SERVICE_GET_RULES

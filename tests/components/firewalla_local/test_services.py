@@ -56,6 +56,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_INCLUDE_ARCHIVED,
     SERVICE_FIELD_INCLUDE_DNS,
     SERVICE_FIELD_INCLUDE_PURPOSE,
+    SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
     SERVICE_FIELD_KIND,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_MODE,
@@ -3399,6 +3400,75 @@ async def test_get_rules_excludes_product_owned_purposes_by_default(
     assert [rule["rule_id"] for rule in default["rules"]] == ["744"]
     assert included is not None
     assert sorted(rule["rule_id"] for rule in included["rules"]) == ["744", "900"]
+
+
+async def test_get_rules_excludes_system_managed_rules_by_default(
+    hass: HomeAssistant,
+) -> None:
+    """Test subsystem-owned rules are hidden unless explicitly requested."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    snapshot = _snapshot()
+    auto_block = replace(
+        snapshot.policy_rules[0],
+        rule_id="651",
+        target="66.132.195.91",
+        target_type="ip",
+        target_name=None,
+        applies_to=(),
+        tag_refs=(),
+        raw_update_payload={"pid": "651", "method": "auto", "action": "block"},
+    )
+    snapshot = replace(snapshot, policy_rules=(*snapshot.policy_rules, auto_block))
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        default = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+        included = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED: True,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert default is not None
+    assert [rule["rule_id"] for rule in default["rules"]] == ["744"]
+    assert included is not None
+    assert sorted(rule["rule_id"] for rule in included["rules"]) == ["651", "744"]
 
 
 async def test_get_rules_supports_filters(hass: HomeAssistant) -> None:

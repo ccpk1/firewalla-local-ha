@@ -8,6 +8,7 @@ from typing import Final, TypedDict
 from custom_components.firewalla_local.managers.rule_manager import (
     RuleManagementInfo,
     build_switch_rule_evaluations,
+    is_user_visible_rule,
 )
 from custom_components.firewalla_local.models import (
     FirewallaHostRuntime,
@@ -582,7 +583,7 @@ def build_runtime_inventory_report(
             dap_rules.append(rule_record)
         elif rule.purpose == _RULE_PURPOSE_FAMILY:
             family_rules.append(rule_record)
-        elif management["classification"] == _RULE_MANAGEMENT_CLASSIFICATION_USER:
+        elif is_user_visible_rule(rule, raw_extras):
             visible_rules.append(rule_record)
             if rule.enabled:
                 visible_enabled_rules.append(rule_record)

@@ -62,6 +62,7 @@ from .const import (
     SERVICE_FIELD_INCLUDE_ARCHIVED,
     SERVICE_FIELD_INCLUDE_DNS,
     SERVICE_FIELD_INCLUDE_PURPOSE,
+    SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
     SERVICE_FIELD_KIND,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_MODE,
@@ -191,6 +192,11 @@ from .const import (
     TRANS_PLACEHOLDER_WAN_UUID,
 )
 from .coordinator import FirewallaConfigEntry
+from .managers.rule_manager import (
+    build_switch_rule_evaluations_for_rules,
+    is_system_managed_rule,
+    is_user_visible_rule,
+)
 from .models import (
     FirewallaAlarm,
     FirewallaAlarmException,
@@ -269,6 +275,7 @@ GET_RULES_SCHEMA = vol.Schema(
             cv.ensure_list_csv,
             [vol.In(HIDDEN_RULE_PURPOSES)],
         ),
+        vol.Optional(SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -3228,11 +3235,12 @@ async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectTy
 async def _async_handle_get_rules(call: ServiceCall) -> JsonObjectType:
     """Return the live policy rules as a flat, selectable list.
 
-    Defaults to user-visible rules: the box carries large numbers of
-    product-owned DAP and family rules that a user never interacts with, so
-    including them by default buries the rules that matter. `include_purpose`
-    opts them back in. Filters are applied server-side so a caller can ask a
-    narrow question without pulling the whole rule table.
+    Defaults to user-visible rules: product-owned DAP and family rules, and
+    rules owned by a Firewalla subsystem (the alarm-intel auto-blocks), are
+    hidden because including them buries the rules a user manages.
+    `include_purpose` and `include_system_managed` opt each set back in.
+    Filters are applied server-side so a caller can ask a narrow question
+    without pulling the whole rule table.
     """
     entry = _get_loaded_entry(
         call.hass,
@@ -3240,10 +3248,21 @@ async def _async_handle_get_rules(call: ServiceCall) -> JsonObjectType:
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
     include_purpose = cast(list[str], call.data.get(SERVICE_FIELD_INCLUDE_PURPOSE, []))
+    include_system_managed = cast(
+        bool, call.data.get(SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED, False)
+    )
+    live_rules = entry.runtime_data.rule_manager.get_rules()
+    evaluations = build_switch_rule_evaluations_for_rules(live_rules)
     rules = [
         rule
-        for rule in entry.runtime_data.rule_manager.get_rules()
-        if _rule_matches_filters(rule, call.data, include_purpose=include_purpose)
+        for rule in live_rules
+        if _rule_matches_filters(
+            rule,
+            call.data,
+            include_purpose=include_purpose,
+            include_system_managed=include_system_managed,
+            raw_extras=evaluations[rule.rule_id].raw_extras,
+        )
     ]
     return {
         "config_entry_id": entry.entry_id,
@@ -3256,10 +3275,17 @@ def _rule_matches_filters(
     data: Mapping[str, Any],
     *,
     include_purpose: list[str],
+    include_system_managed: bool,
+    raw_extras: Mapping[str, object],
 ) -> bool:
     """Return whether one rule passes the default exclusion and every filter."""
-    if rule.purpose in HIDDEN_RULE_PURPOSES and rule.purpose not in include_purpose:
-        return False
+    if not is_user_visible_rule(rule, raw_extras):
+        opted_in_by_purpose = rule.purpose in include_purpose
+        opted_in_by_classification = include_system_managed and is_system_managed_rule(
+            raw_extras
+        )
+        if not (opted_in_by_purpose or opted_in_by_classification):
+            return False
 
     enabled_filter = cast(bool | None, data.get(SERVICE_FIELD_ENABLED))
     if enabled_filter is not None and rule.enabled is not enabled_filter:

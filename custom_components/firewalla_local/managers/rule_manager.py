@@ -12,6 +12,7 @@ from ..api import FirewallaApiClient
 from ..const import (
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
+    HIDDEN_RULE_PURPOSES,
     RULE_TARGET_TAG,
 )
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
@@ -210,6 +211,21 @@ def _get_system_managed_reasons(raw_extras: Mapping[str, object]) -> list[str]:
 def is_system_managed_rule(raw_extras: Mapping[str, object]) -> bool:
     """Return whether direct raw rule attributes mark the rule as system-managed."""
     return bool(_get_system_managed_reasons(raw_extras))
+
+
+def is_user_visible_rule(
+    rule: FirewallaPolicyRule,
+    raw_extras: Mapping[str, object],
+) -> bool:
+    """Return whether a rule belongs to the default user-visible set.
+
+    User-visible means user-managed and not one of the product-owned purposes.
+    This is the single definition behind both the runtime inventory's
+    ``visible_rules`` and the ``get_rules`` default, so the two cannot drift.
+    """
+    return rule.purpose not in HIDDEN_RULE_PURPOSES and not is_system_managed_rule(
+        raw_extras
+    )
 
 
 def is_switch_rule_candidate(

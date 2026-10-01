@@ -202,6 +202,7 @@ SERVICE_FIELD_USER: Final = "user"
 SERVICE_FIELD_ACTION: Final = "action"
 SERVICE_FIELD_APPLIES_TO: Final = "applies_to"
 SERVICE_FIELD_INCLUDE_PURPOSE: Final = "include_purpose"
+SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED: Final = "include_system_managed"
 
 # Rule purposes that are product-owned and never user-facing. They are excluded
 # from rule listings unless explicitly requested: on a real box they outnumber
