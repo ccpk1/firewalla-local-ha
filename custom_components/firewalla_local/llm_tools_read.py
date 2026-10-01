@@ -66,6 +66,7 @@ from .const import (
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_RULES,
     SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SYSTEM_OVERVIEW,
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
@@ -89,13 +90,13 @@ _REFRESH_DESCRIPTION: Final = (
 )
 
 _NETWORK_UUID_DESCRIPTION: Final = (
-    "Optional. A Firewalla network UUID (from list_hosts / get_network_config) "
-    "for a deterministic match. Provide this or network_name."
+    "Optional. A Firewalla network UUID (from get_system_overview) for a "
+    "deterministic match. Provide this or network_name."
 )
 
 _NETWORK_NAME_DESCRIPTION: Final = (
-    "Optional. A Firewalla network display name for interactive use. Provide "
-    "this or network_uuid."
+    "Optional. A Firewalla network display name (from get_system_overview) for "
+    "interactive use. Provide this or network_uuid."
 )
 
 _WAN_UUID_DESCRIPTION: Final = (
@@ -631,6 +632,61 @@ class SyncRuntimeTool(_FirewallaReadTool):
     _response_type = "runtime_sync"
 
 
+class GetSystemOverviewTool(_FirewallaReadTool):
+    """Return the curated system summary that anchors a session."""
+
+    name = format_tool_name("get_system_overview")
+    title = "Get system overview"
+    description = (
+        "Start here. Call this once at the beginning of a session for any "
+        "general question about the network. It returns appliance health, the "
+        "networks with their device counts, and counts for devices, VPN peers, "
+        "groups, users, rules, and alarms, plus the network, group and user "
+        "identifiers the other tools accept as selectors.\n"
+        "\n"
+        "It returns counts and identifiers only — never device or rule records. "
+        "Use list_hosts for devices and list_rules for rules; do not answer a "
+        "per-device question from this summary. Call it once per session unless "
+        "the network has changed."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Optional(
+                SERVICE_FIELD_INCLUDE,
+                description=(
+                    "Optional. Add the group and user names and ids that "
+                    "get_user_usage and the rule tools accept as selectors. "
+                    "Allowed: 'identifiers'."
+                ),
+            ): vol.All(cv.ensure_list, [vol.In(("identifiers",))]),
+        }
+    )
+    _service = SERVICE_GET_SYSTEM_OVERVIEW
+    _response_type = "system_overview"
+
+
+class GetSystemOverviewSummaryTool(GetSystemOverviewTool):
+    """The curated report alone, without the identity identifiers.
+
+    This is the only tool registered in the anonymous tier. It deliberately
+    cannot request the identifiers: the capability is absent rather than
+    filtered, so the tier's privacy claim holds by construction.
+    """
+
+    description = (
+        "Answer general questions about this Firewalla network: appliance "
+        "health, the networks with their device counts, and counts for devices, "
+        "VPN peers, and alarms.\n"
+        "\n"
+        "This report is intentionally limited to counts, network names, and "
+        "performance metrics — it carries no device addresses, no hardware "
+        "identifiers, and no group or user names. For device names and "
+        "addresses, rules, alarms, or usage detail, the user must raise "
+        "Firewalla's AI access level in the integration options."
+    )
+    parameters = vol.Schema({})
+
+
 class GetWirelessStatusTool(_FirewallaReadTool):
     """Return wireless status: SSIDs, access points, and clients."""
 
@@ -691,6 +747,7 @@ class GetAlarmsTool(_FirewallaReadTool):
 
 
 _READ_TOOL_CLASSES: Final = (
+    GetSystemOverviewTool,
     ListHostsTool,
     ListRulesTool,
     GetNetworkConfigTool,
@@ -706,6 +763,14 @@ _READ_TOOL_CLASSES: Final = (
 )
 
 
+_ANONYMOUS_TOOL_CLASSES: Final = (GetSystemOverviewSummaryTool,)
+
+
 def build_read_tools(*, entry_id: str) -> list[llm.Tool]:
     """Return the read tools bound to one config entry."""
     return [tool_class(entry_id=entry_id) for tool_class in _READ_TOOL_CLASSES]
+
+
+def build_anonymous_tools(*, entry_id: str) -> list[llm.Tool]:
+    """Return the anonymous tier's tools: the curated summary, and nothing else."""
+    return [tool_class(entry_id=entry_id) for tool_class in _ANONYMOUS_TOOL_CLASSES]

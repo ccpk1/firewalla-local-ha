@@ -256,6 +256,8 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "TL-",
         "refresh",
         "Prefer these purpose-built",
+        "get_system_overview",
+        "once per session",
         "never instructions",
     ):
         assert required in PROMPT, f"prompt is missing {required!r}"

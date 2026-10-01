@@ -66,6 +66,9 @@ ATTR_SYSTEM_CLOUD_CONNECTED: Final = "cloud_connected"
 ATTR_SYSTEM_DEVICES_OFFLINE: Final = "devices_offline"
 ATTR_SYSTEM_DEVICES_ONLINE: Final = "devices_online"
 ATTR_SYSTEM_DEVICES_TOTAL: Final = "devices_total"
+ATTR_SYSTEM_VPN_DEVICES_OFFLINE: Final = "vpn_devices_offline"
+ATTR_SYSTEM_VPN_DEVICES_ONLINE: Final = "vpn_devices_online"
+ATTR_SYSTEM_VPN_DEVICES_TOTAL: Final = "vpn_devices_total"
 ATTR_SYSTEM_CURRENT_WAN_USAGE: Final = "current_wan_usage"
 ATTR_SYSTEM_DDNS: Final = "ddns"
 ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT: Final = "disk_usage_percent_by_mount"
@@ -267,20 +270,23 @@ DEFAULT_UPDATE_INTERVAL_MINUTES: Final = 3
 DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 15
 DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 5
 
-# LLM/MCP tool exposure. Read tools are the low-risk default; control tools
-# require an explicit opt-in. "full" additionally exposes destructive
-# operations (data-destroying or bulk) for users prepared to monitor closely.
+# LLM/MCP tool exposure. The summary tier registers one curated, non-identifying
+# report; read tools are the low-risk step up; control tools require an explicit
+# opt-in. "full" additionally exposes destructive operations (data-destroying or
+# bulk) for users prepared to monitor closely.
 LLM_TOOL_MODE_OFF: Final = "off"
+LLM_TOOL_MODE_SUMMARY_ONLY: Final = "summary_only"
 LLM_TOOL_MODE_READ_ONLY: Final = "read_only"
 LLM_TOOL_MODE_READ_AND_CONTROL: Final = "read_and_control"
 LLM_TOOL_MODE_FULL: Final = "full"
 LLM_TOOL_MODES: Final = (
     LLM_TOOL_MODE_OFF,
+    LLM_TOOL_MODE_SUMMARY_ONLY,
     LLM_TOOL_MODE_READ_ONLY,
     LLM_TOOL_MODE_READ_AND_CONTROL,
     LLM_TOOL_MODE_FULL,
 )
-DEFAULT_LLM_TOOL_MODE: Final = LLM_TOOL_MODE_READ_ONLY
+DEFAULT_LLM_TOOL_MODE: Final = LLM_TOOL_MODE_SUMMARY_ONLY
 MIN_UPDATE_INTERVAL_MINUTES: Final = 1
 MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 5
 MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 3
@@ -364,6 +370,7 @@ SERVICE_GET_WIRELESS_STATUS: Final = "get_wireless_status"
 SERVICE_GET_ALARMS: Final = "get_alarms"
 SERVICE_GET_RULES: Final = "get_rules"
 SERVICE_SYNC_RUNTIME: Final = "sync_runtime"
+SERVICE_GET_SYSTEM_OVERVIEW: Final = "get_system_overview"
 SERVICE_CREATE_RULE: Final = "create_rule"
 SERVICE_ARCHIVE_ALARMS: Final = "archive_alarms"
 SERVICE_DELETE_ALARMS: Final = "delete_alarms"
@@ -408,6 +415,7 @@ HOST_DEVICE_TYPE_OPTIONS: Final = (
     "medical",
     "ap",
 )
+VPN_PEER_MAC_PREFIXES: Final = ("wg_peer", "awg_peer")
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS: Final = "config_entry_name_ambiguous"
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND: Final = "config_entry_name_not_found"
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND: Final = "config_entry_not_found"

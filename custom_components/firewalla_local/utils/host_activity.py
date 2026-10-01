@@ -10,13 +10,28 @@ the inventory sets the reference point, and other hosts count as online when
 they were active within the configured window of it. A box where nothing has
 been active recently therefore reports no online hosts rather than treating
 stale timestamps as current.
+
+VPN peers are identified here too, for the same reason: the counted population
+has to be one definition shared by the system-status attributes and the summary
+report.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ..const import VPN_PEER_MAC_PREFIXES
 from ..models import FirewallaHostRuntime
+
+
+def is_vpn_peer(host: FirewallaHostRuntime) -> bool:
+    """Return whether one host is a VPN peer rather than a LAN device.
+
+    Peers are synthesized from the box's ``wgPeers``/``awgPeers`` inventories
+    and carry a ``<prefix>:<uid>`` id instead of a MAC, so they are not LAN
+    devices and cannot be targeted by MAC-based tools.
+    """
+    return host.mac.partition(":")[0] in VPN_PEER_MAC_PREFIXES
 
 
 def reference_last_active(hosts: Sequence[FirewallaHostRuntime]) -> float | None:

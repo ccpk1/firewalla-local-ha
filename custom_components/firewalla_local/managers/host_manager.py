@@ -22,6 +22,7 @@ from ..models import FirewallaHostRuntime, FirewallaRuntimeSnapshot
 from ..utils.host_activity import (
     count_online_hosts,
     is_host_online,
+    is_vpn_peer,
     reference_last_active,
 )
 from ..utils.mac import normalize_mac_address
@@ -241,3 +242,30 @@ class FirewallaHostManager(FirewallaBaseManager):
     def count_offline_devices(self) -> int:
         """Return the number of hosts that do not appear online."""
         return self.count_total_devices() - self.count_online_devices()
+
+    def get_vpn_peers(self) -> tuple[FirewallaHostRuntime, ...]:
+        """Return the VPN peers from the latest snapshot.
+
+        Peers are a subset of the host inventory, not an additional
+        population, so their counts are a breakdown of the device counts.
+        """
+        return tuple(host for host in self.get_hosts() if is_vpn_peer(host))
+
+    def count_vpn_total_devices(self) -> int:
+        """Return the number of VPN peers in the latest snapshot."""
+        return len(self.get_vpn_peers())
+
+    def count_vpn_online_devices(self) -> int:
+        """Return the number of VPN peers that appear online.
+
+        Peers carry ``last_active`` from the peer inventory, so the shared
+        online definition applies unchanged — no peer-specific window.
+        """
+        return count_online_hosts(
+            self.get_vpn_peers(),
+            online_window_seconds=self.watched_device_online_window_seconds,
+        )
+
+    def count_vpn_offline_devices(self) -> int:
+        """Return the number of VPN peers that do not appear online."""
+        return self.count_vpn_total_devices() - self.count_vpn_online_devices()

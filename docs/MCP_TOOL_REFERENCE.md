@@ -37,12 +37,13 @@ our LLM API and third-party service tools.
 
 ### Availability model
 
-A single four-state option controls what is registered:
+A single five-state option controls what is registered:
 
 | State | Registered |
 |---|---|
 | **Off** | nothing |
-| **Read only** *(default)* | read tools only |
+| **Summary only** *(default)* | the curated system overview, and nothing else |
+| **Read only** | the full read set, with the overview as the discovery layer |
 | **Read and control** | read tools + control tools |
 | **Full** | read tools + control tools + **destructive** tools |
 
@@ -185,6 +186,7 @@ resolve it to one host.
 
 | Group | Tool | Kind | Availability |
 |---|---|---|---|
+| Overview | `get_system_overview` | read | summary+ |
 | Know my network | `list_hosts` | read | read+ |
 | Know my network | `list_rules` | read | read+ |
 | Know my network | `get_network_config` | read | read+ |
@@ -222,6 +224,34 @@ resolve it to one host.
 ## Know my network (discovery)
 
 Reads that tell you what exists — the first step before any control action.
+
+### `firewalla_local__get_system_overview`
+
+- **Answers:** "How is my network doing?" / "How many devices are online?" /
+  "Which networks, groups and users do I have?"
+- **When to use / not:** **start here.** Call it once at the beginning of a session
+  for any general question. It returns counts and identifiers, never records — use
+  `list_hosts` for devices and `list_rules` for rules, and do not answer a
+  per-device question from this summary.
+- **Inputs:** `include` (optional list — `"identifiers"` adds the group and user
+  names and ids that `get_user_usage` and the rule tools accept as selectors);
+  `config_entry_id` / `config_entry_name` (optional).
+- **Returns:** read envelope — `result` with `appliance` (model, software version,
+  firmware, uptime, CPU/memory/disk), `devices` and `vpn_devices` counts,
+  `networks[]` (uuid, name, kind, `ipv4_subnets`, device/online/offline counts),
+  `groups` and `users` counts, `rules` counts, `alarms` counts, per-WAN `items[]`
+  with nested `latest_speed_test` and `internet_quality`, and `llm_access`
+  (the active mode plus a pointer to raise the access level).
+- **Availability & tier:** registered in **every** enabled mode. In **Summary
+  only** it is the *entire* surface and cannot request identifiers; from **Read
+  only** upward it also carries the identifiers and acts as the discovery layer.
+- **Privacy:** counts, network names, and performance metrics only — no device
+  addresses, hardware identifiers, group/user names, SSIDs, serial number, or
+  public IP. Never a record collection, so the payload cannot grow with the
+  network's size.
+- **Reversibility & undo:** read-only, nothing to undo.
+- **Annotations:** `read_only=true`, `destructive=false`, `idempotent=true`,
+  `open_world=false`.
 
 ### `firewalla_local__list_hosts`
 

@@ -33,6 +33,7 @@ LIST_RULES_TOOL = "firewalla_local__list_rules"
 
 # Every read tool and the response_type it reports in meta.
 _READ_TOOLS: tuple[tuple[str, str], ...] = (
+    ("firewalla_local__get_system_overview", "system_overview"),
     ("firewalla_local__list_hosts", "hosts"),
     ("firewalla_local__list_rules", "rules"),
     ("firewalla_local__get_network_config", "network_config"),

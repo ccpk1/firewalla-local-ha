@@ -33,6 +33,8 @@ from .const import (
     HOST_DEVICE_TYPE_OPTIONS,
     LOGGER,
     RULE_ACTION_BLOCK,
+    RULE_PURPOSE_DAP,
+    RULE_PURPOSE_FAMILY,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_CREATE_RULE,
     SERVICE_DELETE_ALARMS,
@@ -103,6 +105,7 @@ from .const import (
     SERVICE_GET_RULES,
     SERVICE_GET_RUNTIME_INVENTORY,
     SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SYSTEM_OVERVIEW,
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
@@ -191,7 +194,7 @@ from .const import (
     TRANS_PLACEHOLDER_WAN_NAME,
     TRANS_PLACEHOLDER_WAN_UUID,
 )
-from .coordinator import FirewallaConfigEntry
+from .coordinator import FirewallaConfigEntry, get_llm_tool_mode
 from .managers.rule_manager import (
     build_switch_rule_evaluations_for_rules,
     is_system_managed_rule,
@@ -211,6 +214,7 @@ from .models import (
     FirewallaNetworkHostNotifications,
     FirewallaNetworkHostRanking,
     FirewallaNetworkHostTotals,
+    FirewallaNetworkKind,
     FirewallaNetworkMetricSample,
     FirewallaNetworkMetricSeries,
     FirewallaNetworkSegment,
@@ -243,6 +247,7 @@ from .models import (
     format_policy_rule_name,
 )
 from .utils.duration import parse_duration_to_seconds
+from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
@@ -283,6 +288,17 @@ GET_RULES_SCHEMA = vol.Schema(
 
 SYNC_RUNTIME_SCHEMA = vol.Schema(
     {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_SYSTEM_OVERVIEW_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_INCLUDE): vol.All(
+            cv.ensure_list_csv,
+            [vol.In(("identifiers",))],
+        ),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -3305,6 +3321,272 @@ def _rule_matches_filters(
     )
 
 
+def _build_network_overview_entries(
+    entry: FirewallaConfigEntry,
+) -> list[JsonObjectType]:
+    """Return one entry per network with its device counts.
+
+    Device counts are computed from the same host inventory and online
+    definition the system-status attributes use, so a network's total plus the
+    global total can never disagree about the same box.
+    """
+    hosts = entry.runtime_data.host_manager.get_hosts()
+    online_window_seconds = (
+        entry.runtime_data.host_manager.watched_device_online_window_seconds
+    )
+    reference_activity = reference_last_active(hosts)
+    online_macs = {
+        host.mac
+        for host in hosts
+        if is_host_online(
+            host,
+            reference_activity=reference_activity,
+            online_window_seconds=online_window_seconds,
+        )
+        is True
+    }
+
+    entries: list[JsonObjectType] = []
+    for network in entry.runtime_data.integration_manager.get_networks():
+        network_hosts = [host for host in hosts if host.network_uuid == network.uuid]
+        online = sum(1 for host in network_hosts if host.mac in online_macs)
+        entries.append(
+            {
+                "uuid": network.uuid,
+                "name": network.name,
+                "kind": network.kind.value,
+                "ipv4_subnets": list(network.ipv4_subnets),
+                "device_count": len(network_hosts),
+                "online": online,
+                "offline": len(network_hosts) - online,
+            }
+        )
+    return entries
+
+
+def _build_wan_overview_entries(
+    entry: FirewallaConfigEntry,
+) -> list[JsonObjectType]:
+    """Return one entry per WAN, with its metrics nested rather than pooled.
+
+    Speed-test and quality records both carry a WAN identity, so nesting them
+    here states that identity once and removes any chance of a reader matching
+    a record to the wrong WAN. Metrics only — never the public IP or ISP.
+    """
+    manager = entry.runtime_data.integration_manager
+    speed_tests = manager.get_speed_test_results(limit=1)
+    quality_samples = manager.get_internet_quality_samples(limit=1)
+
+    entries: list[JsonObjectType] = []
+    for network in manager.get_networks():
+        if network.kind is not FirewallaNetworkKind.WAN:
+            continue
+
+        latest_speed_test = next(
+            (test for test in speed_tests if test.wan_uuid == network.uuid), None
+        )
+        quality = next(
+            (sample for sample in quality_samples if sample.wan_uuid == network.uuid),
+            None,
+        )
+        entries.append(
+            {
+                "uuid": network.uuid,
+                "name": network.name,
+                "kind": network.kind.value,
+                "enabled": network.enabled,
+                "latest_speed_test": (
+                    {
+                        "tested_at": (
+                            dt_util.utc_from_timestamp(
+                                latest_speed_test.tested_at_timestamp
+                            ).isoformat()
+                            if latest_speed_test.tested_at_timestamp is not None
+                            else None
+                        ),
+                        "download_mbps": latest_speed_test.download_mbps,
+                        "upload_mbps": latest_speed_test.upload_mbps,
+                        "latency_ms": latest_speed_test.latency_ms,
+                        "jitter_ms": latest_speed_test.jitter_ms,
+                        "packet_loss_percent": latest_speed_test.packet_loss_percent,
+                    }
+                    if latest_speed_test is not None
+                    else None
+                ),
+                "internet_quality": (
+                    {
+                        "sampled_at": (
+                            dt_util.utc_from_timestamp(quality.timestamp).isoformat()
+                            if quality.timestamp is not None
+                            else None
+                        ),
+                        "ping_latency_ms": quality.ping_latency_ms,
+                        "ping_latency_max_ms": quality.ping_latency_max_ms,
+                        "ping_latency_median_ms": quality.ping_latency_median_ms,
+                        "ping_latency_min_ms": quality.ping_latency_min_ms,
+                        "ping_packet_loss_percent": quality.ping_packet_loss_percent,
+                    }
+                    if quality is not None
+                    else None
+                ),
+            }
+        )
+    return entries
+
+
+def _build_rule_overview_counts(entry: FirewallaConfigEntry) -> JsonObjectType:
+    """Return the rule counts by ownership and visibility."""
+    rules = entry.runtime_data.rule_manager.get_rules()
+    evaluations = build_switch_rule_evaluations_for_rules(rules)
+    visible = 0
+    visible_enabled = 0
+    dap = 0
+    family = 0
+    system_managed = 0
+    for rule in rules:
+        raw_extras = evaluations[rule.rule_id].raw_extras
+        if is_system_managed_rule(raw_extras):
+            system_managed += 1
+        if rule.purpose == RULE_PURPOSE_DAP:
+            dap += 1
+        elif rule.purpose == RULE_PURPOSE_FAMILY:
+            family += 1
+        if is_user_visible_rule(rule, raw_extras):
+            visible += 1
+            if rule.enabled:
+                visible_enabled += 1
+
+    return {
+        "total": len(rules),
+        "visible": visible,
+        "visible_enabled": visible_enabled,
+        "dap": dap,
+        "family": family,
+        "system_managed": system_managed,
+    }
+
+
+async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType:
+    """Return the curated system summary.
+
+    Counts, network identities, and performance metrics — never a record
+    collection, so the payload cannot grow with the size of the network. The
+    group and user identities the other tools need are only included when
+    ``include: ["identifiers"]`` is requested; the anonymous tier registers a
+    tool that cannot request them, so nothing is filtered at runtime.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    include = cast(list[str], call.data.get(SERVICE_FIELD_INCLUDE, []))
+    include_identifiers = "identifiers" in include
+
+    runtime_data = entry.runtime_data
+    system_status = runtime_data.integration_manager.system_status
+    system_info = runtime_data.integration_manager.system_info
+    snapshot = runtime_data.coordinator.data
+
+    groups = snapshot.groups if snapshot is not None else ()
+    users = snapshot.users if snapshot is not None else ()
+
+    groups_section: JsonObjectType = {"count": len(groups)}
+    if include_identifiers:
+        groups_section["items"] = cast(
+            JsonValueType,
+            [{"id": group.group_id, "name": group.name} for group in groups],
+        )
+
+    users_section: JsonObjectType = {"count": len(users)}
+    if include_identifiers:
+        users_section["items"] = cast(
+            JsonValueType,
+            [
+                {
+                    "id": user.user_id,
+                    "name": user.name,
+                    "affiliated_group_id": user.affiliated_group_id,
+                    "affiliated_group_name": user.affiliated_group_name,
+                }
+                for user in users
+            ],
+        )
+
+    network_entries = _build_network_overview_entries(entry)
+    wan_entries = _build_wan_overview_entries(entry)
+    return {
+        "config_entry_id": entry.entry_id,
+        "llm_access": {
+            "mode": get_llm_tool_mode(entry.options),
+            "note": (
+                "This report is intentionally limited. For device names and "
+                "addresses, rules, alarms, or usage detail, the user must raise "
+                "Firewalla's AI access level in the integration options."
+            ),
+        },
+        "appliance": {
+            "model": system_info.model,
+            "software_version": system_info.software_version,
+            "firmware_release_type": (
+                system_status.firmware_release_type if system_status else None
+            ),
+            "box_image_codename": (
+                system_status.box_image_codename if system_status else None
+            ),
+            "box_image_version": (
+                system_status.box_image_version if system_status else None
+            ),
+            "cloud_connected": (
+                system_status.cloud_connected if system_status else None
+            ),
+            "booting_complete": (
+                system_status.booting_complete if system_status else None
+            ),
+            "uptime_seconds": system_status.uptime_seconds if system_status else None,
+            "timezone_name": system_status.timezone_name if system_status else None,
+            "cpu_usage_1m": system_status.cpu_usage_1m if system_status else None,
+            "memory_usage_percent": (
+                system_status.memory_usage_percent if system_status else None
+            ),
+            "memory_free_mb": (system_status.memory_free_mb if system_status else None),
+            "disk_usage_percent_by_mount": (
+                cast(
+                    JsonValueType,
+                    system_status.disk_usage_percent_by_mount,
+                )
+                if system_status
+                else None
+            ),
+        },
+        "devices": {
+            "total": runtime_data.host_manager.count_total_devices(),
+            "online": runtime_data.host_manager.count_online_devices(),
+            "offline": runtime_data.host_manager.count_offline_devices(),
+        },
+        "vpn_devices": {
+            "total": runtime_data.host_manager.count_vpn_total_devices(),
+            "online": runtime_data.host_manager.count_vpn_online_devices(),
+            "offline": runtime_data.host_manager.count_vpn_offline_devices(),
+        },
+        "networks": {
+            "count": len(network_entries),
+            "items": cast(JsonValueType, network_entries),
+        },
+        "groups": groups_section,
+        "users": users_section,
+        "rules": _build_rule_overview_counts(entry),
+        "alarms": {
+            "active": runtime_data.alarm_manager.active_count,
+            "archived": runtime_data.alarm_manager.archived_count,
+        },
+        "wan": {
+            "count": len(wan_entries),
+            "items": cast(JsonValueType, wan_entries),
+        },
+    }
+
+
 async def _async_handle_sync_runtime(call: ServiceCall) -> JsonObjectType:
     """Poll the Firewalla box now and report the resulting snapshot time.
 
@@ -5187,6 +5469,13 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_GET_RULES,
         _async_handle_get_rules,
         GET_RULES_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_GET_SYSTEM_OVERVIEW,
+        _async_handle_get_system_overview,
+        GET_SYSTEM_OVERVIEW_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),

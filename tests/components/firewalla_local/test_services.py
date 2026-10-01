@@ -31,6 +31,7 @@ from custom_components.firewalla_local.const import (
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
+    DEFAULT_LLM_TOOL_MODE,
     DOMAIN,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_DELETE_ALARMS,
@@ -92,6 +93,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
     SERVICE_GET_RULES,
     SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SYSTEM_OVERVIEW,
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
@@ -3527,6 +3529,191 @@ async def test_get_rules_supports_filters(hass: HomeAssistant) -> None:
     assert [rule["rule_id"] for rule in matches["rules"]] == ["744"]
     assert no_match is not None
     assert no_match["rules"] == []
+
+
+async def test_get_system_overview_reports_counts_without_identities(
+    hass: HomeAssistant,
+) -> None:
+    """The default summary carries counts and network names, never identities."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        overview = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SYSTEM_OVERVIEW,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert overview is not None
+    assert overview["devices"]["total"] == 1
+    assert overview["vpn_devices"] == {"total": 0, "online": 0, "offline": 0}
+    assert overview["rules"]["total"] == 1
+    assert overview["alarms"] == {"active": 0, "archived": 0}
+    assert overview["networks"]["count"] == len(overview["networks"]["items"])
+    assert overview["networks"]["count"] >= 1
+    for network in overview["networks"]["items"]:
+        assert set(network) == {
+            "uuid",
+            "name",
+            "kind",
+            "ipv4_subnets",
+            "device_count",
+            "online",
+            "offline",
+        }
+    # No identity collections unless asked for.
+    assert "items" not in overview["groups"]
+    assert "items" not in overview["users"]
+    assert overview["llm_access"]["mode"] == DEFAULT_LLM_TOOL_MODE
+
+
+async def test_get_system_overview_includes_identifiers_on_request(
+    hass: HomeAssistant,
+) -> None:
+    """Identifiers are opt-in, so they never ride along by default."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        overview = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SYSTEM_OVERVIEW,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_INCLUDE: ["identifiers"],
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert overview is not None
+    assert overview["groups"]["items"] == []
+    assert overview["users"]["items"] == []
+    assert "items" in overview["groups"]
+
+
+async def test_get_system_overview_counts_vpn_peers_separately(
+    hass: HomeAssistant,
+) -> None:
+    """VPN peers are counted as a breakdown of the device total.
+
+    Peers reuse the shared online definition, so a recent peer counts online
+    and a stale one does not — the same 1-online/1-offline shape seen live.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    base = _snapshot()
+    template = base.hosts[0]
+    recent_peer = replace(
+        template,
+        mac="wg_peer:chads-phone",
+        host_name="chads-phone-wgvpn",
+        connection_type="vpn",
+        last_active=1_700_000_000.0,
+    )
+    stale_peer = replace(
+        template,
+        mac="awg_peer:chads-laptop",
+        host_name="chads-laptop-awgvpn",
+        connection_type="vpn",
+        last_active=1_600_000_000.0,
+    )
+    snapshot = replace(base, hosts=(*base.hosts, recent_peer, stale_peer))
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        overview = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SYSTEM_OVERVIEW,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert overview is not None
+    assert overview["devices"]["total"] == 3
+    assert overview["vpn_devices"] == {"total": 2, "online": 1, "offline": 1}
 
 
 async def test_get_host_name_mapping_defaults_to_summary_detail(

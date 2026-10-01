@@ -1270,6 +1270,36 @@ get_rules:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and their names are unique. If names repeat, use Config Entry ID.
 
+get_system_overview:
+  name: Get system overview
+  description: Return a curated system summary — appliance health, network identities with per-network device counts, and counts for devices, VPN peers, groups, users, rules, and alarms, plus per-WAN speed-test and quality metrics. Counts and identities only, never record collections. Group and user names and ids are only included when requested via include.
+  fields:
+    include:
+      required: false
+      example: "identifiers"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "identifiers"
+              label: Group and user names and ids
+      name: Include
+      description: Optional. Add the group and user names and ids that other tools accept as selectors. Omitted by default so the summary discloses no person-level data.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and their names are unique. If names repeat, use Config Entry ID.
+
 sync_runtime:
   name: Sync runtime
   description: Poll the Firewalla box now and report the resulting snapshot time. Requests within the coordinator's debounce window are coalesced, so calling this alongside other actions still costs at most one poll.

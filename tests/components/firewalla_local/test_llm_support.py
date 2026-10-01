@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import llm
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -26,6 +26,7 @@ from custom_components.firewalla_local.const import (
     DEFAULT_LLM_TOOL_MODE,
     DOMAIN,
     LLM_TOOL_MODE_OFF,
+    LLM_TOOL_MODE_READ_ONLY,
     MIN_LLM_TOOLS_HA_VERSION,
 )
 from custom_components.firewalla_local.helpers.llm_support import llm_tools_supported
@@ -67,6 +68,17 @@ def _entry(*, options: dict[str, object] | None = None) -> MockConfigEntry:
             CONF_SYMMETRIC_KEY: "symmetric-key",
         },
         options=options or {},
+    )
+
+
+def _llm_context() -> llm.LLMContext:
+    """Return a minimal LLM context."""
+    return llm.LLMContext(
+        platform="test",
+        context=Context(),
+        language="en",
+        assistant="conversation",
+        device_id=None,
     )
 
 
@@ -138,7 +150,7 @@ def test_llm_tools_supported_boundaries(major: int, minor: int, expected: bool) 
 @pytest.mark.parametrize(
     ("mode", "expected_registered"),
     [
-        pytest.param(DEFAULT_LLM_TOOL_MODE, True, id="default_read_only_registers"),
+        pytest.param(DEFAULT_LLM_TOOL_MODE, True, id="default_mode_registers"),
         pytest.param(LLM_TOOL_MODE_OFF, False, id="off_registers_nothing"),
     ],
 )
@@ -171,6 +183,106 @@ async def test_setup_registers_api_only_when_enabled(
     assert entry.state is ConfigEntryState.LOADED
     registered_ids = {api.id for api in llm.async_get_apis(hass)}
     assert (DOMAIN in registered_ids) is expected_registered
+
+
+async def test_default_mode_registers_only_the_anonymous_summary(
+    hass: HomeAssistant,
+) -> None:
+    """A fresh entry defaults to summary_only with exactly one tool registered."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+
+    assert {tool.name for tool in api_instance.tools} == {
+        "firewalla_local__get_system_overview"
+    }
+
+
+async def test_anonymous_summary_cannot_request_identifiers(
+    hass: HomeAssistant,
+) -> None:
+    """The anonymous tier's tool offers no way to ask for group/user identity.
+
+    The privacy claim is structural: rather than filtering identities out of a
+    response, the tier's tool has no parameter that could ask for them, and the
+    other tools are not registered at all.
+    """
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+
+    (tool,) = api_instance.tools
+    assert not tool.parameters.schema
+
+
+async def test_read_mode_registers_the_full_read_set(
+    hass: HomeAssistant,
+) -> None:
+    """read_only registers the summary alongside every other read tool."""
+    entry = _entry(options={CONF_LLM_TOOL_MODE: LLM_TOOL_MODE_READ_ONLY})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+
+    names = {tool.name for tool in api_instance.tools}
+    assert "firewalla_local__get_system_overview" in names
+    assert "firewalla_local__list_hosts" in names
 
 
 async def test_setup_succeeds_without_llm_tools_on_old_core(

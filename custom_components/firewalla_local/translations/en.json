@@ -229,6 +229,15 @@
           "uptime_seconds": {
             "name": "Uptime seconds"
           },
+          "vpn_devices_offline": {
+            "name": "VPN devices offline"
+          },
+          "vpn_devices_online": {
+            "name": "VPN devices online"
+          },
+          "vpn_devices_total": {
+            "name": "VPN devices total"
+          },
           "purpose": {
             "name": "Purpose",
             "state": {

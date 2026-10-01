@@ -122,15 +122,33 @@ To turn it on:
 2. In this integration, open **Configure → System settings** and set
    **AI assistant (MCP) tool access**.
 
-Four settings are available. The default exposes nothing that can change your
-network:
+Five settings are available. The default is the least disclosing option that still
+answers ordinary questions:
 
 | Setting | What the assistant can do |
 |---|---|
 | **Off** | No Firewalla tools at all. |
-| **Read only** *(default)* | Ask questions: devices, usage, WAN health, alarms, rules. |
+| **Summary only** *(default)* | Ask general questions — how many devices are online, which networks exist, appliance health, per-WAN speed and quality. Sends network names, counts, and performance metrics; never device addresses, hardware identifiers, group or user names, or your public IP. |
+| **Read only** | The above, plus device names and addresses, rules, alarms, and usage detail. |
 | **Read and control** | The above, plus reversible actions — pause/resume a rule, pause an SSID, rename a device, set a DHCP reservation, sleep/unmute alarms. |
 | **Full** | The above, plus **destructive** actions: delete a device, rule, or alarm, and bulk archive. |
+
+**Why the default is Summary only.** A firewall assistant that cannot see IP
+addresses cannot answer firewall questions, so the useful tiers send real network
+detail. Summary only is the one that answers the common questions while sending
+**no device identity at all** — which makes it a defensible starting point. Raise
+it deliberately when you want the assistant to work with specific devices.
+
+Two categories are worth calling out separately, because they are more sensitive
+than a device name on your LAN:
+
+- **Your public IP** (`get_speed_tests`, `get_wan_events`) identifies your
+  household on the internet, not just a device on your network.
+- **External endpoint detail** (`get_alarms`) can include a remote IP address and
+  approximate location for the third party involved in an alarm.
+
+Credentials are never in tool output at all — pairing keys, symmetric keys, and
+passwords cannot reach a response by construction, not by filtering.
 
 **Turn on Full only if you are prepared to watch the assistant closely.** Those
 actions cannot be undone, which is why they are a separate, deliberate choice and

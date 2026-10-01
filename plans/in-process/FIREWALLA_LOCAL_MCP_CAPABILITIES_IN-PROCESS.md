@@ -81,15 +81,15 @@ These were verified during the original investigation. Do not re-derive them; th
 | Phase | Focus | Key deliverables | Status | Depends on |
 |---|---|---|---|---|
 | 5.0 | Correctness fixes from live pulls | **Complete** — D1 `window` default (`last_60_minutes`); D7 WAN events app filters + 7-day window + `system_reboot`; D8 WAN usage `["day","week"]`; D4/D5 VPN pseudo-host caveats; D6 naming roles | **Complete** (443 tests pass) | 4.5 |
-| 5.1 | Privacy defaults and disclosure | **default mode → `summary_only`** (supersedes `off`); drop "recommended" from the read-only label; describe what is sent; credential-never-sent statement; lead with the anonymous tier; public IP called out separately | not-started | 5.7 |
+| 5.1 | Privacy defaults and disclosure | **Default flipped to `summary_only`** (implemented with 5.7); user-guide section rewritten with the tier ladder, the public-IP and external-endpoint lines, and the credential guarantee. Remaining: options-flow label wording and README | **Mostly complete** | 5.7 |
 | 5.2 | Payload reduction | **Complete** — `list_hosts` `detail: summary\|full` + filters; `list_rules` filters + product-purpose exclusion + `applies_to`/`tag_refs`/`purpose`; `vpn_client` exposed; default is the inventory's `visible_rules` (117) via a shared predicate. Measured live: hosts **−22%**, rules **−53%**, VPN-only **−98%**, rules-enabled **−78%** | **Complete** (452 tests pass) | 5.0 |
 | 5.3 | Discovery gaps | **Merged into 5.7** — `get_network_overview` is the shared discovery and curated-summary tool; no separate network/group/user list tools | **Merged into 5.7** | 5.2 |
 | 5.4 | Rule-model clarity | **Complete** — `applies_to` + `tag_refs` + `purpose` on rule summaries; GUI→name resolution needed **no work** (verified: 0 of 89 `applies_to` values are GUIDs). Prompt paragraph still owed under 5.6 | **Complete** (448 tests pass) | 5.2 |
 | 5.5 | Runtime sync | **Complete** — non-admin `sync_runtime` service (read tier, `SupportsResponse.ONLY`) + read-tier tool. Live: first call **13.63 s**, repeat **0.00 s** with an identical timestamp (debounce proven) | **Complete** (451 tests pass) | 4.5 |
 | 5.6 | Action confirmation and response specificity | prompt requirement to state exactly what changed + confirm before acting | not-started | 5.1 |
-| 5.7 | Anonymous (summary-only) tool tier | 5th mode; **one curated system summary report** (same artefact as the overview — see §5.7) | not-started | 5.2 |
+| 5.7 | Anonymous (summary-only) tool tier | **Complete** — 5th mode `summary_only` (now the default); `get_system_overview` service + tool; the anonymous tier registers that one tool with a schema that cannot request identifiers | **Complete** (460 tests pass) | 5.2 |
 | 5.8 | Config-change re-registration + network-config hosts | **Complete** — **D9** LLM mode change now reloads and re-registers (verified by test); **D10** `get_network_config` host section is now an opt-in `include`, absent by default | **Complete** (441 tests pass) | 5.0 |
-| 5.9 | VPN device counts on the system-status entity | `ATTR_SYSTEM_VPN_DEVICES_TOTAL` / `_ONLINE` / `_OFFLINE` (mirroring the existing device counts), via shared `host_manager` count accessors also used by the summary | not-started | 5.7 |
+| 5.9 | VPN device counts on the system-status entity | **Complete** — `ATTR_SYSTEM_VPN_DEVICES_TOTAL` / `_ONLINE` / `_OFFLINE` on the system-status entity, via shared `host_manager` count accessors also used by the summary | **Complete** (460 tests pass) | 5.7 |
 
 Ordering inside Phase 5 is risk-ordered again: **5.0 fixes a guaranteed 400 and undocumented nulls before anything else is built on those payloads**; **5.1 changes a default and is user-visible, so it lands before feature work**; **5.2 reduces payloads, which shrinks the problem 5.3/5.4 then solve**.
 
@@ -934,8 +934,8 @@ Sequenced so each step is independently shippable and nothing is built on a payl
 | **1** | **5.0** — D1, D4, D5, D6, D7, D8 | **Complete** | Correctness first. D1 was a guaranteed 400, D7 returned the wrong data entirely, D8 defaulted to the least-wanted period. Small, independent, and every later step reads these payloads |
 | **2** | **5.2 + 5.4** | **Complete** | Payload reduction and rule-model clarity together, because 5.4's `applies_to` is itself a `list_rules` correctness fix. The `get_rules` default now matches the inventory's `visible_rules` through a shared predicate |
 | **3** | **5.5** — `sync_runtime` | **Complete** | Independent and small: a read-tier service plus its tool |
-| **4** | **5.7 + 5.9** | not-started | The curated summary and the entity attribute land together because they share one VPN accessor. 5.7 is also what makes a `summary_only` default meaningful. 5.3's discovery surface is **merged here** — same artefact, no separate list tools |
-| **5** | **5.1** | not-started | Disclosure wording is written **last**, because it must describe what 5.2 and 5.7 actually send. Writing it earlier risks documenting a payload that then changes |
+| **4** | **5.7 + 5.9** | **Complete** | The curated summary and the VPN counts landed together, sharing one accessor. The `summary_only` default flipped in the same change that registers the tool, so no state could point at a missing tool. 5.3's discovery surface **merged here** — same artefact, no separate list tools |
+| **5** | **5.1** | In progress | The default and the user-guide disclosure landed with step 4; the options-flow label wording and README follow |
 | **6** | **5.6** | not-started | Prompt instructions for action specificity and the rule model are cheap and can trail. 5.3 no longer appears here — it merged into step 4 |
 
 **Default-mode note:** `DEFAULT_LLM_TOOL_MODE = summary_only` flips in **step 4**, in the same change that registers the summary tool, so no intermediate state can land a default pointing at a tool that is not built.
