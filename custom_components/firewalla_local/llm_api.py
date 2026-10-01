@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm
 from homeassistant.util import slugify
 
-from .const import DOMAIN, LLM_TOOL_MODE_READ_AND_CONTROL
+from .const import DOMAIN, LLM_TOOL_MODE_FULL, LLM_TOOL_MODE_READ_AND_CONTROL
 from .coordinator import get_llm_tool_mode
 from .llm_tools_control import build_control_tools
 from .llm_tools_read import build_read_tools
@@ -48,8 +48,13 @@ class FirewallaLocalAPI(llm.API):
     ) -> llm.APIInstance:
         """Return the API instance for one LLM request."""
         tools = build_read_tools(entry_id=self._entry_id)
-        if self._mode == LLM_TOOL_MODE_READ_AND_CONTROL:
-            tools.extend(build_control_tools(entry_id=self._entry_id))
+        if self._mode in (LLM_TOOL_MODE_READ_AND_CONTROL, LLM_TOOL_MODE_FULL):
+            tools.extend(
+                build_control_tools(
+                    entry_id=self._entry_id,
+                    include_destructive=self._mode == LLM_TOOL_MODE_FULL,
+                )
+            )
         return llm.APIInstance(
             api=self,
             api_prompt="",

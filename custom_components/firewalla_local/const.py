@@ -246,14 +246,17 @@ DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 15
 DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 5
 
 # LLM/MCP tool exposure. Read tools are the low-risk default; control tools
-# require an explicit opt-in. "off" registers nothing.
+# require an explicit opt-in. "full" additionally exposes destructive
+# operations (data-destroying or bulk) for users prepared to monitor closely.
 LLM_TOOL_MODE_OFF: Final = "off"
 LLM_TOOL_MODE_READ_ONLY: Final = "read_only"
 LLM_TOOL_MODE_READ_AND_CONTROL: Final = "read_and_control"
+LLM_TOOL_MODE_FULL: Final = "full"
 LLM_TOOL_MODES: Final = (
     LLM_TOOL_MODE_OFF,
     LLM_TOOL_MODE_READ_ONLY,
     LLM_TOOL_MODE_READ_AND_CONTROL,
+    LLM_TOOL_MODE_FULL,
 )
 DEFAULT_LLM_TOOL_MODE: Final = LLM_TOOL_MODE_READ_ONLY
 MIN_UPDATE_INTERVAL_MINUTES: Final = 1

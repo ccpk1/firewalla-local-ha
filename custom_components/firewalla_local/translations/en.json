@@ -116,6 +116,7 @@
   "selector": {
     "llm_tool_mode": {
       "options": {
+        "full": "Full — includes destructive actions (irreversible or bulk; monitor closely)",
         "off": "Off — expose no tools",
         "read_and_control": "Read and control (adds reversible control actions)",
         "read_only": "Read only (recommended)"

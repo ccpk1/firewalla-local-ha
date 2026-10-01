@@ -310,12 +310,20 @@ _CONTROL_TOOLS: tuple[str, ...] = (
     "firewalla_local__unmute_alarm",
     "firewalla_local__block_alarm_target",
     "firewalla_local__unblock_alarm_target",
+)
+
+_DESTRUCTIVE_TOOLS: tuple[str, ...] = (
     "firewalla_local__archive_alarm",
+    "firewalla_local__archive_all_alarms",
+    "firewalla_local__delete_alarm",
+    "firewalla_local__delete_all_alarms",
+    "firewalla_local__delete_host",
+    "firewalla_local__delete_rule",
 )
 
 
-async def _setup_control_hass(hass: HomeAssistant) -> MockConfigEntry:
-    """Set up an entry with read-and-control tools enabled."""
+async def _setup_control_hass(hass: HomeAssistant, *, mode: str) -> MockConfigEntry:
+    """Set up an entry with the given LLM tool mode enabled."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Firewalla (192.168.200.1)",
@@ -327,7 +335,7 @@ async def _setup_control_hass(hass: HomeAssistant) -> MockConfigEntry:
             CONF_AID: "aid-123",
             CONF_SYMMETRIC_KEY: "symmetric-key",
         },
-        options={CONF_LLM_TOOL_MODE: "read_and_control"},
+        options={CONF_LLM_TOOL_MODE: mode},
     )
     entry.add_to_hass(hass)
     with (
@@ -352,24 +360,35 @@ async def _setup_control_hass(hass: HomeAssistant) -> MockConfigEntry:
 
 
 async def test_control_tools_absent_in_read_only_mode(hass: HomeAssistant) -> None:
-    """Read-only mode registers reads but no control tools."""
+    """Read-only mode registers reads but no control or destructive tools."""
     await _setup_hass(hass)
     api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
 
     registered = {tool.name for tool in api_instance.tools}
     assert not registered.intersection(_CONTROL_TOOLS)
+    assert not registered.intersection(_DESTRUCTIVE_TOOLS)
     assert "firewalla_local__list_hosts" in registered
 
 
 async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> None:
-    """Read-and-control mode registers the full control catalog."""
-    await _setup_control_hass(hass)
+    """Read-and-control mode registers control tools but no destructive tools."""
+    await _setup_control_hass(hass, mode="read_and_control")
     api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
 
     registered = {tool.name for tool in api_instance.tools}
     assert registered.issuperset(_CONTROL_TOOLS)
-    # Read tools remain available alongside control tools.
+    assert not registered.intersection(_DESTRUCTIVE_TOOLS)
     assert "firewalla_local__list_hosts" in registered
+
+
+async def test_destructive_tools_only_in_full_mode(hass: HomeAssistant) -> None:
+    """Full mode registers control and destructive tools together."""
+    await _setup_control_hass(hass, mode="full")
+    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+
+    registered = {tool.name for tool in api_instance.tools}
+    assert registered.issuperset(_CONTROL_TOOLS)
+    assert registered.issuperset(_DESTRUCTIVE_TOOLS)
 
 
 @pytest.mark.parametrize(
@@ -379,7 +398,7 @@ async def test_control_tools_are_non_read_only(
     hass: HomeAssistant, tool_name: str
 ) -> None:
     """Every control tool is annotated as a write with named parameters."""
-    await _setup_control_hass(hass)
+    await _setup_control_hass(hass, mode="read_and_control")
     api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
     tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
 
@@ -387,6 +406,25 @@ async def test_control_tools_are_non_read_only(
     assert tool.title
     assert tool.description
     assert tool.annotations.read_only is False
+    assert tool.annotations.open_world is False
+    for marker in tool.parameters.schema:
+        assert marker.description, f"{tool_name} field {marker} lacks a description"
+
+
+@pytest.mark.parametrize(
+    "tool_name", [pytest.param(name, id=name) for name in _DESTRUCTIVE_TOOLS]
+)
+async def test_destructive_tools_are_annotated_destructive(
+    hass: HomeAssistant, tool_name: str
+) -> None:
+    """Every destructive tool is flagged destructive with described parameters."""
+    await _setup_control_hass(hass, mode="full")
+    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
+
+    assert tool.integration == DOMAIN
+    assert tool.annotations.read_only is False
+    assert tool.annotations.destructive is True
     assert tool.annotations.open_world is False
     for marker in tool.parameters.schema:
         assert marker.description, f"{tool_name} field {marker} lacks a description"

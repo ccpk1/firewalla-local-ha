@@ -57,12 +57,17 @@ WAKE_HOST = "firewalla_local__wake_host"
 BLOCK_ALARM_TARGET = "firewalla_local__block_alarm_target"
 SET_ALARM_MUTED = "firewalla_local__set_alarm_muted"
 ARCHIVE_ALARM = "firewalla_local__archive_alarm"
+ARCHIVE_ALL_ALARMS = "firewalla_local__archive_all_alarms"
+DELETE_ALARM = "firewalla_local__delete_alarm"
+DELETE_ALL_ALARMS = "firewalla_local__delete_all_alarms"
+DELETE_HOST = "firewalla_local__delete_host"
+DELETE_RULE = "firewalla_local__delete_rule"
 
 _HOST_MAC = "0C:85:E1:B0:1D:1C"
 
 
-def _entry() -> MockConfigEntry:
-    """Return a provisioned entry with control tools enabled."""
+def _entry(*, mode: str = "read_and_control") -> MockConfigEntry:
+    """Return a provisioned entry with the given LLM tool mode."""
     return MockConfigEntry(
         domain=DOMAIN,
         title="Firewalla (192.168.200.1)",
@@ -74,7 +79,7 @@ def _entry() -> MockConfigEntry:
             CONF_AID: "aid-123",
             CONF_SYMMETRIC_KEY: "symmetric-key",
         },
-        options={CONF_LLM_TOOL_MODE: "read_and_control"},
+        options={CONF_LLM_TOOL_MODE: mode},
     )
 
 
@@ -167,9 +172,11 @@ def _llm_context() -> llm.LLMContext:
     )
 
 
-async def _setup(hass: HomeAssistant, *, rule_enabled: bool = True) -> llm.APIInstance:
+async def _setup(
+    hass: HomeAssistant, *, rule_enabled: bool = True, mode: str = "read_and_control"
+) -> llm.APIInstance:
     """Set up the entry with mocked runtime data and return the API instance."""
-    entry = _entry()
+    entry = _entry(mode=mode)
     entry.add_to_hass(hass)
     with (
         patch(
@@ -358,7 +365,7 @@ async def test_archive_alarm_uses_single_mode(hass: HomeAssistant) -> None:
         "FirewallaAlarmManager.async_archive_alarms",
         new=AsyncMock(return_value={}),
     ) as archive:
-        api_instance = await _setup(hass)
+        api_instance = await _setup(hass, mode="full")
         result = await _call(
             api_instance, ARCHIVE_ALARM, {SERVICE_FIELD_ALARM_ID: "1728"}
         )
@@ -425,3 +432,88 @@ async def test_block_requires_alarm_or_target(
 
     with pytest.raises(Exception):  # noqa: B017 - service validation error
         await _call(api_instance, tool_name, {})
+
+
+async def test_archive_all_alarms_is_bulk(hass: HomeAssistant) -> None:
+    """archive_all_alarms uses the bulk all_active mode with warnings."""
+    with patch(
+        "custom_components.firewalla_local.managers.alarm_manager."
+        "FirewallaAlarmManager.async_archive_alarms",
+        new=AsyncMock(return_value={}),
+    ) as archive:
+        api_instance = await _setup(hass, mode="full")
+        result = await _call(api_instance, ARCHIVE_ALL_ALARMS, {})
+
+    assert archive.await_args is not None
+    assert archive.await_args.kwargs == {"mode": "all_active", "alarm_id": None}
+    assert "bulk action" in result.data["warnings"]
+
+
+async def test_delete_alarm_uses_single_mode(hass: HomeAssistant) -> None:
+    """delete_alarm deletes exactly one alarm and forces confirmation."""
+    with patch(
+        "custom_components.firewalla_local.managers.alarm_manager."
+        "FirewallaAlarmManager.async_delete_alarms",
+        new=AsyncMock(return_value={}),
+    ) as delete:
+        api_instance = await _setup(hass, mode="full")
+        result = await _call(
+            api_instance, DELETE_ALARM, {SERVICE_FIELD_ALARM_ID: "1728"}
+        )
+
+    assert delete.await_args is not None
+    assert delete.await_args.kwargs["mode"] == "this"
+    assert delete.await_args.kwargs["alarm_id"] == "1728"
+    assert result.data["status"] == "applied"
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param("all_active", id="all_active"),
+        pytest.param("all_archived", id="all_archived"),
+    ],
+)
+async def test_delete_all_alarms_uses_bulk_mode(hass: HomeAssistant, mode: str) -> None:
+    """delete_all_alarms deletes the requested set with a bulk warning."""
+    with patch(
+        "custom_components.firewalla_local.managers.alarm_manager."
+        "FirewallaAlarmManager.async_delete_alarms",
+        new=AsyncMock(return_value={}),
+    ) as delete:
+        api_instance = await _setup(hass, mode="full")
+        result = await _call(api_instance, DELETE_ALL_ALARMS, {"mode": mode})
+
+    assert delete.await_args is not None
+    assert delete.await_args.kwargs["mode"] == mode
+    assert "irreversible" in result.data["warnings"]
+
+
+async def test_delete_rule_deletes_rule(hass: HomeAssistant) -> None:
+    """delete_rule permanently removes the resolved rule."""
+    with patch(
+        "custom_components.firewalla_local.managers.rule_manager."
+        "FirewallaRuleManager.async_delete_rule",
+        new=AsyncMock(return_value=True),
+    ) as delete_rule:
+        api_instance = await _setup(hass, mode="full")
+        result = await _call(api_instance, DELETE_RULE, {"rule_id": "761"})
+
+    assert delete_rule.await_args is not None
+    assert delete_rule.await_args.args[0] == "761"
+    assert result.data["warnings"] == ["irreversible"]
+
+
+async def test_delete_host_deletes_host(hass: HomeAssistant) -> None:
+    """delete_host permanently removes the host record."""
+    with patch(
+        "custom_components.firewalla_local.managers.integration_manager."
+        "FirewallaIntegrationManager.async_delete_host",
+        new=AsyncMock(return_value={}),
+    ) as delete_host:
+        api_instance = await _setup(hass, mode="full")
+        result = await _call(api_instance, DELETE_HOST, {"host_mac": _HOST_MAC})
+
+    assert delete_host.await_count == 1
+    assert result.data["status"] == "applied"
+    assert result.data["warnings"] == ["irreversible"]

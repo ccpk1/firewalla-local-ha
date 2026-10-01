@@ -23,6 +23,8 @@ from .const import (
     DOMAIN,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_CREATE_RULE,
+    SERVICE_DELETE_ALARMS,
+    SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
     SERVICE_FIELD_ALARM_ID,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
@@ -36,6 +38,7 @@ from .const import (
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_MODE,
     SERVICE_FIELD_NEW_NAME,
+    SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
@@ -909,6 +912,224 @@ class ArchiveAlarmTool(_FirewallaControlTool):
         )
 
 
+class ArchiveAllAlarmsTool(_FirewallaControlTool):
+    """Archive every active alarm (bulk)."""
+
+    name = "firewalla_local__archive_all_alarms"
+    title = "Archive all alarms"
+    description = _PREFERRED_PREFIX + (
+        "Destructive bulk action: archive every active alarm at once. Records "
+        "are kept but move to the archive, and there is no un-archive. Prefer "
+        "archive_alarm for a single alarm."
+    )
+    parameters = vol.Schema({})
+    annotations = _DESTRUCTIVE_ANNOTATIONS
+    _service = SERVICE_ARCHIVE_ALARMS
+
+    @override
+    async def async_call(
+        self,
+        hass: HomeAssistant,
+        tool_input: llm.ToolInput,
+        llm_context: llm.LLMContext,
+    ) -> llm.ToolResult:
+        """Archive every active alarm."""
+        await self._call_service(hass, llm_context, {SERVICE_FIELD_MODE: "all_active"})
+        return self._result(
+            status="applied",
+            changed=True,
+            target={"kind": "alarm", "id": "all_active"},
+            warnings=["bulk action", "no un-archive"],
+        )
+
+
+class DeleteAlarmTool(_FirewallaControlTool):
+    """Permanently delete one alarm."""
+
+    name = "firewalla_local__delete_alarm"
+    title = "Delete alarm"
+    description = _PREFERRED_PREFIX + (
+        "Destructive: permanently delete one alarm record. This is "
+        "irreversible. To dismiss without destroying the record use "
+        "archive_alarm."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required(
+                SERVICE_FIELD_ALARM_ID,
+                description="Required. The alarm id to delete (from get_alarms).",
+            ): str,
+            vol.Required(
+                SERVICE_FIELD_CONFIRM,
+                description="Required. Set true to confirm the irreversible delete.",
+            ): bool,
+        }
+    )
+    annotations = _DESTRUCTIVE_ANNOTATIONS
+    _service = SERVICE_DELETE_ALARMS
+
+    @override
+    async def async_call(
+        self,
+        hass: HomeAssistant,
+        tool_input: llm.ToolInput,
+        llm_context: llm.LLMContext,
+    ) -> llm.ToolResult:
+        """Delete a single alarm."""
+        alarm_id = tool_input.tool_args[SERVICE_FIELD_ALARM_ID]
+        data = {
+            SERVICE_FIELD_MODE: "this",
+            SERVICE_FIELD_ALARM_ID: alarm_id,
+            SERVICE_FIELD_CONFIRM: True,
+        }
+        await self._call_service(hass, llm_context, data)
+        return self._result(
+            status="applied",
+            changed=True,
+            target={"kind": "alarm", "id": alarm_id},
+            warnings=["irreversible"],
+        )
+
+
+class DeleteAlarmsTool(_FirewallaControlTool):
+    """Permanently delete all active or all archived alarms."""
+
+    name = "firewalla_local__delete_all_alarms"
+    title = "Delete all alarms"
+    description = _PREFERRED_PREFIX + (
+        "Destructive bulk action: permanently delete every alarm in the chosen "
+        "set. This is irreversible and cannot be undone. Deleting all active "
+        "alarms destroys alarms that are not archived; deleting all archived "
+        "alarms destroys the retained history."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required(
+                SERVICE_FIELD_MODE,
+                description="Required. Which set to delete permanently.",
+            ): vol.In(("all_active", "all_archived")),
+            vol.Required(
+                SERVICE_FIELD_CONFIRM,
+                description="Required. Set true to confirm the bulk delete.",
+            ): bool,
+        }
+    )
+    annotations = _DESTRUCTIVE_ANNOTATIONS
+    _service = SERVICE_DELETE_ALARMS
+
+    @override
+    async def async_call(
+        self,
+        hass: HomeAssistant,
+        tool_input: llm.ToolInput,
+        llm_context: llm.LLMContext,
+    ) -> llm.ToolResult:
+        """Delete all alarms in the chosen set."""
+        mode = tool_input.tool_args[SERVICE_FIELD_MODE]
+        data = {SERVICE_FIELD_MODE: mode, SERVICE_FIELD_CONFIRM: True}
+        await self._call_service(hass, llm_context, data)
+        return self._result(
+            status="applied",
+            changed=True,
+            target={"kind": "alarm", "id": mode},
+            warnings=["bulk action", "irreversible"],
+        )
+
+
+class DeleteHostTool(_FirewallaControlTool):
+    """Permanently delete one Firewalla host record."""
+
+    name = "firewalla_local__delete_host"
+    title = "Delete host"
+    description = _PREFERRED_PREFIX + (
+        "Destructive: permanently delete a device record from Firewalla. This "
+        "is irreversible. It removes the host's identity, reservations, and "
+        "history; the device reappears as a new host if it rejoins the network."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required(
+                SERVICE_FIELD_HOST_MAC,
+                description="Required. The MAC address of the host to delete.",
+            ): str,
+            vol.Required(
+                SERVICE_FIELD_CONFIRM,
+                description="Required. Set true to confirm the irreversible delete.",
+            ): bool,
+        }
+    )
+    annotations = _DESTRUCTIVE_ANNOTATIONS
+    _service = SERVICE_DELETE_HOST
+    _returns_response = True
+
+    @override
+    async def async_call(
+        self,
+        hass: HomeAssistant,
+        tool_input: llm.ToolInput,
+        llm_context: llm.LLMContext,
+    ) -> llm.ToolResult:
+        """Delete one host record."""
+        host_mac = tool_input.tool_args[SERVICE_FIELD_HOST_MAC]
+        data = {
+            SERVICE_FIELD_HOST_MAC: host_mac,
+            SERVICE_FIELD_CONFIRM: True,
+            SERVICE_FIELD_REFRESH: True,
+        }
+        result = await self._call_service(hass, llm_context, data)
+        return self._result(
+            status="applied",
+            changed=True,
+            target={"kind": "host", "id": host_mac},
+            warnings=["irreversible"],
+            result=result,
+        )
+
+
+class DeleteRuleTool(_FirewallaControlTool):
+    """Permanently delete one policy rule."""
+
+    name = "firewalla_local__delete_rule"
+    title = "Delete rule"
+    description = _PREFERRED_PREFIX + (
+        "Destructive: permanently delete a firewall rule. This is irreversible. "
+        "To disable a rule reversibly use pause_rule instead. Resolve rule_id "
+        "from list_rules."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required(
+                SERVICE_FIELD_RULE_ID,
+                description="Required. The rule id to delete (from list_rules).",
+            ): str,
+            vol.Required(
+                SERVICE_FIELD_CONFIRM,
+                description="Required. Set true to confirm the irreversible delete.",
+            ): bool,
+        }
+    )
+    annotations = _DESTRUCTIVE_ANNOTATIONS
+    _service = SERVICE_DELETE_RULE
+
+    @override
+    async def async_call(
+        self,
+        hass: HomeAssistant,
+        tool_input: llm.ToolInput,
+        llm_context: llm.LLMContext,
+    ) -> llm.ToolResult:
+        """Delete one rule."""
+        rule_id = tool_input.tool_args[SERVICE_FIELD_RULE_ID]
+        data = {SERVICE_FIELD_RULE_ID: rule_id, SERVICE_FIELD_CONFIRM: True}
+        await self._call_service(hass, llm_context, data)
+        return self._result(
+            status="applied",
+            changed=True,
+            target={"kind": "rule", "id": rule_id},
+            warnings=["irreversible"],
+        )
+
+
 _CONTROL_TOOL_CLASSES: Final = (
     PauseRuleTool,
     ResumeRuleTool,
@@ -925,10 +1146,26 @@ _CONTROL_TOOL_CLASSES: Final = (
     UnmuteAlarmTool,
     BlockAlarmTargetTool,
     UnblockAlarmTargetTool,
+)
+
+# Destructive tools are registered only in the "full" mode. They are
+# irreversible (no undo) or bulk, so they require an explicit, informed opt-in.
+_DESTRUCTIVE_TOOL_CLASSES: Final = (
     ArchiveAlarmTool,
+    ArchiveAllAlarmsTool,
+    DeleteAlarmTool,
+    DeleteAlarmsTool,
+    DeleteHostTool,
+    DeleteRuleTool,
 )
 
 
-def build_control_tools(*, entry_id: str) -> list[llm.Tool]:
-    """Return the control tools bound to one config entry."""
-    return [tool_class(entry_id=entry_id) for tool_class in _CONTROL_TOOL_CLASSES]
+def build_control_tools(*, entry_id: str, include_destructive: bool) -> list[llm.Tool]:
+    """Return the control tools bound to one config entry.
+
+    Destructive tools are included only when ``include_destructive`` is true.
+    """
+    tool_classes: tuple[type[_FirewallaControlTool], ...] = _CONTROL_TOOL_CLASSES
+    if include_destructive:
+        tool_classes = (*tool_classes, *_DESTRUCTIVE_TOOL_CLASSES)
+    return [tool_class(entry_id=entry_id) for tool_class in tool_classes]
