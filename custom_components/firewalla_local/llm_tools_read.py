@@ -179,7 +179,12 @@ class ListHostsTool(_FirewallaReadTool):
         "have NO MAC address (`mac` is null and `host_id` is a `wg_peer:`/"
         "`awg_peer:` identifier), so they cannot be passed to any host tool "
         "that takes a MAC. `ip_assignment` is also null for them; do not assume "
-        "it is always an object."
+        "it is always an object.\n"
+        "\n"
+        "This lists every host by default. Pass the filters to narrow it — a "
+        "name, one network, online state or kind — rather than pulling the whole "
+        "inventory, and keep the default `detail: summary` unless the full "
+        "record is needed."
     )
     parameters = vol.Schema(
         {
@@ -262,7 +267,11 @@ class ListRulesTool(_FirewallaReadTool):
         "Defaults to user-visible rules. The box also carries large numbers of "
         "product-owned DAP and family rules, plus rules owned by a Firewalla "
         "subsystem (the alarm-intel auto-blocks); those are hidden unless "
-        "requested via include_purpose or include_system_managed."
+        "requested via include_purpose or include_system_managed.\n"
+        "\n"
+        "Filters narrow the result on the box. Pass `enabled`, `action`, "
+        "`target_type` or `applies_to` to answer a question about specific "
+        "rules rather than listing every one."
     )
     parameters = vol.Schema(
         {
@@ -325,7 +334,11 @@ class GetNetworkConfigTool(_FirewallaReadTool):
         "`safeSearch`, `family`, `doh`, `monitor`, `qos`, and similar). They are "
         "settings, not rules: they neither create nor correspond to any rule, so "
         "a `family` setting here has nothing to do with a `family` rule purpose "
-        "in list_rules."
+        "in list_rules.\n"
+        "\n"
+        "The network's device list is not included by default. Ask for it with "
+        "`include: ['hosts']` only when the user wants the devices on that "
+        "network; use list_hosts for device questions."
     )
     parameters = vol.Schema(
         {
@@ -510,7 +523,10 @@ class GetUserUsageTool(_FirewallaReadTool):
         "Answer 'how much time did a person/device spend online?' with a "
         "time-based usage report over a begin/end range. This is time (minutes), "
         "not bandwidth volume (see get_network_usage). Resolve scope from "
-        "list_hosts (for a device) or the watched-user surfaces."
+        "list_hosts (for a device) or the watched-user surfaces.\n"
+        "\n"
+        "Every section is returned by default; pass `sections` to keep only what "
+        "the question needs."
     )
     parameters = vol.Schema(
         {

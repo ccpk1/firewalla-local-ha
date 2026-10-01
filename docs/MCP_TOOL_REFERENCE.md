@@ -267,8 +267,15 @@ Reads that tell you what exists — the first step before any control action.
 - **When to use / not:** the discovery feed for device work. Use before
   `set_host_name` / `set_host_dhcp_reservation`. For a host's *traffic*, use
   `get_network_usage`.
-- **Inputs:** `refresh` (bool, default true — performs a live poll; set false for a
-  fast cached read); `config_entry_id` / `config_entry_name` (optional).
+- **Narrow it — do not pull the whole inventory:** this returns every host by
+  default and is the largest payload in the surface (~18k tokens live). Filters are
+  applied server-side, so the model is expected to pass `host_name` (substring),
+  `host_mac`, `group_name`, `user`, `network_uuid`, `online` or `kind` rather than
+  listing everything and filtering in context. `detail` defaults to `summary`; ask
+  for `full` only when a field that `summary` omits is actually needed.
+- **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
+  (bool, default true — performs a live poll; set false for a fast cached read);
+  `config_entry_id` / `config_entry_name` (optional).
 - **Returns:** read envelope — `result.hosts[]`, each with `host_id`, `name`,
   `device_type`, online status, and `ip_assignment` (`mode`: `dynamic`/`static`,
   `reserved_ipv4`, `network_uuid`).
@@ -283,6 +290,10 @@ Reads that tell you what exists — the first step before any control action.
 - **When to use / not:** use to resolve a `rule_target` before any rule action and to
   resolve scope targets (person → device-group, valid app ids, network). Not for host
   traffic (`get_network_usage`).
+- **Narrow it:** filters are applied server-side. Pass `enabled`, `action`,
+  `target_type` or `applies_to` to answer a question about specific rules instead of
+  listing every one; the default already hides the product-owned DAP/family and
+  subsystem rules.
 - **Scope precedence — state this, do not infer it from `scope` alone:** rules attach
   to a device (`scope`), to a group or user (`applies_to` + `tag_refs`), or to a
   network, and a rule with none of those applies globally. **Attachment replaces rather
@@ -304,8 +315,11 @@ Reads that tell you what exists — the first step before any control action.
   DHCP configured on this network?"
 - **When to use / not:** for network structure and DHCP config. Not for per-host
   traffic (`get_network_usage`) or per-host reservations (`list_hosts`).
-- **Inputs:** `network_name` or `network_uuid` (optional — all networks if omitted); `refresh`; `config_entry_id` / `config_entry_name`.
-- **Returns:** read envelope — `result.networks[]` with interface, subnet, DHCP range, VLAN, `block_icmp`, device counts.
+- **Inputs:** `network_name` or `network_uuid` (**required** — one network per call;
+  resolve from `get_system_overview`); `include` (`['hosts']` to add the per-network
+  device list, which is absent by default); `refresh`; `config_entry_id` /
+  `config_entry_name`.
+- **Returns:** read envelope — `result.networks[]` with interface, subnet, DHCP range, VLAN, `block_icmp`, device counts, and the network-level `policy` block (settings, not rules — see [Policy controls](#policy-controls)); the `hosts` section only when requested.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
 
@@ -355,6 +369,9 @@ Reads that explain what the network is doing and how it is performing.
   person get?"
 - **When to use / not:** time-based usage for a person/device/tag. Not bandwidth
   volume (`get_network_usage`).
+- **Narrow it:** every section is returned by default, so pass `sections` (and
+  `app_ids` when only some apps matter) to keep the report to what the question
+  needs.
 - **Inputs:** `scope_kind` (`host`/`tag`/…), `scope_target`, `begin`/`end` (or a period), `granularity` (`day`/`hour`), `sections`, `app_ids`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with internet/app/category time summaries and periods.
 - **Availability:** read, default-on.

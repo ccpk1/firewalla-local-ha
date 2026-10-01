@@ -324,6 +324,34 @@ async def test_rule_scope_precedence_is_stated_consistently(
     assert "no longer apply" in rules_description
 
 
+# Each entry pairs a tool that returns a large payload with the phrase in its
+# description that tells the model how to avoid paying for all of it.
+_PAYLOAD_GUIDANCE: Final = (
+    ("firewalla_local__list_hosts", "filters to narrow"),
+    ("firewalla_local__list_rules", "Filters narrow the result"),
+    ("firewalla_local__get_network_config", "not included by default"),
+    ("firewalla_local__get_user_usage", "pass `sections`"),
+)
+
+
+async def test_large_payload_tools_tell_the_model_to_narrow(
+    hass: HomeAssistant,
+) -> None:
+    """Tools with filters must say so, or the model lists everything first.
+
+    These descriptions are the model's only cue that narrowing is possible. The
+    observed failure without them is "list everything, then narrow", and the
+    full host inventory alone is roughly 18k tokens. Each tool already has the
+    filters — this is one line of guidance, not a new capability — so the test
+    pins the guidance rather than the filters.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+
+    for tool_name, expected_phrase in _PAYLOAD_GUIDANCE:
+        assert expected_phrase in tools[tool_name].description, tool_name
+
+
 async def test_read_envelope_is_json_serializable(hass: HomeAssistant) -> None:
     """A read tool's result serializes with the stdlib JSON encoder."""
     api_instance = await _api_instance(hass)
