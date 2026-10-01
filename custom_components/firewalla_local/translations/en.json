@@ -1309,6 +1309,40 @@
         }
       }
     },
+    "create_rule": {
+      "name": "Create rule",
+      "description": "Create a persistent block rule, optionally scoped to an alarm's target. Blocking a target from an alarm creates an ordinary policy rule that records the alarm id as a back-reference.",
+      "fields": {
+        "alarm_id": {
+          "name": "Alarm ID",
+          "description": "Optional. Build the block from an alarm's target and device scope, recording the alarm id on the new rule. Provide this or target_type and target_value."
+        },
+        "target_type": {
+          "name": "Target type",
+          "description": "Optional. Required with target_value when alarm_id is omitted."
+        },
+        "target_value": {
+          "name": "Target value",
+          "description": "Optional. Required with target_type when alarm_id is omitted. The domain, IP, or MAC to block."
+        },
+        "scope_kind": {
+          "name": "Scope kind",
+          "description": "Optional. Where the rule applies. Defaults to everywhere when omitted."
+        },
+        "scope_target": {
+          "name": "Scope target",
+          "description": "Optional. The scope value for the chosen kind (a MAC for device, a network uuid for network)."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "archive_alarms": {
       "name": "Archive alarms",
       "description": "Move one or all active alarms to the archive. Archived alarms remain retrievable.",

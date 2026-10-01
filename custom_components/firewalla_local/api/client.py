@@ -274,6 +274,17 @@ _RAW_RULE_DISABLED_TRUE_VALUE: Final = 1
 _RAW_RULE_IDLE_TS_EMPTY_VALUE: Final = ""
 
 
+def _extract_created_rule_id(response: dict[str, object]) -> str | None:
+    """Return the new policy rule id from a policy:create response."""
+    policy = response.get(_COMMAND_SET_POLICY)
+    if not isinstance(policy, dict):
+        return None
+    raw_id = policy.get(_RAW_RULE_ID_KEY)
+    if isinstance(raw_id, (int, str)):
+        return str(raw_id)
+    return None
+
+
 class FirewallaApiClient:
     """Strictly local client for the Encipher runtime endpoint."""
 
@@ -747,9 +758,13 @@ class FirewallaApiClient:
             log_level=log_level,
         )
 
-    async def async_create_rule(self, template: FirewallaRuleTemplate) -> None:
-        """Create one persistent rule from a stored template."""
-        await self._async_send_local_message(
+    async def async_create_rule(self, template: FirewallaRuleTemplate) -> str | None:
+        """Create one persistent rule from a stored template.
+
+        Returns the new rule id when the box reports it, so the caller can undo
+        the creation.
+        """
+        response = await self._async_send_local_message(
             message_type=_COMMAND_MESSAGE_TYPE,
             data={
                 _COMMAND_ITEM_KEY: _COMMAND_POLICY_CREATE,
@@ -759,6 +774,7 @@ class FirewallaApiClient:
             },
             target=DEFAULT_INIT_TARGET,
         )
+        return _extract_created_rule_id(response)
 
     async def async_delete_rule(self, rule_id: str) -> None:
         """Delete one existing policy rule by ID."""

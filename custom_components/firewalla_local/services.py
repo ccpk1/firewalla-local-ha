@@ -28,7 +28,9 @@ from .const import (
     DOMAIN,
     HOST_DEVICE_TYPE_OPTIONS,
     LOGGER,
+    RULE_ACTION_BLOCK,
     SERVICE_ARCHIVE_ALARMS,
+    SERVICE_CREATE_RULE,
     SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
@@ -202,6 +204,7 @@ from .models import (
     FirewallaReportTarget,
     FirewallaReportTimeBasis,
     FirewallaReportWarning,
+    FirewallaRuleTemplate,
     FirewallaSpeedTestResult,
     FirewallaUsageHistoryDeviceUsage,
     FirewallaUsageHistoryEntry,
@@ -243,6 +246,18 @@ GET_RUNTIME_INVENTORY_SCHEMA = vol.Schema(
 
 GET_RULES_SCHEMA = vol.Schema(
     {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+CREATE_RULE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_TARGET_TYPE): vol.In(("dns", "ip", "mac")),
+        vol.Optional(SERVICE_FIELD_TARGET_VALUE): cv.string,
+        vol.Optional(SERVICE_FIELD_SCOPE_KIND): vol.In(("device", "network", "all")),
+        vol.Optional(SERVICE_FIELD_SCOPE_TARGET): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -3113,6 +3128,74 @@ async def _async_handle_get_rules(call: ServiceCall) -> JsonObjectType:
     }
 
 
+async def _async_handle_create_rule(call: ServiceCall) -> JsonObjectType:
+    """Create a policy rule, optionally scoped to an alarm's target.
+
+    Blocking a target from an alarm is ordinary rule creation: the alarm is used
+    as the rule source and its id is recorded as a back-reference.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
+    target_type = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_TYPE))
+    target_value = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_VALUE))
+
+    if alarm_id is not None:
+        alarm = entry.runtime_data.alarm_manager.get_alarm(alarm_id)
+        if alarm is None:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
+            )
+        template = FirewallaRuleTemplate.from_alarm(alarm)
+        if template is None:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
+            )
+    else:
+        if target_type is None or target_value is None:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
+            )
+        scope_kind = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_KIND))
+        scope_target = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_TARGET))
+        scope = (
+            (scope_target,)
+            if scope_kind == "device" and scope_target is not None
+            else ()
+        )
+        template = FirewallaRuleTemplate(
+            source_rule_id="",
+            name=f"block {target_value}",
+            action=RULE_ACTION_BLOCK,
+            target=target_value,
+            target_type=target_type,
+            scope=scope,
+            dnsmasq_only=True if target_type == "dns" else None,
+        )
+
+    try:
+        new_rule_id = await entry.runtime_data.rule_manager.async_create_rule(template)
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to create Firewalla rule",
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+        )
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "rule_id": new_rule_id,
+        "action": template.action,
+        "target": template.target,
+        "target_type": template.target_type,
+        "scope": list(template.scope),
+        "alarm_id": template.alarm_id,
+    }
+
+
 async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     """Return active and optionally archived alarms with shared report metadata."""
     entry = _get_loaded_entry(
@@ -4832,6 +4915,13 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         GET_RULES_SCHEMA,
         SupportsResponse.ONLY,
         False,
+    ),
+    (
+        SERVICE_CREATE_RULE,
+        _async_handle_create_rule,
+        CREATE_RULE_SCHEMA,
+        SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_ARCHIVE_ALARMS,

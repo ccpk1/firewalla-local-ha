@@ -1,9 +1,8 @@
-"""LLM tools exposing Firewalla Local reads through Home Assistant's LLM API.
+"""LLM read tools for Firewalla Local.
 
-This module is imported only by ``llm_api.py``, which itself is imported only
-when ``llm_tools_supported()`` is true, so the Core 2026.10-only
-``homeassistant.helpers.llm`` names below are never imported on older Home
-Assistant.
+Imported only by ``llm_api.py``, which is imported only when LLM tools are
+supported, so the Core 2026.10-only ``homeassistant.helpers.llm`` names below
+are never imported on older Home Assistant.
 
 Each read tool delegates to an existing Firewalla Local service and wraps the
 service payload in the documented response envelope. The tool injects its own

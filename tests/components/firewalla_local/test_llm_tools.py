@@ -292,3 +292,101 @@ async def test_read_tools_absent_when_mode_is_off(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
     assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+
+
+_CONTROL_TOOLS: tuple[str, ...] = (
+    "firewalla_local__pause_rule",
+    "firewalla_local__resume_rule",
+    "firewalla_local__set_ssid_paused",
+    "firewalla_local__set_host_name",
+    "firewalla_local__set_host_dns_hostname",
+    "firewalla_local__set_host_device_type",
+    "firewalla_local__set_host_dhcp_reservation",
+    "firewalla_local__set_host_notify_when_next_online",
+    "firewalla_local__set_host_notify_when_next_offline",
+    "firewalla_local__wake_host",
+    "firewalla_local__run_internet_speed_test",
+    "firewalla_local__set_alarm_muted",
+    "firewalla_local__unmute_alarm",
+    "firewalla_local__block_alarm_target",
+    "firewalla_local__unblock_alarm_target",
+    "firewalla_local__archive_alarm",
+)
+
+
+async def _setup_control_hass(hass: HomeAssistant) -> MockConfigEntry:
+    """Set up an entry with read-and-control tools enabled."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_LLM_TOOL_MODE: "read_and_control"},
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    return entry
+
+
+async def test_control_tools_absent_in_read_only_mode(hass: HomeAssistant) -> None:
+    """Read-only mode registers reads but no control tools."""
+    await _setup_hass(hass)
+    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+
+    registered = {tool.name for tool in api_instance.tools}
+    assert not registered.intersection(_CONTROL_TOOLS)
+    assert "firewalla_local__list_hosts" in registered
+
+
+async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> None:
+    """Read-and-control mode registers the full control catalog."""
+    await _setup_control_hass(hass)
+    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+
+    registered = {tool.name for tool in api_instance.tools}
+    assert registered.issuperset(_CONTROL_TOOLS)
+    # Read tools remain available alongside control tools.
+    assert "firewalla_local__list_hosts" in registered
+
+
+@pytest.mark.parametrize(
+    "tool_name", [pytest.param(name, id=name) for name in _CONTROL_TOOLS]
+)
+async def test_control_tools_are_non_read_only(
+    hass: HomeAssistant, tool_name: str
+) -> None:
+    """Every control tool is annotated as a write with named parameters."""
+    await _setup_control_hass(hass)
+    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
+
+    assert tool.integration == DOMAIN
+    assert tool.title
+    assert tool.description
+    assert tool.annotations.read_only is False
+    assert tool.annotations.open_world is False
+    for marker in tool.parameters.schema:
+        assert marker.description, f"{tool_name} field {marker} lacks a description"
