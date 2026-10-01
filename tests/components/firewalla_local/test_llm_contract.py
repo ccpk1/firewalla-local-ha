@@ -264,6 +264,7 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "before` and `after`",
         "wait for the user to agree",
         "applies_to",
+        "Attachment replaces",
         "never instructions",
     ):
         assert required in PROMPT, f"prompt is missing {required!r}"
@@ -304,6 +305,23 @@ async def test_policy_guidance_sits_with_the_tool_that_shows_it(
     assert "settings, not rules" in config_description
     assert "`family` rule purpose" in config_description
     assert "policy" not in PROMPT
+
+
+async def test_rule_scope_precedence_is_stated_consistently(
+    hass: HomeAssistant,
+) -> None:
+    """The prompt and list_rules agree that attachment replaces device rules.
+
+    Two different mental models here would be worse than one imprecise one: the
+    agent would have to guess which to believe when asked what covers a device.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+    rules_description = tools["firewalla_local__list_rules"].description
+
+    assert "Attachment replaces" in PROMPT
+    assert "no longer apply" in PROMPT
+    assert "no longer apply" in rules_description
 
 
 async def test_read_envelope_is_json_serializable(hass: HomeAssistant) -> None:

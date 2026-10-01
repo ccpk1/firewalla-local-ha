@@ -283,6 +283,14 @@ Reads that tell you what exists — the first step before any control action.
 - **When to use / not:** use to resolve a `rule_target` before any rule action and to
   resolve scope targets (person → device-group, valid app ids, network). Not for host
   traffic (`get_network_usage`).
+- **Scope precedence — state this, do not infer it from `scope` alone:** rules attach
+  to a device (`scope`), to a group or user (`applies_to` + `tag_refs`), or to a
+  network, and a rule with none of those applies globally. **Attachment replaces rather
+  than adds:** once a device belongs to a group or user, its rules come from that group
+  or user and its device-level rules no longer apply to it. So answer "what covers this
+  device?" from the device's membership, not from device-scoped rules that exist in the
+  inventory. *(Owner-provided product behaviour, 2026-10-01 — not yet reproduced from a
+  live capture.)*
 - **Inputs:** optional filters (action, paused/enabled, target scope); `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
   `action`, `is_paused`/`enabled`, target (`type`/`target`), scope, and the `aid`
