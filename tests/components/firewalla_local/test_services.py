@@ -4,10 +4,12 @@ from __future__ import annotations
 
 # pylint: disable=too-many-lines
 import json
+import re
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import cast
+from pathlib import Path
+from typing import Final, cast
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
@@ -3529,6 +3531,41 @@ async def test_get_rules_supports_filters(hass: HomeAssistant) -> None:
     assert [rule["rule_id"] for rule in matches["rules"]] == ["744"]
     assert no_match is not None
     assert no_match["rules"] == []
+
+
+_TRANSLATIONS_PATH: Final = (
+    Path(__file__).parents[3]
+    / "custom_components"
+    / "firewalla_local"
+    / "translations"
+    / "en.json"
+)
+_SERVICES_YAML_PATH: Final = (
+    Path(__file__).parents[3]
+    / "custom_components"
+    / "firewalla_local"
+    / "services.yaml"
+)
+
+
+def test_every_service_has_a_translation_and_no_orphans() -> None:
+    """Every service is translated, and no translation describes a missing service.
+
+    A service with no translation shows an empty title/description to users, and
+    an orphaned entry is dead weight that hides which services still exist. Both
+    directions are checked so the surface cannot drift from its documentation.
+    """
+    translations = json.loads(_TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+    translated = set(translations["services"])
+    declared = {
+        match.group(1)
+        for match in re.finditer(
+            r"^([a-z_]+):$", _SERVICES_YAML_PATH.read_text(encoding="utf-8"), re.M
+        )
+    }
+
+    assert declared - translated == set(), "services missing a translation"
+    assert translated - declared == set(), "translation entries with no service"
 
 
 async def test_get_system_overview_reports_counts_without_identities(

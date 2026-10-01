@@ -108,7 +108,7 @@
           "update_interval": "Update interval (minutes)",
           "watched_device_online_window": "Watched-device online window (minutes)"
         },
-        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more. Network status entities expose one connectivity binary sensor per Firewalla network (LAN/VLAN/VPN/WAN) with addressing, advanced options, and usage details. SSID status entities expose one connectivity binary sensor and one toggle switch per Firewalla wireless network (SSID) when AP7 access points are present. AI assistant (MCP) tools expose Firewalla data to LLM clients and require Home Assistant Core 2026.10 or newer.",
+        "description": "Configure Firewalla runtime settings. Shorter intervals update faster but load the local API more, so keep the polling interval shorter than the windows you set below. The AI assistant (MCP) settings require Home Assistant Core 2026.10 or newer.",
         "title": "System settings"
       }
     }
@@ -1317,6 +1317,38 @@
         }
       }
     },
+    "get_system_overview": {
+      "name": "Get system overview",
+      "description": "Return a curated system summary: appliance health, the networks with per-network device counts, and counts for devices, VPN peers, groups, users, rules, and alarms, plus per-WAN speed-test and quality metrics. Counts and identities only, never record collections. Use include to add the group and user names and ids that other services accept as selectors.",
+      "fields": {
+        "include": {
+          "name": "Include",
+          "description": "Optional. 'identifiers' adds the group and user names and ids. Other services accept those ids as selectors."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "sync_runtime": {
+      "name": "Sync runtime",
+      "description": "Poll the Firewalla box now and report when the snapshot was taken. Requests within the coordinator's debounce window are coalesced, so calling this alongside other actions still costs at most one poll.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "create_rule": {
       "name": "Create rule",
       "description": "Create a persistent block rule, optionally scoped to an alarm's target. Blocking a target from an alarm creates an ordinary policy rule that records the alarm id as a back-reference.",
@@ -2083,53 +2115,9 @@
         }
       }
     },
-    "pause_rule_control_only": {
-      "name": "Pause rule (control only)",
-      "description": "Experimental. Pause one managed Firewalla rule using only the rule ID and pause control fields in the update payload. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.",
-      "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
-        },
-        "duration": {
-          "name": "Duration",
-          "description": "Optional. How long to pause the rule, for example 30m, 4h, or 2d 4h 30m."
-        },
-        "resume_at": {
-          "name": "Resume at",
-          "description": "Optional. A local date and time when the rule should resume."
-        },
-        "config_entry_id": {
-          "name": "Config entry ID (Optional)",
-          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
-        },
-        "config_entry_name": {
-          "name": "Config entry name (Optional)",
-          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
-        }
-      }
-    },
     "resume_rule": {
       "name": "Resume rule",
       "description": "Resume one managed Firewalla rule immediately.",
-      "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
-        },
-        "config_entry_id": {
-          "name": "Config entry ID (Optional)",
-          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
-        },
-        "config_entry_name": {
-          "name": "Config entry name (Optional)",
-          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
-        }
-      }
-    },
-    "resume_rule_control_only": {
-      "name": "Resume rule (control only)",
-      "description": "Experimental. Resume one managed Firewalla rule using only the rule ID and pause control fields in the update payload.",
       "fields": {
         "rule_target": {
           "name": "Rule target",

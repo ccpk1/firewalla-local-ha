@@ -79,6 +79,11 @@ You can read state or call services this way, and both return structured data yo
 * **Per-AP Device Monitoring (AP7):** Each Firewalla AP7 access point becomes its own Home Assistant device (linked to the box), with a system-status binary sensor exposing channel, LED, TX power, country, mesh mode, timezone, pause-WiFi/ACL state, and live client count.
 * **Rich Local Reporting:** Leverage over two dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, WAN event timelines, and current or archived alarms with their silences—all pulled directly from the local data plane without touching the cloud.
 
+### **AI Assistant & MCP Access**
+* **Ask your network questions:** The integration registers its own MCP tool surface, so an AI assistant with an MCP client can answer "how many devices are online?", "why did my internet drop?", or "what's eating my bandwidth?" using real local data — no sidecar, no cloud subscription.
+* **Graduated access, privacy-first default:** Five settings control what the assistant can reach. The default, **Summary only**, answers general questions using counts, network names, and performance metrics — **no device addresses, hardware identifiers, group or user names, or public IP**. Raise it to **Read only** for device names and addresses, then **Read and control** for reversible actions, and finally **Full** for destructive ones.
+* **Safe by construction, not by redaction:** In the anonymous tier the other tools are not registered at all, so there is no sensitive field to filter out and nothing to leak. Every control action is admin-gated, so a non-admin user can never change your network through the assistant. Credentials, pairing keys, and symmetric keys cannot appear in tool output at all.
+
 ## **Supported Hardware & Prerequisites**
 * **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. Confirmed working on the following models running the Firewalla Box software that supports the local API:
    * Gold
