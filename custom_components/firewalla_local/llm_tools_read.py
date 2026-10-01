@@ -341,9 +341,10 @@ class GetNetworkUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_network_usage")
     title = "Get network usage"
     description = (
-        "Answer 'what is eating my bandwidth?' with windowed top talkers, apps, "
-        "and categories for one network. Note: windowed WAN usage is not "
-        "available; use get_wan_usage for WAN totals."
+        "Answer 'what is using the most bandwidth on this network?' with windowed "
+        "top talkers, apps, and categories. A network must be selected: this is "
+        "per network segment over a time window, not a whole-box total. Note: "
+        "windowed WAN usage is not available; use get_wan_usage for WAN totals."
     )
     parameters = vol.Schema(
         {

@@ -136,11 +136,16 @@ answers ordinary questions:
 **Why the default is Summary only.** A firewall assistant that cannot see IP
 addresses cannot answer firewall questions, so the useful tiers send real network
 detail. Summary only is the one that answers the common questions while sending
-**no device identity at all** — which makes it a defensible starting point. Raise
-it deliberately when you want the assistant to work with specific devices.
+**no device identity at all** — which makes it a defensible starting point.
 
-Two categories are worth calling out separately, because they are more sensitive
-than a device name on your LAN:
+**Be deliberate about raising it.** Anything above Summary only sends that detail
+to whichever LLM provider your assistant is connected to — a third party. That
+includes device names, IP and MAC addresses, rule and alarm detail, and your
+public IP. The higher tiers are genuinely more useful; they also hand a model a
+lot of information about your household. Use the lowest tier that answers your
+question, and lower it again when you are done.
+
+Some fields are more sensitive than a device name on your LAN:
 
 - **Your public IP** (`get_speed_tests`, `get_wan_events`) identifies your
   household on the internet, not just a device on your network.

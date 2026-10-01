@@ -302,19 +302,24 @@ Reads that explain what the network is doing and how it is performing.
 
 ### `firewalla_local__get_network_usage`
 
-- **Answers:** "What is eating my bandwidth?" / "Who are the top talkers?" / "Which
-  apps/categories are using data?"
-- **When to use / not:** for per-host/app/category usage. Not for WAN totals
-  (`get_wan_usage`) or a person's time-online (`get_user_usage`).
-- **Inputs:** `window` (enum: which period — the valid windows differ by source; see the tool description), `top_n` (default 5 — a truncated ranking is flagged in `meta`), `include` (e.g. `"series"` to add raw samples), `refresh`, `config_entry_id` / `config_entry_name`.
+- **Answers:** "What is using the most bandwidth on this network?" / "Who are the
+  top talkers?" / "Which apps/categories are using data?"
+- **When to use / not:** for per-host/app/category usage **within one network
+  segment, over a time window**. There is no whole-box usage tool: ask per
+  network. Not for WAN totals (`get_wan_usage`) or a person's time-online
+  (`get_user_usage`).
+- **Inputs:** `network_uuid` or `network_name` (**required** — resolve from `get_system_overview`); `window` (enum: which period — the valid windows differ by source; see the tool description), `top_n` (default 5 — a truncated ranking is flagged in `meta`), `include` (e.g. `"series"` to add raw samples), `refresh`, `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with top talkers, apps, categories, activity; `meta.truncated` when `top_n` cut data.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
 
 ### `firewalla_local__get_wan_usage`
 
-- **Answers:** "How much internet data have I used this month?"
-- **When to use / not:** WAN/internet totals over time. Not per-device (`get_network_usage`). Note: WAN windowed usage is limited — some windows are unavailable.
+- **Answers:** "How much internet data have I used today/this week?"
+- **When to use / not:** WAN/internet totals over time. Defaults to the **day and
+  week** periods (the common question); history is roughly 12× the size, so ask
+  for it explicitly. Not per-device (`get_network_usage`). Note: WAN windowed
+  usage is limited — some windows are unavailable.
 - **Inputs:** `wan_name`/`wan_uuid` (for multi-WAN), `history_count`/`history_period`; `refresh`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with download/upload totals and periods (`*_bytes`/`*_megabytes`).
 - **Availability:** read, default-on.
