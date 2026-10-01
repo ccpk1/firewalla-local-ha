@@ -118,7 +118,7 @@ nothing, so the tool reports the outcome):
 - `changed` — whether anything actually changed.
 - `target` — the **resolved** host/rule/alarm acted on (id + name), so the agent never
   has to track raw ids.
-- `before` / `after` — the state that changed.
+- `before` / `after` — the state that changed. `before` is the state observed before the action, present only when the tool read it (the idempotency pre-check); `after` is the state the action **requested**, a statement of intent rather than a re-read of the box. Either may be `null` — a measurement tool changes no state.
 - `undo` — the exact call to reverse the action.
 - `warnings` — degradations or side effects.
 
@@ -525,6 +525,26 @@ Deliberately **not** available as tools at any mode:
   cost). Host and rule discovery are `list_hosts` and `list_rules`.
 - Generic `create_rule` beyond the alarm-block workflow — arbitrary rule creation has
   a wide blast radius; `block_alarm_target` is the bounded, alarm-scoped entry point.
+
+## Policy controls
+
+Firewalla also carries **policy controls** (`adblock`, `safeSearch`, `family`, `doh`,
+`unbound`, `monitor`, `ntp_redirect`, `weak_password_scan`, `device_service_scan`,
+`acl`, `qos`, `newDeviceTag`, `vpnClient`). They appear at **network** scope in
+`get_network_config` and at **group** scope in the runtime inventory.
+
+They are **settings, not rules**, and this integration does not model them. Known
+and deliberately not built on:
+
+- They share one vocabulary across both scopes, which is what makes them a settings
+  layer rather than a rule construct.
+- They **do not map to rules** in either direction. Verified live: groups with no
+  policy settings carry rules, groups with policy settings carry unrelated rules, and
+  two groups with `family: true` have **zero** `family`-purpose rules. The earlier
+  "`family` is the materialization link" theory is refuted.
+- Their semantics are **not fully understood**, so no tool reads or writes them and
+  no attempt is made to correlate them with rules. The only useful relationship is
+  the `tag:<group_id>` join, which groups a group's rules and nothing more.
 
 ---
 

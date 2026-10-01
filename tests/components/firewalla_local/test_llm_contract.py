@@ -313,5 +313,9 @@ async def test_action_result_envelope_is_json_serializable(
         )
 
     json.dumps(result.data)
-    for key in ("status", "changed", "target", "undo", "warnings"):
-        assert key in result.data
+    for key in ("status", "changed", "target", "before", "after", "undo", "warnings"):
+        assert key in result.data, key
+    # `before` is the observed state and `after` the requested state; both are
+    # present even when unknown, so the envelope shape is stable.
+    assert result.data["before"] == {"enabled": True, "is_paused": False}
+    assert result.data["after"] == {"enabled": False, "is_paused": True}

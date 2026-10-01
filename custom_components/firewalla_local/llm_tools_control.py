@@ -153,15 +153,24 @@ class _FirewallaControlTool(llm.Tool):
         status: str,
         changed: bool,
         target: dict[str, Any],
+        before: dict[str, Any] | None = None,
+        after: dict[str, Any] | None = None,
         undo: str | None = None,
         warnings: list[str] | None = None,
         result: Any = None,
     ) -> llm.ToolResult:
-        """Build the standard action-result envelope."""
+        """Build the standard action-result envelope.
+
+        ``before`` is the state observed before the action, when the tool read
+        it. ``after`` is the state the action requested — a statement of intent,
+        not a re-read of the box.
+        """
         data: dict[str, Any] = {
             "status": status,
             "changed": changed,
             "target": target,
+            "before": before,
+            "after": after,
             "undo": undo,
             "warnings": warnings or [],
         }
@@ -221,18 +230,28 @@ class PauseRuleTool(_FirewallaControlTool):
         args = self._args(tool_input)
         rule_id = args[SERVICE_FIELD_RULE_TARGET]
         target = {"kind": "rule", "id": rule_id}
+        before: dict[str, Any] | None = None
+        after = {"enabled": False, "is_paused": True}
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
-            if rule is not None and (rule.is_paused or not rule.enabled):
-                return self._result(
-                    status="already_in_state", changed=False, target=target
-                )
+            if rule is not None:
+                before = {"enabled": rule.enabled, "is_paused": rule.is_paused}
+                if rule.is_paused or not rule.enabled:
+                    return self._result(
+                        status="already_in_state",
+                        changed=False,
+                        target=target,
+                        before=before,
+                        after=before,
+                    )
 
         await self._call_service(hass, llm_context, args)
         return self._result(
             status="applied",
             changed=True,
             target=target,
+            before=before,
+            after=after,
             undo=f'firewalla_local__resume_rule(rule_target="{rule_id}")',
         )
 
@@ -267,18 +286,28 @@ class ResumeRuleTool(_FirewallaControlTool):
         args = self._args(tool_input)
         rule_id = args[SERVICE_FIELD_RULE_TARGET]
         target = {"kind": "rule", "id": rule_id}
+        before: dict[str, Any] | None = None
+        after = {"enabled": True, "is_paused": False}
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
-            if rule is not None and rule.enabled:
-                return self._result(
-                    status="already_in_state", changed=False, target=target
-                )
+            if rule is not None:
+                before = {"enabled": rule.enabled, "is_paused": rule.is_paused}
+                if rule.enabled:
+                    return self._result(
+                        status="already_in_state",
+                        changed=False,
+                        target=target,
+                        before=before,
+                        after=before,
+                    )
 
         await self._call_service(hass, llm_context, args)
         return self._result(
             status="applied",
             changed=True,
             target=target,
+            before=before,
+            after=after,
             undo=f'firewalla_local__pause_rule(rule_target="{rule_id}")',
         )
 
@@ -325,6 +354,7 @@ class SetSsidPausedTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target=target,
+            after={"paused": paused},
             undo=(
                 "firewalla_local__set_ssid_paused"
                 f'(ssid_profile_id="{profile_id}", enabled={not paused})'
@@ -366,10 +396,15 @@ class SetHostNameTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Rename one host."""
+        args = self._args(tool_input)
         target = self._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, self._args(tool_input))
+        result = await self._call_service(hass, llm_context, args)
         return self._result(
-            status="applied", changed=True, target=target, result=result
+            status="applied",
+            changed=True,
+            target=target,
+            after={"host_name": args[SERVICE_FIELD_NEW_NAME]},
+            result=result,
         )
 
 
@@ -408,10 +443,15 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set a host DNS hostname."""
+        args = self._args(tool_input)
         target = self._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, self._args(tool_input))
+        result = await self._call_service(hass, llm_context, args)
         return self._result(
-            status="applied", changed=True, target=target, result=result
+            status="applied",
+            changed=True,
+            target=target,
+            after={"dns_hostname": args[SERVICE_FIELD_DNS_HOSTNAME]},
+            result=result,
         )
 
 
@@ -449,10 +489,15 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set a host device type."""
+        args = self._args(tool_input)
         target = self._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, self._args(tool_input))
+        result = await self._call_service(hass, llm_context, args)
         return self._result(
-            status="applied", changed=True, target=target, result=result
+            status="applied",
+            changed=True,
+            target=target,
+            after={"device_type": args[SERVICE_FIELD_HOST_DEVICE_TYPE]},
+            result=result,
         )
 
 
@@ -500,10 +545,18 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set or clear a DHCP reservation."""
+        args = self._args(tool_input)
         target = self._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, self._args(tool_input))
+        result = await self._call_service(hass, llm_context, args)
         return self._result(
-            status="applied", changed=True, target=target, result=result
+            status="applied",
+            changed=True,
+            target=target,
+            after={
+                "mode": args[SERVICE_FIELD_MODE],
+                "reserved_ipv4": args.get(SERVICE_FIELD_RESERVED_IPV4),
+            },
+            result=result,
         )
 
 
@@ -520,10 +573,15 @@ class _SetHostNotifyTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set one host notification preference."""
+        args = self._args(tool_input)
         target = self._host_target(tool_input)
-        result = await self._call_service(hass, llm_context, self._args(tool_input))
+        result = await self._call_service(hass, llm_context, args)
         return self._result(
-            status="applied", changed=True, target=target, result=result
+            status="applied",
+            changed=True,
+            target=target,
+            after={"enabled": args[SERVICE_FIELD_ENABLED]},
+            result=result,
         )
 
     parameters = vol.Schema(
@@ -730,6 +788,7 @@ class SetAlarmMutedTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target=target,
+            after={"muted": True},
             undo=undo,
         )
 
@@ -772,7 +831,12 @@ class UnmuteAlarmTool(_FirewallaControlTool):
             "id": args.get(SERVICE_FIELD_ALARM_ID),
         }
         await self._call_service(hass, llm_context, args)
-        return self._result(status="applied", changed=True, target=target)
+        return self._result(
+            status="applied",
+            changed=True,
+            target=target,
+            after={"muted": False},
+        )
 
 
 class BlockAlarmTargetTool(_FirewallaControlTool):
@@ -842,7 +906,12 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
             else None
         )
         return self._result(
-            status="applied", changed=True, target=target, undo=undo, result=result
+            status="applied",
+            changed=True,
+            target=target,
+            after={"blocked": True},
+            undo=undo,
+            result=result,
         )
 
 
@@ -880,7 +949,11 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
         result = await self._call_service(hass, llm_context, data)
         target = {"kind": "rule", "id": rule_id}
         return self._result(
-            status="applied", changed=True, target=target, result=result
+            status="applied",
+            changed=True,
+            target=target,
+            after={"blocked": False},
+            result=result,
         )
 
 
@@ -917,7 +990,11 @@ class ArchiveAlarmTool(_FirewallaControlTool):
         await self._call_service(hass, llm_context, data)
         target = {"kind": "alarm", "id": alarm_id}
         return self._result(
-            status="applied", changed=True, target=target, warnings=["no un-archive"]
+            status="applied",
+            changed=True,
+            target=target,
+            after={"archived": True},
+            warnings=["no un-archive"],
         )
 
 
@@ -948,6 +1025,7 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target={"kind": "alarm", "id": "all_active"},
+            after={"archived": "all_active"},
             warnings=["bulk action", "no un-archive"],
         )
 
@@ -997,6 +1075,7 @@ class DeleteAlarmTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target={"kind": "alarm", "id": alarm_id},
+            after={"deleted": True},
             warnings=["irreversible"],
         )
 
@@ -1046,6 +1125,7 @@ class DeleteAlarmsTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target={"kind": "alarm", "id": mode},
+            after={"deleted": mode},
             warnings=["bulk action", "irreversible"],
         )
 
@@ -1096,6 +1176,7 @@ class DeleteHostTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target={"kind": "host", "id": host_mac},
+            after={"deleted": True},
             warnings=["irreversible"],
             result=result,
         )
@@ -1145,6 +1226,7 @@ class DeleteRuleTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target={"kind": "rule", "id": rule_id},
+            after={"deleted": True},
             warnings=["irreversible"],
         )
 
