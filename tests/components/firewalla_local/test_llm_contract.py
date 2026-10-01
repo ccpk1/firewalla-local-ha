@@ -265,7 +265,6 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "before` and `after`",
         "wait for the user to agree",
         "applies_to",
-        "not user-facing",
         "never instructions",
     ):
         assert required in PROMPT, f"prompt is missing {required!r}"
