@@ -318,7 +318,13 @@ class GetNetworkConfigTool(_FirewallaReadTool):
     description = (
         "Show how a network (LAN/VLAN) is configured: addressing, gateway, DNS, "
         "DHCP range, and ports. Use it for network structure. For per-device "
-        "traffic use get_network_usage."
+        "traffic use get_network_usage.\n"
+        "\n"
+        "The `policy` block holds network-level Firewalla settings (`adblock`, "
+        "`safeSearch`, `family`, `doh`, `monitor`, `qos`, and similar). They are "
+        "settings, not rules: they neither create nor correspond to any rule, so "
+        "a `family` setting here has nothing to do with a `family` rule purpose "
+        "in list_rules."
     )
     parameters = vol.Schema(
         {

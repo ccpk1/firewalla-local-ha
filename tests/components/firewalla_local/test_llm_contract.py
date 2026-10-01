@@ -261,7 +261,6 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "get_system_overview",
         "once per session",
         # 5.6 — action reporting, blast-radius confirmation, and the rule model.
-        "already_in_state",
         "before` and `after`",
         "wait for the user to agree",
         "applies_to",
@@ -287,6 +286,24 @@ async def test_write_descriptions_guide_the_model(hass: HomeAssistant) -> None:
     # The block tool must name its key fields.
     for field in ("alarm_id", "target_type", "target_value"):
         assert field in tools["firewalla_local__block_alarm_target"].description
+
+
+async def test_policy_guidance_sits_with_the_tool_that_shows_it(
+    hass: HomeAssistant,
+) -> None:
+    """The policy-controls warning belongs on get_network_config, not the prompt.
+
+    Only that tool's payload carries a `policy` block, so the guidance is paid
+    for when it is relevant rather than on every request. In the default
+    summary_only tier the tool is not even registered.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+    config_description = tools["firewalla_local__get_network_config"].description
+
+    assert "settings, not rules" in config_description
+    assert "`family` rule purpose" in config_description
+    assert "policy" not in PROMPT
 
 
 async def test_read_envelope_is_json_serializable(hass: HomeAssistant) -> None:
