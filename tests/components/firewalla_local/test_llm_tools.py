@@ -31,6 +31,21 @@ from custom_components.firewalla_local.models import (
 LIST_HOSTS_TOOL = "firewalla_local__list_hosts"
 LIST_RULES_TOOL = "firewalla_local__list_rules"
 
+# Every read tool and the response_type it reports in meta.
+_READ_TOOLS: tuple[tuple[str, str], ...] = (
+    ("firewalla_local__list_hosts", "hosts"),
+    ("firewalla_local__list_rules", "rules"),
+    ("firewalla_local__get_network_config", "network_config"),
+    ("firewalla_local__get_network_usage", "network_usage"),
+    ("firewalla_local__get_wan_usage", "wan_usage"),
+    ("firewalla_local__get_wan_events", "wan_events"),
+    ("firewalla_local__get_user_usage", "user_usage"),
+    ("firewalla_local__get_internet_quality", "internet_quality"),
+    ("firewalla_local__get_speed_tests", "speed_tests"),
+    ("firewalla_local__get_wireless_status", "wireless_status"),
+    ("firewalla_local__get_alarms", "alarms"),
+)
+
 
 def _entry() -> MockConfigEntry:
     """Return a provisioned Firewalla config entry with LLM tools enabled."""
@@ -195,16 +210,13 @@ async def test_list_hosts_returns_host_records(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.parametrize(
-    "tool_name",
-    [
-        pytest.param(LIST_HOSTS_TOOL, id="list_hosts"),
-        pytest.param(LIST_RULES_TOOL, id="list_rules"),
-    ],
+    ("tool_name", "_response_type"),
+    [pytest.param(name, rtype, id=name) for name, rtype in _READ_TOOLS],
 )
 async def test_read_tools_are_annotated_read_only(
-    hass: HomeAssistant, tool_name: str
+    hass: HomeAssistant, tool_name: str, _response_type: str
 ) -> None:
-    """Read tools declare the safe, explicit annotation set."""
+    """Every read tool declares the safe, explicit annotation set."""
     await _setup_hass(hass)
     api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
 
@@ -214,7 +226,34 @@ async def test_read_tools_are_annotated_read_only(
     assert tool.description
     assert tool.annotations.read_only is True
     assert tool.annotations.destructive is False
+    assert tool.annotations.idempotent is True
     assert tool.annotations.open_world is False
+
+
+async def test_read_tool_catalog_matches_spec(hass: HomeAssistant) -> None:
+    """The registered read-tool catalog exactly matches the intended set."""
+    await _setup_hass(hass)
+    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+
+    assert {tool.name for tool in api_instance.tools} == {
+        name for name, _ in _READ_TOOLS
+    }
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "_response_type"),
+    [pytest.param(name, rtype, id=name) for name, rtype in _READ_TOOLS],
+)
+async def test_every_parameter_has_a_description(
+    hass: HomeAssistant, tool_name: str, _response_type: str
+) -> None:
+    """Every tool parameter carries a description for the model."""
+    await _setup_hass(hass)
+    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
+
+    for marker in tool.parameters.schema:
+        assert marker.description, f"{tool_name} field {marker} lacks a description"
 
 
 async def test_read_tools_absent_when_mode_is_off(hass: HomeAssistant) -> None:

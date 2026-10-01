@@ -208,7 +208,7 @@ Reads that tell you what exists — the first step before any control action.
   reservation?" / "What is this device named?"
 - **When to use / not:** the discovery feed for device work. Use before
   `set_host_name` / `set_host_dhcp_reservation`. For a host's *traffic*, use
-  `get_network_usage`. *(Planned.)*
+  `get_network_usage`.
 - **Inputs:** `refresh` (bool, default true — performs a live poll; set false for a
   fast cached read); `config_entry_id` / `config_entry_name` (optional).
 - **Returns:** read envelope — `result.hosts[]`, each with `host_id`, `name`,
@@ -229,8 +229,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
   `action`, `is_paused`/`enabled`, target (`type`/`target`), scope, and the `aid`
   alarm back-reference when the rule was created by an alarm block.
-- **Availability:** read, default-on. *(Planned — backed by the non-admin
-  `get_rules` service.)*
+- **Availability:** read, default-on (backed by the non-admin `get_rules` service).
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false` (coordinator-backed) or `true` (live).
 
 ### `firewalla_local__get_network_config`
