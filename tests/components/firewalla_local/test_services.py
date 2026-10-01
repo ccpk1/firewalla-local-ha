@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # pylint: disable=too-many-lines
+import json
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
+    SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
@@ -52,6 +54,9 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_INCLUDE_ARCHIVED,
+    SERVICE_FIELD_INCLUDE_DNS,
+    SERVICE_FIELD_INCLUDE_PURPOSE,
+    SERVICE_FIELD_KIND,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_MODE,
     SERVICE_FIELD_NETWORK_NAME,
@@ -84,6 +89,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
+    SERVICE_GET_RULES,
     SERVICE_GET_SPEED_TEST_RESULTS,
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
@@ -100,6 +106,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_SET_SSID_PAUSED,
+    SERVICE_SYNC_RUNTIME,
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
@@ -3222,10 +3229,244 @@ async def test_set_host_device_type_returns_acknowledgement_for_host_mac(
     }
 
 
-async def test_get_host_name_mapping_returns_host_identity_records(
+async def test_sync_runtime_reports_snapshot_time(hass: HomeAssistant) -> None:
+    """Test the sync runtime service polls the box and reports the snapshot time."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.coordinator."
+            "FirewallaDataUpdateCoordinator.async_request_refresh",
+            new=AsyncMock(),
+        ) as mock_refresh,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SYNC_RUNTIME,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_refresh.await_count == 1
+    assert response is not None
+    assert response["config_entry_id"] == entry.entry_id
+    assert response["synced"] is True
+    assert set(response) == {
+        "config_entry_id",
+        "synced",
+        "synced_at",
+        "synced_at_timestamp",
+    }
+
+
+async def test_get_rules_returns_attachment_and_purpose_fields(
     hass: HomeAssistant,
 ) -> None:
-    """Test the host-name mapping service returns MAC and pseudo-host records."""
+    """Test rule summaries expose group/network attachments and purpose.
+
+    Without `applies_to` and `tag_refs` a group- or network-scoped rule is
+    indistinguishable from an unattached one, because `scope` only covers
+    device-scoped rules.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    rule = response["rules"][0]
+    assert rule["applies_to"] == ["AV_SMART_TV"]
+    assert rule["tag_refs"] == ["tag:17"]
+    assert rule["purpose"] is None
+
+
+async def test_get_rules_excludes_product_owned_purposes_by_default(
+    hass: HomeAssistant,
+) -> None:
+    """Test DAP and family rules are hidden unless explicitly requested."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    snapshot = _snapshot()
+    dap_rule = replace(
+        snapshot.policy_rules[0],
+        rule_id="900",
+        purpose="dap",
+        target_name="dap_bc2411a6aef9",
+    )
+    snapshot = replace(snapshot, policy_rules=(*snapshot.policy_rules, dap_rule))
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        default = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+        included = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_INCLUDE_PURPOSE: ["dap"],
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert default is not None
+    assert [rule["rule_id"] for rule in default["rules"]] == ["744"]
+    assert included is not None
+    assert sorted(rule["rule_id"] for rule in included["rules"]) == ["744", "900"]
+
+
+async def test_get_rules_supports_filters(hass: HomeAssistant) -> None:
+    """Test the rule filters narrow the result server-side."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(enabled=False),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        matches = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_APPLIES_TO: "AV_SMART_TV",
+                SERVICE_FIELD_ENABLED: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+        no_match = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_ENABLED: True,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert matches is not None
+    assert [rule["rule_id"] for rule in matches["rules"]] == ["744"]
+    assert no_match is not None
+    assert no_match["rules"] == []
+
+
+async def test_get_host_name_mapping_defaults_to_summary_detail(
+    hass: HomeAssistant,
+) -> None:
+    """Test the host-name mapping service defaults to the compact summary shape.
+
+    Summary omits `dns_fqdn` (derivable), `dhcp_name` (unreliable) and the
+    nested `ip_assignment`, flattening the assignment's useful parts instead.
+    """
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -3275,16 +3516,12 @@ async def test_get_host_name_mapping_returns_host_identity_records(
                 "host_name": "Plex Server",
                 "dns_hostname": "plex-server",
                 "dns_domain": "int.ccpk.us",
-                "dns_fqdn": "plex-server.int.ccpk.us",
-                "dhcp_name": "plex-server",
                 "group_name": "Media Devices",
                 "host_device_type": "tablet",
-                "ip_assignment": {
-                    "mode": "static",
-                    "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
-                    "reserved_ipv4": "192.168.10.10",
-                },
                 "kind": "mac_host",
+                "vpn_client": None,
+                "ip_assignment_mode": "static",
+                "reserved_ipv4": "192.168.10.10",
             },
             {
                 "host_id": "wg_peer:test-peer",
@@ -3293,15 +3530,132 @@ async def test_get_host_name_mapping_returns_host_identity_records(
                 "host_name": "WireGuard Kaden",
                 "dns_hostname": None,
                 "dns_domain": "int.ccpk.us",
-                "dns_fqdn": None,
-                "dhcp_name": None,
                 "group_name": None,
                 "host_device_type": None,
-                "ip_assignment": None,
                 "kind": "pseudo_host",
+                "vpn_client": None,
+                "ip_assignment_mode": None,
+                "reserved_ipv4": None,
             },
         ],
     }
+
+
+async def test_get_host_name_mapping_full_detail_includes_derived_fields(
+    hass: HomeAssistant,
+) -> None:
+    """Test the full detail shape keeps the derivable and nested fields."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(primary_group_name="Media Devices"),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOST_NAME_MAPPING,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_DETAIL: "full",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    first = response["hosts"][0]
+    assert first["dns_fqdn"] == "plex-server.int.ccpk.us"
+    assert first["dhcp_name"] == "plex-server"
+    assert first["ip_assignment"] == {
+        "mode": "static",
+        "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+        "reserved_ipv4": "192.168.10.10",
+    }
+    assert "ip_assignment_mode" not in first
+
+
+async def test_get_host_name_mapping_supports_filters(
+    hass: HomeAssistant,
+) -> None:
+    """Test the host filters narrow the result server-side."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(primary_group_name="Media Devices"),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        by_name = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOST_NAME_MAPPING,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_NAME: "plex",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+        vpn_only = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOST_NAME_MAPPING,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_KIND: "pseudo_host",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert by_name is not None
+    assert [host["host_name"] for host in by_name["hosts"]] == ["Plex Server"]
+    assert vpn_only is not None
+    assert [host["host_name"] for host in vpn_only["hosts"]] == ["WireGuard Kaden"]
 
 
 async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode(
@@ -4364,10 +4718,10 @@ async def test_get_time_usage_report_service_ranks_apps_and_filters_zero_only_ro
     ]
 
 
-async def test_get_wan_data_usage_service_returns_current_month_summary_by_default(
+async def test_get_wan_data_usage_service_returns_current_month_summary_when_requested(
     hass: HomeAssistant,
 ) -> None:
-    """Test the WAN data usage service returns current-month summary by default."""
+    """Test the WAN data usage service returns the requested current month."""
     await hass.config.async_set_time_zone("America/Los_Angeles")
 
     entry = MockConfigEntry(
@@ -4410,6 +4764,7 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_by_defau
             SERVICE_GET_WAN_DATA_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_CURRENT_PERIODS: ["month"],
             },
             blocking=True,
             return_response=True,
@@ -4511,6 +4866,7 @@ async def test_get_wan_data_usage_service_adds_daily_detail_to_current_month(
             SERVICE_GET_WAN_DATA_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_CURRENT_PERIODS: ["month"],
                 SERVICE_FIELD_DETAIL: "full",
             },
             blocking=True,
@@ -4537,6 +4893,62 @@ async def test_get_wan_data_usage_service_adds_daily_detail_to_current_month(
         "total_bytes": 2816,
     }
     assert first_report["current"]["month"]["days"][0]["time_period"]["kind"] == "day"
+
+
+async def test_get_wan_data_usage_service_defaults_to_day_and_week(
+    hass: HomeAssistant,
+) -> None:
+    """Test the WAN data usage service defaults to the day and week periods.
+
+    The month-only default answered the least common form of the question and
+    omitted the day and week totals callers usually want.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(timezone_name="America/New_York"),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_monthly_wan_usage_payload",
+            new=AsyncMock(return_value=_runtime_payload()["monthlyDataUsageOnWans"]),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_DATA_USAGE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["query"]["current_periods"] == ["day", "week"]
+    assert response["summary"]["current_periods"] == ["day", "week"]
+    assert response["summary"]["includes_history"] is False
 
 
 async def test_get_wan_data_usage_service_returns_history_months_only(
@@ -4715,6 +5127,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_INCLUDE: ["hosts"],
                 SERVICE_FIELD_REFRESH: False,
             },
             blocking=True,
@@ -4822,7 +5235,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
         "actions": {"wake_on_lan_supported": True},
     }
     assert response["metadata"] == {
-        "applied": {"refresh": False},
+        "applied": {"refresh": False, "include": ["hosts"]},
         "warnings": [],
         "unavailable_sections": [],
         "provenance": {
@@ -4864,6 +5277,73 @@ async def test_get_network_segment_report_service_returns_configuration_report(
             },
         },
     }
+
+
+async def test_get_network_segment_report_service_omits_hosts_by_default(
+    hass: HomeAssistant,
+) -> None:
+    """Test host rows are omitted unless explicitly included.
+
+    Host rows carry MAC, hostname, IP and reservation, so they must not be part
+    of the default configuration report. The section must be absent rather than
+    present-and-empty so its absence is unambiguous.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=_network_interface_payload()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_NETWORK_SEGMENT_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert "hosts" not in response["sections"]
+    assert set(response["sections"]) == {
+        "configuration",
+        "usage",
+        "addressing",
+        "dns",
+        "dhcp",
+    }
+    assert response["summary"]["host_count"] == 0
+    assert response["metadata"]["applied"] == {"refresh": False, "include": []}
+    assert "hosts" not in response["metadata"]["provenance"]
 
 
 async def test_get_network_segment_report_service_requires_network_selector(
@@ -5369,10 +5849,14 @@ async def test_get_network_segment_usage_service_returns_series_when_requested(
     }
 
 
-async def test_get_network_segment_usage_service_requires_window(
+async def test_get_network_segment_usage_service_defaults_window(
     hass: HomeAssistant,
 ) -> None:
-    """Test the network segment usage service requires one window."""
+    """Test the network segment usage service works without a window.
+
+    An omitted window previously raised a validation error while the tool
+    advertised a default, making a compliant call impossible.
+    """
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="license-123",
@@ -5397,12 +5881,15 @@ async def test_get_network_segment_usage_service_requires_window(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
             return_value=_speed_test_snapshot(timezone_name="America/New_York"),
         ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=_network_interface_payload()),
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    with pytest.raises(ServiceValidationError, match="Provide a window"):
-        await hass.services.async_call(
+        response = await hass.services.async_call(
             DOMAIN,
             SERVICE_GET_NETWORK_SEGMENT_USAGE,
             {
@@ -5413,6 +5900,9 @@ async def test_get_network_segment_usage_service_requires_window(
             blocking=True,
             return_response=True,
         )
+
+    assert response is not None
+    assert response["query"]["window"] == "last_60_minutes"
 
 
 async def test_get_network_segment_usage_service_requires_network_selector(
@@ -5682,7 +6172,7 @@ async def test_get_wan_events_service_returns_normalized_timeline(
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_wan_events_payload",
-            new=AsyncMock(return_value=_wan_events_payload()),
+            new=AsyncMock(side_effect=_wan_events_service_payload),
         ) as mock_get_events,
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -5702,46 +6192,39 @@ async def test_get_wan_events_service_returns_normalized_timeline(
         )
 
     assert mock_get_events.await_args is not None
-    assert mock_get_events.await_args.kwargs == {
-        "limit_count": 100,
-        "limit_offset": 10,
-    }
+    call_kwargs = mock_get_events.await_args.kwargs
+    assert call_kwargs["limit_count"] == 100
+    assert call_kwargs["limit_offset"] == 10
+    # The read is filtered to real link-state events; without filters it returns
+    # a DNS-probe firehose instead of WAN events.
+    assert call_kwargs["filters"] == [
+        {"event_type": "action", "sub_type": "system_reboot"},
+        {"event_type": "state", "sub_type": "dualwan_state"},
+        {"event_type": "state", "sub_type": "wan_state"},
+    ]
+    assert "dns" not in json.dumps(call_kwargs["filters"])
     assert response is not None
     assert response["config_entry_id"] == entry.entry_id
     assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
-    assert response["query"] == {"limit": 100, "offset": 10}
-    assert response["count"] == 3
-    assert response["results"][0] == {
-        "family": "ping_RTT",
-        "event_type": "action",
-        "timestamp": 1_774_036_038.371,
-        "timestamp_iso": "2026-03-20T19:47:18.371000+00:00",
-        "value": 1,
-        "previous_value": None,
-        "ok_value": None,
-        "state_key": None,
-        "wan_uuid": "wan-1",
-        "wan_name": "WAN-ONE",
-        "active": None,
-        "ready": None,
-        "changed_interface": None,
-        "primary_interface": None,
-        "wan_type": None,
-        "wan_switched": None,
-        "target": "1.1.1.1",
-        "name_server": None,
-        "dns_test_domain": None,
-        "wan_interface_address": None,
-        "measurement_kind": "rtt",
-        "measurement_value": 53.2365,
-        "threshold_value": 35.3376,
-        "failures": [],
-        "wan_statuses": [],
+    assert response["query"] == {
+        "limit": 100,
+        "offset": 10,
+        "window_days": 7,
+        "include_dns": False,
     }
-    assert response["results"][1]["family"] == "dualwan_state"
-    assert response["results"][1]["wan_uuid"] == "wan-1"
-    assert response["results"][1]["changed_interface"] == "eth0"
-    assert response["results"][1]["wan_statuses"] == [
+    assert response["count"] == 1
+    assert response["results"][0]["family"] == "dualwan_state"
+    # The fixture also carries a `ping_RTT` alert and a `dns` health probe.
+    # Neither is a WAN link event: latency alerts live in get_internet_quality
+    # and DNS probes are health checks, so both are excluded by default.
+    assert all(
+        item["family"] not in {"ping_RTT", "ping_lossrate", "dns"}
+        for item in response["results"]
+    )
+    assert response["results"][0]["family"] == "dualwan_state"
+    assert response["results"][0]["wan_uuid"] == "wan-1"
+    assert response["results"][0]["changed_interface"] == "eth0"
+    assert response["results"][0]["wan_statuses"] == [
         {
             "interface_key": "eth0",
             "wan_uuid": "wan-1",
@@ -5761,9 +6244,88 @@ async def test_get_wan_events_service_returns_normalized_timeline(
             "seq": 1,
         },
     ]
-    assert response["results"][2]["family"] == "dns"
-    assert response["results"][2]["name_server"] == "172.64.36.2"
-    assert response["results"][2]["wan_interface_address"] == "23.245.207.179"
+
+
+async def test_get_wan_events_service_includes_dns_when_requested(
+    hass: HomeAssistant,
+) -> None:
+    """Test DNS health probes are returned only when explicitly requested."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_wan_events_payload",
+            new=AsyncMock(side_effect=_wan_events_service_payload),
+        ) as mock_get_events,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_EVENTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_INCLUDE_DNS: True,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_get_events.await_args is not None
+    filters = mock_get_events.await_args.kwargs["filters"]
+    assert {"event_type": "state", "sub_type": "dns"} in filters
+    assert response is not None
+    assert response["count"] == 2
+    assert any(item["family"] == "dns" for item in response["results"])
+
+
+def _wan_events_service_payload(
+    *,
+    filters: list[dict[str, str]] | None = None,
+    **kwargs: object,
+) -> list[dict[str, object]]:
+    """Return the WAN events fixture filtered the way the box filters it.
+
+    The service relies on the box applying `filters`; the mock must honour them
+    too, or the default DNS exclusion cannot be tested.
+    """
+    del kwargs
+    payload = _wan_events_payload()
+    if not filters:
+        return payload
+
+    allowed = {(item["event_type"], item["sub_type"]) for item in filters}
+    return [
+        event
+        for event in payload
+        if (
+            event.get("event_type"),
+            event.get("state_type") or event.get("action_type"),
+        )
+        in allowed
+    ]
 
 
 def _wireless_runtime_payload() -> dict[str, object]:

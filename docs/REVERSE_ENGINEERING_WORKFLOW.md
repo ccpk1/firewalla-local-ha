@@ -3626,6 +3626,101 @@ which is cheap precisely because the retained set is bounded.
 
 **Artifacts:** live session 2026-09-30, `utils/probe_alarm_control.py`.
 
+### Finding 40: WAN events require the app's `filters` — an unfiltered read is a DNS-probe firehose
+
+**Scenario:**
+
+- The `get_wan_events` service returned 99 records dominated by events the
+  Firewalla app does not show in its WAN events view. The owner compared the app
+  (3 events over several days: one high-latency alert, one `WAN-ONE` restored,
+  one WAN disconnected) against the service output and found no correlation.
+- Suspected cause: the service issues a bare `item=events` read, while the
+  pairing/init path sends a `filters` array (`api/client.py:723-735`).
+
+**Result: confirmed. The app filters; an unfiltered read is dominated by the
+box's own DNS health probes.**
+
+Measured on the live box 2026-10-01 via `item=events` with `parse_json` and
+`reverse` set, grouping raw records by `state_type` / `action_type`:
+
+| `value` | Records | Composition |
+| --- | --- | --- |
+| unfiltered, `limit_count: 100` | 100 | **93 `dns`**, 6 `ping`, 1 `ping_RTT` |
+| app filters, `limit_count: 100` | **2** | `wan_state` ×2 |
+| app filters, `min` = 7 days | **2** | `wan_state` ×2 |
+| ping filters, `min` = 7 days | **1** | `ping_RTT` ×1 |
+| `dns` filter only, `min` = 7 days | **162** | `dns` ×162 |
+
+The DNS probes are `state_key` / `name_server` = `127.0.0.1` with
+`dns_test_domain` = `github.com`, firing roughly every three minutes — the box
+health-checking its own resolver. **162 of them accumulate in a week**, so a
+count-limited unfiltered read returns almost nothing else. The app never asks
+for them.
+
+**The app's filter set (verbatim from the init capture):**
+
+```json
+"value": {
+  "min": <24h_ago_ms>,
+  "reverse": true,
+  "parse_json": true,
+  "filters": [
+    {"event_type": "action", "sub_type": "system_reboot"},
+    {"event_type": "state", "sub_type": "dualwan_state"},
+    {"event_type": "state", "sub_type": "wan_state"}
+  ]
+}
+```
+
+Filtered to that set, the two `wan_state` records are exactly the owner's
+`WAN-ONE restored` / `WAN disconnected` pair. The third event the app shows —
+the high-latency alert — comes from the **separate** `ping_RTT` / `ping_lossrate`
+action feed (Finding 25), which is a threshold-crossing alert stream, not a
+sample stream. That is the alert feed, not a WAN link event.
+
+**`min` is honoured here — unlike alarm reads.** `item=events` accepts a
+millisecond epoch `min` and filters by it (the 7-day window returned a strict
+subset of the unfiltered set, and the DNS filter returned 162 in-week records).
+This is a **direct contrast with Finding 39**, where alarm reads silently ignore
+every candidate time parameter. The events item is the one place so far where a
+time bound actually works. `limit_count` / `limit_offset` also work, but a count
+limit over the unfiltered firehose is unstable by construction — it returns
+whatever the newest N records happen to be.
+
+**Ordering note:** the records carry `ts` in **milliseconds**, and the payload is
+requested with `reverse: true` (newest first). The normalized model converts to
+seconds.
+
+**Implementation impact:**
+
+- **Send `filters` on every `item=events` read.** An unfiltered read is not a
+  WAN event read; it is the DNS probe log with a WAN event occasionally in it.
+- **`ping_RTT` / `ping_lossrate` do not belong in WAN events.** They are the
+  Internet Quality alert feed — quality already surfaces ping latency (mean /
+  max / median / min) and packet loss percentage from `networkMonitorData`
+  (Finding 25), so latency and loss have a correct home and should not be
+  duplicated as link events.
+- **`system_reboot` is not currently a supported action family.** The normalized
+  model accepts only `ping_RTT` / `ping_lossrate` for `event_type: "action"`
+  (`_SUPPORTED_WAN_EVENT_ACTION_FAMILIES`), so the app's `system_reboot` filter
+  would produce records the model silently drops. Add the family if reboots are
+  wanted.
+- **`dns` should not be a default family.** It is in
+  `_SUPPORTED_WAN_EVENT_STATE_FAMILIES`, which is why DNS probes reach the
+  normalized output at all. Keep it reachable only as an explicit exception.
+- **A 7-day window is affordable once filtered.** With the app's filter set the
+  entire retained history here is 2 records, so `min` can be used as the primary
+  selector instead of a count limit.
+
+**Design consequence for the service/tool:** default to the app's link-state
+filter set over a **7-day** `min` window, exclude `dns` unless explicitly
+requested, and leave latency/loss alerting to Internet Quality. That reduces the
+payload from 57,762 bytes of mostly-DNS noise to a handful of real events.
+
+**Artifacts:** live session 2026-10-01; raw probe output
+`/tmp/wanprobe_*.json`; comparison `.tmp/quality_events.json` (the ping alert
+feed, captured 2026-09-10).
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two

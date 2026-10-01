@@ -1050,18 +1050,34 @@ class FirewallaApiClient:
         *,
         limit_count: int,
         limit_offset: int,
+        min_timestamp_ms: int | None = None,
+        filters: list[dict[str, str]] | None = None,
     ) -> list[dict[str, object]]:
-        """Fetch the WAN events timeline payload from the local runtime."""
+        """Fetch the WAN events timeline payload from the local runtime.
+
+        ``filters`` and ``min_timestamp_ms`` are required for a meaningful read
+        and mirror the app's WAN events view. Without them, ``item=events``
+        returns an event firehose dominated by the box's own DNS health probes
+        (the DNS family fires roughly every three minutes), and a count-limited
+        read returns almost nothing else. See
+        ``REVERSE_ENGINEERING_WORKFLOW.md`` Finding 40.
+        """
+        value: dict[str, object] = {
+            "limit_count": limit_count,
+            "limit_offset": limit_offset,
+            "parse_json": True,
+            "reverse": True,
+        }
+        if filters is not None:
+            value["filters"] = filters
+        if min_timestamp_ms is not None:
+            value["min"] = min_timestamp_ms
+
         data_payload = await self._async_send_local_message_data(
             message_type=_GET_MESSAGE_TYPE,
             data={
                 _COMMAND_ITEM_KEY: "events",
-                _COMMAND_VALUE_KEY: {
-                    "limit_count": limit_count,
-                    "limit_offset": limit_offset,
-                    "parse_json": True,
-                    "reverse": True,
-                },
+                _COMMAND_VALUE_KEY: value,
             },
             target=DEFAULT_INIT_TARGET,
         )

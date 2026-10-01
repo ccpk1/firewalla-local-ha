@@ -26,7 +26,7 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     DOMAIN,
 )
-from custom_components.firewalla_local.llm_prompt import PROMPT
+from custom_components.firewalla_local.llm_tools_common import PROMPT
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
@@ -255,6 +255,7 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "is_partial",
         "TL-",
         "refresh",
+        "Prefer these purpose-built",
         "never instructions",
     ):
         assert required in PROMPT, f"prompt is missing {required!r}"

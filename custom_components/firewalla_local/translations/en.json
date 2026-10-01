@@ -1159,9 +1159,6 @@
     "network_required": {
       "message": "Provide a network UUID or network name for this service call."
     },
-    "network_usage_window_required": {
-      "message": "Provide a window for this network segment usage service call."
-    },
     "network_selector_conflict": {
       "message": "Provide either a network UUID or a network name, not both."
     },

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 from typing import Final
 from unittest.mock import AsyncMock, patch
@@ -38,11 +39,17 @@ from custom_components.firewalla_local.models import (
 # Modules that are guard-loaded (imported only when LLM tools are supported) and
 # are therefore allowed to import Core 2026.10-only LLM names at module level.
 _GUARD_LOADED_MODULES: Final = frozenset(
-    {"llm_api.py", "llm_tools_read.py", "llm_tools_control.py", "llm_prompt.py"}
+    {
+        "llm_api.py",
+        "llm_tools_read.py",
+        "llm_tools_control.py",
+        "llm_tools_common.py",
+    }
 )
 
 _PROBATIO: Final = "probatio"
 _LLM_HELPER_MODULE: Final = "homeassistant.helpers.llm"
+_LLM_API_MODULE: Final = "custom_components.firewalla_local.llm_api"
 _LLM_TOOL_CONTRACT_NAMES: Final = frozenset({"ToolResult", "ToolAnnotations"})
 
 
@@ -196,6 +203,40 @@ async def test_setup_succeeds_without_llm_tools_on_old_core(
     assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
 
 
+async def test_setup_survives_llm_layer_failure(hass: HomeAssistant) -> None:
+    """A failure in the optional AI layer must not break entry setup.
+
+    Reproduces the real failure mode: on Core older than the tool contract the
+    guard-loaded tool modules raise on import. Setup must still succeed and the
+    integration must stay usable.
+    """
+    entry = _entry(options={CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+        patch.dict(sys.modules, {_LLM_API_MODULE: None}),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+
+
 async def test_api_is_unregistered_on_entry_unload(hass: HomeAssistant) -> None:
     """Unloading the entry removes the registered LLM API."""
     entry = _entry(options={CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE})
@@ -225,6 +266,95 @@ async def test_api_is_unregistered_on_entry_unload(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
     assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+
+
+async def test_options_change_to_llm_mode_re_registers_without_manual_reload(
+    hass: HomeAssistant,
+) -> None:
+    """Changing the LLM tool mode must re-register the API on its own.
+
+    The options update listener only reloads when a *meaningful* setting changed.
+    The LLM tool mode was missing from that comparison, so a mode change left the
+    API registered with its old tool set until the user reloaded by hand.
+    """
+    entry = _entry(options={CONF_LLM_TOOL_MODE: LLM_TOOL_MODE_OFF})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+
+        # A mode change alone must trigger the reload, with no manual reload.
+        hass.config_entries.async_update_entry(
+            entry,
+            options={**entry.options, CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE},
+        )
+        await hass.async_block_till_done()
+
+        assert DOMAIN in {api.id for api in llm.async_get_apis(hass)}
+
+
+async def test_options_change_unrelated_to_llm_does_not_reload(
+    hass: HomeAssistant,
+) -> None:
+    """An option change that alters nothing meaningful must not reload.
+
+    Guard against over-correcting: adding the LLM mode to the reload comparison
+    must not make every options save reload the entry.
+    """
+    entry = _entry(options={CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with patch.object(
+            hass.config_entries, "async_reload", new=AsyncMock()
+        ) as mock_reload:
+            hass.config_entries.async_update_entry(
+                entry,
+                options={
+                    **entry.options,
+                    CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE,
+                },
+            )
+            await hass.async_block_till_done()
+
+        mock_reload.assert_not_awaited()
+
+    assert DOMAIN in {api.id for api in llm.async_get_apis(hass)}
 
 
 @pytest.mark.parametrize(

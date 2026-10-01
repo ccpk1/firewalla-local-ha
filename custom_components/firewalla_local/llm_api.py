@@ -18,7 +18,7 @@ from homeassistant.util import slugify
 
 from .const import DOMAIN, LLM_TOOL_MODE_FULL, LLM_TOOL_MODE_READ_AND_CONTROL
 from .coordinator import get_llm_tool_mode
-from .llm_prompt import PROMPT
+from .llm_tools_common import PROMPT
 from .llm_tools_control import build_control_tools
 from .llm_tools_read import build_read_tools
 

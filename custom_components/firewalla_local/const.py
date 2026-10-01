@@ -193,6 +193,20 @@ SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: Final = "granularity"
 SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: Final = "scope_kind"
 SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: Final = "scope_target"
 SERVICE_FIELD_LIMIT: Final = "limit"
+SERVICE_FIELD_WINDOW_DAYS: Final = "window_days"
+SERVICE_FIELD_INCLUDE_DNS: Final = "include_dns"
+SERVICE_FIELD_GROUP_NAME: Final = "group_name"
+SERVICE_FIELD_KIND: Final = "kind"
+SERVICE_FIELD_ONLINE: Final = "online"
+SERVICE_FIELD_USER: Final = "user"
+SERVICE_FIELD_ACTION: Final = "action"
+SERVICE_FIELD_APPLIES_TO: Final = "applies_to"
+SERVICE_FIELD_INCLUDE_PURPOSE: Final = "include_purpose"
+
+# Rule purposes that are product-owned and never user-facing. They are excluded
+# from rule listings unless explicitly requested: on a real box they outnumber
+# user rules several times over.
+HIDDEN_RULE_PURPOSES: Final = ("dap", "family")
 SERVICE_FIELD_NETWORK_NAME: Final = "network_name"
 SERVICE_FIELD_NETWORK_UUID: Final = "network_uuid"
 SERVICE_FIELD_OFFSET: Final = "offset"
@@ -207,6 +221,13 @@ SERVICE_FIELD_WAN_NAME: Final = "wan_name"
 SERVICE_FIELD_WAN_UUID: Final = "wan_uuid"
 SERVICE_FIELD_WINDOW: Final = "window"
 SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
+
+# Default query windows. The network usage default is the smallest supported
+# window so the common call stays cheap; the WAN usage default is day+week, the
+# periods callers actually ask for.
+DEFAULT_NETWORK_USAGE_WINDOW: Final = "last_60_minutes"
+DEFAULT_WAN_USAGE_CURRENT_PERIODS: Final = ("day", "week")
+DEFAULT_WAN_EVENT_WINDOW_DAYS: Final = 7
 
 # Config entry data and options keys
 CONF_AID: Final = "aid"
@@ -341,6 +362,7 @@ SERVICE_SET_SSID_PAUSED: Final = "set_ssid_paused"
 SERVICE_GET_WIRELESS_STATUS: Final = "get_wireless_status"
 SERVICE_GET_ALARMS: Final = "get_alarms"
 SERVICE_GET_RULES: Final = "get_rules"
+SERVICE_SYNC_RUNTIME: Final = "sync_runtime"
 SERVICE_CREATE_RULE: Final = "create_rule"
 SERVICE_ARCHIVE_ALARMS: Final = "archive_alarms"
 SERVICE_DELETE_ALARMS: Final = "delete_alarms"
@@ -422,9 +444,6 @@ TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED: Final = "network_segment_usage
 TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS: Final = "network_name_ambiguous"
 TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND: Final = "network_not_found"
 TRANS_KEY_EXCEPTION_NETWORK_REQUIRED: Final = "network_required"
-TRANS_KEY_EXCEPTION_NETWORK_USAGE_WINDOW_REQUIRED: Final = (
-    "network_usage_window_required"
-)
 TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT: Final = "network_selector_conflict"
 TRANS_KEY_ENTITY_BUTTON_SYNC_RUNTIME: Final = "sync_runtime"
 TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT: Final = "pause_rule_timing_conflict"

@@ -93,7 +93,21 @@ _TOP_TALKER_LIMIT: Final = 5
 _SUPPORTED_WAN_EVENT_STATE_FAMILIES: Final = frozenset(
     {"wan_state", "overall_wan_state", "dualwan_state", "dns"}
 )
-_SUPPORTED_WAN_EVENT_ACTION_FAMILIES: Final = frozenset({"ping_RTT", "ping_lossrate"})
+_SUPPORTED_WAN_EVENT_ACTION_FAMILIES: Final = frozenset(
+    {"ping_RTT", "ping_lossrate", "system_reboot"}
+)
+
+# The app's WAN events view reads this exact filter set. See Finding 40.
+_WAN_EVENT_LINK_STATE_FILTERS: Final = (
+    {"event_type": "action", "sub_type": "system_reboot"},
+    {"event_type": "state", "sub_type": "dualwan_state"},
+    {"event_type": "state", "sub_type": "wan_state"},
+)
+_WAN_EVENT_DNS_FILTER: Final[dict[str, str]] = {
+    "event_type": "state",
+    "sub_type": "dns",
+}
+_WAN_EVENT_DEFAULT_WINDOW_DAYS: Final = 7
 _SYSTEM_STATUS_PRIMARY_DISK_MOUNTS: Final = (
     "/",
     "/boot",
@@ -486,11 +500,29 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         wan_uuid: str | None = None,
         limit: int,
         offset: int,
+        window_days: int = _WAN_EVENT_DEFAULT_WINDOW_DAYS,
+        include_dns: bool = False,
     ) -> tuple[FirewallaWanEvent, ...]:
-        """Return normalized WAN health events from the local runtime."""
+        """Return normalized WAN health events from the local runtime.
+
+        The read is filtered to real link-state events over a bounded window.
+        An unfiltered `item=events` read is dominated by the box's own DNS health
+        probes, so `dns` is opt-in and the window is the primary selector.
+        """
+        filters = list(_WAN_EVENT_LINK_STATE_FILTERS)
+        if include_dns:
+            filters.append(dict(_WAN_EVENT_DNS_FILTER))
+
+        min_timestamp_ms = (
+            int((datetime.now(UTC).timestamp() - window_days * 86400) * 1000)
+            if window_days > 0
+            else None
+        )
         raw_events = await self.client.async_get_wan_events_payload(
             limit_count=limit,
             limit_offset=offset,
+            min_timestamp_ms=min_timestamp_ms,
+            filters=filters,
         )
         return self._build_wan_events(raw_events, wan_uuid=wan_uuid)
 

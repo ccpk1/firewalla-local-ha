@@ -19,21 +19,33 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
 
 from .const import (
+    DEFAULT_NETWORK_USAGE_WINDOW,
     DOMAIN,
+    SERVICE_FIELD_ACTION,
     SERVICE_FIELD_ALARM_TYPE,
+    SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
+    SERVICE_FIELD_ENABLED,
+    SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
+    SERVICE_FIELD_HOST_MAC,
+    SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_INCLUDE_ARCHIVED,
+    SERVICE_FIELD_INCLUDE_DNS,
+    SERVICE_FIELD_INCLUDE_PURPOSE,
+    SERVICE_FIELD_KIND,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_OFFSET,
+    SERVICE_FIELD_ONLINE,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_SECTIONS,
+    SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
@@ -41,9 +53,11 @@ from .const import (
     SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
+    SERVICE_FIELD_USER,
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_FIELD_WINDOW_DAYS,
     SERVICE_GET_ALARMS,
     SERVICE_GET_HOST_NAME_MAPPING,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
@@ -55,7 +69,9 @@ from .const import (
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
     SERVICE_GET_WIRELESS_STATUS,
+    SERVICE_SYNC_RUNTIME,
 )
+from .llm_tools_common import format_tool_name
 
 # Every read tool is a bounded, read-only query against the user's own box.
 _READ_ANNOTATIONS: Final = llm.ToolAnnotations(
@@ -63,11 +79,6 @@ _READ_ANNOTATIONS: Final = llm.ToolAnnotations(
     destructive=False,
     idempotent=True,
     open_world=False,
-)
-
-_PREFERRED_PREFIX: Final = (
-    "Purpose-built Firewalla Local tool — prefer it over any generic "
-    "firewalla_local service/action tool another client may expose. "
 )
 
 _REFRESH_DESCRIPTION: Final = (
@@ -148,21 +159,78 @@ class _FirewallaReadTool(llm.Tool):
 class ListHostsTool(_FirewallaReadTool):
     """List Firewalla hosts (devices) with identity and IP assignment."""
 
-    name = "firewalla_local__list_hosts"
+    name = format_tool_name("list_hosts")
     title = "List hosts"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "List the devices on your Firewalla network with their name, device "
         "type, IP address, and DNS/DHCP identity. Use it to find a host before "
         "renaming it or setting a DHCP reservation. Refreshing first polls the "
-        "box and is slower than reading the last snapshot."
+        "box and is slower than reading the last snapshot.\n"
+        "\n"
+        "Naming: `host_name` is the primary human-facing label and the one to "
+        "match a user's words against. `dns_hostname`/`dns_domain`/`dns_fqdn` "
+        "are the DNS-facing names. `dhcp_name` is device-supplied and "
+        "unreliable (`nvidia-shield` carries `android-66fc79bd9bb55411`) — "
+        "never use it to identify a device.\n"
+        "\n"
+        'VPN peers: a device with `kind: "pseudo_host"` is a VPN peer. Those '
+        "have NO MAC address (`mac` is null and `host_id` is a `wg_peer:`/"
+        "`awg_peer:` identifier), so they cannot be passed to any host tool "
+        "that takes a MAC. `ip_assignment` is also null for them; do not assume "
+        "it is always an object."
     )
     parameters = vol.Schema(
         {
             vol.Optional(
+                SERVICE_FIELD_DETAIL,
+                default="summary",
+                description=(
+                    "Optional. Omits the derivable "
+                    "`dns_fqdn`, the unreliable `dhcp_name`, and the nested "
+                    "`ip_assignment` (its useful parts are flattened to "
+                    "`ip_assignment_mode` and `reserved_ipv4`). Use 'full' for "
+                    "the complete record."
+                ),
+            ): vol.In(("summary", "full")),
+            vol.Optional(
+                SERVICE_FIELD_HOST_NAME,
+                description=(
+                    "Optional. Substring match on the host name. Use it to find "
+                    "one device instead of listing every host."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_HOST_MAC,
+                description="Optional. Exact host MAC address.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_NAME,
+                description="Optional. Exact group name to filter by.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_KIND,
+                description=(
+                    "Optional. 'mac_host' for a normal device, 'pseudo_host' to "
+                    "return only VPN peers."
+                ),
+            ): vol.In(("mac_host", "pseudo_host")),
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_UUID,
+                description="Optional. Filter to one network by its uuid.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_ONLINE,
+                description="Optional. Filter to hosts currently online or offline.",
+            ): bool,
+            vol.Optional(
+                SERVICE_FIELD_USER,
+                description="Optional. Filter to hosts belonging to one user id.",
+            ): str,
+            vol.Optional(
                 SERVICE_FIELD_REFRESH,
                 default=True,
                 description=(
-                    "Optional. Defaults to true. Poll the Firewalla box for "
+                    "Optional. Poll the Firewalla box for "
                     "current host data; set false to read the last snapshot "
                     "faster."
                 ),
@@ -176,14 +244,59 @@ class ListHostsTool(_FirewallaReadTool):
 class ListRulesTool(_FirewallaReadTool):
     """List Firewalla policy rules with their current state."""
 
-    name = "firewalla_local__list_rules"
+    name = format_tool_name("list_rules")
     title = "List rules"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "List your Firewalla firewall rules with id, name, action, "
         "enabled/paused state, target, scope, and any originating alarm. Use it "
-        "to resolve the rule target that pause_rule and resume_rule require."
+        "to resolve the rule target that pause_rule and resume_rule require.\n"
+        "\n"
+        "`applies_to` names the groups, users or networks a rule governs, and "
+        "`tag_refs` carries the matching ids. A rule with neither applies "
+        "globally. A device only inherits a group's or user's rules when it "
+        "belongs to that group or user, so check `applies_to` before concluding "
+        "a rule covers a specific device.\n"
+        "\n"
+        "Defaults to user-visible rules. The box also carries large numbers of "
+        "product-owned DAP and family rules that users do not manage; those are "
+        "hidden unless requested via include_purpose."
     )
-    parameters = vol.Schema({})
+    parameters = vol.Schema(
+        {
+            vol.Optional(
+                SERVICE_FIELD_ENABLED,
+                description="Optional. Filter by enabled state.",
+            ): bool,
+            vol.Optional(
+                SERVICE_FIELD_ACTION,
+                description="Optional. Filter by action.",
+            ): vol.In(("block", "allow", "qos", "disturb")),
+            vol.Optional(
+                SERVICE_FIELD_TARGET_TYPE,
+                description=(
+                    "Optional. Filter by target type, e.g. 'category', 'mac', "
+                    "'ip', 'dns', 'network'."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_APPLIES_TO,
+                description=(
+                    "Optional. Filter to rules governing one group, user or "
+                    "network name."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_INCLUDE_PURPOSE,
+                description=(
+                    "Optional. Include product-owned rules that are hidden by "
+                    "default. Allowed: 'dap' (Device Active Protect), 'family'."
+                ),
+            ): vol.All(
+                cv.ensure_list,
+                [vol.In(("dap", "family"))],
+            ),
+        }
+    )
     _service = SERVICE_GET_RULES
     _response_type = "rules"
 
@@ -191,9 +304,9 @@ class ListRulesTool(_FirewallaReadTool):
 class GetNetworkConfigTool(_FirewallaReadTool):
     """Return configuration-oriented detail for one network segment."""
 
-    name = "firewalla_local__get_network_config"
+    name = format_tool_name("get_network_config")
     title = "Get network config"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Show how a network (LAN/VLAN) is configured: addressing, gateway, DNS, "
         "DHCP range, and ports. Use it for network structure. For per-device "
         "traffic use get_network_usage."
@@ -216,9 +329,9 @@ class GetNetworkConfigTool(_FirewallaReadTool):
 class GetNetworkUsageTool(_FirewallaReadTool):
     """Return windowed usage: top talkers, apps, and categories."""
 
-    name = "firewalla_local__get_network_usage"
+    name = format_tool_name("get_network_usage")
     title = "Get network usage"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Answer 'what is eating my bandwidth?' with windowed top talkers, apps, "
         "and categories for one network. Note: windowed WAN usage is not "
         "available; use get_wan_usage for WAN totals."
@@ -233,9 +346,12 @@ class GetNetworkUsageTool(_FirewallaReadTool):
             ): str,
             vol.Optional(
                 SERVICE_FIELD_WINDOW,
+                default=DEFAULT_NETWORK_USAGE_WINDOW,
                 description=(
-                    "Optional. Activity window to report. Defaults to the "
-                    "service default when omitted."
+                    "Optional. Activity window to report. The smallest window "
+                    "is 'last_60_minutes'. Allowed: "
+                    "'last_60_minutes', 'last_24_hours', 'last_30_days', "
+                    "'last_12_months'."
                 ),
             ): vol.In(
                 (
@@ -269,12 +385,14 @@ class GetNetworkUsageTool(_FirewallaReadTool):
 class GetWanUsageTool(_FirewallaReadTool):
     """Return WAN/internet data totals over time."""
 
-    name = "firewalla_local__get_wan_usage"
+    name = format_tool_name("get_wan_usage")
     title = "Get WAN usage"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Answer 'how much internet data have I used?' with WAN download/upload "
-        "totals and, optionally, history and subperiod breakdowns. This is WAN "
-        "totals, not per-device usage (see get_network_usage)."
+        "totals. Defaults to the day and week periods, which is what this "
+        "question usually means; add history only when a trend is wanted, since "
+        "it is roughly 12x the size. This is WAN totals, not per-device usage "
+        "(see get_network_usage)."
     )
     parameters = vol.Schema(
         {
@@ -321,11 +439,13 @@ class GetWanUsageTool(_FirewallaReadTool):
 class GetWanEventsTool(_FirewallaReadTool):
     """Return WAN health events (outages and status changes)."""
 
-    name = "firewalla_local__get_wan_events"
+    name = format_tool_name("get_wan_events")
     title = "Get WAN events"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Answer 'why did my internet drop?' with WAN link events such as outages "
-        "and status changes. For volume over time use get_wan_usage."
+        "and status changes. Defaults to the last 7 days of real connectivity "
+        "events. For volume over time use get_wan_usage; for latency and packet "
+        "loss samples use get_internet_quality."
     )
     parameters = vol.Schema(
         {
@@ -343,6 +463,21 @@ class GetWanEventsTool(_FirewallaReadTool):
                 SERVICE_FIELD_OFFSET,
                 description="Optional. Skip this many events. Defaults to 0.",
             ): int,
+            vol.Optional(
+                SERVICE_FIELD_WINDOW_DAYS,
+                description=(
+                    "Optional. How many days back to look. Defaults to 7; use 0 "
+                    "for no time bound."
+                ),
+            ): int,
+            vol.Optional(
+                SERVICE_FIELD_INCLUDE_DNS,
+                description=(
+                    "Optional. Defaults to false. Include the box's internal "
+                    "DNS health probes (roughly every 3 minutes), which are not "
+                    "WAN events and are excluded by default."
+                ),
+            ): bool,
         }
     )
     _service = SERVICE_GET_WAN_EVENTS
@@ -352,9 +487,9 @@ class GetWanEventsTool(_FirewallaReadTool):
 class GetUserUsageTool(_FirewallaReadTool):
     """Return time-based usage for one person, group, or device."""
 
-    name = "firewalla_local__get_user_usage"
+    name = format_tool_name("get_user_usage")
     title = "Get user usage"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Answer 'how much time did a person/device spend online?' with a "
         "time-based usage report over a begin/end range. This is time (minutes), "
         "not bandwidth volume (see get_network_usage). Resolve scope from "
@@ -416,9 +551,9 @@ class GetUserUsageTool(_FirewallaReadTool):
 class GetInternetQualityTool(_FirewallaReadTool):
     """Return internet-quality measurements (latency, loss, jitter)."""
 
-    name = "firewalla_local__get_internet_quality"
+    name = format_tool_name("get_internet_quality")
     title = "Get internet quality"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Answer 'how good is my internet right now?' with quality samples such "
         "as latency, jitter, and packet loss. For a point-in-time throughput "
         "test run run_internet_speed_test; for past results use get_speed_tests."
@@ -445,9 +580,9 @@ class GetInternetQualityTool(_FirewallaReadTool):
 class GetSpeedTestsTool(_FirewallaReadTool):
     """Return historical speed-test results."""
 
-    name = "firewalla_local__get_speed_tests"
+    name = format_tool_name("get_speed_tests")
     title = "Get speed tests"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Answer 'what were my last speed test results?' with stored download, "
         "upload, latency, and packet-loss measurements. To run a new test use "
         "run_internet_speed_test."
@@ -471,12 +606,29 @@ class GetSpeedTestsTool(_FirewallaReadTool):
     _response_type = "speed_tests"
 
 
+class SyncRuntimeTool(_FirewallaReadTool):
+    """Poll the Firewalla box now and report the resulting snapshot time."""
+
+    name = format_tool_name("sync_runtime")
+    title = "Sync runtime"
+    description = (
+        "Poll the Firewalla box for a fresh snapshot and report when it was "
+        "taken. Use it when the user needs current data and the last snapshot "
+        "may be stale; then read other tools with refresh=false. Requests "
+        "within about 10 seconds are coalesced, so calling it before several "
+        "other tools costs at most one poll."
+    )
+    parameters = vol.Schema({})
+    _service = SERVICE_SYNC_RUNTIME
+    _response_type = "runtime_sync"
+
+
 class GetWirelessStatusTool(_FirewallaReadTool):
     """Return wireless status: SSIDs, access points, and clients."""
 
-    name = "firewalla_local__get_wireless_status"
+    name = format_tool_name("get_wireless_status")
     title = "Get wireless status"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Show WiFi state: SSID profiles (with paused state), access points, and "
         "connected clients. Use it to resolve the ssid_profile_id that "
         "set_ssid_paused requires."
@@ -489,9 +641,9 @@ class GetWirelessStatusTool(_FirewallaReadTool):
 class GetAlarmsTool(_FirewallaReadTool):
     """Return recent active and optionally archived alarms."""
 
-    name = "firewalla_local__get_alarms"
+    name = format_tool_name("get_alarms")
     title = "Get alarms"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Answer 'what is happening on my network?' with the most recent alarms "
         "(active, and archived when requested). Defaults to the 10 newest; raise "
         "limit deliberately, since a large alarm payload is expensive context. "
@@ -542,6 +694,7 @@ _READ_TOOL_CLASSES: Final = (
     GetSpeedTestsTool,
     GetWirelessStatusTool,
     GetAlarmsTool,
+    SyncRuntimeTool,
 )
 
 

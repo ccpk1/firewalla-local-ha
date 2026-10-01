@@ -1196,7 +1196,76 @@ get_alarms:
 
 get_rules:
   name: Get rules
-  description: Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, and any originating alarm. Use this to resolve the rule target for pause_rule and resume_rule.
+  description: Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, applies_to, tag_refs, purpose, and any originating alarm. Defaults to user-visible rules; product-owned DAP and family rules are hidden unless requested via include_purpose. Use this to resolve the rule target for pause_rule and resume_rule.
+  fields:
+    enabled:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Enabled
+      description: Optional. Filter by enabled state.
+    action:
+      required: false
+      example: "block"
+      selector:
+        select:
+          options:
+            - value: "block"
+              label: Block
+            - value: "allow"
+              label: Allow
+            - value: "qos"
+              label: QoS
+            - value: "disturb"
+              label: Disturb
+      name: Action
+      description: Optional. Filter by rule action.
+    target_type:
+      required: false
+      example: "category"
+      selector:
+        text:
+      name: Target type
+      description: Optional. Filter by target type, for example category, mac, ip, dns or network.
+    applies_to:
+      required: false
+      example: "KADEN's Devices"
+      selector:
+        text:
+      name: Applies to
+      description: Optional. Filter to rules governing one group, user or network name.
+    include_purpose:
+      required: false
+      example: "dap"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "dap"
+              label: Device Active Protect rules
+            - value: "family"
+              label: Family rules
+      name: Include purpose
+      description: Optional. Include product-owned rules that are hidden by default.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.200.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and their names are unique. If names repeat, use Config Entry ID.
+
+sync_runtime:
+  name: Sync runtime
+  description: Poll the Firewalla box now and report the resulting snapshot time. Requests within the coordinator's debounce window are coalesced, so calling this alongside other actions still costs at most one poll.
   fields:
     config_entry_id:
       required: false

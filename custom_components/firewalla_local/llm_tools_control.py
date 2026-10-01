@@ -64,11 +64,7 @@ from .const import (
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
 )
-
-_PREFERRED_PREFIX: Final = (
-    "Purpose-built Firewalla Local tool — prefer it over any generic "
-    "firewalla_local service/action tool another client may expose. "
-)
+from .llm_tools_common import format_tool_name
 
 _CONTROL_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=False,
@@ -125,6 +121,16 @@ class _FirewallaControlTool(llm.Tool):
         """
         return cast(dict[str, Any], self.parameters(tool_input.tool_args))
 
+    @staticmethod
+    def _host_target(tool_input: llm.ToolInput) -> dict[str, Any]:
+        """Echo the host selector the caller supplied."""
+        args = tool_input.tool_args
+        return {
+            "kind": "host",
+            "id": args.get(SERVICE_FIELD_HOST_MAC),
+            "name": args.get(SERVICE_FIELD_HOST_NAME),
+        }
+
     async def _call_service(
         self,
         hass: HomeAssistant,
@@ -173,9 +179,9 @@ class _FirewallaControlTool(llm.Tool):
 class PauseRuleTool(_FirewallaControlTool):
     """Pause one Firewalla firewall rule, optionally until a resume time."""
 
-    name = "firewalla_local__pause_rule"
+    name = format_tool_name("pause_rule")
     title = "Pause rule"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Temporarily disable one firewall rule. Resolve rule_target from "
         "list_rules. Fully reversible: undo with resume_rule. Pausing an "
         "already-paused rule is a no-op."
@@ -234,9 +240,9 @@ class PauseRuleTool(_FirewallaControlTool):
 class ResumeRuleTool(_FirewallaControlTool):
     """Resume one paused Firewalla firewall rule."""
 
-    name = "firewalla_local__resume_rule"
+    name = format_tool_name("resume_rule")
     title = "Resume rule"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Resume (re-enable) one firewall rule. This is the undo for pause_rule. "
         "Resuming an already-running rule is a no-op."
     )
@@ -280,9 +286,9 @@ class ResumeRuleTool(_FirewallaControlTool):
 class SetSsidPausedTool(_FirewallaControlTool):
     """Pause or resume one wireless SSID across all access points."""
 
-    name = "firewalla_local__set_ssid_paused"
+    name = format_tool_name("set_ssid_paused")
     title = "Set SSID paused"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Pause or resume one WiFi network (SSID) across every access point. Wide "
         "blast radius: every client on that SSID is disconnected, possibly "
         "including the client or Home Assistant host making the request. Resolve "
@@ -329,9 +335,9 @@ class SetSsidPausedTool(_FirewallaControlTool):
 class SetHostNameTool(_FirewallaControlTool):
     """Rename one Firewalla host."""
 
-    name = "firewalla_local__set_host_name"
+    name = format_tool_name("set_host_name")
     title = "Set host name"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Rename a device. Cosmetic and fully reversible. For a DNS name use "
         "set_host_dns_hostname instead."
     )
@@ -366,23 +372,13 @@ class SetHostNameTool(_FirewallaControlTool):
             status="applied", changed=True, target=target, result=result
         )
 
-    @staticmethod
-    def _host_target(tool_input: llm.ToolInput) -> dict[str, Any]:
-        """Echo the host selector the caller supplied."""
-        args = tool_input.tool_args
-        return {
-            "kind": "host",
-            "id": args.get(SERVICE_FIELD_HOST_MAC),
-            "name": args.get(SERVICE_FIELD_HOST_NAME),
-        }
-
 
 class SetHostDnsHostnameTool(_FirewallaControlTool):
     """Set the DNS hostname for one Firewalla host."""
 
-    name = "firewalla_local__set_host_dns_hostname"
+    name = format_tool_name("set_host_dns_hostname")
     title = "Set host DNS hostname"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Set the per-host DNS name used for local name resolution. Can break "
         "resolution for that host if set incorrectly. Reversible. Not the display "
         "name (use set_host_name)."
@@ -412,7 +408,7 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set a host DNS hostname."""
-        target = SetHostNameTool._host_target(tool_input)
+        target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
@@ -422,9 +418,9 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
 class SetHostDeviceTypeTool(_FirewallaControlTool):
     """Set the device-type classification for one Firewalla host."""
 
-    name = "firewalla_local__set_host_device_type"
+    name = format_tool_name("set_host_device_type")
     title = "Set host device type"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Classify a device (desktop, phone, tablet, tv, …) so reports and "
         "summaries make sense. Cosmetic and reversible."
     )
@@ -453,7 +449,7 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set a host device type."""
-        target = SetHostNameTool._host_target(tool_input)
+        target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
@@ -463,9 +459,9 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
 class SetHostDhcpReservationTool(_FirewallaControlTool):
     """Set or clear a DHCP reservation for one Firewalla host."""
 
-    name = "firewalla_local__set_host_dhcp_reservation"
+    name = format_tool_name("set_host_dhcp_reservation")
     title = "Set host DHCP reservation"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Give a device a fixed IP address (or return it to dynamic). Pair with "
         "list_hosts to find devices without a reservation. Strong built-in "
         "validation rejects conflicting, in-use, or out-of-range addresses. "
@@ -504,7 +500,7 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set or clear a DHCP reservation."""
-        target = SetHostNameTool._host_target(tool_input)
+        target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
@@ -524,7 +520,7 @@ class _SetHostNotifyTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Set one host notification preference."""
-        target = SetHostNameTool._host_target(tool_input)
+        target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=True, target=target, result=result
@@ -551,9 +547,9 @@ class _SetHostNotifyTool(_FirewallaControlTool):
 class SetHostNotifyWhenNextOnlineTool(_SetHostNotifyTool):
     """Enable or disable notify-when-next-online for one host."""
 
-    name = "firewalla_local__set_host_notify_when_next_online"
+    name = format_tool_name("set_host_notify_when_next_online")
     title = "Set host notify when next online"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Turn the 'notify when this device comes online' preference on or off. "
         "Notification preference only, no network effect. Reversible."
     )
@@ -563,9 +559,9 @@ class SetHostNotifyWhenNextOnlineTool(_SetHostNotifyTool):
 class SetHostNotifyWhenNextOfflineTool(_SetHostNotifyTool):
     """Enable or disable notify-when-next-offline for one host."""
 
-    name = "firewalla_local__set_host_notify_when_next_offline"
+    name = format_tool_name("set_host_notify_when_next_offline")
     title = "Set host notify when next offline"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Turn the 'notify when this device drops offline' preference on or off. "
         "Notification preference only, no network effect. Reversible."
     )
@@ -575,9 +571,9 @@ class SetHostNotifyWhenNextOfflineTool(_SetHostNotifyTool):
 class WakeHostTool(_FirewallaControlTool):
     """Send a Wake-on-LAN packet to one Firewalla host."""
 
-    name = "firewalla_local__wake_host"
+    name = format_tool_name("wake_host")
     title = "Wake host"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Send a Wake-on-LAN packet to wake a device. Sends one packet and makes "
         "no persistent change; not idempotent, since each call sends a packet."
     )
@@ -603,7 +599,7 @@ class WakeHostTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Send a Wake-on-LAN packet."""
-        target = SetHostNameTool._host_target(tool_input)
+        target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, self._args(tool_input))
         return self._result(
             status="applied", changed=False, target=target, result=result
@@ -613,9 +609,9 @@ class WakeHostTool(_FirewallaControlTool):
 class RunInternetSpeedTestTool(_FirewallaControlTool):
     """Run an on-demand internet speed test on one WAN."""
 
-    name = "firewalla_local__run_internet_speed_test"
+    name = format_tool_name("run_internet_speed_test")
     title = "Run internet speed test"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Run a new internet speed test now. Consumes WAN bandwidth and takes "
         "time; for recent results prefer get_speed_tests. Not idempotent — each "
         "call runs a new test."
@@ -659,9 +655,9 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
 class SetAlarmMutedTool(_FirewallaControlTool):
     """Mute or unmute an alarm silence."""
 
-    name = "firewalla_local__set_alarm_muted"
+    name = format_tool_name("set_alarm_muted")
     title = "Set alarm muted"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Create or remove a silence so matching alarms stop alerting. This does "
         "NOT block traffic (use block_alarm_target) and does not clear the alarm "
         "(use archive_alarm). Scope is required: an 'all' scope silences the "
@@ -741,9 +737,9 @@ class SetAlarmMutedTool(_FirewallaControlTool):
 class UnmuteAlarmTool(_FirewallaControlTool):
     """Remove an alarm silence."""
 
-    name = "firewalla_local__unmute_alarm"
+    name = format_tool_name("unmute_alarm")
     title = "Unmute alarm"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Remove a silence so matching alarms alert again. This is the undo for "
         "set_alarm_muted. Provide either the alarm id or the silence (exception) "
         "id."
@@ -782,9 +778,9 @@ class UnmuteAlarmTool(_FirewallaControlTool):
 class BlockAlarmTargetTool(_FirewallaControlTool):
     """Block an alarm's target by creating an ordinary policy rule."""
 
-    name = "firewalla_local__block_alarm_target"
+    name = format_tool_name("block_alarm_target")
     title = "Block alarm target"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Block the domain/IP that caused an alarm by creating a firewall rule, "
         "recording the alarm id on it. Provide either `alarm_id`, or "
         "`target_type` and `target_value` (optionally with `scope_kind` / "
@@ -853,9 +849,9 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
 class UnblockAlarmTargetTool(_FirewallaControlTool):
     """Remove the block rule created for an alarm by deleting it."""
 
-    name = "firewalla_local__unblock_alarm_target"
+    name = format_tool_name("unblock_alarm_target")
     title = "Unblock alarm target"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Remove a firewall block created for an alarm by deleting its rule. This "
         "is the undo for block_alarm_target and removes only that rule."
     )
@@ -891,9 +887,9 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
 class ArchiveAlarmTool(_FirewallaControlTool):
     """Archive one alarm without deleting it."""
 
-    name = "firewalla_local__archive_alarm"
+    name = format_tool_name("archive_alarm")
     title = "Archive alarm"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Dismiss one alarm from the active list while keeping the record. This "
         "does NOT stop future matching alarms (use set_alarm_muted). Note there "
         "is no un-archive if you change your mind."
@@ -928,9 +924,9 @@ class ArchiveAlarmTool(_FirewallaControlTool):
 class ArchiveAllAlarmsTool(_FirewallaControlTool):
     """Archive every active alarm (bulk)."""
 
-    name = "firewalla_local__archive_all_alarms"
+    name = format_tool_name("archive_all_alarms")
     title = "Archive all alarms"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Destructive bulk action: archive every active alarm at once. Records "
         "are kept but move to the archive, and there is no un-archive. Prefer "
         "archive_alarm for a single alarm."
@@ -959,9 +955,9 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
 class DeleteAlarmTool(_FirewallaControlTool):
     """Permanently delete one alarm."""
 
-    name = "firewalla_local__delete_alarm"
+    name = format_tool_name("delete_alarm")
     title = "Delete alarm"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Destructive: permanently delete one alarm record. This is "
         "irreversible. To dismiss without destroying the record use "
         "archive_alarm."
@@ -1008,9 +1004,9 @@ class DeleteAlarmTool(_FirewallaControlTool):
 class DeleteAlarmsTool(_FirewallaControlTool):
     """Permanently delete all active or all archived alarms."""
 
-    name = "firewalla_local__delete_all_alarms"
+    name = format_tool_name("delete_all_alarms")
     title = "Delete all alarms"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Destructive bulk action: permanently delete every alarm in the chosen "
         "set. This is irreversible and cannot be undone. Deleting all active "
         "alarms destroys alarms that are not archived; deleting all archived "
@@ -1057,9 +1053,9 @@ class DeleteAlarmsTool(_FirewallaControlTool):
 class DeleteHostTool(_FirewallaControlTool):
     """Permanently delete one Firewalla host record."""
 
-    name = "firewalla_local__delete_host"
+    name = format_tool_name("delete_host")
     title = "Delete host"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Destructive: permanently delete a device record from Firewalla. This "
         "is irreversible. It removes the host's identity, reservations, and "
         "history; the device reappears as a new host if it rejoins the network."
@@ -1108,9 +1104,9 @@ class DeleteHostTool(_FirewallaControlTool):
 class DeleteRuleTool(_FirewallaControlTool):
     """Permanently delete one policy rule."""
 
-    name = "firewalla_local__delete_rule"
+    name = format_tool_name("delete_rule")
     title = "Delete rule"
-    description = _PREFERRED_PREFIX + (
+    description = (
         "Destructive: permanently delete a firewall rule. This is irreversible. "
         "To disable a rule reversibly use pause_rule instead. Resolve rule_id "
         "from list_rules."

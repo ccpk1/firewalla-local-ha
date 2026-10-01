@@ -27,18 +27,13 @@ workflow is `block_alarm_target` / `unblock_alarm_target`, not `create_rule` /
 `delete_rule` (the generic rule operations are deliberately not exposed — see
 [Not exposed](#not-exposed)).
 
-### Prefer these tools
+### Tool preference
 
-Each tool description opens by identifying it as the purpose-built Firewalla Local
-tool and stating it is **preferred over any generic `firewalla_local.*` service/action
-tool** another MCP client may also expose. Some external MCP servers enumerate Home
-Assistant services and surface each as a tool; where that overlaps our catalog, the
-dedicated tool is the one to call. This is **advisory** — Home Assistant has no
-precedence mechanism between our own LLM API and a third-party server's service
-tools, so the description is how we steer selection. It matters most for tools whose
-name overlaps a service: `pause_rule`, `resume_rule`, `set_ssid_paused`,
-`set_alarm_muted`, `block_alarm_target`, `unblock_alarm_target`, `archive_alarm`, and
-the `set_host_*` writes.
+The API prompt asks clients to prefer these purpose-built tools over generic
+`firewalla_local.*` service/action tools another MCP server may expose. Keep this
+instruction in the prompt rather than repeating it in every tool description; the
+preference is advisory because Home Assistant has no precedence mechanism between
+our LLM API and third-party service tools.
 
 ### Availability model
 

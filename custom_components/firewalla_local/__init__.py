@@ -74,9 +74,22 @@ def _async_setup_llm_api(hass: HomeAssistant, entry: FirewallaConfigEntry) -> No
             )
         return
 
-    from .llm_api import async_register_firewalla_api
+    # The AI tools are optional, so a failure here must never take the whole
+    # integration down with it. The version guard above covers the known Core
+    # boundary only; this contains unknown failures (a Core contract change, a
+    # defect in a tool module) on any version.
+    try:
+        from .llm_api import async_register_firewalla_api
 
-    entry.async_on_unload(async_register_firewalla_api(hass, entry))
+        unregister = async_register_firewalla_api(hass, entry)
+    except Exception:
+        LOGGER.exception(
+            "Failed to register Firewalla Local AI tools; the integration "
+            "continues without them"
+        )
+        return
+
+    entry.async_on_unload(unregister)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

@@ -209,6 +209,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
             config_entry.options
         )
         self._enable_ssid_entities = get_enabled_ssid_entities(config_entry.options)
+        self._llm_tool_mode = get_llm_tool_mode(config_entry.options)
         self._unavailable_logged = False
         super().__init__(
             hass,
@@ -312,6 +313,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         enable_network_entities = get_enabled_network_entities(entry.options)
         current_enable_ssid_entities = self._enable_ssid_entities
         enable_ssid_entities = get_enabled_ssid_entities(entry.options)
+        # The LLM tool mode changes which tools are registered, so a change must
+        # reload the entry to re-register the API.
+        current_llm_tool_mode = self._llm_tool_mode
+        llm_tool_mode = get_llm_tool_mode(entry.options)
         if (
             current_selected_rule_ids == _get_selected_rule_ids(entry.options)
             and current_watched_device_macs == _get_watched_device_macs(entry.options)
@@ -319,12 +324,14 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
             and current_watched_user_ids == _get_watched_user_ids(entry.options)
             and current_enable_network_entities == enable_network_entities
             and current_enable_ssid_entities == enable_ssid_entities
+            and current_llm_tool_mode == llm_tool_mode
         ):
             self.async_update_listeners()
             return
 
         self._enable_network_entities = enable_network_entities
         self._enable_ssid_entities = enable_ssid_entities
+        self._llm_tool_mode = llm_tool_mode
         await hass.config_entries.async_reload(entry.entry_id)
 
     @callback
