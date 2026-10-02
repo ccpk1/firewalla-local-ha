@@ -163,22 +163,6 @@ That is how the assistant tells the two boxes apart, and it is also the only cas
 where a tool name says which box it belongs to. Without it — one box per URL —
 there is nothing in the name, so the choice rests entirely on what you selected.
 
-**Long merged names can be cut short in some clients.** Every character the entry
-name and the integration prefix consume is unavailable to the tool name, and MCP
-clients commonly cap a tool name at 64 characters. An entry whose default name
-is `Firewalla (192.168.200.129)` produces a namespace of `firewalla-192-168-200-129`,
-which leaves almost no room: `archive_alarm` becomes `..._firewalla_local__ar`, and
-several tools then share the same truncated name. Concretely, at that length only
-about a third of the tools stay individually addressable.
-
-Two things avoid it, and both are worth doing if you run more than one box:
-
-- **Give each entry a short, distinctive name** — "Upstairs", "Garage" rather
-  than the default `Firewalla (x.x.x.x)`. A short name leaves the tool name intact.
-- **Point the client at one box's URL** instead of merging. There is no namespace,
-  so names are as short as they can be, at the cost of the client seeing only that
-  box.
-
 **Merging also hands the assistant a choice it can get wrong.** With several boxes
 in one tool list, a question like "is the printer online?" is genuinely ambiguous
 when either box could answer it, and with **Read and control** enabled a wrong
