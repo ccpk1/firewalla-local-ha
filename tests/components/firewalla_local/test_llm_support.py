@@ -720,3 +720,49 @@ async def test_identical_entry_titles_still_give_uniquely_named_tools(
     assert len(set(names)) == 2
     tool_names = [tool.name for tool in merged.tools]
     assert len(tool_names) == len(set(tool_names))
+
+
+async def test_merged_tool_names_namespace_by_entry_title(
+    hass: HomeAssistant,
+) -> None:
+    """Merging boxes prefixes each tool with that entry's name.
+
+    Home Assistant derives the namespace with the `slugify` package, which
+    separates words with a **hyphen**, while this integration's API id uses
+    `homeassistant.util.slugify`, which uses **underscores**. The two appear side
+    by side in Home Assistant — the API URL and the merged tool names — so the
+    difference is pinned here rather than left to prose. It was documented wrong
+    once already for exactly this reason.
+    """
+    first = _entry()
+    second = _second_entry(title="Main Router", host="10.0.0.1", license_="lic-ns")
+    first.add_to_hass(hass)
+
+    with contextlib.ExitStack() as stack:
+        for ctx in _setup_patches():
+            stack.enter_context(ctx)
+
+        assert await hass.config_entries.async_setup(first.entry_id)
+        await hass.async_block_till_done()
+        second.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+
+        ids = sorted(_firewalla_api_ids(hass))
+        solo = await llm.async_get_api(hass, ids[0], _llm_context())
+        merged = await llm.async_get_api(hass, ids, _llm_context())
+
+    # One box on its own: the tool keeps the plain name.
+    assert [t.name for t in solo.tools] == ["firewalla_local__get_system_overview"]
+
+    # Merged: namespaced by the entry title, with hyphens for word breaks.
+    assert [t.name for t in merged.tools] == [
+        "firewalla-192-168-200-1__firewalla_local__get_system_overview",
+        "main-router__firewalla_local__get_system_overview",
+    ]
+
+    # The API id uses the other slug rule, so the two do not match.
+    assert ids == [
+        "firewalla_local-firewalla_192_168_200_1",
+        "firewalla_local-main_router",
+    ]
