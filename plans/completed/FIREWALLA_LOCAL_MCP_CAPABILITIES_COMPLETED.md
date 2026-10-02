@@ -2,12 +2,12 @@
 
 ## 1. Initiative snapshot
 
-- **Status: COMPLETE (2026-10-02).** Phases 4.0–4.5 and 5.0–5.9 are implemented, tested, and documented. **34 tools** (12 read, 17 control, 5 destructive), **five** availability modes, **467 tests** passing, ruff/format/mypy clean. Released as **2.2.0**. The only item that cannot be closed from the repository alone is the live runtime smoke check, which the release checklist owns.
+- **Status: COMPLETE (2026-10-02).** Phases 4.0–4.5 and 5.0–5.9 are implemented, tested, and documented. **34 tools** (13 read — one of which is the anonymous tier's redacted variant — 16 control, 5 destructive), **five** availability modes, **475 tests** passing, ruff/format/mypy clean. Released as **2.5.0-beta.1**. The only item that cannot be closed from the repository alone is the live runtime smoke check, which the release checklist owns.
 - **Origin:** this plan was split out of `FIREWALLA_LOCAL_SURFACE_COMPLETION_COMPLETED.md` (archived in `plans/completed/`) on 2026-09-30, when that initiative closed after shipping Phases 1–3 in release **2.1.0**. It is the former *Phase 4 — MCP implementation*, carried forward at full fidelity with its decisions, constraints and research notes intact.
 - **Why it was split:** the rest of that initiative was a hardening-and-exposure exercise on an existing surface. This is a **new surface** with its own version-gating problem, its own safety model, and a distinct test strategy. Keeping it in the original plan would have held a release for a body of work that had not started.
 - **What it builds:** an owned `llm.API` registered by this integration (version-gated at Core 2026.10), exposing ~10 read tools by default and tiered control tools behind a single options toggle, with an **MCP tool reference (the spec)**, a prompt fragment derived from it, and tests.
 - **Current state (2026-10-01):** Phases 4.0–4.5 are **Complete** — 33 tools (12 read / 16 control / 5 destructive), four availability modes, 451 tests passing, ruff/format/mypy clean. **Phase 5 (feedback and tuning)** was opened the same day, after the first live end-to-end sessions and a full live pull of every read tool from the working dev box. Phase 5 is driven entirely by measured behaviour on real hardware — see §5.0 and the payload table in §5.2.
-- **The problem it solves:** Home Assistant's `mcp_server` integration serves any registered LLM API automatically. Registering our own API means a user with an MCP client (or Aspsist) can ask questions about their network and act on it, with real auth and audit, instead of needing a sidecar or a cloud subscription.
+- **The problem it solves:** Home Assistant's `mcp_server` integration serves any registered LLM API automatically. Registering our own API means a user with an MCP client (or Assist) can ask questions about their network and act on it, with real auth and audit, instead of needing a sidecar or a cloud subscription.
 - **Explicitly not in scope:** shipping our own MCP server, emulating MSP endpoints, or building a separate search/query API. Home Assistant already provides MCP; we only contribute tools.
 - **Prerequisites — both already satisfied:** the Phase 1 **admin gate is live** (it is the actual write protection, because `/api/mcp` requires no admin) and the Phase 3 **documentation approach is settled**.
 
@@ -71,7 +71,7 @@ These were verified during the original investigation. Do not re-derive them; th
 |---|---|---|---|---|
 | 4.0 | **MCP tool reference (the spec)** | `docs/MCP_TOOL_REFERENCE.md` — conventions + grouped tool catalog + per-tool template; the authoritative spec & surface record, referenced from the user guide. **Complete** — covers all 34 tools; a contract test now fails if a registered tool is undocumented | **Complete** | none — **first step** |
 | 4.1 | Foundation and older-Core safety proof | version guard (`const.py` tuple + `helpers/llm_support.py` predicate), `llm_api.py` API shell, guarded registration + unload, options toggle, pre-2026.10 proof | **Complete** (329 tests pass) | 4.0 (spec exists) |
-| 4.2 | Read tools | **Complete** — 12 read tools in `llm_tools_read.py` (incl. `sync_runtime` and new `get_rules` service), available in read tiers | Complete | 4.1 |
+| 4.2 | Read tools | **Complete** — 13 read tools in `llm_tools_read.py` (incl. `sync_runtime`, `get_wireless_status`, and the `get_system_overview` service that landed in 5.7), available in read tiers | Complete | 4.1 |
 | 4.3 | Control tools | **Complete** — 16 control tools in `llm_tools_control.py` behind `read_and_control`; `create_rule` service + `from_alarm` + `aid` parity; effect tests | Complete | 4.2 |
 | 4.3b | Destructive tier | **Complete** — 4th mode `full`; 5 destructive tools (`archive_all_alarms`, `delete_alarm`, `delete_all_alarms`, `delete_host`, `delete_rule`) with `confirm` + `destructive` annotation | Complete | 4.3 |
 | 4.4 | Prompt fragment and contract tests | **Complete** — prompt fragment in `llm_tools_common.py` wired as `api_prompt`; consolidated contract tests (`test_llm_contract.py`); alarm timestamp field fix | Complete | 4.0 + 4.2 |
@@ -946,9 +946,9 @@ Sequenced so each step is independently shippable and nothing is built on a payl
 
 **Default-mode note:** `DEFAULT_LLM_TOOL_MODE = summary_only` flips in **step 4**, in the same change that registers the summary tool, so no intermediate state can land a default pointing at a tool that is not built.
 
-## 7. Release 2.2.0
+## 7. Release 2.5.0-beta.1
 
-**Version:** `2.2.0` in `manifest.json` and `pyproject.toml`. **Home Assistant floor unchanged** at 2025.10; the AI/MCP surface is gated at Core 2026.10 and is simply absent on older Core.
+**Version:** `2.5.0-beta.1` in `manifest.json` and `pyproject.toml`. **Home Assistant floor unchanged** at 2025.10; the AI/MCP surface is gated at Core 2026.10 and is simply absent on older Core.
 
 **Suggested GitHub release body:**
 
@@ -965,10 +965,16 @@ Sequenced so each step is independently shippable and nothing is built on a payl
 
 **Payload and tool-surface work in this release:** filters on `list_hosts` / `list_rules` (with descriptions that tell the model to use them), `detail: summary` by default on host reads, real WAN link events instead of resolver probes, day+week WAN totals, a non-admin `sync_runtime`, and a curated `get_system_overview` that replaces the costly opening call.
 
+**Late fixes folded into this release (after 5.9):**
+
+- The host-name-mapping service was renamed to **`get_hosts`** — it returns more than a name mapping — with no alias and no migration, since nothing shipped depended on the old name.
+- The last two service actions got their translation entries, and the general options form copy was shortened.
+- **Every surface that reports whether a device is online now shares one window.** The watched-device sensors, the device counts, the VPN-peer counts, the inventory summary and `list_hosts.online` previously used three different windows and disagreed on 11 of 212 hosts; the watched-device sensor reported **0** online for a group the Firewalla app showed as **1**. The watched-device **online-window default is now 15 minutes (was 5)**, so this is user-visible on upgrade: anyone who never set the option inherits the new default, and a device that goes quiet stays "connected" for up to 15 minutes. The device tracker is deliberately unchanged — "is it home" is a separate question, answered with wall-clock time and its own away window.
+
 **Known risks and defers carried into this release:**
 
 - **Rule-scope precedence is stated as owner-provided product behaviour, not reproduced from a live capture.** The prompt, the `list_rules` description, and the reference all say that once a device belongs to a group or user its device-level rules no longer apply. If a future capture contradicts it, those three sites are the places to fix.
-- **Live payload re-measurement (5.2) and the runtime smoke checks were not run in this environment** — no box is reachable from the dev container. The release checklist owns both, and the in-repo guarantee is the response *shape* (asserted exhaustively), not the byte counts.
+- **Live payload re-measurement (5.2) and the runtime smoke checks are done against the real box as part of this release cut.** The pull used for the 5.2 percentages is unchanged; the release smoke re-pulled the live runtime (217 hosts, 307 rules, 10 users) and re-ran the connectivity and `get_hosts` filter paths on it: 120 online of 217 on the shared 15-minute window versus 110 at the old 5-minute default, the counts partition the inventory exactly, and the Quarantine group reads the same as the Firewalla app (10 devices, 7 past, 3 fresh, 1 online — idle 9.1 minutes). The in-repo guarantee remains the response *shape* (asserted exhaustively), not the byte counts.
 - The long-term defers in `RELEASE_CHECKLIST.md` (discovery support, rule-family expansion, DHCP admin surfaces, release automation, custom branding) are unchanged.
 
 ## 8. References
