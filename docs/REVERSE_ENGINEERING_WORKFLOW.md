@@ -2911,9 +2911,9 @@ cloud path until the cloud contract is documented.
 - pre/post runtime pulls: `.tmp/capture_chads_before.json`,
   `.tmp/capture_chads_after.json`
 
-### Finding 43: The membership write can be minimal, and the box does not sweep stale rules
+### Finding 43: The membership write can be minimal, and the app's rule cleanup is DAP state
 
-Two questions left open by Findings 41 and 42 were resolved on the dev box on
+Three questions left open by Findings 41 and 42 were resolved on the dev box on
 2026-10-02 with read-only pulls plus two reversible writes.
 
 **1. A `tags`-only payload is accepted and clobbers nothing — confirmed.**
@@ -2941,38 +2941,114 @@ own `ipAllocation` sub-object — and confirms a membership write can send only
 strictly safer because it cannot carry a policy key the caller did not intend to
 send.
 
-**2. The box does not sweep a host's stale device-scoped rules — confirmed.**
+**2. The app deletes the device's `dap` rules on a membership change, and the
+box does not do it by itself — confirmed. A first reading of this was wrong; the
+correction follows.**
 
 Finding 41 showed the app issuing two `policy:delete` calls in the same
-`batchAction` as a tags write, and asked whether the box performs that sweep
-itself.
+`batchAction` as a tags write. Two separate things were established.
 
-Test: on `office-floor-light-bulb-1`, which owns exactly the two rule shapes
-Finding 41 described, clear the tags with a minimal payload only — no
-`policy:delete` — and compare the rule set.
-
-Result:
+**The box does not do it on its own.** Test: on `office-floor-light-bulb-1`,
+clear the tags through the local channel with no `policy:delete`, then compare
+the rule set.
 
 - the box **kept both rules**. Nothing was swept
-- the rules in question are `block`/`mac`/`target=<mac>`/`disabled=1` and
-  `allow`/`category`/`scope=[<mac>]`/`disabled=1`
-- they are a per-host **pair**, and a pair exists on nearly every host on the
-  box: 323 policy rules total, ~2 per host
 
-Interpretation: the sweep is the app deleting **its own already-disabled
-leftovers**, not a protocol requirement of the membership change. This has a
-direct implementation consequence — an integration must **not** attempt to
-reproduce it. The rules are disabled, so leaving them has no behavioural effect,
-while "delete the stale device-scoped rules" is a destructive heuristic that
-would have to guess which of a host's rules are stale. On the same box there are
-live, *enabled* device-scoped `allow`/`ip` rules with a host in `scope`; a naive
-sweep would delete real user firewall rules.
+**The rules are Device Active Protect state, not membership state.** Reading the
+deleted ids out of the pre/post pulls around the *original* capture gives their
+full text:
 
-**Still open:** whether the box fires `host:syncAppTimeUsageToTags` on its own
-after a local write. The app sends it explicitly with an app-supplied `begin`
-epoch, so the same reasoning as above suggests it does not — but that is an
-inference, not a measurement. It affects usage-report re-attribution only, not
-membership correctness.
+```json
+{"pid": "575", "action": "allow", "direction": "outbound", "type": "category",
+ "target": "dap_00aabbcc6031", "scope": ["00:AA:BB:CC:60:31"],
+ "disabled": "1", "purpose": "dap", "targetList": "1", "seq": 3}
+{"pid": "576", "action": "block", "direction": "bidirection", "type": "mac",
+ "target": "00:AA:BB:CC:60:31",
+ "disabled": "1", "purpose": "dap", "seq": 3}
+```
+
+Both carry `"purpose": "dap"` — Device Active Protect — and both are
+`disabled: "1"`. Their `timestamp` is `1788978268`, roughly six hours **before**
+the capture, so the membership action did not create them; they were pre-existing
+product state.
+
+Box-wide they are a per-host **pair**: 184 `dap` rules, 92 hosts, exactly two
+each.
+
+**They are not a group-membership artifact.** Across the pre-capture pull:
+
+| Host population | Hosts | Owning a `dap` pair |
+| --- | --- | --- |
+| assigned to a **group** | 124 | 84 (68%) |
+| assigned to a **user** | 28 | **0 (0%)** |
+| no membership | 59 | 8 (14%) |
+
+The 68% is the part a first reading missed: **a device sitting in a group keeps
+its `dap` pair**. So the pair is not created by group membership and its
+presence says nothing about it. The 0% on user-assigned hosts is the signal
+pointing the other way, and is consistent with membership *changes* clearing it.
+
+**So the sweep is real and belongs to the app, not the box.** In the capture the
+host was moved out of `Quarantine` and into `SVR_NAS`; the app deleted the
+device's `dap` pair in the same batch as the removal, and the pair was gone
+before the add, so the add had nothing left to delete. The likely intent is that
+a device's Active Protect state is invalidated when its policy (its tags) moves,
+so the app clears the stale pair rather than leaving a `dap` block behind.
+
+**A first reading of this was wrong in two ways, both worth recording:**
+
+- It called the rules "the app's own disabled leftovers" and concluded an
+  integration must **not** reproduce the delete. The 0% user-assigned figure
+  contradicts "unrelated". The app is clearing state that belongs to the device
+  it is moving.
+- Its safety argument was that a sweep would delete real firewall rules, citing
+  live enabled device-scoped `allow`/`ip` rules with a host in `scope`. Those
+  rules are real, but they carry **no** `purpose: "dap"`, so a sweep keyed on
+  `purpose == "dap"` cannot reach them. The argument conflated "device-scoped
+  rules" with "DAP rules" and overstated the risk.
+
+**Implementation consequence — corrected.** The operation is precisely
+discriminable, so it is safe to reproduce: delete rules that are
+`purpose == "dap"` **and** device-scoped to this host (its MAC is the `target`
+or appears in `scope`) **and** disabled. The `purpose` key is the discriminator
+that keeps it away from user rules. A pair of disabled `dap` rules left behind is
+observable divergence from the app, which is what the integration is trying to
+avoid.
+
+**3. `host:syncAppTimeUsageToTags` — what it is.**
+
+Finding 41's add batch carried
+`{"item": "host:syncAppTimeUsageToTags", "value": {"begin": 1790395200, "mac":
+"<mac>"}}`. Decoding `begin`:
+
+```
+1790395200  ->  2026-09-26T00:00:00-04:00 (box timezone, America/New_York)
+capture     ->  2026-10-02T13:56:49+00:00
+```
+
+`begin` is a **midnight in the box's own timezone, seven days back including the
+current day** (26 Sep through 2 Oct). Firewalla tracks per-app usage against a
+**tag** — a group or a user — because that is what the app-time limits are
+attached to. When a device moves, its recorded usage for that window was
+attributed to the old tag. This command tells the box to re-attribute the
+device's app-time usage for the current window to the new tag, so the new group's
+usage totals include it and the old group's no longer do.
+
+**Recommendation: do not send it.** It is usage-accounting backfill, not part of
+the membership write, and it is separable from a working implementation:
+
+- membership is already correct without it — the capture's membership landed and
+  a local write landed, both verified
+- the window length ("seven days including today") is inferred from **one**
+  sample. The box timezone is available to the integration, so the value is
+  computable, but a wrong window silently mis-attributes a user's usage
+  accounting — worse than not sending it
+- the integration reads usage; it does not own Firewalla's app-time limits. The
+  only surface where the difference becomes user-visible is a tag's usage
+  history in the app, and the box reconciles it on its own schedule
+
+Revisit if the integration ever writes usage limits, and by then confirm the
+window from more than one sample.
 
 **Artifacts:**
 
@@ -2981,6 +3057,11 @@ membership correctness.
 - `.tmp/list_device_rules.py` (read-only: device-scoped rule discovery)
 - `.tmp/test_minimal_write.py` (minimal-write key-preservation probe)
 - `.tmp/test_rule_sweep.py` (rule-sweep probe, self-restoring)
+- `.tmp/reconstruct_capture.py` (pre/post pull diff for the 575/576 delete)
+- `.tmp/rule_correlation.py`, `.tmp/dap_analysis.py` (DAP rule correlation and
+  the `begin` decode)
+- `.artifacts/membership-capture/20261002-135538/` and `.../20261002-135842/`
+  (the pre and post pulls the ids were read out of)
 
 ## Alarm findings
 

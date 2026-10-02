@@ -334,21 +334,39 @@ mutually exclusive target fields, backing **four** LLM tools in Phase 4.
       `integration_manager` → `async_set_host_policy` path. The response carries
       `membership.before`, `membership.after` and a `changed` flag so a caller can
       tell whether the single slot actually moved.
-- [x] **2.4b Stale-rule sweep — resolved as "do not replicate".** Tested live and
-      recorded as Finding 43. **The box does not sweep.** The app issues the
-      `policy:delete` calls itself, and the rules it removes are its own
-      `disabled=1` leftovers (a per-host pair; 323 rules on the dev box, ~2 per
-      host). An integration must not attempt this: the rules are disabled, so
-      leaving them has no behavioural effect, while "delete the stale device-scoped
-      rules" is a destructive heuristic that would have to guess which of a host's
-      rules are stale — and the same box carries live, *enabled* device-scoped
-      `allow`/`ip` rules with a host in `scope`, so a naive sweep would delete real
-      user firewall rules.
-      **Still open (inference, not measurement):** whether the box fires
-      `host:syncAppTimeUsageToTags` on its own after a local write. The app sends it
-      explicitly with a `begin` epoch, which suggests it does not, but this was not
-      measured. It affects usage-report re-attribution only, never membership
-      correctness.
+- [x] **2.4b DAP rule cleanup — corrected reading, now implemented.** A first
+      reading of the capture concluded the box should not reproduce the app's
+      `policy:delete` calls, on the grounds that they were unrelated disabled
+      leftovers and that a sweep risked deleting real firewall rules. **That was
+      wrong on both counts**, and the owner's challenge was right to press on it.
+      Reading the deleted ids out of the pre/post pulls shows both are
+      `"purpose": "dap"` — Device Active Protect — and `disabled: "1"`, created six
+      hours before the capture. Box-wide they are a per-host pair: 184 rules over 92
+      hosts.
+      The correlation is the decisive part: of hosts assigned to a **group**, 68%
+      still own their pair, so membership does not create them and their presence
+      says nothing about it. But of hosts assigned to a **user**, **0%** do. The app
+      is clearing state belonging to the device it is moving, not tidying unrelated
+      leftovers.
+      The safety argument also failed: it cited live enabled device-scoped
+      `allow`/`ip` rules as sweep casualties, but those carry **no** `purpose: "dap"`,
+      so a cleanup keyed on `purpose == "dap"` cannot reach them.
+      The integration now deletes the device's disabled `dap` rules as part of a
+      membership change, through the existing `async_delete_rule` path, which was
+      already byte-for-byte the app's captured payload (`mtype: "cmd"`,
+      `item: "policy:delete"`, `value: {"policyID": ...}`, `target: 0.0.0.0`).
+      See Finding 43.
+- [x] **2.4c `host:syncAppTimeUsageToTags` — decoded, documented, deliberately not
+      sent.** `begin` decodes to a midnight in the box's own timezone seven days
+      back including the current day (26 Sep–2 Oct for the 2 Oct capture). Firewalla
+      tracks per-app usage against a tag, so the command re-attributes a device's
+      usage for the current window to its new tag. It is usage-accounting backfill,
+      not part of the membership write: membership lands without it, and the only
+      surface it changes is a tag's usage history in the app, which the box
+      reconciles on its own schedule. The window length is inferred from a **single**
+      sample, and a wrong window silently mis-attributes a user's usage accounting —
+      worse than not sending it. Revisit if the integration ever writes usage limits;
+      confirm the window from more than one sample first.
 - [x] **2.5 Document the service.** `services.yaml`, `translations/en.json` (both
       the `services.<name>` block and the exception messages), and the
       `docs/USER_GUIDE.md` catalog plus a `#### Set host membership` section in the

@@ -41,6 +41,8 @@ from custom_components.firewalla_local.const import (
     LLM_TOOL_MODE_READ_AND_CONTROL,
     LLM_TOOL_MODE_READ_ONLY,
     LLM_TOOL_MODE_SUMMARY_ONLY,
+    RULE_PURPOSE_DAP,
+    RULE_TARGET_TYPE_MAC,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
@@ -956,8 +958,13 @@ def _membership_entry() -> MockConfigEntry:
 
 
 @contextmanager
-def _membership_patches(write_mock: AsyncMock) -> Iterator[None]:
-    """Patch the runtime payload, snapshot, and host-policy writer."""
+def _membership_patches(
+    write_mock: AsyncMock,
+    *,
+    snapshot: FirewallaRuntimeSnapshot | None = None,
+    delete_mock: AsyncMock | None = None,
+) -> Iterator[None]:
+    """Patch the runtime payload, snapshot, host-policy writer, and rule deleter."""
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
@@ -965,7 +972,11 @@ def _membership_patches(write_mock: AsyncMock) -> Iterator[None]:
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
-            return_value=_membership_snapshot(),
+            return_value=snapshot if snapshot is not None else _membership_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_delete_rule",
+            new=delete_mock if delete_mock is not None else AsyncMock(),
         ),
         patch(
             "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_policy",
@@ -973,6 +984,76 @@ def _membership_patches(write_mock: AsyncMock) -> Iterator[None]:
         ),
     ):
         yield
+
+
+def _membership_snapshot_with_dap() -> FirewallaRuntimeSnapshot:
+    """Return a membership snapshot carrying the device's Active Protect rules.
+
+    The app clears a device's disabled `dap` rules as part of a membership change.
+    This snapshot pins every boundary of that cleanup: the device's own disabled
+    pair goes, another device's pair stays, a live user rule scoped to the same
+    device stays, and an enabled `dap` rule stays because it is actively blocking.
+    """
+    return replace(
+        _membership_snapshot(),
+        policy_rules=(
+            FirewallaPolicyRule(
+                rule_id="575",
+                action="allow",
+                target="dap_0c85e1b01d1c",
+                target_type="category",
+                direction="outbound",
+                enabled=False,
+                purpose=RULE_PURPOSE_DAP,
+                scope=("0C:85:E1:B0:1D:1C",),
+                target_name=None,
+            ),
+            FirewallaPolicyRule(
+                rule_id="576",
+                action="block",
+                target="0C:85:E1:B0:1D:1C",
+                target_type=RULE_TARGET_TYPE_MAC,
+                direction="bidirection",
+                enabled=False,
+                purpose=RULE_PURPOSE_DAP,
+                scope=(),
+                target_name=None,
+            ),
+            FirewallaPolicyRule(
+                rule_id="577",
+                action="block",
+                target="AA:BB:CC:DD:EE:FF",
+                target_type=RULE_TARGET_TYPE_MAC,
+                direction="bidirection",
+                enabled=False,
+                purpose=RULE_PURPOSE_DAP,
+                scope=(),
+                target_name=None,
+            ),
+            FirewallaPolicyRule(
+                rule_id="578",
+                action="allow",
+                target="192.168.254.8",
+                target_type="ip",
+                direction="outbound",
+                enabled=True,
+                purpose=None,
+                scope=("0C:85:E1:B0:1D:1C",),
+                target_name=None,
+            ),
+            FirewallaPolicyRule(
+                rule_id="579",
+                action="block",
+                target="0C:85:E1:B0:1D:1C",
+                target_type=RULE_TARGET_TYPE_MAC,
+                direction="bidirection",
+                enabled=True,
+                purpose=RULE_PURPOSE_DAP,
+                scope=(),
+                target_name=None,
+            ),
+        ),
+    )
 
 
 def _usage_history_snapshot() -> FirewallaRuntimeSnapshot:
@@ -4669,6 +4750,78 @@ async def test_set_host_membership_requires_exactly_one_target(
 
     assert write.await_count == 0
     assert err.value.translation_key == expected_key
+
+
+async def test_set_host_membership_clears_the_device_active_protect_rules(
+    hass: HomeAssistant,
+) -> None:
+    """A membership change clears the device's disabled Active Protect rules.
+
+    The Firewalla app does this in the same batch as the tags write, so a device
+    does not keep a stale `dap` pair across a move. Only this device's disabled
+    `dap` rules are eligible: another device's pair, an enabled `dap` rule that is
+    actively blocking, and a live user rule merely scoped to this device all stay.
+    """
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+    write = AsyncMock(return_value={"ok": True})
+    delete = AsyncMock(return_value=None)
+
+    with _membership_patches(
+        write,
+        snapshot=_membership_snapshot_with_dap(),
+        delete_mock=delete,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await _call_set_host_membership(
+            hass,
+            entry,
+            {
+                SERVICE_FIELD_HOST_MAC: "0C:85:E1:B0:1D:1C",
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_REFRESH: False,
+            },
+        )
+
+    deleted = [call.args[0] for call in delete.await_args_list]
+    assert deleted == ["575", "576"]
+    assert response["device_active_protect"] == {
+        "rules_removed": ["575", "576"],
+    }
+    assert response["membership"]["after"] == {
+        "kind": "group",
+        "id": "12",
+        "name": "Quarantine",
+    }
+
+
+async def test_set_host_membership_reports_no_dap_rules_when_there_are_none(
+    hass: HomeAssistant,
+) -> None:
+    """A device with no Active Protect rules still reports the key."""
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+    write = AsyncMock(return_value={"ok": True})
+    delete = AsyncMock(return_value=None)
+
+    with _membership_patches(write, delete_mock=delete):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await _call_set_host_membership(
+            hass,
+            entry,
+            {
+                SERVICE_FIELD_HOST_MAC: "0C:85:E1:B0:1D:1C",
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_REFRESH: False,
+            },
+        )
+
+    assert delete.await_count == 0
+    assert response["device_active_protect"] == {"rules_removed": []}
 
 
 def test_set_host_membership_is_registered_as_an_admin_action() -> None:

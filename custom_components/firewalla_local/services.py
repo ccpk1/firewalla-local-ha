@@ -39,6 +39,7 @@ from .const import (
     RULE_ACTION_BLOCK,
     RULE_PURPOSE_DAP,
     RULE_PURPOSE_FAMILY,
+    RULE_TARGET_TYPE_MAC,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_CREATE_RULE,
     SERVICE_DELETE_ALARMS,
@@ -4419,6 +4420,32 @@ async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
     }
 
 
+def _find_device_dap_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> list[str]:
+    """Return the ids of one device's Device Active Protect rules.
+
+    The Firewalla app clears these when a device's membership changes, because a
+    device's Active Protect state is invalidated when its tags move. ``purpose``
+    is what keeps this away from user rules: a live device-scoped rule carries no
+    ``dap`` purpose, so it is never matched. ``async_delete_rule`` sends the same
+    ``policy:delete`` payload the app does.
+    """
+    snapshot = entry.runtime_data.coordinator.data
+    if snapshot is None:
+        return []
+
+    mac = host_mac.upper()
+    return [
+        rule.rule_id
+        for rule in snapshot.policy_rules
+        if rule.purpose == RULE_PURPOSE_DAP
+        and not rule.enabled
+        and (
+            (rule.target_type == RULE_TARGET_TYPE_MAC and rule.target.upper() == mac)
+            or any(scope.upper() == mac for scope in rule.scope)
+        )
+    ]
+
+
 async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType:
     """Set or clear the single group or user membership of one device.
 
@@ -4466,6 +4493,19 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
         target.group_id if target is not None else None
     )
 
+    # The app clears the device's Active Protect rules as part of the same batch,
+    # before the tags write, so the stale pair cannot outlive the move.
+    dap_rule_ids = _find_device_dap_rule_ids(entry, host.mac)
+    for rule_id in dap_rule_ids:
+        try:
+            await entry.runtime_data.rule_manager.async_delete_rule(rule_id)
+        except FirewallaApiError as err:
+            _raise_runtime_service_error(
+                err,
+                log_message="Failed to clear device Active Protect rules",
+                translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
+            )
+
     try:
         command_response = (
             await entry.runtime_data.integration_manager.async_set_host_policy(
@@ -4505,6 +4545,9 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
             "before": cast(JsonValueType, before),
             "after": cast(JsonValueType, after),
             "changed": before != after,
+        },
+        "device_active_protect": {
+            "rules_removed": cast(JsonValueType, dap_rule_ids),
         },
         "command": {
             "item": "policy",
