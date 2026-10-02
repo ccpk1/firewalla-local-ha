@@ -386,6 +386,14 @@ async def test_count_totals_are_not_presented_as_connected(
         assert "connected" in description, tool_name
         assert "online" in description, tool_name
 
+    # A group's membership is every device the box still tracks, not only the
+    # current ones — a live Quarantine group held 10 devices of which 7 had been
+    # idle for 13-33 days.
+    assert (
+        "not limited to current devices"
+        in tools["firewalla_local__list_hosts"].description
+    )
+
     config = tools["firewalla_local__list_hosts"].parameters.schema
     assert any(marker.schema == "online" for marker in config)
 
