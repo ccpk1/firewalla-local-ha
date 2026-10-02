@@ -174,7 +174,7 @@ async def _api_instance(hass: HomeAssistant) -> llm.APIInstance:
         await hass.async_block_till_done()
         return await llm.async_get_api(
             hass,
-            DOMAIN,
+            _api_id(hass),
             llm.LLMContext(
                 platform="test",
                 context=Context(),
@@ -372,3 +372,14 @@ async def test_unknown_argument_is_rejected(hass: HomeAssistant) -> None:
         )
 
     _assert_clean_error(err.value)
+
+
+def _api_id(hass: HomeAssistant) -> str:
+    """Return the id of the registered Firewalla LLM API.
+
+    The id always carries a per-entry suffix, so it is never the bare domain;
+    the suffix is derived from the entry title.
+    """
+    return next(
+        api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
+    )

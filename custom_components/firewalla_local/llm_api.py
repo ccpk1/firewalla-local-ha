@@ -74,32 +74,52 @@ class FirewallaLocalAPI(llm.API):
         )
 
 
-def _resolve_api_id(hass: HomeAssistant, entry: ConfigEntry) -> str:
-    """Return a unique LLM API id for one config entry.
+def _resolve_api_name(hass: HomeAssistant, entry: ConfigEntry) -> str:
+    """Return a display name unique among this integration's entries.
 
-    The common case is a single Firewalla setup, which gets the bare domain as a
-    clean, pasteable MCP URL. Beyond that the slugified entry title disambiguates,
-    with the entry id as a collision fallback. Ids are decided from the entries
-    present at registration time and are not reshuffled live.
+    Home Assistant derives a merged tool's namespace from the API *name*
+    (`MergedAPI` prefixes tools with the slugified name), and it only enforces
+    uniqueness of ids, not names. Two entries the user has titled identically
+    would therefore produce two identically-named tools, leaving the model no
+    way to tell which box it is acting on.
+
+    The discriminator is decided from the config entries themselves rather than
+    from what is currently registered, so every entry reaches the same verdict
+    regardless of registration order and the names do not move on reload.
     """
-    registered = {api.id for api in llm.async_get_apis(hass)}
-    if len(hass.config_entries.async_entries(DOMAIN)) <= 1:
-        return DOMAIN if DOMAIN not in registered else f"{DOMAIN}-{entry.entry_id[:8]}"
+    title = entry.title
+    others = [
+        other
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ]
+    if not any(other.title == title for other in others):
+        return title
+    return f"{title} [{entry.entry_id[:6]}]"
 
-    candidate = f"{DOMAIN}-{slugify(entry.title) or entry.entry_id[:8]}"
-    if candidate not in registered:
-        return candidate
-    return f"{DOMAIN}-{entry.entry_id[:8]}"
+
+def _resolve_api_id(api_name: str) -> str:
+    """Return the LLM API id for one config entry.
+
+    Always carries a suffix. An id that is the bare domain for a single box
+    would have to change the moment a second box is added, and that id is both
+    the MCP URL and the value `mcp_server` stores to pick an API — so adding a
+    box would silently break an existing client. Deriving the id from the
+    already-unique name keeps it stable and unique by construction, matching
+    how the `mcp` integration names its per-entry APIs.
+    """
+    return f"{DOMAIN}-{slugify(api_name) or 'box'}"
 
 
 def async_register_firewalla_api(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> Callable[[], None]:
     """Register the Firewalla Local LLM API for one config entry."""
+    entry_name = _resolve_api_name(hass, entry)
     api = FirewallaLocalAPI(
         hass,
-        api_id=_resolve_api_id(hass, entry),
-        name=entry.title,
+        api_id=_resolve_api_id(entry_name),
+        name=entry_name,
         entry_id=entry.entry_id,
         mode=get_llm_tool_mode(entry.options),
     )

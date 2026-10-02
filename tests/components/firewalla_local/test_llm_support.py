@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import sys
 from pathlib import Path
 from typing import Final
@@ -184,7 +185,13 @@ async def test_setup_registers_api_only_when_enabled(
 
     assert entry.state is ConfigEntryState.LOADED
     registered_ids = {api.id for api in llm.async_get_apis(hass)}
-    assert (DOMAIN in registered_ids) is expected_registered
+    firewalla_ids = {
+        api_id for api_id in registered_ids if api_id.startswith(f"{DOMAIN}-")
+    }
+    assert bool(firewalla_ids) is expected_registered
+    # The id is never the bare domain: it always carries a per-entry suffix so
+    # that it cannot change when another box is added.
+    assert DOMAIN not in registered_ids
 
 
 async def test_default_mode_registers_only_the_anonymous_summary(
@@ -212,7 +219,7 @@ async def test_default_mode_registers_only_the_anonymous_summary(
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+        api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     assert {tool.name for tool in api_instance.tools} == {
         "firewalla_local__get_system_overview"
@@ -249,7 +256,7 @@ async def test_anonymous_summary_cannot_request_identifiers(
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+        api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     (tool,) = api_instance.tools
     assert not tool.parameters.schema
@@ -280,7 +287,7 @@ async def test_read_mode_registers_the_full_read_set(
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+        api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     names = {tool.name for tool in api_instance.tools}
     assert "firewalla_local__get_system_overview" in names
@@ -314,7 +321,7 @@ async def test_setup_succeeds_without_llm_tools_on_old_core(
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+    assert not _firewalla_api_ids(hass)
 
 
 async def test_setup_survives_llm_layer_failure(hass: HomeAssistant) -> None:
@@ -348,7 +355,7 @@ async def test_setup_survives_llm_layer_failure(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+    assert not _firewalla_api_ids(hass)
 
 
 async def test_api_is_unregistered_on_entry_unload(hass: HomeAssistant) -> None:
@@ -374,12 +381,12 @@ async def test_api_is_unregistered_on_entry_unload(hass: HomeAssistant) -> None:
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        assert DOMAIN in {api.id for api in llm.async_get_apis(hass)}
+        assert bool(_firewalla_api_ids(hass))
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 
-    assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+    assert not _firewalla_api_ids(hass)
 
 
 async def test_options_change_to_llm_mode_re_registers_without_manual_reload(
@@ -412,7 +419,7 @@ async def test_options_change_to_llm_mode_re_registers_without_manual_reload(
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        assert DOMAIN not in {api.id for api in llm.async_get_apis(hass)}
+        assert not _firewalla_api_ids(hass)
 
         # A mode change alone must trigger the reload, with no manual reload.
         hass.config_entries.async_update_entry(
@@ -421,7 +428,7 @@ async def test_options_change_to_llm_mode_re_registers_without_manual_reload(
         )
         await hass.async_block_till_done()
 
-        assert DOMAIN in {api.id for api in llm.async_get_apis(hass)}
+        assert bool(_firewalla_api_ids(hass))
 
 
 async def test_options_change_unrelated_to_llm_does_not_reload(
@@ -468,7 +475,7 @@ async def test_options_change_unrelated_to_llm_does_not_reload(
 
         mock_reload.assert_not_awaited()
 
-    assert DOMAIN in {api.id for api in llm.async_get_apis(hass)}
+    assert bool(_firewalla_api_ids(hass))
 
 
 @pytest.mark.parametrize(
@@ -581,3 +588,135 @@ def test_no_eager_llm_imports() -> None:
                         )
 
     assert not offenders, "Eager LLM imports found:\n" + "\n".join(offenders)
+
+
+def _api_id(hass: HomeAssistant) -> str:
+    """Return the id of the registered Firewalla LLM API.
+
+    The id always carries a per-entry suffix, so it is never the bare domain;
+    the suffix is derived from the entry title.
+    """
+    return next(
+        api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
+    )
+
+
+def _firewalla_api_ids(hass: HomeAssistant) -> set[str]:
+    """Return the registered Firewalla LLM API ids.
+
+    The id always carries a per-entry suffix, so it is never the bare domain.
+    """
+    return {
+        api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
+    }
+
+
+def _second_entry(*, title: str, host: str, license_: str) -> MockConfigEntry:
+    """Return a second provisioned Firewalla entry for multi-box tests."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title=title,
+        unique_id=license_,
+        data={
+            CONF_LICENSE: license_,
+            CONF_HOST: host,
+            CONF_GID: f"gid-{license_}",
+            CONF_EID: f"eid-{license_}",
+            CONF_AID: f"aid-{license_}",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+
+
+def _setup_patches() -> tuple[object, ...]:
+    """Return the patches needed to set up an entry without a real box."""
+    return (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    )
+
+
+async def test_api_id_is_stable_when_a_second_box_is_added(
+    hass: HomeAssistant,
+) -> None:
+    """The id must not move when another entry is added.
+
+    The id is both the MCP URL and the value `mcp_server` stores to pick an API,
+    so an id that changed on the 1 -> 2 transition would silently break an
+    existing client. It is derived from the entry itself rather than from how
+    many entries exist, so adding a second box leaves the first box's id alone.
+    """
+    first = _entry()
+    first.add_to_hass(hass)
+    second = _second_entry(
+        title="Firewalla (192.168.200.2)",
+        host="192.168.200.2",
+        license_="license-456",
+    )
+
+    with contextlib.ExitStack() as stack:
+        for ctx in _setup_patches():
+            stack.enter_context(ctx)
+
+        assert await hass.config_entries.async_setup(first.entry_id)
+        await hass.async_block_till_done()
+
+        single = _firewalla_api_ids(hass)
+        assert len(single) == 1
+        (first_id,) = single
+
+        second.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+
+    assert len(_firewalla_api_ids(hass)) == 2
+    # The first box keeps the id it had before the second box existed.
+    assert first_id in _firewalla_api_ids(hass)
+
+
+async def test_identical_entry_titles_still_give_uniquely_named_tools(
+    hass: HomeAssistant,
+) -> None:
+    """Two boxes titled the same must not produce colliding tool names.
+
+    Merged tools are namespaced by the API *name*, and Home Assistant enforces
+    unique ids but not unique names. Identical titles would therefore yield two
+    identically-named tools, leaving the model no way to tell which box it is
+    acting on — a real risk on the write tools.
+    """
+    first = _second_entry(title="Firewalla", host="10.0.0.1", license_="license-a")
+    second = _second_entry(title="Firewalla", host="10.0.0.2", license_="license-b")
+    first.add_to_hass(hass)
+
+    with contextlib.ExitStack() as stack:
+        for ctx in _setup_patches():
+            stack.enter_context(ctx)
+
+        assert await hass.config_entries.async_setup(first.entry_id)
+        await hass.async_block_till_done()
+        second.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+
+        names = [api.name for api in llm.async_get_apis(hass)]
+        merged = await llm.async_get_api(
+            hass, sorted(_firewalla_api_ids(hass)), _llm_context()
+        )
+
+    assert len(names) == 2
+    assert len(set(names)) == 2
+    tool_names = [tool.name for tool in merged.tools]
+    assert len(tool_names) == len(set(tool_names))

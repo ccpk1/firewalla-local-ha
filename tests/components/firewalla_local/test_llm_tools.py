@@ -160,7 +160,7 @@ async def test_read_tool_returns_envelope(
 ) -> None:
     """Every read tool returns the documented response envelope."""
     await _setup_hass(hass)
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     registered = {tool.name for tool in api_instance.tools}
     assert tool_name in registered
@@ -177,7 +177,7 @@ async def test_read_tool_returns_envelope(
 async def test_list_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
     """list_rules surfaces the flat rule shape including the alarm reference."""
     await _setup_hass(hass)
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     result = await api_instance.async_call_tool(
         llm.ToolInput(tool_name=LIST_RULES_TOOL, tool_args={})
@@ -199,7 +199,7 @@ async def test_list_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
 async def test_list_hosts_returns_host_records(hass: HomeAssistant) -> None:
     """list_hosts surfaces the host identity records from the host service."""
     await _setup_hass(hass)
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     result = await api_instance.async_call_tool(
         llm.ToolInput(tool_name=LIST_HOSTS_TOOL, tool_args={})
@@ -220,7 +220,7 @@ async def test_read_tools_are_annotated_read_only(
 ) -> None:
     """Every read tool declares the safe, explicit annotation set."""
     await _setup_hass(hass)
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
     assert tool.integration == DOMAIN
@@ -235,7 +235,7 @@ async def test_read_tools_are_annotated_read_only(
 async def test_read_tool_catalog_matches_spec(hass: HomeAssistant) -> None:
     """The registered read-tool catalog exactly matches the intended set."""
     await _setup_hass(hass)
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     assert {tool.name for tool in api_instance.tools} == {
         name for name, _ in _READ_TOOLS
@@ -251,7 +251,7 @@ async def test_every_parameter_has_a_description(
 ) -> None:
     """Every tool parameter carries a description for the model."""
     await _setup_hass(hass)
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
     tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
 
     for marker in tool.parameters.schema:
@@ -364,7 +364,7 @@ async def _setup_control_hass(hass: HomeAssistant, *, mode: str) -> MockConfigEn
 async def test_control_tools_absent_in_read_only_mode(hass: HomeAssistant) -> None:
     """Read-only mode registers reads but no control or destructive tools."""
     await _setup_hass(hass)
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     registered = {tool.name for tool in api_instance.tools}
     assert not registered.intersection(_CONTROL_TOOLS)
@@ -375,7 +375,7 @@ async def test_control_tools_absent_in_read_only_mode(hass: HomeAssistant) -> No
 async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> None:
     """Read-and-control mode registers control tools but no destructive tools."""
     await _setup_control_hass(hass, mode="read_and_control")
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     registered = {tool.name for tool in api_instance.tools}
     assert registered.issuperset(_CONTROL_TOOLS)
@@ -386,7 +386,7 @@ async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> Non
 async def test_destructive_tools_only_in_full_mode(hass: HomeAssistant) -> None:
     """Full mode registers control and destructive tools together."""
     await _setup_control_hass(hass, mode="full")
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     registered = {tool.name for tool in api_instance.tools}
     assert registered.issuperset(_CONTROL_TOOLS)
@@ -401,7 +401,7 @@ async def test_control_tools_are_non_read_only(
 ) -> None:
     """Every control tool is annotated as a write with named parameters."""
     await _setup_control_hass(hass, mode="read_and_control")
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
     tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
 
     assert tool.integration == DOMAIN
@@ -421,7 +421,7 @@ async def test_destructive_tools_are_annotated_destructive(
 ) -> None:
     """Every destructive tool is flagged destructive with described parameters."""
     await _setup_control_hass(hass, mode="full")
-    api_instance = await llm.async_get_api(hass, DOMAIN, _llm_context())
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
     tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
 
     assert tool.integration == DOMAIN
@@ -430,3 +430,14 @@ async def test_destructive_tools_are_annotated_destructive(
     assert tool.annotations.open_world is False
     for marker in tool.parameters.schema:
         assert marker.description, f"{tool_name} field {marker} lacks a description"
+
+
+def _api_id(hass: HomeAssistant) -> str:
+    """Return the id of the registered Firewalla LLM API.
+
+    The id always carries a per-entry suffix, so it is never the bare domain;
+    the suffix is derived from the entry title.
+    """
+    return next(
+        api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
+    )
