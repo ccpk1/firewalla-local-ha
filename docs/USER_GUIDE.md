@@ -149,7 +149,13 @@ and there is no setting to point it elsewhere.
 
 The id is the config entry's own identifier, so it never changes: renaming the
 entry, adding another box, or removing one leaves every other URL exactly as it
-was. You can rename freely without re-pointing a client.
+was. A client connected to a box's URL keeps working through a rename.
+
+**Renaming a box does change its name in a merged tool list.** The prefix in the
+section below follows the entry's title, not the URL, so renaming "Firewalla Test
+Only" to "Basement" turns `firewalla-test-only__firewalla_local__list_hosts` into
+`basement__firewalla_local__list_hosts`. The URL is untouched and no client needs
+re-pointing, but a merged client will see the new names after the entry reloads.
 
 **Serving several boxes at once prefixes their tool names with the entry name.**
 When you select more than one API (or "All LLM APIs"), Home Assistant merges
