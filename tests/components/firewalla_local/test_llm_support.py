@@ -12,6 +12,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import llm
+from homeassistant.helpers.translation import async_get_translations
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.firewalla_local as firewalla_local
@@ -27,6 +28,7 @@ from custom_components.firewalla_local.const import (
     DOMAIN,
     LLM_TOOL_MODE_OFF,
     LLM_TOOL_MODE_READ_ONLY,
+    LLM_TOOL_MODES,
     MIN_LLM_TOOLS_HA_VERSION,
 )
 from custom_components.firewalla_local.helpers.llm_support import llm_tools_supported
@@ -497,6 +499,53 @@ async def test_options_toggle_visibility(
 
     schema_keys = {marker.schema for marker in result["data_schema"].schema}
     assert (CONF_LLM_TOOL_MODE in schema_keys) is expected_present
+
+
+async def test_every_llm_mode_option_has_a_label(hass: HomeAssistant) -> None:
+    """Each mode in the picker resolves to a human label, in every layer.
+
+    A SelectSelector with a translation_key renders the raw value when its
+    translation is missing, so a new mode can ship showing "summary_only"
+    rather than "Summary only (...)". This walks the real options flow, reads
+    the selector HA is actually given, and resolves it through HA's own
+    translation loader — so a mistyped key or a missing entry fails here rather
+    than in a user's options dialog.
+    """
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.config_flow.llm_tools_supported",
+        return_value=True,
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "general_options"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "system_settings"}
+        )
+
+    selector = next(
+        value
+        for marker, value in result["data_schema"].schema.items()
+        if marker.schema == CONF_LLM_TOOL_MODE
+    )
+    selector_config = selector.config
+    assert selector_config["translation_key"] == CONF_LLM_TOOL_MODE
+    assert tuple(selector_config["options"]) == LLM_TOOL_MODES
+
+    translations = await async_get_translations(
+        hass, "en", "selector", integrations={DOMAIN}
+    )
+    missing = [
+        mode
+        for mode in LLM_TOOL_MODES
+        if not translations.get(
+            f"component.{DOMAIN}.selector.{CONF_LLM_TOOL_MODE}.options.{mode}"
+        )
+    ]
+    assert missing == [], f"modes with no label: {missing}"
 
 
 def test_no_eager_llm_imports() -> None:

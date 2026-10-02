@@ -250,7 +250,10 @@ Reads that tell you what exists — the first step before any control action.
   `networks[]` (uuid, name, kind, `ipv4_subnets`, device/online/offline counts),
   `groups` and `users` counts, `rules` counts, `alarms` counts, per-WAN `items[]`
   with nested `latest_speed_test` and `internet_quality`, and `llm_access`
-  (the active mode plus a pointer to raise the access level).
+  (`mode`, plus a `note` written **from the active mode** — it states what the
+  current tier reaches and what the next tier would add, so the assistant never
+  tells a user to unlock what they already have, and can answer "what else could
+  you do?" without guessing).
 - **Availability & tier:** registered in **every** enabled mode. In **Summary
   only** it is the *entire* surface and cannot request identifiers; from **Read
   only** upward it also carries the identifiers and acts as the discovery layer.

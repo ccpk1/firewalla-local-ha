@@ -30,11 +30,15 @@ from custom_components.firewalla_local.const import (
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
     DEFAULT_LLM_TOOL_MODE,
     DOMAIN,
+    LLM_TOOL_MODE_READ_AND_CONTROL,
+    LLM_TOOL_MODE_READ_ONLY,
+    LLM_TOOL_MODE_SUMMARY_ONLY,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
@@ -3631,6 +3635,74 @@ async def test_get_system_overview_reports_counts_without_identities(
     assert "items" not in overview["groups"]
     assert "items" not in overview["users"]
     assert overview["llm_access"]["mode"] == DEFAULT_LLM_TOOL_MODE
+    # The note must describe this tier, not claim detail is unavailable.
+    assert "Read only" in overview["llm_access"]["note"]
+
+
+async def test_llm_access_note_describes_the_active_tier(
+    hass: HomeAssistant,
+) -> None:
+    """The access note tracks the mode instead of always asking for more.
+
+    A fixed "raise access for rules and alarms" line is false above the summary
+    tier — the assistant would tell a user to unlock what they already have, and
+    could not answer "what else could you do?". Each tier's note now states what
+    it reaches and what the next step would add.
+    """
+    notes: dict[str, str] = {}
+    for mode in (
+        LLM_TOOL_MODE_SUMMARY_ONLY,
+        LLM_TOOL_MODE_READ_ONLY,
+        LLM_TOOL_MODE_READ_AND_CONTROL,
+    ):
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id=f"license-{mode}",
+            title="Firewalla (192.168.200.1)",
+            data={
+                CONF_LICENSE: "license-123",
+                CONF_HOST: "192.168.200.1",
+                CONF_GID: "gid-123",
+                CONF_EID: "eid-123",
+                CONF_AID: "aid-123",
+                CONF_SYMMETRIC_KEY: "symmetric-key",
+            },
+            options={CONF_LLM_TOOL_MODE: mode},
+        )
+        entry.add_to_hass(hass)
+
+        with (
+            patch(
+                "custom_components.firewalla_local.api.client.FirewallaApiClient."
+                "async_get_runtime_init_payload",
+                new=AsyncMock(return_value=_runtime_payload()),
+            ),
+            patch(
+                "custom_components.firewalla_local.api.client.FirewallaApiClient."
+                "build_runtime_snapshot",
+                return_value=_snapshot(),
+            ),
+        ):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+            overview = await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_SYSTEM_OVERVIEW,
+                {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+                blocking=True,
+                return_response=True,
+            )
+
+        assert overview is not None
+        assert overview["llm_access"]["mode"] == mode
+        notes[mode] = overview["llm_access"]["note"]
+
+    assert len(set(notes.values())) == 3, "each tier must describe itself"
+    # The summary tier points upward; the higher tiers do not pretend to be short.
+    assert "Read only" in notes[LLM_TOOL_MODE_SUMMARY_ONLY]
+    assert "Read only" not in notes[LLM_TOOL_MODE_READ_ONLY]
+    assert "Full" in notes[LLM_TOOL_MODE_READ_AND_CONTROL]
 
 
 async def test_get_system_overview_includes_identifiers_on_request(

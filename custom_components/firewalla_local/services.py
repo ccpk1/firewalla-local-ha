@@ -31,6 +31,10 @@ from .const import (
     DOMAIN,
     HIDDEN_RULE_PURPOSES,
     HOST_DEVICE_TYPE_OPTIONS,
+    LLM_TOOL_MODE_OFF,
+    LLM_TOOL_MODE_READ_AND_CONTROL,
+    LLM_TOOL_MODE_READ_ONLY,
+    LLM_TOOL_MODE_SUMMARY_ONLY,
     LOGGER,
     RULE_ACTION_BLOCK,
     RULE_PURPOSE_DAP,
@@ -3321,6 +3325,45 @@ def _rule_matches_filters(
     )
 
 
+def _build_llm_access_note(mode: str) -> str:
+    """Return what the current AI access level does and does not reach.
+
+    Written from the active mode rather than as fixed text: a static "raise
+    access for rules and alarms" line is false once the user is in `read_only`
+    or above, and would have the assistant tell someone to unlock what they
+    already have. It also names the next tier, so the assistant can answer
+    "what else could you do?" without guessing.
+    """
+    if mode == LLM_TOOL_MODE_OFF:
+        return (
+            "AI tool access is off; no Firewalla tools are registered. The user "
+            "can enable it in the integration options."
+        )
+    if mode == LLM_TOOL_MODE_SUMMARY_ONLY:
+        return (
+            "This report is intentionally limited to counts, network names, and "
+            "performance metrics. For device names and addresses, rules, alarms, "
+            "or usage detail, the user must raise Firewalla's AI access level to "
+            "Read only in the integration options."
+        )
+    if mode == LLM_TOOL_MODE_READ_ONLY:
+        return (
+            "Read-only access. Device names, addresses, rules, alarms, and usage "
+            "detail are available. To change anything, the user must raise access "
+            "to Read and control; Full additionally allows destructive actions."
+        )
+    if mode == LLM_TOOL_MODE_READ_AND_CONTROL:
+        return (
+            "Read and reversible control access. Destructive actions (deleting a "
+            "host, rule, or alarm, and bulk archive) are NOT available; the user "
+            "must raise access to Full to enable them, and they cannot be undone."
+        )
+    return (
+        "Full access, including destructive actions that cannot be undone. "
+        "Confirm with the user before using them."
+    )
+
+
 def _build_network_overview_entries(
     entry: FirewallaConfigEntry,
 ) -> list[JsonObjectType]:
@@ -3515,15 +3558,12 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
 
     network_entries = _build_network_overview_entries(entry)
     wan_entries = _build_wan_overview_entries(entry)
+    mode = get_llm_tool_mode(entry.options)
     return {
         "config_entry_id": entry.entry_id,
         "llm_access": {
-            "mode": get_llm_tool_mode(entry.options),
-            "note": (
-                "This report is intentionally limited. For device names and "
-                "addresses, rules, alarms, or usage detail, the user must raise "
-                "Firewalla's AI access level in the integration options."
-            ),
+            "mode": mode,
+            "note": _build_llm_access_note(mode),
         },
         "appliance": {
             "model": system_info.model,
