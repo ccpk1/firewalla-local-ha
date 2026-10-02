@@ -1329,7 +1329,7 @@
         },
         "applies_to": {
           "name": "Applies to",
-          "description": "Optional. Filter to rules governing one group, user, or network name. A host's group_name from get_host_name_mapping is the value to pass here. Matches exactly."
+          "description": "Optional. Filter to rules governing one group, user, or network name. A host's group_name from get_hosts is the value to pass here. Matches exactly."
         },
         "include_purpose": {
           "name": "Include purpose",
@@ -1537,7 +1537,7 @@
         }
       }
     },
-    "get_host_name_mapping": {
+    "get_hosts": {
       "name": "Get hosts",
       "description": "Return the Firewalla host (device) records with naming fields, IP address, device type, kind, group membership, and online state. Filters narrow the result on the box. Non-admin; for the full runtime inventory use get_runtime_inventory.",
       "fields": {

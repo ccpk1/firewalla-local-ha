@@ -60,7 +60,7 @@ from .const import (
     SERVICE_FIELD_WINDOW,
     SERVICE_FIELD_WINDOW_DAYS,
     SERVICE_GET_ALARMS,
-    SERVICE_GET_HOST_NAME_MAPPING,
+    SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -192,13 +192,12 @@ class ListHostsTool(_FirewallaReadTool):
         "idle for weeks. When asked how many are connected, count `online: true` "
         "(or filter `online=true`), never the length of the list.\n"
         "\n"
-        "Inactive devices are included — the box is explicitly asked to return "
-        "them, so a device idle for weeks still appears here, with `online: "
-        "false`. What is not here is a device the box has dropped entirely: the "
-        "Firewalla app may still list those as past members of a group, and they "
-        "cannot be read locally. So a group count here is what the box reports "
-        "and can be lower than the app's total; say which you mean, and use "
-        "`online` to separate active from idle.\n"
+        "Past devices are included. The init request asks the box for inactive "
+        "hosts (`includeInactiveHosts`), which is the same data behind the app's "
+        "\"Show past devices\" toggle, so a device that has not been online for "
+        "weeks still appears here with `online: false` and an old `last_active`. "
+        "A group's membership here is therefore the group's full device list, "
+        "not just the active ones — use `online` to separate the two.\n"
         "\n"
         "This lists every host by default. Pass the filters to narrow it — a "
         "name, one network, online state or kind — rather than pulling the whole "
@@ -262,7 +261,7 @@ class ListHostsTool(_FirewallaReadTool):
             ): bool,
         }
     )
-    _service = SERVICE_GET_HOST_NAME_MAPPING
+    _service = SERVICE_GET_HOSTS
     _response_type = "hosts"
 
 

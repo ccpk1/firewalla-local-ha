@@ -177,7 +177,7 @@ Services that already existed in 1.0.0:
 
 Services added after 1.0.0:
 
-- `firewalla_local.get_host_name_mapping`
+- `firewalla_local.get_hosts`
 - `firewalla_local.get_network_segment_report`
 - `firewalla_local.get_network_segment_usage`
 - `firewalla_local.run_internet_speed_test`
@@ -722,7 +722,7 @@ correlate, and validate Firewalla data during reverse engineering.
 Inspection and report services:
 
 - `firewalla_local.get_runtime_inventory`
-- `firewalla_local.get_host_name_mapping`
+- `firewalla_local.get_hosts`
 - `firewalla_local.get_network_segment_report`
 - `firewalla_local.get_network_segment_usage`
 - `firewalla_local.get_speed_test_results`
@@ -850,7 +850,7 @@ snapshot was taken.
 
 ### Get host name mapping
 
-Use `firewalla_local.get_host_name_mapping` to read the Firewalla host (device)
+Use `firewalla_local.get_hosts` to read the Firewalla host (device)
 records: identity, IP, device type, kind, group membership, and connectivity.
 
 - **Filters run on the box**, so narrow the result instead of listing every

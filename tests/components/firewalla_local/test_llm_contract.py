@@ -386,11 +386,12 @@ async def test_count_totals_are_not_presented_as_connected(
         assert "connected" in description, tool_name
         assert "online" in description, tool_name
 
-    # Inactive devices ARE included (the box is asked for them), so the only
-    # gap is devices the box has dropped entirely. A live Quarantine group
-    # returned 10 locally against 17 in the app.
+    # Past devices ARE included: the init request sets includeInactiveHosts,
+    # which is what the app's "Show past devices" toggle does. A live Quarantine
+    # group returned 10 devices, 7 of them long-idle, so membership here is the
+    # group's full device list.
     assert (
-        "Inactive devices are included"
+        "Past devices are included"
         in tools["firewalla_local__list_hosts"].description
     )
 

@@ -93,7 +93,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
     SERVICE_GET_ALARMS,
-    SERVICE_GET_HOST_NAME_MAPPING,
+    SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -3585,7 +3585,7 @@ def test_every_service_field_is_documented() -> None:
     """Every service field accepted by a schema is named in both doc surfaces.
 
     The mirror of the LLM reference check, for the human-facing surface. It
-    caught `get_host_name_mapping` growing eight server-side filters for the AI
+    caught `get_hosts` growing eight server-side filters for the AI
     tools while the docs still described only `refresh` and the entry selectors,
     and the same pattern in `get_rules` (six), `get_wan_events` (two), and
     `get_network_segment_report` (one). Automations could not discover
@@ -3888,7 +3888,7 @@ async def test_get_system_overview_counts_vpn_peers_separately(
         )
         peers = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_HOST_NAME_MAPPING,
+            SERVICE_GET_HOSTS,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_KIND: "pseudo_host",
@@ -3911,7 +3911,7 @@ async def test_get_system_overview_counts_vpn_peers_separately(
     assert sum(1 for host in peers["hosts"] if host["online"]) == 1
 
 
-async def test_get_host_name_mapping_defaults_to_summary_detail(
+async def test_get_hosts_defaults_to_summary_detail(
     hass: HomeAssistant,
 ) -> None:
     """Test the host-name mapping service defaults to the compact summary shape.
@@ -3949,7 +3949,7 @@ async def test_get_host_name_mapping_defaults_to_summary_detail(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_HOST_NAME_MAPPING,
+            SERVICE_GET_HOSTS,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_REFRESH: False,
@@ -3997,7 +3997,7 @@ async def test_get_host_name_mapping_defaults_to_summary_detail(
     }
 
 
-async def test_get_host_name_mapping_full_detail_includes_derived_fields(
+async def test_get_hosts_full_detail_includes_derived_fields(
     hass: HomeAssistant,
 ) -> None:
     """Test the full detail shape keeps the derivable and nested fields."""
@@ -4031,7 +4031,7 @@ async def test_get_host_name_mapping_full_detail_includes_derived_fields(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_HOST_NAME_MAPPING,
+            SERVICE_GET_HOSTS,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_DETAIL: "full",
@@ -4053,7 +4053,7 @@ async def test_get_host_name_mapping_full_detail_includes_derived_fields(
     assert "ip_assignment_mode" not in first
 
 
-async def test_get_host_name_mapping_supports_filters(
+async def test_get_hosts_supports_filters(
     hass: HomeAssistant,
 ) -> None:
     """Test the host filters narrow the result server-side."""
@@ -4087,7 +4087,7 @@ async def test_get_host_name_mapping_supports_filters(
 
         by_name = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_HOST_NAME_MAPPING,
+            SERVICE_GET_HOSTS,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_HOST_NAME: "plex",
@@ -4098,7 +4098,7 @@ async def test_get_host_name_mapping_supports_filters(
         )
         vpn_only = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_HOST_NAME_MAPPING,
+            SERVICE_GET_HOSTS,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_KIND: "pseudo_host",

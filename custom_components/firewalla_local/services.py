@@ -102,7 +102,7 @@ from .const import (
     SERVICE_FIELD_WINDOW,
     SERVICE_FIELD_WINDOW_DAYS,
     SERVICE_GET_ALARMS,
-    SERVICE_GET_HOST_NAME_MAPPING,
+    SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
@@ -3961,7 +3961,7 @@ async def _async_handle_delete_rule(call: ServiceCall) -> None:
         )
 
 
-async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectType:
+async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
     """Return the current host identity mapping for Firewalla hosts.
 
     `summary` drops derivable and provenance-only fields (`dns_fqdn`,
@@ -5372,8 +5372,8 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         True,
     ),
     (
-        SERVICE_GET_HOST_NAME_MAPPING,
-        _async_handle_get_host_name_mapping,
+        SERVICE_GET_HOSTS,
+        _async_handle_get_hosts,
         GET_HOST_NAME_MAPPING_SCHEMA,
         SupportsResponse.ONLY,
         False,

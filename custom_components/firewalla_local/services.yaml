@@ -17,7 +17,7 @@ get_runtime_inventory:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_host_name_mapping:
+get_hosts:
   name: Get hosts
   description: Return the Firewalla host (device) records with naming fields, IP address, device type, kind, group membership, and online state. Filters narrow the result on the box. Non-admin; for the full runtime inventory use get_runtime_inventory.
   fields:
