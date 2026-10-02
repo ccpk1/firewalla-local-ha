@@ -10,4 +10,5 @@ Keep plans phase-based, executable, and tied to concrete files.
 When an initiative completes, move its plan and supporting notes to `plans/completed/`
 and rename the main plan to `INITIATIVE_NAME_COMPLETED.md`.
 
-**Currently no initiatives are in process.**
+**Currently in process:** `FIREWALLA_LOCAL_MEMBERSHIP_IN-PROCESS.md` — membership
+foundation (group/user kind discriminator) and the device membership service.

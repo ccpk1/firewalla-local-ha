@@ -497,7 +497,7 @@ Applicability interpretation note:
 
 ### Runtime inventory capture helper
 
-- `.tmp/capture_runtime_inventory.py`
+- `.tmp/capture_runtime_inventory.py` (local, gitignored convenience script)
 
 This script:
 
@@ -506,6 +506,14 @@ This script:
 - requests the raw init payload from the local runtime
 - normalizes that payload into the repository's current inventory report shape
 - writes the structured result to a JSON artifact file
+
+> **Staleness warning.** This helper lives in `.tmp/`, which is gitignored and is
+> not maintained alongside the integration. Its call signature drifts whenever
+> `build_runtime_inventory_report` changes, and it has broken that way before.
+> For before/after membership or rule state, prefer the maintained
+> `utils/pull_runtime.py` — it writes the raw `runtime_init.json`, which is what
+> packet captures are diffed against anyway. Use the `.tmp` helper only when the
+> normalized inventory report itself is the thing you need.
 
 ### Packet capture analysis helper
 
@@ -518,6 +526,49 @@ This script:
 - reassembles HTTP streams
 - decrypts Firewalla message payloads using the integration crypto helpers
 - prints the decoded request or response contents for inspection
+
+Limitations: it inspects only `POST` bodies on port `8833`. It does not report
+other HTTP methods, does not decode server-sent events, and cannot see an action
+that leaves the box. Use the widened helper below for those.
+
+### Widened capture analysis helper
+
+- `utils/analyze_capture_wide.py`
+
+Use this for captures that may include cloud or push traffic. It prints four
+sections:
+
+1. **TLS flows** — destination endpoint, SNI server name, byte totals, and the
+   first/last packet time. A cloud-only mutation is still visible here even
+   though the TLS content stays opaque. `--sni-only` prints just this section.
+2. **Local runtime (port 8833)** — *every* HTTP method, not only `POST`. Each
+   `batchAction` is expanded, so the individual `set` / `cmd` / `init` steps and
+   any `tags` / `userTags` values are shown directly.
+3. **Server-sent events** — the `event:liveStats` push stream on port 8833,
+   decoded end to end. The chain is: chunked transfer-encoding → AES-256-CBC
+   with the box key → JSON envelope `{"compressed": 1, "payload": "<base64>"}`
+   → base64 → zlib → JSON. `undecoded=0` means every event decoded cleanly.
+4. **DNS queries** — resolved names, which help attribute an unknown endpoint.
+
+It finds the box key the same way as the standard helper, so it needs no
+re-pairing and accepts the same credential source.
+
+### User-facing capture tool
+
+- `tools/support/capture_firewalla_packets.py`
+- `tools/support/capture_firewalla_packets_requirements.txt`
+- `tools/support/run_capture_firewalla_packets.bat`
+- `tools/support/WINDOWS_PACKET_CAPTURE_USAGE.md`
+
+This is the self-service path for a **user** who does not have developer access
+to this repository. It prompts for the box address and SSH password, starts the
+remote capture, downloads the pcap, and can produce a redacted safe report that
+excludes keys, addresses, and the raw capture.
+
+Point users at this tool and its usage note rather than at the internal steps in
+this document. The internal workflow assumes a paired development environment
+with a stored config entry and a trusted SSH key; the support tool assumes
+neither.
 
 ### Remote capture transport
 
@@ -623,9 +674,40 @@ Move to `tcpdump` plus `utils/analyze_capture.py` only when you need proof of:
 - encrypted request or response ordering
 - fields that appear only during a live action and not in steady-state runtime data
 
-## Standard workflow
+## Choosing a capture
 
-Use this sequence for any new rule-family investigation.
+Pick the lane before you start; it decides the tool and the filter.
+
+| Lane | Use when | Filter | Tool |
+| --- | --- | --- | --- |
+| **A — current value** | you need what the box reports now, with no mutation proof | none | `utils/pull_runtime.py` |
+| **B — local mutation** | the action is expected on the local runtime (rules, group membership, host settings) | `port 8833` | `utils/analyze_capture.py` |
+| **C — widened** | the action may leave the box, or you do not know where it lands | `port 8833 or 443 or 80 or 8443 or 53` | `utils/analyze_capture_wide.py` |
+| **U — user self-service** | a user is capturing without developer access | managed by the tool | `tools/support/capture_firewalla_packets.py` |
+
+- **Start with Lane A.** It is free, needs no capture, and often answers the
+  question on its own.
+- **Escalate to a packet lane only for mutation proof** — exact message shapes,
+  ordering, or fields that appear only during a live action.
+- **When unsure between B and C, choose C.** A widened capture is a superset: if
+  the action turns out to be local you still have the port 8833 evidence, and if
+  it is cloud-mediated you are not left guessing. The only cost is a larger pcap.
+- **Never guess the lane from the UI.** An action that looks local in the app may
+  be written by the cloud and merely reflected on the box, and vice versa.
+
+## Standard workflow (local mutation capture)
+
+### 0. Set the capture variables
+
+Keep these in one place; every command below uses them.
+
+```bash
+BOX_HOST=<box-ip-or-fire.walla>   # the Firewalla box
+SSH_USER=pi                        # fixed by Firewalla firmware
+SSH_KEY=<path-to-ssh-key>          # a key the box already trusts
+CLIENT_IP=<app-client-ip>          # the phone running the Firewalla app
+CAPTURE_NAME=<short-label>         # e.g. host_rename, group_add
+```
 
 ### 1. Confirm live credentials
 
@@ -639,20 +721,27 @@ Reason:
 
 - the workflow depends on local runtime access without repeating QR pairing
 
-### 2. Capture baseline inventory
+### 2. Capture baseline state
 
-Run `.tmp/capture_runtime_inventory.py` and write a baseline artifact.
+Run the maintained pull helper:
+
+```bash
+python -m utils.pull_runtime --artifact-dir .artifacts/<CAPTURE_NAME>
+```
+
+It prints the timestamped directory it wrote. Keep that path; it is the "before"
+side of the diff.
 
 Purpose:
 
-- establish the exact pre-action rule state
-- identify any existing rule IDs that may be updated rather than created
+- establish the exact pre-action state
+- identify existing rule or tag IDs that may be updated rather than created
 
-### 3. Inspect baseline for the target scope
+### 3. Inspect the baseline for the target scope
 
-Before capturing packets, inspect the inventory for:
+Before capturing packets, inspect the baseline for:
 
-- the target group or host
+- the target group, user, or host
 - any existing rules whose `applies_to`, `target_name`, or `tag_refs` overlap
   the target
 - whether the current state is absent, enabled, or disabled
@@ -662,84 +751,151 @@ Reason:
 - Firewalla does not always use the same mutation strategy for every rule
   family
 
-### 4. Arm remote `tcpdump`
+### 4. Clear old captures and confirm free space
 
-Start `tcpdump` on the Firewalla box over SSH.
-
-Current pattern:
+The box's `/tmp` is small and fills quickly, and a full disk silently produces
+zero-byte pcaps.
 
 ```bash
-ssh -i .tmp/firewalla_temp_ssh_key \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  pi@fire.walla \
-  "sudo tcpdump -i any -s 0 -w /tmp/<capture_name>.pcap port 8833"
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SSH_USER@$BOX_HOST" \
+  "sudo rm -f /tmp/*.pcap; df -h /tmp | tail -1"
 ```
 
-Reason:
+### 5. Arm remote `tcpdump`
 
-- local runtime mutations occur over encrypted HTTP on port `8833`
+```bash
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SSH_USER@$BOX_HOST" \
+  "sudo tcpdump -i any -s 0 -U -w /tmp/$CAPTURE_NAME.pcap \
+     host $CLIENT_IP and port 8833"
+```
 
-### 5. Perform one user action only
+Notes:
 
-Have the user perform exactly one action in the Firewalla app, for example:
+- `-U` writes each packet to disk immediately, so the file is flushed and its
+  size can be verified at any moment. Without it, a pcap copied too early can be
+  truncated.
+- Scope to the app client's IP. Capturing every host on port 8833 adds noise and
+  size for no benefit.
+- Reason the port matters: local runtime mutations travel over encrypted HTTP on
+  port `8833`.
 
-- create a timed block
-- turn a persistent block off
-- turn internet block on
-- re-enable a disabled internet block rule
+Leave this running while the action is performed.
 
-Reason:
+### 6. Perform the app action
 
-- a single action makes the inventory delta and decrypted packet trace easier to
-  correlate
+Have the user perform the action in the Firewalla app. A single action is
+easiest to correlate, but one capture can hold several actions if the user
+records their order — attribution is then by timestamp.
 
-### 6. Stop capture and copy the pcap locally
+### 7. Stop the capture by PID, then verify
 
-Stop the remote `tcpdump` and copy the pcap to `.tmp/` with `scp`.
+Stop **only your own** capture, by PID. Never blanket-`pkill tcpdump`: the box
+runs its own IPv6 router-advertisement sniffers under `tcpdump`, and killing
+them disturbs its network monitoring.
 
-### 7. Capture post-action inventory
+```bash
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SSH_USER@$BOX_HOST" \
+  "PID=\$(pgrep -f 'tcpdump.*$CAPTURE_NAME'); \
+   [ -n \"\$PID\" ] && sudo kill -INT \$PID; sleep 2; \
+   stat -c '%s' /tmp/$CAPTURE_NAME.pcap"
+```
 
-Run `.tmp/capture_runtime_inventory.py` again and write a new artifact.
+Confirm the size is stable and non-zero before copying.
 
-Purpose:
+### 8. Copy the pcap, then free the box
 
-- identify whether a rule was created, deleted, or updated in place
+```bash
+scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SSH_USER@$BOX_HOST:/tmp/$CAPTURE_NAME.pcap" .tmp/$CAPTURE_NAME.pcap
 
-### 8. Decrypt the packet capture
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SSH_USER@$BOX_HOST" "sudo rm -f /tmp/$CAPTURE_NAME.pcap"
+```
 
-Run `utils/analyze_capture.py <pcap_path>`.
+Copy first, delete second. The local `.tmp/` copy is the artifact; the remote
+file is scratch space and must not be left behind.
 
-If the capture is noisy, scope the report to the pairing phone with
-`utils/analyze_capture.py <pcap_path> --client-ip <phone_ip>`.
+### 9. Capture post-action state
 
-If you want to suppress live-stream `GET` and `text/event-stream` traffic and
-focus only on the pairing `POST` flow, add `--pairing-only`.
+```bash
+python -m utils.pull_runtime --artifact-dir .artifacts/<CAPTURE_NAME>
+```
 
-Inspect the decoded request for:
+Note the new timestamped directory. This is the "after" side of the diff.
+
+### 10. Decrypt the packet capture
+
+```bash
+python -m utils.analyze_capture .tmp/$CAPTURE_NAME.pcap --client-ip $CLIENT_IP
+```
+
+Add `--pairing-only` to suppress live-stream `GET` and `text/event-stream`
+traffic. Inspect each decoded request for:
 
 - outer message type such as `cmd` or `init`
-- inner `item` field such as `policy:create`, `policy:delete`, or
-  `policy:update`
-- full `value` payload
+- inner `item` field such as `policy:create`, `policy:delete`, `policy:update`,
+  or `policy`
+- the full `value` payload
 
-### 9. Diff inventories
+### 11. Diff the two pulls
 
-Compare pre-action and post-action inventories and identify:
+Compare the before and after `runtime_init.json` and identify:
 
-- new rule IDs
-- removed rule IDs
-- rules updated in place
-- changes to `enabled`, `dnsmasq_only`, `target`, `target_type`, and timing
-  fields
+- new, removed, or in-place-updated identifiers
+- changes to `enabled`, `dnsmasq_only`, `target`, `target_type`, `tags`,
+  `userTags`, and timing fields
 
-### 10. Record the finding in this document
+### 12. Record the finding in this document
 
 Every confirmed capture should update:
 
 - the findings matrix
 - the mutation-family notes
 - the open questions list if new uncertainty appears
+
+## Widened capture workflow (cloud and push traffic)
+
+Use this when the local-mutation workflow above shows **no** traffic for the
+action, or when you do not yet know where the action lands.
+
+Only two things change: the filter and the analysis tool.
+
+```bash
+"sudo tcpdump -i any -s 0 -U -w /tmp/$CAPTURE_NAME.pcap \
+   host $CLIENT_IP and ( port 8833 or port 443 or port 80 or port 8443 or port 53 )"
+```
+
+```bash
+python -m utils.analyze_capture_wide .tmp/$CAPTURE_NAME.pcap --client-ip $CLIENT_IP
+```
+
+How to read the result:
+
+- **A TLS flow but no port 8833 traffic** → the action is cloud-mediated. The
+  capture proves *which* endpoint was contacted and *when*, but not the payload:
+  TLS content is opaque to this tool.
+- **Both present** → the app wrote locally *and* contacted the cloud. Take the
+  write contract from the port 8833 sections and use the TLS section for
+  correlation.
+- **`undecoded=0` on the SSE section** → the push stream decoded cleanly. A
+  non-zero count means an event shape changed and the decoder needs updating.
+
+A worked example: a device-to-user assignment produced **zero** port 8833
+traffic and a TLS session to the vendor's cloud endpoint, while the box later
+reported the assignment as an ordinary host tag. See the cloud-mediated
+device-to-user finding in the Additional host-settings section for the full
+contract.
+
+### Can we see inside TLS?
+
+Not with this tool. The app-side credentials recovered during the pairing work
+mean decrypting the app's cloud session is possible in principle, but no tooling
+exists for it yet. Until then, treat cloud payloads as opaque and recover the
+contract from the box's own representation instead — that is what the widened
+workflow above is designed to do.
 
 ## Safety and repeatability rules
 
@@ -751,6 +907,12 @@ Every confirmed capture should update:
 - do not guess mutation semantics from UI labels alone
 - do not assume every switchable rule family uses `create` and `delete`
 - do not assume every disabled rule is deleted when turned off
+- do not assume an action is local because it looks local in the app; when the
+  location is unknown, use the widened lane
+- never blanket-kill `tcpdump` on the box; stop your own capture by PID
+- verify the pcap is non-zero before analysing it; a zero-byte capture means the
+  remote disk filled or `tcpdump` never started
+- delete the remote pcap after copying it; the box's `/tmp` is small
 
 ## Modeling output rule
 
@@ -1788,6 +1950,19 @@ Remaining wireless capture opportunities (not required for the toggle):
 - `stationControls` band-steering / banned-AP control
 - channel/band changes
 
+### Group and user membership
+
+**Group membership resolved (2026-10-02):** See Finding 41. Group membership is
+a host-scoped `set` on `item: "policy"` writing `value.tags`; no further
+capture is required for group add/remove.
+
+**User membership resolved (2026-10-02):** See Finding 42. Device-to-user
+assignment is **cloud-mediated** in the app (`firewalla.encipher.io`), but it
+lands on the box as the user's **affiliated backing tag** in `host.tags` — the
+same shape as a group write. **A local write path is confirmed working**: the
+existing host-scoped `set item=policy value.tags=[<affiliated tag>]` assigns a
+user directly. No further capture is required for the user path.
+
 ## Open questions
 
 These items remain unconfirmed and should stay visible.
@@ -1807,6 +1982,12 @@ These items remain unconfirmed and should stay visible.
   delete payload shape
 - whether re-enabling a timed-paused direct DNS rule uses the same payload shape
   as internet-block re-enable, in addition to clearing `idleTs`
+- whether the box fires the `host:syncAppTimeUsageToTags` follow-up on its own
+  after a local membership write, or whether the app must send it
+- whether the Firewalla cloud later reconciles or reverts an affiliated tag
+  written locally, rather than through the app
+- whether the app always sends the full host policy object on membership
+  changes, and whether it always sweeps disabled device-scoped rules on remove
 
 ## AP7 wireless controller findings
 
@@ -2446,6 +2627,289 @@ Conclusion:
   are identical whether the network is collected from the registry or the
   `networkProfiles` fallback, so fixing the collection does not churn existing
   registry entries — only the display name/ports update
+
+### Finding 41: Group membership is a host-scoped `set` on `item: policy` writing `value.tags`
+
+**Scenario:**
+
+- One app session on a single host (the test device, MAC `<device-mac>`)
+  performed two membership actions in order:
+  1. removed the host from its group (`<group-a>`), leaving no group association
+  2. added the host to another group (`<group-b>`)
+- A baseline runtime pull was taken before the session, one continuous
+  `tcpdump` captured port `8833` throughout, and a post-action runtime pull was
+  taken after.
+
+**Result: confirmed. Group membership is written as `value.tags` on the same
+host-scoped `item: "policy"` / `mtype: "set"` path already used for DHCP
+reservations and notification toggles.**
+
+Observed action 1 — remove from the group:
+
+```json
+{
+  "COMMAND_TIMEOUT": 180,
+  "item": "batchAction",
+  "value": [
+    {"data": {"item": "policy:delete", "value": {"policyID": "<policy-id-2>"}}, "mtype": "cmd", "target": "0.0.0.0", "type": "jsonmsg"},
+    {"data": {"item": "policy:delete", "value": {"policyID": "<policy-id-1>"}}, "mtype": "cmd", "target": "0.0.0.0", "type": "jsonmsg"},
+    {"data": {"item": "policy", "value": {"...": "...", "tags": []}}, "mtype": "set", "target": "<device-mac>", "type": "jsonmsg"}
+  ]
+}
+```
+
+Observed action 2 — add to the other group:
+
+```json
+{
+  "COMMAND_TIMEOUT": 180,
+  "item": "batchAction",
+  "value": [
+    {"data": {"item": "policy", "value": {"...": "...", "tags": [<group-b-tag>]}}, "mtype": "set", "target": "<device-mac>", "type": "jsonmsg"},
+    {"data": {"item": "host:syncAppTimeUsageToTags", "value": {"begin": <epoch>, "mac": "<device-mac>"}}, "mtype": "cmd", "target": "0.0.0.0", "type": "jsonmsg"},
+    {"data": {"item": "init", "value": {}, "get": "0.0.0.0", "includeInactiveHosts": true, "fwapcOps": ["..."]}, "mtype": "init", "target": "0.0.0.0", "type": "jsonmsg"}
+  ]
+}
+```
+
+Result:
+
+- host raw `tags` changed from the first group's tag to the second group's tag
+- the host top-level `tags` and the nested `host.policy.tags` changed together
+- the `policyRules` count dropped by two, matching the two deletes in action 1
+- both actions were single `batchAction` posts; each batch's trailing `init`
+  request is a data refresh, not part of the membership mutation
+
+Normalized characteristics:
+
+- the mutation is `mtype: "set"`, `item: "policy"`, `target: "<host-mac>"` —
+  the same host-policy write family as Finding 15
+- membership is expressed as an integer list in `value.tags`
+- tag IDs are **integers in the write** but **strings in the read payload**
+- the write carries the **entire host policy object**, not a `tags`-only patch:
+  `acl`, `adblock`, `bypass_prevention`, `deviceOffline`, `devicePresence`,
+  `device_service_scan`, `doh`, `family`, `ipAllocation`, `monitor`,
+  `ntp_redirect`, `qos`, `safeSearch`, `unbound`, `weak_password_scan`, `tags`
+- `value.tags: []` means "no group"; there is no separate remove command
+
+Side effects of the remove:
+
+- the app also deleted two **disabled, device-scoped rules** for the same MAC:
+  - one `allow` / `outbound` / `type: category` /
+    `scope: ["<device-mac>"]` / `disabled: "1"`
+  - one `block` / `bidirection` / `type: mac` /
+    `target: "<device-mac>"` / `disabled: "1"`
+- "remove from group" is therefore not tags-only; the app sweeps stale
+  device-scoped rules at the same time
+- the add fires `host:syncAppTimeUsageToTags` with an app-supplied epoch
+  `begin`, so the box re-attributes the host's usage history to the new group
+
+Implementation impact:
+
+- a future group-membership service can reuse the existing host-scoped
+  `item: "policy"` writer; no new command family is needed
+- because the app sends the full policy object, an implementation must send the
+  host's current policy with only `tags` changed, not a partial payload
+- integer tag IDs in the write versus string tag IDs in the read must be
+  handled
+- "remove" and "add" are the same call with a different `tags` list; matching
+  app behavior may also require the device-scoped-rule cleanup and the
+  `host:syncAppTimeUsageToTags` follow-up
+
+Open: **user** membership was not exercised in this capture. The same host
+policy object also carries `userTags`, which stayed `[]` throughout, so the
+device-to-user conduit is expected to be this same `item: "policy"` write with
+`userTags` populated — but that is not yet confirmed. The app may instead express
+a user assignment through the user's affiliated backing tag (see the user-facing
+identity rule), which this capture cannot yet distinguish from a plain group
+change.
+
+**Artifacts:**
+
+- `.tmp/firewalla_membership_capture.pcap`
+- `.tmp/membership_capture.decoded.txt`
+- `.tmp/membership_posts.json`
+- pre-capture runtime pull: `.artifacts/membership-capture/20261002-135538/`
+- post-capture runtime pull: `.artifacts/membership-capture/20261002-135842/`
+
+### Finding 42: Device-to-user assignment is cloud-mediated and lands locally as the user's affiliated tag
+
+**Scenario:**
+
+- Two captures were used to isolate how the app assigns a device to a **user**
+  (as opposed to a group).
+- The first capture filtered only the local runtime port (`port 8833`) and the
+  user did several actions: assign to a user, assign to a group, remove from
+  that group, re-assign to the user, remove from the user.
+- Only the two **group** actions produced local traffic (Finding 41 payload
+  shape). **None** of the three user actions produced any local message.
+- A second capture widened the filter to
+  `port 8833 or 443 or 80 or 8443 or 53` and the user performed a single action:
+  assign the test device (`<device-mac>`) to a user.
+
+**Result: confirmed. User assignment never touches the local runtime channel.**
+
+Observed in the widened capture:
+
+- **zero** port `8833` traffic during the action
+- the app opened a TLS session to the vendor's cloud endpoint
+  (`firewalla.encipher.io`), roughly 5.9 KB client / 267 KB server
+- the remaining 443 flow was the phone's DNS provider, unrelated to the mutation
+- no local message of any HTTP method was observed
+
+Observed effect on the box (post-action runtime pull):
+
+```
+host <device-name> (<device-mac>)
+  tags:            ['<user-a-tag>']    <- was []
+  userTags:        []
+  policy.tags:     ['<user-a-tag>']
+  policy.userTags: []
+
+tag <user-a-tag>   name: <tag-uuid>
+                   policy: {"userTags": ["<user-a-id>"]}
+
+user <user-a-id>   name: <user-a>
+                   affiliatedTag: "<user-a-tag>"
+```
+
+Normalized interpretation:
+
+- a Firewalla **user** is a backing **tag** with `policy.userTags` naming the
+  user id; the user record's `affiliatedTag` points back at that tag
+- assigning a device to a user is therefore, at the box, **the same kind of
+  write as assigning it to a group** — `host.tags` gains the user's affiliated
+  backing tag id
+- the group and user cases are **indistinguishable in shape**; only the tag's
+  linkage to a user id distinguishes them
+- the host `policy.userTags` field remained empty in both cases, so it is **not**
+  the device-to-user conduit
+
+**The underlying tag's name is not a reliable signal — and is sometimes a trap:**
+
+A user's backing tag name is **not** uniform across accounts or across the
+account's own history. Measured across 10 users on one box:
+
+- **8 of 10** backing tags are named with a bare **UUID** (a
+  `XXXXXXXX-XXXX-…` style value) and are unmistakably internal
+- **2 of 10** backing tags carry a **human-readable name** (a possessive
+  "<owner>'s Devices" style label) that is indistinguishable from an ordinary
+  group name
+
+Owner context that explains the split: those two users predate Firewalla's
+current user model. When Firewalla first introduced users, a user **was** a
+group, and the app displayed it as such. The later model layers a user identity
+over a backing tag and hides the tag. The two older users are therefore legacy
+artifacts from the original process and its migration; every user created since
+(roughly the last 3-6 months here) uses the finalized UUID-named backing tag.
+
+**Consequence — the legacy name is a false positive, not a real group:**
+
+- there is **no separate group** with the legacy backing tag's name; the name
+  belongs to the user's backing tag and nothing else
+- the human-readable name must **never** be used to decide whether a tag is a
+  group or a user
+- an affiliated backing tag must **never** be rendered by its raw name: 8 of 10
+  would leak a UUID, and the remaining 2 would render a stale legacy label
+  instead of the user's current name
+
+**Classification must be by linkage, never by name.** A tag is a user
+affiliation when its `policy.userTags` is populated (equivalently, when the tag
+id appears as some user record's `affiliatedTag`). Anything else is a plain
+group. This holds for both the UUID-named and the legacy human-named backing
+tags.
+
+**Existing integration surface that this affects:**
+
+- `groups[]` in the runtime inventory is built from the raw `tags` map, so it
+  currently **includes all user backing tags** — both the UUID-named ones and the
+  legacy human-named ones. User affiliations are therefore offered as if they
+  were groups
+- `affiliated_group_name` on a user record is set from the **user's** name rather
+  than the backing tag's name, so it is display-safe but not truthful about the
+  tag, and it makes any "user (group)" label branch dead code
+- per-host resolution is already correct: `_resolve_host_group_name` maps an
+  affiliated tag to the **user's** name, so a device in a legacy backing tag
+  shows the user name rather than the legacy label
+
+**Write paths differ — this is the central asymmetry:**
+
+| | Group add/remove | User assignment |
+| --- | --- | --- |
+| Transport | local `8833` | cloud `443` (vendor endpoint) |
+| Message | `set item=policy target=<mac> value.tags=[...]` | TLS-encrypted, not visible |
+| Local effect | immediate `tags` write | box syncs the affiliated tag in |
+
+Implementation impact:
+
+- user assignment **cannot** be implemented from the local runtime channel the
+  way group membership can; the app does not perform it there
+- the cloud payload is opaque TLS, so the exact cloud write shape cannot be
+  recovered from a packet capture alone
+- implementing user assignment against the cloud requires Firewalla's published
+  cloud contract (the contract-first method at the top of this document), not a
+  local mutation capture
+- **the local shortcut is confirmed working:** because the box represents a user
+  assignment as just `tags: [<affiliated tag>]`, the existing host-scoped
+  `set item=policy value.tags` path **can** express a user assignment directly,
+  even though the app performs the write over the cloud. Verified 2026-10-02 on
+  the dev box (see the confirmation below)
+
+**Local shortcut verification (2026-10-02):**
+
+- wrote a user's affiliated tag to the test device over the local channel only,
+  using the app-shaped 16-key policy object with `value.tags = [<user-tag>]`
+- the box accepted the write and the runtime pull reported the new tag
+- the user record resolved correctly by its `affiliatedTag`
+- the integration's existing normalization already renders it —
+  `_resolve_host_group_name` produced the user's name as `group_name`
+- the host was then restored to the app's prior state, which also succeeded
+- **the app reflects local writes.** After the local user-tag write the Firewalla
+  app showed the device under that user with no app-side action taken, so a
+  locally written assignment is not treated as second-class by the app
+- **group and user tags render distinctly in the app.** The assignment dialog
+  lists groups and users together but separates them into their own sections.
+  Writing a plain group tag locally (no `policy.userTags` link) put the device
+  under the **groups** section; writing a user's affiliated tag put it under the
+  **users** section. So the box and the app both preserve the group/user
+  distinction even though the wire shape is identical
+- **distinguishing the two in data is a tag lookup, not a guess.** A tag is a
+  user affiliation when its `policy.userTags` is populated (equivalently, when
+  the tag id appears as a user record's `affiliatedTag`); otherwise it is a
+  plain group. An implementation must resolve the tag to classify it, because
+  `host.tags` carries no type marker of its own
+- **removal round-tripped on both paths.** A local write driven by
+  `value.tags = [0]` (an invalid tag id the box stripped to `[]`) and a later
+  **explicit** `value.tags = []` write both left the host unassigned, and the app
+  cleared the assignment in both cases. The two paths are therefore equivalent,
+  and an implementation can safely send a clean empty list
+- **no cloud revert observed.** The box still reported the locally written tag
+  on a read-only pull after the app had been open, so the cloud did not
+  reconcile the locally written value within that window
+- **caveat on the normalized model:** the assignment surfaces through
+  `host.group_name` / `group_ids`, **not** `host.user_ids`. `user_ids` is fed by
+  the host `userTags` array, which stays empty. Any user-assignment surface must
+  therefore treat an affiliated tag in `tags` as a user assignment, not rely on
+  `user_ids`
+- **not yet verified:** whether the box fires the `host:syncAppTimeUsageToTags`
+  follow-up on its own after a local write, and whether the cloud reconciles a
+  locally written affiliated tag over a longer window
+
+**Practical consequence:** a working local user-assignment capability is
+achievable today by writing the user's affiliated tag through the existing
+host-policy writer — the same contract as group membership. Prefer this over the
+cloud path until the cloud contract is documented.
+
+**Artifacts:**
+
+- `.tmp/firewalla_user_assign_capture.pcap` (8833-only; group writes only)
+- `.tmp/firewalla_chads_capture.pcap` (widened 8833/443/80/8443/53; cloud call)
+- `.tmp/chads_wide.txt` (widened analysis output)
+- `.tmp/analyze_wide.py` (method-agnostic + SSE decode + TLS/DNS summary)
+- `.tmp/tls_probe.py` (SNI extraction and per-second TLS timeline)
+- `.tmp/probe_membership.py` (dry-run-by-default local membership write probe)
+- pre/post runtime pulls: `.tmp/capture_chads_before.json`,
+  `.tmp/capture_chads_after.json`
 
 ## Alarm findings
 

@@ -89,6 +89,16 @@ Identity presentation rule:
 - this rule applies to normalized rule applicability, watched-user associations, and host-backed entity attributes derived from group membership
 - when normalized rule applicability uses an affiliated user identity in place of a backing group name, the accompanying applicability kind must also be `user` so label and kind stay aligned on Home Assistant-facing surfaces
 
+Group and user collection rule:
+
+- the runtime group collection mirrors the Firewalla app: it holds plain groups and user assignments together in **one collection**, because both are host tags at the protocol level
+- every entry carries a kind discriminator of `group` or `user`; consumers must use it rather than inferring from the entry's name or id
+- an entry is a `user` entry when its tag appears as some user record's `affiliatedTag` (equivalently, when the tag's `policy.userTags` is populated). Classification is by **linkage, never by name**
+- a user entry's display name is the **user's** name. The backing tag's own name is an implementation detail and must never be rendered: it may be a bare UUID, or a stale legacy label left over from the period when a Firewalla user was modelled as a group
+- a user entry also carries the affiliated user id, so a consumer can resolve the full user record without a second lookup
+- counts are reported so the two populations stay legible: group counts exclude user affiliations, and user affiliation counts are reported separately. The two together reconcile to the collection size
+- device-to-user association joins continue to use the backing tag id in `host.group_ids`; the kind discriminator does not change how membership is resolved on a host
+
 ## Protocol baseline
 
 The repository assumes the following protocol facts:
