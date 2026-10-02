@@ -139,7 +139,7 @@ def _mock_snapshot() -> FirewallaRuntimeSnapshot:
                 user_id="21",
                 name="KADEN",
                 affiliated_group_id="10",
-                affiliated_group_name="KADEN's Devices",
+                affiliated_group_name="KADEN",
                 total_minutes_today=410,
                 unique_minutes_today=381,
                 app_usage_today=(
@@ -1557,7 +1557,9 @@ async def test_get_runtime_inventory_service_returns_markdown(
     assert response is not None
     assert response["config_entry_id"] == entry.entry_id
     assert "# Firewalla runtime inventory" in response["markdown"]
-    assert response["inventory"]["summary"]["group_count"] == 1
+    # Tag 10 is a user's affiliated backing tag, so it is not a plain group.
+    assert response["inventory"]["summary"]["group_count"] == 0
+    assert response["inventory"]["summary"]["user_count"] == 1
 
 
 async def test_get_runtime_inventory_service_uses_single_loaded_entry(

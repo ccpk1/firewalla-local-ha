@@ -96,7 +96,7 @@ Group and user collection rule:
 - an entry is a `user` entry when its tag appears as some user record's `affiliatedTag` (equivalently, when the tag's `policy.userTags` is populated). Classification is by **linkage, never by name**
 - a user entry's display name is the **user's** name. The backing tag's own name is an implementation detail and must never be rendered: it may be a bare UUID, or a stale legacy label left over from the period when a Firewalla user was modelled as a group
 - a user entry also carries the affiliated user id, so a consumer can resolve the full user record without a second lookup
-- counts are reported so the two populations stay legible: group counts exclude user affiliations, and user affiliation counts are reported separately. The two together reconcile to the collection size
+- counts are reported from the same classification that produced the collection: the group count counts `group` entries only, and user affiliations are legible through the user collection and user count rather than a second derived field. A separately computed affiliation count could only ever disagree through a defect, so it is deliberately not reported
 - device-to-user association joins continue to use the backing tag id in `host.group_ids`; the kind discriminator does not change how membership is resolved on a host
 
 ## Protocol baseline

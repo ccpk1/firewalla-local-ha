@@ -39,9 +39,11 @@
 1. Add a `group` / `user` kind discriminator to the group collection across the
    client snapshot, the inventory report, and the overview counts.
 2. Give every user-backed entry the user's display name and affiliated user id.
-3. Report group and user counts separately so they reconcile to the collection size.
+3. Report counts from the single classification that produced the collection, so a
+   group count and the user collection can never diverge (no separately derived
+   affiliation count).
 4. Build one admin-gated service that assigns a device to a group or a user, and
-   removes it from either.
+   clears either membership.
 5. Keep every existing entity surface that derives from membership working:
    watched-device `device_group`, device-tracker attributes, and watched-user
    associated-host joins.
@@ -61,25 +63,37 @@
 - **No rename of the Python field `group_name` on hosts** in this initiative;
   only the collection model changes. Host `group_name` already resolves to the
   user-facing identity and is correct.
-- **No multi-group semantics invented.** Whether a device may hold several
-  memberships is confirmed in Phase 1, not assumed.
+- **No multi-group semantics invented.** A device holds exactly one membership
+  (Phase 1, owner-confirmed); a service call replaces it rather than adding to it.
+- **No change to Firewalla *cloud* groups.** `api/auth.py` has its own `groups`
+  concept (`CloudGroupRecord`, `_LOGIN_FIELD_GROUPS`, `extract_group_credentials`,
+  the cloud `groups` endpoint and its polling fallback). That is the pairing and
+  account model, unrelated to on-box device membership, and it is **not** touched
+  here. The two are easy to conflate by name; the plan means the on-box `tags`
+  collection only.
 
 ## 3. Open questions / external dependencies
 
-### Blocking (must be resolved before the dependent phase)
+### Resolved (2026-10-02, owner-confirmed)
 
-- **Can a host hold more than one membership at once?** Every captured write sent a
-  whole `tags` list, but all observed values were either `[]` or a single id. The
-  app dialog presents groups and users in sections, which is consistent with either
-  a single selection or a multi-select. **This decides the service signature**
-  (`assign`/`remove` over a set versus `set`/`clear`). Phase 1 resolves it with one
-  targeted capture. **Fallback if it cannot be resolved:** model the service as
-  `set` + `clear` (whole-list replacement), which is faithful to the observed wire
-  behavior and can be widened later without breaking callers.
-- **Does a plain group and a user assignment compose?** Related to the above. If a
-  host can be in one group *and* one user, the collection memberships coexist and
-  the service needs to preserve the untouched list members while replacing the one
-  being changed. Phase 1 answers this too.
+- **Can a host hold more than one membership at once? — No.** The Firewalla app
+  permits exactly one membership per device. Groups and users are two flavours of
+  the same single slot, not two independent slots, so assigning a group to a device
+  already assigned to a user **replaces** the user, and vice versa.
+  - **Service signature (1.2): one slot, replaced wholesale** — not
+    `assign`/`remove` over a set.
+  - **Absence of composition is confirmed, not assumed.** A host can be in a group
+    **or** a user, never both, so there is no untouched list member to preserve.
+  - **Tool shape (owner-approved): 4 tools** — `set_host_group`,
+    `clear_host_group`, `set_host_user`, `clear_host_user` — all backed by **one**
+    admin-gated service. Separate tools per kind are required rather than a single
+    free-text target because group and user names collide in real data: the legacy
+    user backing tags are literally named `"<owner>'s Devices"`, indistinguishable
+    from a group name. N tools over one service is an established pattern here
+    (`_SetHostNotifyTool` backs two tools from one handler).
+  - **The app's presentation is mirrored.** The app lists groups and users together
+    on one screen but separated into sections; the collection keeps them together
+    with a `kind` discriminator for exactly that reason.
 
 ### Confirmed constraints (design around these)
 
@@ -97,112 +111,270 @@
   command family is needed.
 - **A stale lookaside helper exists.** `_build_affiliated_user_lookup` only records
   a tag when the user **has a name**, so it cannot be used as the exclusion or
-  classification set. Classification must read `affiliatedTag` from user records
-  directly.
+  classification set. Classification is derived from the normalized user records'
+  `affiliatedTag` instead. The helper itself stays: it still has two live callers
+  that use it to label a host's tags.
 - **Entity surfaces already resolve to the user-facing identity.**
   `_resolve_host_group_name` maps an affiliated tag to the user's name, so
   watched-device and device-tracker attributes are correct today. The breakage in
   the current model is in the **collection**, not in per-host resolution.
 
-### Known inconsistency to fix (not an open question, a defect)
+### Known inconsistency — resolved in Phase 1.5
 
-`affiliated_group_name` means three different things today:
+`affiliated_group_name` carried **three different meanings** across **four readers**
+today:
 
-| Location | Current value |
+| Location | Value before 1.5 |
 | --- | --- |
 | `api/client.py::_normalize_user_inventory` | the **tag's** raw name |
 | `helpers/runtime_inventory.py::_build_user_inventory` | the **user's** name |
 | `managers/user_manager.py::_build_watched_user_view` | the **user's** name (forced) |
+| `services.py:3560` (overview `identifiers`) | pass-through of the client value |
 
-The client-side value is the one that can surface a UUID or a legacy label. One
-meaning must win, and the rule in `docs/ARCHITECTURE.md` says it is the user's name.
+The client-side value was the one that could surface a UUID or a legacy label, and
+the overview passed it straight out. One meaning won — the user's name, per
+`docs/ARCHITECTURE.md` — and the client is now the site that was corrected, which
+fixes the other three by construction. The field is **kept**: after 1.5 it equals
+the user's name wherever `affiliated_group_id` is set, and it is the sole source for
+the shipped `associated_device_group` watched-user attribute
+(`const.py:142`, `sensor.py:535`). The name is a mild misnomer now; a rename to
+`affiliated_tag_name` is deliberately a **separate later cleanup**, not part of this
+initiative.
+
+## 3b. Consumer inventory (verified 2026-10-02)
+
+Every place in the repository that reads user or group data, established by
+reading each site rather than by grep alone. This is the coverage contract for
+the phase steps: no consumer may be left unaccounted for.
+
+### Data model and normalization
+
+| Consumer | Where | Reads | Covered by |
+| --- | --- | --- | --- |
+| Group collection | `api/client.py:2191` `_normalize_group_inventory` | every key in raw `tags`, no discriminator | 1.3 |
+| User normalization | `api/client.py:2172-2175` | `affiliated_group_name` from the tag-name lookup | 1.5 |
+| Affiliated-user lookup | `api/client.py:1611` `_build_affiliated_user_lookup` | `userTags[*].affiliatedTag` + a required name | 1.3 (classification must stop relying on it) |
+| Host group label | `api/client.py:1777` `_resolve_host_group_name` | `affiliated_users` first, then the raw `tags` name | 1.3 / 3.2 (fallback can render a tag name) |
+| Inventory groups | `helpers/runtime_inventory.py:332` | **already** derives `user_ids` from `policy.userTags` | 1.4 |
+| Inventory users | `helpers/runtime_inventory.py:382` | `affiliated_group_name` forced to the user's name | 1.5 |
+| Models | `models.py:841`, `:857`, `:835/836` | `FirewallaGroupRuntime`, `FirewallaUserRuntime`, host `group_ids`/`user_ids` | 1.3 |
+
+### Collection consumers
+
+| Consumer | Where | Reads | Covered by |
+| --- | --- | --- | --- |
+| Group accessor | `integration_manager.py:292` `get_groups()` | the whole collection | 1.3 |
+| Usage-history scope | `services.py:3205` `_resolve_usage_history_target` | `group.name` **only** | **3.4 (the defect)** |
+| Overview counts / identifiers | `services.py:3542-3543`, `:3560` | `snapshot.groups`, `snapshot.users` | 3.1 |
+| Inventory counts | `helpers/runtime_inventory.py:605`, `:661` | `group_count` | 1.6 |
+| Group policy controls | `helpers/runtime_inventory.py:400` | policy keys, **skips** `userTags` | 1.4 (now skips `kind == "user"` outright) |
+| Group markdown | `helpers/runtime_inventory.py:419` | `group["name"]` | 1.4 |
+
+### Host-facing consumers of `group_name` / `group_ids` / `user_ids`
+
+These do **not** read the collection, so Phase 3.4's grep will not find them:
+
+| Consumer | Where | Reads | Covered by |
+| --- | --- | --- | --- |
+| Watched-device attribute | `binary_sensor.py:806` | `host.group_name` | 3.2 |
+| Device-tracker attribute | `device_tracker.py:187` | `host.group_name` | 3.2 |
+| Host record | `services.py:4042` | `host.group_name` | 3.4 (extended) |
+| `get_hosts` group filter | `services.py:4092-4095` | `host.group_name` match | 3.4 (extended) |
+| `get_hosts` user filter | `services.py:4114` | `host.user_ids` | 3.4 (extended) |
+| Rule switch attributes | `switch.py:175-179` | `rule.applies_to(_kind)` | 3.4 (extended) |
+| Rule applicability text | `models.py:1413` | `rule.applies_to` | 3.4 (extended) |
+| Rule filtering | `rule_manager.py:260` | `rule.applies_to` | 3.4 (extended) |
+
+### User-facing consumers
+
+| Consumer | Where | Reads | Covered by |
+| --- | --- | --- | --- |
+| Association join | `user_manager.py:102-114` | `host.user_ids`, `host.group_ids` | 3.3 (document the 1:1 invariant) |
+| Watched-user view | `user_manager.py:117-160` | `affiliated_group_name` (forced) | 1.5 |
+| **Choice label** | `user_manager.py:51-57` `_format_user_choice_label` | renders `affiliated_group_name` | **1.5 (live leak — see below)** |
+| Choices | `user_manager.py:61`, `:77` | user records | 1.3 |
+| Watched-user attribute | `sensor.py:534-536` | `affiliated_group_name` | 3.2 |
+| Options flow | `config_flow.py:878`, `:893`, `:1137-1186` | user choices, `CONF_WATCHED_USERS` | 3.2 (verified via choice label) |
+| Entity helper | `entity.py:85` `get_watched_user` | user id | none needed |
+
+### Verified non-consumers
+
+- **`diagnostics.py`** — no group or user references at all, so no diagnostic
+  output changes. Confirmed by search, so this does not need re-checking later.
+- **`api/auth.py` cloud groups** — a different concept; excluded by the non-goal above.
+
+### Live defect found during this review (fixed in Phase 1.5)
+
+`user_manager.py:51-57` `_format_user_choice_label` rendered
+`f"{user.name} ({user.affiliated_group_name})"` whenever the two differed. With a
+UUID-named backing tag that put a **bare UUID into an options-flow choice label
+today**. It was present-day user-visible behaviour, not hypothetical, so Phase 1.5
+treated removing it as a required fix rather than optional cleanup. With
+`affiliated_group_name` unified to the user's name the branch became provably dead,
+and the helper was removed entirely, so a `name (name)` label is now impossible
+rather than merely unlikely.
+
+### Corrections found while executing Phase 1
+
+Two claims in the original §3b review were wrong and are corrected above:
+
+1. **Group policy controls were not "verified correct".** `_build_group_policy_controls`
+   skipped only the `userTags` key, so a user backing tag carrying any other policy
+   key would have produced report rows named after a user. Real backing tags happen
+   to carry nothing else, so this was correct only by coincidence. `1.4` now skips
+   user entries by `kind`, so it holds by construction.
+2. **The inventory's user index was not aligned with the client's.**
+   `_build_user_index` accepted every `userTags` record, while
+   `api/client.py::_normalize_user_inventory` skips records whose `type` is present
+   and not `"user"`. A non-user record carrying an `affiliatedTag` would therefore
+   have classified a tag differently in the two modules. `1.4` applies the same
+   `type` rule in both, so classification cannot diverge.
 
 ## 4. Phase summary
 
-| Phase | Focus | Key output |
-| --- | --- | --- |
-| 1 | Resolve membership semantics and land the model | Confirmed single/multi membership; `kind` + `user_id` on the collection; consistent naming |
-| 2 | Build the membership service | One admin-gated service for assign/remove across groups and users, with validation and tests |
-| 3 | Make the reported surface accurate | Corrected overview counts, verified entity joins, updated read-tool text |
-| 4 | Expose it to assistants | Reversible LLM control tool, prompt fragment, contracts and docs |
+| Phase | Focus | Key output | Status |
+| --- | --- | --- | --- |
+| 1 | Resolve membership semantics and land the model | Single-membership confirmed; `kind` + `user_id` on the collection; one meaning for `affiliated_group_name`; single-path group count | **Complete 2026-10-02** |
+| 2 | Build the membership service | One admin-gated service (single-slot set/clear, group or user) backed by 4 LLM tools, with validation and tests | Not started |
+| 3 | Make the reported surface accurate | Corrected overview counts, verified entity joins, updated read-tool text | Not started |
+| 4 | Expose it to assistants | Four reversible LLM control tools, prompt fragment, contracts and docs | Not started |
 
 ## 5. Phase details
 
-### Phase 1 — Membership semantics and the collection model
+### Phase 1 — Membership semantics and the collection model — COMPLETE (2026-10-02)
 
 Goal: confirm how many memberships a host may hold, then land the data-model change
 so every later phase builds on a correct foundation.
 
-- [ ] **1.1 Confirm multi-membership.** With the owner, use the app to place one
-      device in a group and then also in a user (and vice versa), and pull the
-      runtime. Record whether `host.tags` holds one entry or several. Capture with
-      the widened lane if the app uses the cloud path. Record the result in
-      `docs/REVERSE_ENGINEERING_WORKFLOW.md` and close the blocking question.
-- [ ] **1.2 Choose the service signature** from 1.1: `assign` + `remove` over a set
-      if membership is multi, or `set` + `clear` if it is single. Write the decision
-      into the plan before starting Phase 2.
-- [ ] **1.3 Add the kind discriminator to the snapshot.** In
-      `custom_components/firewalla_local/models.py`, extend `FirewallaGroupRuntime`
-      with `kind` (`"group"` / `"user"`) and `user_id: str | None`. Update
-      `api/client.py::_normalize_group_inventory` to classify by reading
-      `affiliatedTag` from the user records directly, and to set the display name
-      from the user record for user entries. Leave `_build_affiliated_user_lookup`
-      untouched for its existing consumer, or retire it if Phase 3 finds no caller.
-- [ ] **1.4 Make the inventory report consistent.** In
-      `helpers/runtime_inventory.py`: add `kind` and `user_id` to
-      `RuntimeGroupRecord`, classify in `_build_group_inventory`, and set a user
-      entry's `name` to the user's name. Update the markdown group section to show
-      the kind. Keep `group_policy_controls` as-is — it already skips the
-      `userTags` key, so user entries contribute nothing.
-- [ ] **1.5 Unify `affiliated_group_name`.** Pick one meaning — the user's name, per
-      `docs/ARCHITECTURE.md` — and apply it in `api/client.py`,
-      `helpers/runtime_inventory.py`, and `managers/user_manager.py`. Remove the now
-      dead `name (group)` branch in `user_manager.py` if the values are always
-      equal.
-- [ ] **1.6 Report reconciled counts.** In `helpers/runtime_inventory.py`, change
-      `group_count` to count only `kind == "group"` and add a user-affiliation
-      count. Note in code that each user maps 1:1 to exactly one backing tag, so a
-      user-affiliation count equals the user count by construction.
-- [ ] **1.7 Update model tests.** Update `test_runtime_inventory.py`,
-      `test_client.py`, and any fixture asserting on `groups[]`, `group_count`, or
-      `affiliated_group_name`, including the legacy human-named-tag case (classified
-      `user`, displayed with the user's name) and the UUID-named case.
+- [x] **1.1 Confirm multi-membership.** Answered by the owner: the Firewalla app
+      permits exactly one membership per device, so a group and a user are two
+      flavours of one slot, not two independent slots. See the resolved section in
+      §3.
+- [x] **1.2 Choose the service signature.** One slot, replaced wholesale — not
+      `assign` / `remove` over a set. The write is the same host-scoped
+      `set item=policy value.tags` call for both kinds. Owner-approved tool shape:
+      **4 tools** (`set_host_group`, `clear_host_group`, `set_host_user`,
+      `clear_host_user`) over **one** admin-gated service, because group and user
+      names collide in real data (legacy user backing tags are named
+      `"<owner>'s Devices"`).
+- [x] **1.3 Add the kind discriminator to the snapshot.** `FirewallaGroupRuntime`
+      gained `kind: Literal["group", "user"]` and `user_id: str | None = None`.
+      `_normalize_group_inventory` now takes the normalized users and classifies by
+      linkage, never by name — it builds an affiliation map from
+      `FirewallaUserRuntime.affiliated_group_id` and discards the backing tag's own
+      name for user entries. `build_runtime_snapshot` normalizes users before groups
+      so both derive from one source. `_build_affiliated_user_lookup` is **not**
+      retired: it still has two live callers (`api/client.py:1975`, `:2433`), and it
+      only stops being used for classification.
+- [x] **1.4 Make the inventory report consistent.** `RuntimeGroupRecord` gained
+      `kind` and `user_id`; `_build_group_inventory` classifies from `affiliatedTag`
+      via `_build_user_index` and sets a user entry's `name` to the user's name; the
+      markdown group section shows the kind. Two corrections were required beyond the
+      original wording:
+      1. classification is from `affiliatedTag` linkage, **not** from
+         `policy.userTags` — the two agree in practice, but linkage is the rule the
+         Architecture states and does not depend on a policy key surviving.
+      2. `_build_group_policy_controls` now skips `kind == "user"` outright. Its
+         old `userTags`-key skip was correct only by coincidence: a user backing tag
+         carrying any other policy key would have produced rows named after a user.
+      `_build_user_index` also gained the client's `type != "user"` filter, so the
+      inventory and the client cannot disagree about who is a user.
+- [x] **1.5 Unify `affiliated_group_name`.** One meaning — the user's name, per
+      `docs/ARCHITECTURE.md` — at all four sites: `api/client.py:2172` was the site
+      corrected (it read the backing tag's raw name), which fixes
+      `helpers/runtime_inventory.py:392`, `managers/user_manager.py:149` and
+      `services.py:3560` by construction. `_format_user_choice_label` was then
+      **removed entirely** rather than trimmed: with the value unified its
+      `name (group)` branch was provably dead, and a `name (name)` label is now
+      impossible rather than merely unlikely. The field itself is **kept** — it is
+      the sole source for the shipped `associated_device_group` watched-user
+      attribute; see §3.
+- [x] **1.6 Report reconciled counts.** `group_count` is derived from the same
+      classified list that is emitted (`sum(1 for group in groups if group["kind"] ==
+      "group")`), so it cannot diverge from the collection. **No separate
+      user-affiliation count was added**, by owner direction: each user maps 1:1 to
+      one backing tag, so such a field could only ever disagree through a defect.
+      `docs/ARCHITECTURE.md` was corrected to match.
+- [x] **1.7 Update model tests.** `test_runtime_inventory.py` now carries both the
+      legacy human-named backing tag (`"KADEN's Devices"` → `KADEN`) and a
+      UUID-named one, asserts the rendered group bullets and that neither the legacy
+      label nor the UUID leaks, and asserts group policy controls exclude user
+      entries. `test_client.py`, `test_init.py` and `test_services.py` fixtures were
+      updated for the new `kind` field and the unified name; the usage-history
+      fixture gained a genuine plain group so its group-scope test still exercises a
+      real group instead of silently resolving a user entry.
+
 
 ### Phase 2 — The membership service
 
-Goal: one admin-gated service that changes a device's group or user membership.
+Goal: one admin-gated service that sets or clears a device's single group or user
+membership. Signature is fixed by 1.2: **one service**, kind-explicit and
+mutually exclusive target fields, backing **four** LLM tools in Phase 4.
 
 - [ ] **2.1 Add constants.** In `custom_components/firewalla_local/const.py`: the
-      service name, the membership kind field, the membership target field, and
-      translation keys for the new validation failures. Reuse
-      `SERVICE_FIELD_MODE`, `SERVICE_FIELD_HOST_MAC`, `SERVICE_FIELD_HOST_NAME`,
-      `SERVICE_FIELD_REFRESH`, and the config-entry selectors.
-- [ ] **2.2 Build the app-shaped policy payload.** Add a helper that reads the
-      host's current raw policy, preserves the app's 16 keys, and replaces only
-      `tags`. Do not reuse `_build_host_ip_allocation_policy_value`, which is
-      allocation-specific. Base it on the proven shape in
-      `.tmp/probe_membership.py`.
-- [ ] **2.3 Resolve the membership target.** Accept a target by id or by name and
-      resolve it against the classified collection, so a caller can pass either a
-      group name or a user name. Reject ambiguous matches and unknown targets with
+      service name, the group and user target fields (name and id each), a `clear`
+      field, and translation keys for the new validation failures. Reuse
+      `SERVICE_FIELD_HOST_MAC`, `SERVICE_FIELD_HOST_NAME`, `SERVICE_FIELD_REFRESH`,
+      and the config-entry selectors.
+- [ ] **2.2 Build the payload.** Add a helper that reads the host's current raw
+      policy and replaces only `tags`. Do not reuse
+      `_build_host_ip_allocation_policy_value`, which is allocation-specific.
+      **Owner direction: send only what changes, DHCP-writer style.** The DHCP
+      reservation writer sends just the `ipAllocation` sub-object, not a 16-key
+      policy object, and it works. The membership writer should do the same with
+      `tags` unless a live test proves the box requires the full object. Finding 41
+      recorded the app sending the whole 16-key object, but the app's choice is not
+      evidence that the box requires it — the DHCP writer is direct evidence that it
+      does not require it for its own key. **Confirm on the dev box before choosing**,
+      and record the result; a minimal write is safer because it cannot clobber a
+      policy key the caller never intended to send.
+- [ ] **2.3 Resolve the membership target.** Accept a group or a user, by id or by
+      name, and resolve it against the **classified** collection — a `group` target
+      must resolve to a `kind == "group"` entry and a `user` target to a
+      `kind == "user"` entry, so a name that exists in both kinds cannot silently
+      pick the wrong one. Reject ambiguous matches and unknown targets with
       translated errors, following the existing selector-resolution pattern in
       `services.py`.
 - [ ] **2.4 Implement the handler.** In `services.py`, add the schema and the
       handler, then register it in `_SERVICE_REGISTRATIONS` as admin-gated with
-      `SupportsResponse.ONLY`. Write through the existing
-      `integration_manager` → `async_set_host_policy` path. Preserve list members
-      the caller did not touch when membership turns out to be multi (Phase 1).
+      `SupportsResponse.ONLY`. Exactly one of `{group, user, clear}` is required;
+      `clear` sends `value.tags: []`. Write through the existing
+      `integration_manager` → `async_set_host_policy` path. This is a single-slot
+      replace, so assigning replaces whatever membership existed.
+- [ ] **2.4b Reproduce the app's stale-rule sweep.** Finding 41 records that the
+      app does **not** only rewrite `tags` on removal: it also sweeps the
+      device-scoped `block` / `bidirection` / `type: mac` rules that targeted the
+      device's previous affiliation, and the app cleans up the assignment in the same
+      action. Owner direction: **this is required, not optional.** A local clear that
+      leaves those rules behind would diverge from the app. Establish during live
+      testing whether the sweep is performed by the box (in which case nothing is
+      needed) or must be issued by the integration, and record the answer. Also
+      re-check the unverified `host:syncAppTimeUsageToTags` follow-up noted in
+      Finding 42; if the box does not fire it after a local write, usage history for
+      the new assignment may not re-attribute, and that must be called out.
 - [ ] **2.5 Document the service.** In `services.yaml`, follow the existing host
       service style — description, field descriptions, example values, and the
       translation-ready wording used by the other host-setting services. Reference
       the service from the host-actions section of `docs/USER_GUIDE.md`.
+      **`translations/en.json` is also required and is a hard gate.** This
+      repository has no `strings.json`; `translations/en.json` is hand-maintained,
+      and `test_every_service_has_a_translation_and_no_orphans`
+      (`test_services.py:3562`) fails for any registered service with no block
+      there. Add the `services.<name>` entry with a `name` and a `description`,
+      then the per-field `name`/`description` entries. Phase 2 is not complete
+      until the suite is green.
 - [ ] **2.6 Promote the probe.** Move the proven write probe out of gitignored
       `.tmp/` into a tracked utility alongside the capture tooling, so the contract
       is reproducible. Keep it dry-run by default, matching
       `utils/probe_alarm_control.py` and `utils/probe_internet_quality.py`.
-- [ ] **2.7 Tests.** Cover: assign to a group, assign to a user, remove each,
-      unknown target rejected, ambiguous target rejected, tag-id type handling,
-      and that the payload sent is the app-shaped key set with only `tags` changed.
+      `.tmp/` is gitignored, so `.tmp/probe_membership.py` and the capture artifacts
+      exist only on this machine. Finding 41/42 text in
+      `docs/REVERSE_ENGINEERING_WORKFLOW.md` is the durable copy of the contract;
+      the promoted probe is the second.
+- [ ] **2.7 Tests.** Cover: assign to a group, assign to a user, clear, unknown
+      target rejected, ambiguous target rejected, a name that exists as both a group
+      and a user resolving by kind rather than by luck, tag-id type handling, and the
+      exact payload sent (asserting the minimal write if 2.2 confirms it).
 
 ### Phase 3 — Accurate surface and preserved entity behavior
 
@@ -210,9 +382,14 @@ Goal: make the reported surface correct without breaking anything downstream.
 
 - [ ] **3.1 Fix the overview counts.** In
       `services.py::_async_handle_get_system_overview`, report the group count from
-      the classified collection and add the user-affiliation count. Confirm
-      `include: ["identifiers"]` items carry the kind so a consumer can tell them
-      apart. Existing tests at `test_services.py:3700,3819,3821` need updating.
+      the classified collection. **No user-affiliation count is added** (owner
+      direction, see 1.6); the `users` section already carries that population.
+      Confirm `include: ["identifiers"]` items carry the kind so a consumer can tell
+      them apart. The tests that assert on this are `test_services.py` (the
+      `assert "items" not in overview["groups"]` case and its `identifiers`
+      variant). The count assertions that Phase 1.6 changed were
+      `test_runtime_inventory.py` (`group_count`) and `test_init.py` (`group_count`),
+      both updated in Phase 1.
 - [ ] **3.2 Audit the entity surfaces.** Verify that watched-device
       (`binary_sensor.py:806`), device-tracker (`device_tracker.py:187`), and
       watched-user (`sensor.py:536`) attributes are unchanged in meaning and that
@@ -222,12 +399,18 @@ Goal: make the reported surface correct without breaking anything downstream.
       `managers/user_manager.py::_get_associated_hosts_for_user` still resolves
       associated devices through the backing tag id in `host.group_ids`, and that
       the 1:1 user-to-tag invariant is documented where it is relied on.
-- [ ] **3.4 Audit remaining group consumers.** Grep for every use of
-      `snapshot.groups`, `get_groups()`, and `groups[]`, and confirm each consumer
-      either uses the kind or is provably unaffected. **One consumer needs a real
-      fix:** `services.py::_resolve_usage_history_target` (line 3112, reached from
-      `_async_handle_get_time_usage_report` at line 4749) resolves a
-      `scope_kind="group"` request against `get_groups()` and matches on
+- [ ] **3.4 Audit remaining group consumers.** Work from the §3b inventory rather
+      than a fresh grep, because two groups of consumers will not be found by
+      searching for `snapshot.groups`, `get_groups()`, or `groups[]`:
+      the **host-facing** consumers that read `host.group_name`, `host.group_ids`
+      or `host.user_ids` (`binary_sensor.py:806`, `device_tracker.py:187`,
+      `services.py:4042`, the `get_hosts` group filter at `services.py:4092-4095`,
+      the `get_hosts` user filter at `services.py:4114`), and the **rule-facing**
+      consumers that read `applies_to` (`switch.py:175-179`, `models.py:1413`,
+      `rule_manager.py:260`). Confirm each is either unaffected or handled.
+      **One consumer needs a real fix:** `services.py::_resolve_usage_history_target`
+      (line 3112, called from `_async_handle_get_time_usage_report` at line 4767)
+      resolves a `scope_kind="group"` request against `get_groups()` and matches on
       `group.name`. Once a user-backed entry carries the user's name, a group-scoped
       request can resolve to a user's backing tag and return that user's usage
       labelled as a group. The group branch must skip entries whose kind is `user`
@@ -244,49 +427,72 @@ Goal: make the reported surface correct without breaking anything downstream.
 
 Goal: let an assistant change a device's membership as a reversible control.
 
-- [ ] **4.1 Add the control tool.** In
-      `llm_tools_control.py`, add a tool following the
-      `SetHostDhcpReservationTool` pattern — reversible annotations, host selector
-      plus membership selector, delegating to the new service with
-      `_returns_response = True`. Register it in `_CONTROL_TOOL_CLASSES` (not the
-      destructive list) since it is reversible.
+- [ ] **4.1 Add the control tools.** In
+      `llm_tools_control.py`, add **four** tools — `set_host_group`,
+      `clear_host_group`, `set_host_user`, `clear_host_user` — each following the
+      `SetHostDhcpReservationTool` pattern: reversible annotations, host selector
+      plus (for the `set_` tools) the kind's name-or-id target, delegating to the
+      one new service with `_returns_response = True`. Register all four in
+      `_CONTROL_TOOL_CLASSES` (not the destructive list) since they are reversible.
+      Four tools rather than one free-text target because group and user names
+      collide in real data; `_SetHostNotifyTool` is the in-repo precedent for
+      several tools over one service.
 - [ ] **4.2 Update the prompt fragment.** In `llm_tools_common.py`, note that a
       device's membership can be changed, that groups and users are both valid
       targets, and that the change is reversible.
-- [ ] **4.3 Document the contract.** Add the tool to
+- [ ] **4.3 Document the contract.** Add the four tools to
       `docs/MCP_TOOL_REFERENCE.md` in the existing per-tool format, using the same
-      annotation and availability fields as its neighbours.
-- [ ] **4.4 Tests.** Cover the tool's schema, its service delegation, its
+      annotation and availability fields as their neighbours.
+- [ ] **4.4 Tests.** Cover each tool's schema, its service delegation, its
       response envelope, and its registration tier. Update
       `test_llm_contract.py` if it asserts an exact tool count or list.
-- [ ] **4.5 Verify availability tiers.** Confirm the tool appears at
+- [ ] **4.5 Verify availability tiers.** Confirm the tools appear at
       read-and-control and above and not in summary-only, consistent with the other
       reversible controls.
 
 ## 6. Validation strategy
 
+- **§3b is the coverage contract.** Every user/group consumer in the repository is
+  listed there with the step that covers it, and two verified non-consumers
+  (`diagnostics.py`, the `api/auth.py` cloud groups) are recorded so they are not
+  re-investigated. A phase is not complete while any row's step is unfinished.
 - **Per phase:** `python -m ruff check .`, `python -m ruff format .`,
   `python -m mypy custom_components/firewalla_local`, `python -m pytest tests/ -v`.
-- **Phase 1 is the highest-risk phase.** It changes a published shape that entities
-  and services read. Do not start Phase 2 until the full suite is green, and treat
-  any failing test as a signal that a consumer was missed rather than a test to
-  update blindly.
+- **Phase 1 is complete and was the highest-risk phase.** It changed a published
+  shape that entities and services read. The full suite was green before Phase 2
+  started, and no test outside the predicted set failed — which is the evidence that
+  §3b's consumer inventory was complete.
 - **Live verification:** after Phase 2, run the service against the dev box for
-  assign-to-group, assign-to-user, and remove, and confirm each in the Firewalla
-  app. Membership writes are trivially reversible, so a live check is safe and is
+  set-to-group, set-to-user, and clear, and confirm each in the Firewalla app.
+  Membership writes are trivially reversible, so a live check is safe and is
   the strongest evidence the contract still holds.
-- **Contract checks:** confirm the write sends the app-shaped key set, integer tag
-  ids, and that removal sends an explicit empty list.
+- **Contract checks:** establish on the dev box whether the minimal `tags`-only
+  write (the DHCP-writer shape) is accepted, and whether the box performs the
+  stale device-scoped rule sweep itself; integer tag ids; and that clear sends an
+explicit empty list.
 - **Regression focus:** legacy human-named backing tags, UUID-named backing tags,
   real groups, and a device with no membership.
 
 ## 7. Breaking changes to call out
 
 - `groups` / `groups[]` entries gain `kind` and `user_id`, and a user-backed entry's
-  `name` changes from the raw tag name to the user's name.
-- `group_count` shrinks to real groups only; a user-affiliation count is added.
+  `name` changes from the raw tag name to the user's name. *(Landed in Phase 1.)*
+- `group_count` shrinks to real groups only. **No user-affiliation count is added** —
+  use the `users` collection or `user_count` for that population.
 - Any consumer summing `group_count` to get a collection total must switch to the
-  two counts or the collection length.
+  collection length.
+- `affiliated_group_name` has one meaning now: the user's name. A consumer that
+  relied on it carrying the backing tag's name loses that value. *(Landed in
+  Phase 1.)*
+- The options-flow watched-user label no longer appends a parenthesised tag name, so
+  a label that previously leaked a UUID is now just the user's name. *(Landed in
+  Phase 1.)*
+- **Assigning a membership clears the previous one.** A device holds at most one
+  membership (Phase 1, owner-confirmed), so the write replaces `tags` wholesale and
+  assigning a group to a device already assigned to a user **removes the user
+  assignment** rather than adding alongside it. That is a user-visible outcome of a
+  single call and must be stated in the release notes and in the service
+  description. This is confirmed behaviour, not a contingency.
 
 ## 8. References
 

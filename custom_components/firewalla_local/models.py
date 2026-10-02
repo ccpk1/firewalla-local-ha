@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 from enum import StrEnum
-from typing import Final, NotRequired, TypedDict
+from typing import Final, Literal, NotRequired, TypedDict
 
 from cronsim import CronSim, CronSimError
 
@@ -839,10 +839,17 @@ class FirewallaHostRuntime:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaGroupRuntime:
-    """Minimal normalized group inventory used for scoped history queries."""
+    """One entry from the Firewalla host-tag collection.
+
+    Firewalla models a plain group and a user assignment as the same protocol
+    object — a host tag — so both live in one collection. ``kind`` is the
+    discriminator; ``user_id`` is set only on ``"user"`` entries.
+    """
 
     group_id: str
     name: str
+    kind: Literal["group", "user"]
+    user_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

@@ -599,8 +599,13 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert rules[5].dnsmasq_only is True
     assert rules[5].is_temporary is True
     assert snapshot.groups == (
-        FirewallaGroupRuntime(group_id="10", name="KADEN's Devices"),
-        FirewallaGroupRuntime(group_id="12", name="Quarantine"),
+        FirewallaGroupRuntime(
+            group_id="10",
+            name="KADEN",
+            kind="user",
+            user_id="21",
+        ),
+        FirewallaGroupRuntime(group_id="12", name="Quarantine", kind="group"),
     )
 
 
@@ -1164,7 +1169,7 @@ async def test_get_runtime_snapshot_derives_user_totals_and_group_links() -> Non
             user_id="23",
             name="PAYTON",
             affiliated_group_id="11",
-            affiliated_group_name="PAYTON's Devices",
+            affiliated_group_name="PAYTON",
             total_minutes_today=44,
             unique_minutes_today=42,
             app_usage_today=(
@@ -1243,7 +1248,7 @@ async def test_get_runtime_snapshot_prefers_internet_usage_totals_for_users() ->
             user_id="21",
             name="KADEN",
             affiliated_group_id="10",
-            affiliated_group_name=None,
+            affiliated_group_name="KADEN",
             total_minutes_today=99,
             unique_minutes_today=99,
             app_usage_today=(

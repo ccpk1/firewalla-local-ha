@@ -2092,7 +2092,6 @@ class FirewallaApiClient:
         if not isinstance(raw_user_tags, dict):
             return ()
 
-        group_lookup = self._build_named_lookup(data, "tags")
         normalized_users: list[FirewallaUserRuntime] = []
         for raw_user_id, raw_user in raw_user_tags.items():
             if not isinstance(raw_user_id, str) or not raw_user_id:
@@ -2171,9 +2170,7 @@ class FirewallaApiClient:
                     name=user_name,
                     affiliated_group_id=affiliated_group_id,
                     affiliated_group_name=(
-                        group_lookup.get(affiliated_group_id)
-                        if affiliated_group_id is not None
-                        else None
+                        user_name if affiliated_group_id is not None else None
                     ),
                     total_minutes_today=total_minutes_today,
                     unique_minutes_today=unique_minutes_today,
@@ -2189,15 +2186,54 @@ class FirewallaApiClient:
         )
 
     def _normalize_group_inventory(
-        self, data: dict[str, object]
+        self,
+        data: dict[str, object],
+        *,
+        users: tuple[FirewallaUserRuntime, ...],
     ) -> tuple[FirewallaGroupRuntime, ...]:
-        """Normalize group inventory from the Firewalla tag collection."""
-        group_lookup = self._build_named_lookup(data, "tags")
+        """Normalize the Firewalla host-tag collection into groups and users.
+
+        A plain group and a user assignment are the same protocol object — a
+        host tag — so they share one collection and are told apart by linkage,
+        never by name: a tag is a user entry when a normalized user record names
+        it as its ``affiliatedTag``. The backing tag's own name is discarded for
+        user entries, because it may be a bare UUID or a stale legacy label.
+
+        The affiliation map is built from the already-normalized users so the
+        two collections can never disagree about which tag belongs to a user.
+        """
+        tag_lookup = self._build_named_lookup(data, "tags")
+        affiliated_users = {
+            user.affiliated_group_id: user
+            for user in users
+            if user.affiliated_group_id is not None
+        }
+
+        normalized_groups: list[FirewallaGroupRuntime] = []
+        for group_id, tag_name in tag_lookup.items():
+            affiliated_user = affiliated_users.get(group_id)
+            if affiliated_user is None:
+                normalized_groups.append(
+                    FirewallaGroupRuntime(
+                        group_id=group_id,
+                        name=tag_name,
+                        kind="group",
+                    )
+                )
+                continue
+            normalized_groups.append(
+                FirewallaGroupRuntime(
+                    group_id=group_id,
+                    name=affiliated_user.name,
+                    kind="user",
+                    user_id=affiliated_user.user_id,
+                )
+            )
+
         return tuple(
-            FirewallaGroupRuntime(group_id=group_id, name=group_name)
-            for group_id, group_name in sorted(
-                group_lookup.items(),
-                key=lambda item: (item[1].casefold(), item[0]),
+            sorted(
+                normalized_groups,
+                key=lambda group: (group.name.casefold(), group.group_id),
             )
         )
 
@@ -2688,8 +2724,8 @@ class FirewallaApiClient:
     ) -> FirewallaRuntimeSnapshot:
         """Build a coordinator-ready snapshot from one raw init payload."""
         hosts = self._normalize_host_inventory(data)
-        groups = self._normalize_group_inventory(data)
         users = self._normalize_user_inventory(data)
+        groups = self._normalize_group_inventory(data, users=users)
         return FirewallaRuntimeSnapshot(
             appliance_identity=self._extract_appliance_identity(data),
             appliance_runtime=self._extract_appliance_runtime(data),

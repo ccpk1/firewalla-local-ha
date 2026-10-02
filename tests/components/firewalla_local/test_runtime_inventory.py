@@ -86,15 +86,21 @@ def test_build_runtime_inventory_report() -> None:
         "tags": {
             "10": {
                 "name": "KADEN's Devices",
-                "policy": {
-                    "family": True,
-                    "safeSearch": {"state": False},
-                    "userTags": ["21"],
-                },
+                "policy": {"userTags": ["21"]},
             },
-            "17": {"name": "AV_SMART_TV", "policy": {"adblock": False}},
+            "12": {
+                "name": "9C7F1E4A-0B2D-4E6F-8A1B-2C3D4E5F6071",
+                "policy": {"userTags": ["22"]},
+            },
+            "17": {
+                "name": "AV_SMART_TV",
+                "policy": {"adblock": False, "safeSearch": {"state": True}},
+            },
         },
-        "userTags": {"21": {"name": "KADEN", "affiliatedTag": "10"}},
+        "userTags": {
+            "21": {"name": "KADEN", "affiliatedTag": "10"},
+            "22": {"name": "PAYTON", "affiliatedTag": "12"},
+        },
         "policyRules": [
             {
                 "pid": "736",
@@ -172,9 +178,10 @@ def test_build_runtime_inventory_report() -> None:
         online_window_seconds=300,
     )
 
-    assert report["summary"]["group_count"] == 2
-    assert report["summary"]["group_policy_control_count"] == 3
-    assert report["summary"]["user_count"] == 1
+    # Tag 10 and tag 12 are user backing tags, so only tag 17 is a plain group.
+    assert report["summary"]["group_count"] == 1
+    assert report["summary"]["group_policy_control_count"] == 2
+    assert report["summary"]["user_count"] == 2
     assert report["summary"]["policy_rule_count"] == 3
     assert report["summary"]["dap_rule_count"] == 0
     assert report["summary"]["family_rule_count"] == 0
@@ -185,14 +192,37 @@ def test_build_runtime_inventory_report() -> None:
     assert report["summary"]["rule_switch_candidate_count"] == 1
     assert report["summary"]["rules_needing_review_count"] == 1
     assert report["summary"]["target_list_reference_count"] == 1
-    assert report["groups"][0]["name"] == "AV_SMART_TV"
-    assert report["groups"][1]["name"] == "KADEN's Devices"
-    assert report["groups"][1]["policy"] == {
-        "family": True,
-        "safeSearch": False,
-        "userTags": ["21"],
-    }
-    assert report["groups"][1]["user_names"] == ["KADEN"]
+    assert report["groups"] == [
+        {
+            "id": "17",
+            "kind": "group",
+            "name": "AV_SMART_TV",
+            "policy": {"adblock": False, "safeSearch": True},
+            "user_id": None,
+            "user_ids": [],
+            "user_names": [],
+        },
+        {
+            "id": "10",
+            "kind": "user",
+            # The backing tag's own name is a legacy label and must not render.
+            "name": "KADEN",
+            "policy": {"userTags": ["21"]},
+            "user_id": "21",
+            "user_ids": ["21"],
+            "user_names": ["KADEN"],
+        },
+        {
+            "id": "12",
+            "kind": "user",
+            # A UUID-named backing tag must render as the user's name.
+            "name": "PAYTON",
+            "policy": {"userTags": ["22"]},
+            "user_id": "22",
+            "user_ids": ["22"],
+            "user_names": ["PAYTON"],
+        },
+    ]
     assert report["group_policy_controls"] == [
         {
             "group_id": "17",
@@ -202,18 +232,11 @@ def test_build_runtime_inventory_report() -> None:
             "value": False,
         },
         {
-            "group_id": "10",
-            "group_name": "KADEN's Devices",
-            "policy_key": "family",
-            "user_names": ["KADEN"],
-            "value": True,
-        },
-        {
-            "group_id": "10",
-            "group_name": "KADEN's Devices",
+            "group_id": "17",
+            "group_name": "AV_SMART_TV",
             "policy_key": "safeSearch",
-            "user_names": ["KADEN"],
-            "value": False,
+            "user_names": [],
+            "value": True,
         },
     ]
     assert report["users"] == [
@@ -222,8 +245,25 @@ def test_build_runtime_inventory_report() -> None:
             "affiliated_group_name": "KADEN",
             "id": "21",
             "name": "KADEN",
-        }
+        },
+        {
+            "affiliated_group_id": "12",
+            "affiliated_group_name": "PAYTON",
+            "id": "22",
+            "name": "PAYTON",
+        },
     ]
+    markdown = render_runtime_inventory_markdown(report)
+    assert "- AV_SMART_TV (kind: group, id: 17)" in markdown
+    assert "- KADEN (kind: user, id: 10)" in markdown
+    assert "- PAYTON (kind: user, id: 12)" in markdown
+    groups_section = markdown.split("## Groups", 1)[1].split(
+        "## Group Policy Controls", 1
+    )[0]
+    # Neither the legacy label nor the UUID behind a user entry may render as a
+    # group bullet.
+    assert "- KADEN's Devices" not in groups_section
+    assert "9C7F1E4A-0B2D-4E6F-8A1B-2C3D4E5F6071" not in markdown
     assert report["rules"][0]["label"] == (
         "block internet for KADEN's Devices (KADEN) (enabled)"
     )

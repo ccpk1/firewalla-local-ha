@@ -47,29 +47,16 @@ class FirewallaUserManager(FirewallaBaseManager):
             )
         )
 
-    @staticmethod
-    def _format_user_choice_label(user: FirewallaWatchedUser) -> str:
-        """Build the best available user-facing label."""
-        if (
-            user.affiliated_group_name is not None
-            and user.affiliated_group_name != user.name
-        ):
-            return f"{user.name} ({user.affiliated_group_name})"
-        return user.name
-
     @classmethod
     def get_watched_user_choices_for_users(
         cls, users: tuple[FirewallaWatchedUser, ...]
     ) -> dict[str, str]:
         """Return watched-user choices keyed by user identifier."""
         return {
-            user.user_id: cls._format_user_choice_label(user)
+            user.user_id: user.name
             for user in sorted(
                 users,
-                key=lambda user: (
-                    cls._format_user_choice_label(user).casefold(),
-                    user.user_id,
-                ),
+                key=lambda user: (user.name.casefold(), user.user_id),
             )
         }
 

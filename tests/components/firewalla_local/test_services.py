@@ -859,13 +859,21 @@ def _usage_history_snapshot() -> FirewallaRuntimeSnapshot:
                 user_ids=("21",),
             ),
         ),
-        groups=(FirewallaGroupRuntime(group_id="10", name="KADEN's Devices"),),
+        groups=(
+            FirewallaGroupRuntime(group_id="12", name="Quarantine", kind="group"),
+            FirewallaGroupRuntime(
+                group_id="10",
+                name="KADEN",
+                kind="user",
+                user_id="21",
+            ),
+        ),
         users=(
             FirewallaUserRuntime(
                 user_id="21",
                 name="KADEN",
                 affiliated_group_id="10",
-                affiliated_group_name="KADEN's Devices",
+                affiliated_group_name="KADEN",
                 total_minutes_today=410,
                 unique_minutes_today=381,
             ),
@@ -5085,7 +5093,7 @@ async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "group",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "KADEN's Devices",
+                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "Quarantine",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                     1_774_065_600,
                     UTC,
@@ -5103,7 +5111,7 @@ async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(
 
     assert mock_get_usage_history.await_args is not None
     assert mock_get_usage_history.await_args.kwargs["scope_type"] == "tag"
-    assert mock_get_usage_history.await_args.kwargs["target"] == "10"
+    assert mock_get_usage_history.await_args.kwargs["target"] == "12"
     assert mock_get_usage_history.await_args.kwargs["app_ids"] == ()
     assert response is not None
     assert response["query"]["app_ids"] == []
