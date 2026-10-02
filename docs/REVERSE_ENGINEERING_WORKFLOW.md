@@ -1986,8 +1986,12 @@ These items remain unconfirmed and should stay visible.
   after a local membership write, or whether the app must send it
 - whether the Firewalla cloud later reconciles or reverts an affiliated tag
   written locally, rather than through the app
-- whether the app always sends the full host policy object on membership
-  changes, and whether it always sweeps disabled device-scoped rules on remove
+- ~~whether the app always sends the full host policy object on membership
+  changes, and whether it always sweeps disabled device-scoped rules on remove~~
+  — **answered in Finding 43.** The app sends the full 16-key policy object but the
+  box does not require it (a `tags`-only write keeps every other key). On a rule
+  removal the app deletes **every** rule the device owns — not only disabled ones,
+  and not only `dap` — ahead of the tags write, in the same batch
 
 ## AP7 wireless controller findings
 
@@ -2701,6 +2705,12 @@ Side effects of the remove:
     `target: "<device-mac>"` / `disabled: "1"`
 - "remove from group" is therefore not tags-only; the app sweeps stale
   device-scoped rules at the same time
+- **superseded in part by Finding 43**, which captured the full rule handling on a
+  membership change: the app deletes **every** rule the device owns — enabled or
+  disabled, `dap` or user-created — ahead of the tags write, in the same batch. The
+  two rules deleted here were the only two that device had, so this capture could
+  not distinguish "delete the device's rules" from "sweep the disabled ones".
+  Finding 43's device carried four rules of mixed state and settled it
 - the add fires `host:syncAppTimeUsageToTags` with an app-supplied epoch
   `begin`, so the box re-attributes the host's usage history to the new group
 
@@ -2708,8 +2718,9 @@ Implementation impact:
 
 - a future group-membership service can reuse the existing host-scoped
   `item: "policy"` writer; no new command family is needed
-- because the app sends the full policy object, an implementation must send the
-  host's current policy with only `tags` changed, not a partial payload
+- the app sends the full policy object, but the box does **not** require it: a
+  `tags`-only write keeps every other key (Finding 43). A minimal payload is
+  preferable, since it cannot carry a key the caller did not intend to send
 - integer tag IDs in the write versus string tag IDs in the read must be
   handled
 - "remove" and "add" are the same call with a different `tags` list; matching
@@ -2911,10 +2922,11 @@ cloud path until the cloud contract is documented.
 - pre/post runtime pulls: `.tmp/capture_chads_before.json`,
   `.tmp/capture_chads_after.json`
 
-### Finding 43: The membership write can be minimal, and group assignment strips a device's own rules
+### Finding 43: Membership writes may be minimal, and a membership change deletes every rule the device owns
 
 Three questions left open by Findings 41 and 42 were resolved on the dev box on
-2026-10-02 with read-only pulls plus two reversible writes.
+2026-10-02 with read-only pulls, reversible writes, and one purpose-built app
+capture.
 
 **1. A `tags`-only payload is accepted and clobbers nothing — confirmed.**
 
@@ -2941,25 +2953,30 @@ own `ipAllocation` sub-object — and confirms a membership write can send only
 strictly safer because it cannot carry a policy key the caller did not intend to
 send.
 
-**2. A device assigned to a group has every rule of its own deleted — confirmed
-by capture. The delete is not `dap`-specific.**
+**2. A membership change deletes every rule the device owns.**
 
-Finding 41 showed the app issuing two `policy:delete` calls in the same
-`batchAction` as a tags write, and called it a sweep of "stale device-scoped
-rules". That phrasing was closer to the truth than two later readings that
-narrowed or dismissed it, and the capture below settles it.
+**The rule, stated plainly:**
 
-**The box deletes nothing on its own.** Test: on `office-floor-light-bulb-1`,
+> When a device's membership changes, the app deletes **every rule that belongs
+> to that device**. "Belongs to the device" means the device's MAC is the rule's
+> `target`, or the device's MAC appears in the rule's `scope`. Nothing about the
+> rule's `purpose`, `action`, `type`, or `disabled` state affects eligibility: an
+> enabled rule the owner created is deleted exactly like a disabled one.
+>
+> This is not `dap`-specific, and it is not "stale rules only". It is every rule
+> on the device. The consequence is visible in the app's own UI, which warns at
+> assignment time that the device will follow only its group's rules from then on.
+
+**The box never does this by itself.** Test: on `office-floor-light-bulb-1`,
 clear the tags through the local channel with no `policy:delete`, then compare
-the rule set.
+the rule set. The box **kept both rules**. The deletion is the app's, not the
+box's — an integration must issue it explicitly.
 
-- the box **kept both rules**. Nothing was swept
-
-**The app deletes every rule the device owns.** Test (2026-10-02): an
-**unassigned** device carrying its own rules — `rustdesk-server`
-(`00:AA:BB:CC:60:31`), with two **enabled, user-created** rules and a disabled
-`dap` pair — was assigned to one group **in the app**, with a port 8833 capture
-armed and runtime pulls either side.
+**The deletes go first, ahead of the tags write.** Captured on 2026-10-02 with
+`rustdesk-server` (`00:AA:BB:CC:60:31`), an **unassigned** device carrying two
+**enabled, user-created** rules plus a disabled `dap` pair. It was assigned to
+one group **in the app**, with a port 8833 capture armed and runtime pulls either
+side.
 
 Before:
 
@@ -2967,8 +2984,8 @@ Before:
 | --- | --- | --- |
 | 666 | `block`/`mac`, `dap` | disabled |
 | 667 | `allow`/`category`, `dap` | disabled |
-| 668 | `block`/`category` → `TLX-fw-youtube` | **enabled** |
-| 669 | `block`/`category` → `TLX-fw-tiktok` | **enabled** |
+| 668 | `block`/`category` → `TLX-fw-youtube` | **enabled, user-created** |
+| 669 | `block`/`category` → `TLX-fw-tiktok` | **enabled, user-created** |
 
 The app sent one `batchAction` of seven items, in this order:
 
@@ -2983,31 +3000,38 @@ The app sent one `batchAction` of seven items, in this order:
 ```
 
 After: the device is in `SVR_NAS`, and **all four rules are gone**. Box-wide the
-rule count fell by exactly four, with nothing added.
+rule count fell by exactly four, nothing was added, and nothing changed.
 
-So three things are established:
+**What is *not* deleted:**
 
-- **all** of the device's rules are deleted, not just `dap`
-- the deletes come **first**, ahead of the tags write, in the same batch
-- an **enabled** user rule is deleted just the same as a disabled one
+- rules belonging to **other** devices, even when they are otherwise identical
+- rules scoped by group, network, tag, or interface rather than by the device —
+  including the group rules the device now inherits. Membership changes the
+  device's scope; it does not touch the group's own rules
+- any rule that does not name the device's MAC in `target` or `scope`
 
 **A wrong intermediate reading, recorded because it was nearly shipped.** An
 earlier version of the integration keyed the delete on `purpose == "dap"`, on
 the reasoning that the two ids seen in Finding 41 were `dap`-purposed and that
-`purpose` would keep the operation away from user rules. Measured box-wide that
-was already doubtful — 84 of 124 group-assigned hosts still carry a `dap` pair,
-so `dap` is what *survives* assignment — and this capture refutes it outright:
-a `dap`-only delete would have left this device's two enabled user rules behind,
-the exact opposite of what the app does. The owner's model — assign a device to a
-group and it carries no rules of its own — was right, and the app's own UI warns
-about it at assignment time.
+`purpose` would keep the operation away from user rules. Box-wide that was
+already doubtful — 84 of 124 group-assigned hosts still carry a `dap` pair, so
+`dap` is what *survives* assignment — and this capture refutes it outright: a
+`dap`-only delete would have left this device's two **enabled** user rules
+behind, the exact opposite of what the app does. The owner's model was right from
+the start.
 
-**Implementation.** The selector is "the device's MAC is the rule's `target`, or
-appears in its `scope`", applied to every rule regardless of purpose or enabled
-state, deleted before the tags write. That is exactly the four ids above. A
-live-rule check matters here: `home-assistant`, `portainer` and `caddy-int` all
-carry device-scoped rules that this selector would also remove on assignment,
-which is the app's behaviour rather than a side effect.
+**Implementation.** Select by device membership in the rule, not by `purpose`:
+
+```python
+(rule.target_type == RULE_TARGET_TYPE_MAC and rule.target.upper() == mac)
+or any(scope.upper() == mac for scope in rule.scope)
+```
+
+Applied to every rule regardless of purpose or enabled state, and issued
+**before** the tags write. On the captured device that is exactly ids 666–669.
+The behaviour is not a corner case: `home-assistant`, `portainer` and `caddy-int`
+all carry device-scoped rules today, so assigning any of them to a group removes
+those rules — as the app does.
 
 **3. `host:syncAppTimeUsageToTags` — what it is, sent on assignment too.**
 
@@ -3049,16 +3073,20 @@ against a third sample before then.
 - `.tmp/test_minimal_write.py` (minimal-write key-preservation probe)
 - `.tmp/test_rule_sweep.py` (rule-sweep probe, self-restoring)
 - `.tmp/preflight_capture.py` (read-only: target state and candidate devices)
-- `.tmp/diff_capture.py` (before/after rule diff for the group-add capture)
-- `.tmp/dump_membership.py <pcap> <out.json>` (full decrypted POST bodies)
+- `.tmp/diff_capture.py <before> <after>` (per-device and box-wide rule diff)
+- `.tmp/dump_membership.py <pcap> <out.json> [client-ip]` (full decrypted POST bodies,
+  the tool that produced the seven-item batch above)
 - `.tmp/reconstruct_capture.py` (pre/post pull diff for the original 575/576 delete)
 - `.tmp/rule_correlation.py`, `.tmp/dap_analysis.py` (`dap` correlation, `begin` decode)
 - `.tmp/test_own_rules_hypothesis.py` (the group/user/none rule-ownership table)
 - `.tmp/capture_device_rules.py` (the captured device's full rule set)
 - `.tmp/verify_dap_selector.py` (read-only selector check)
-- **the group-add capture:** `.tmp/firewalla_capture_20261002-221733_rustdesk-group-add.pcap`,
-  pulls `.artifacts/rustdesk_group_add/20261002-214538/` (before) and
-  `.../20261002-221837/` (after)
+- **the group-assignment capture** — the evidence for the rule-deletion rule:
+  `.tmp/firewalla_capture_20261002-221733_rustdesk-group-add.pcap`, with pulls
+  `.artifacts/rustdesk_group_add/20261002-214538/` (before) and
+  `.../20261002-221837/` (after). Captured with
+  `tools/support/capture_firewalla_packets.py --host <box> --client-ip <phone>
+  --label rustdesk-group-add`, which is the maintained workflow for this
 - `.artifacts/membership-capture/20261002-135538/` and `.../20261002-135842/`
   (the pulls the original 575/576 ids were read out of)
 
