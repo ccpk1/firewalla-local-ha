@@ -235,7 +235,7 @@ Two claims in the original §3b review were wrong and are corrected above:
 | Phase | Focus | Key output | Status |
 | --- | --- | --- | --- |
 | 1 | Resolve membership semantics and land the model | Single-membership confirmed; `kind` + `user_id` on the collection; one meaning for `affiliated_group_name`; single-path group count | **Complete 2026-10-02** |
-| 2 | Build the membership service | One admin-gated service (single-slot set/clear, group or user) backed by 4 LLM tools, with validation and tests | Not started |
+| 2 | Build the membership service | One admin-gated service (single-slot set/clear, group or user) backed by 4 LLM tools, with validation and tests | **Complete 2026-10-02** |
 | 3 | Make the reported surface accurate | Corrected overview counts, verified entity joins, updated read-tool text | Not started |
 | 4 | Expose it to assistants | Four reversible LLM control tools, prompt fragment, contracts and docs | Not started |
 
@@ -305,76 +305,66 @@ so every later phase builds on a correct foundation.
       real group instead of silently resolving a user entry.
 
 
-### Phase 2 — The membership service
+### Phase 2 — The membership service — COMPLETE (2026-10-02)
 
 Goal: one admin-gated service that sets or clears a device's single group or user
 membership. Signature is fixed by 1.2: **one service**, kind-explicit and
 mutually exclusive target fields, backing **four** LLM tools in Phase 4.
 
-- [ ] **2.1 Add constants.** In `custom_components/firewalla_local/const.py`: the
-      service name, the group and user target fields (name and id each), a `clear`
-      field, and translation keys for the new validation failures. Reuse
-      `SERVICE_FIELD_HOST_MAC`, `SERVICE_FIELD_HOST_NAME`, `SERVICE_FIELD_REFRESH`,
-      and the config-entry selectors.
-- [ ] **2.2 Build the payload.** Add a helper that reads the host's current raw
-      policy and replaces only `tags`. Do not reuse
-      `_build_host_ip_allocation_policy_value`, which is allocation-specific.
-      **Owner direction: send only what changes, DHCP-writer style.** The DHCP
-      reservation writer sends just the `ipAllocation` sub-object, not a 16-key
-      policy object, and it works. The membership writer should do the same with
-      `tags` unless a live test proves the box requires the full object. Finding 41
-      recorded the app sending the whole 16-key object, but the app's choice is not
-      evidence that the box requires it — the DHCP writer is direct evidence that it
-      does not require it for its own key. **Confirm on the dev box before choosing**,
-      and record the result; a minimal write is safer because it cannot clobber a
-      policy key the caller never intended to send.
-- [ ] **2.3 Resolve the membership target.** Accept a group or a user, by id or by
-      name, and resolve it against the **classified** collection — a `group` target
-      must resolve to a `kind == "group"` entry and a `user` target to a
-      `kind == "user"` entry, so a name that exists in both kinds cannot silently
-      pick the wrong one. Reject ambiguous matches and unknown targets with
-      translated errors, following the existing selector-resolution pattern in
-      `services.py`.
-- [ ] **2.4 Implement the handler.** In `services.py`, add the schema and the
-      handler, then register it in `_SERVICE_REGISTRATIONS` as admin-gated with
-      `SupportsResponse.ONLY`. Exactly one of `{group, user, clear}` is required;
-      `clear` sends `value.tags: []`. Write through the existing
-      `integration_manager` → `async_set_host_policy` path. This is a single-slot
-      replace, so assigning replaces whatever membership existed.
-- [ ] **2.4b Reproduce the app's stale-rule sweep.** Finding 41 records that the
-      app does **not** only rewrite `tags` on removal: it also sweeps the
-      device-scoped `block` / `bidirection` / `type: mac` rules that targeted the
-      device's previous affiliation, and the app cleans up the assignment in the same
-      action. Owner direction: **this is required, not optional.** A local clear that
-      leaves those rules behind would diverge from the app. Establish during live
-      testing whether the sweep is performed by the box (in which case nothing is
-      needed) or must be issued by the integration, and record the answer. Also
-      re-check the unverified `host:syncAppTimeUsageToTags` follow-up noted in
-      Finding 42; if the box does not fire it after a local write, usage history for
-      the new assignment may not re-attribute, and that must be called out.
-- [ ] **2.5 Document the service.** In `services.yaml`, follow the existing host
-      service style — description, field descriptions, example values, and the
-      translation-ready wording used by the other host-setting services. Reference
-      the service from the host-actions section of `docs/USER_GUIDE.md`.
-      **`translations/en.json` is also required and is a hard gate.** This
-      repository has no `strings.json`; `translations/en.json` is hand-maintained,
-      and `test_every_service_has_a_translation_and_no_orphans`
-      (`test_services.py:3562`) fails for any registered service with no block
-      there. Add the `services.<name>` entry with a `name` and a `description`,
-      then the per-field `name`/`description` entries. Phase 2 is not complete
-      until the suite is green.
-- [ ] **2.6 Promote the probe.** Move the proven write probe out of gitignored
-      `.tmp/` into a tracked utility alongside the capture tooling, so the contract
-      is reproducible. Keep it dry-run by default, matching
-      `utils/probe_alarm_control.py` and `utils/probe_internet_quality.py`.
-      `.tmp/` is gitignored, so `.tmp/probe_membership.py` and the capture artifacts
-      exist only on this machine. Finding 41/42 text in
-      `docs/REVERSE_ENGINEERING_WORKFLOW.md` is the durable copy of the contract;
-      the promoted probe is the second.
-- [ ] **2.7 Tests.** Cover: assign to a group, assign to a user, clear, unknown
-      target rejected, ambiguous target rejected, a name that exists as both a group
-      and a user resolving by kind rather than by luck, tag-id type handling, and the
-      exact payload sent (asserting the minimal write if 2.2 confirms it).
+- [x] **2.1 Add constants.** `SERVICE_SET_HOST_MEMBERSHIP`, `SERVICE_FIELD_CLEAR`,
+      `SERVICE_FIELD_GROUP_ID`, `SERVICE_FIELD_USER_ID`, `SERVICE_FIELD_USER_NAME`,
+      the two ambiguity placeholders, and seven translation keys were added to
+      `const.py`. `SERVICE_FIELD_GROUP_NAME` already existed.
+- [x] **2.2 Build the payload — minimal, confirmed live.** The owner's DHCP-writer
+      hypothesis was tested on the box and holds: a `{"tags": [...]}`-only write is
+      accepted and leaves every other policy key untouched. Recorded as Finding 43.
+      The builder sends only `tags`, so it cannot carry a key the caller did not
+      intend to send. The app's full 16-key object is **not** required.
+- [x] **2.3 Resolve the membership target.** `_resolve_membership_target` resolves
+      against the **classified** collection and is scoped by kind: a group selector
+      only matches a `kind == "group"` entry and a user selector only a
+      `kind == "user"` entry. Tests pin the cross-kind cases (tag `10` is a user's
+      backing tag, tag `99` is a plain group) so a selector that stopped being
+      scoped would fail loudly. Ambiguous and unknown targets raise translated
+      errors.
+- [x] **2.4 Implement the handler.** `_async_handle_set_host_membership` plus
+      `SET_HOST_MEMBERSHIP_SCHEMA`, registered admin-gated with
+      `SupportsResponse.ONLY`. Exactly one of `{group, user, clear}` is enforced in
+      the handler, because voluptuous cannot express it. Writes through the existing
+      `integration_manager` → `async_set_host_policy` path. The response carries
+      `membership.before`, `membership.after` and a `changed` flag so a caller can
+      tell whether the single slot actually moved.
+- [x] **2.4b Stale-rule sweep — resolved as "do not replicate".** Tested live and
+      recorded as Finding 43. **The box does not sweep.** The app issues the
+      `policy:delete` calls itself, and the rules it removes are its own
+      `disabled=1` leftovers (a per-host pair; 323 rules on the dev box, ~2 per
+      host). An integration must not attempt this: the rules are disabled, so
+      leaving them has no behavioural effect, while "delete the stale device-scoped
+      rules" is a destructive heuristic that would have to guess which of a host's
+      rules are stale — and the same box carries live, *enabled* device-scoped
+      `allow`/`ip` rules with a host in `scope`, so a naive sweep would delete real
+      user firewall rules.
+      **Still open (inference, not measurement):** whether the box fires
+      `host:syncAppTimeUsageToTags` on its own after a local write. The app sends it
+      explicitly with a `begin` epoch, which suggests it does not, but this was not
+      measured. It affects usage-report re-attribution only, never membership
+      correctness.
+- [x] **2.5 Document the service.** `services.yaml`, `translations/en.json` (both
+      the `services.<name>` block and the exception messages), and the
+      `docs/USER_GUIDE.md` catalog plus a `#### Set host membership` section in the
+      host-operator group. The user guide entry states the single-slot replace
+      behaviour explicitly, because a user assigning a group to a user-owned device
+      will lose the user assignment.
+- [x] **2.6 Promote the probe.** `utils/probe_membership.py` is tracked and
+      documented, dry-run by default, with `--list`, `--tag`, `--clear`, `--apply`
+      and `--restore`. It goes beyond the original `.tmp/` probe by asserting the
+      contract Finding 43 established: it diffs the host policy before and after and
+      reports any key lost or changed.
+- [x] **2.7 Tests.** 15 new tests: assignment by group name, by group id, and by
+      user name (asserting the **backing tag** is written and not the user id);
+      clear; six bad-target cases including both cross-kind cases and both ambiguity
+      paths; four target-shape cases; and a registration pin for the admin gate and
+      `SupportsResponse.ONLY`.
 
 ### Phase 3 — Accurate surface and preserved entity behavior
 

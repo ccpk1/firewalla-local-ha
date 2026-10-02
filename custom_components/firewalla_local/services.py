@@ -48,6 +48,7 @@ from .const import (
     SERVICE_FIELD_ALARM_ID,
     SERVICE_FIELD_ALARM_TYPE,
     SERVICE_FIELD_APPLIES_TO,
+    SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
@@ -57,6 +58,7 @@ from .const import (
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_EXCEPTION_ID,
+    SERVICE_FIELD_GROUP_ID,
     SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
@@ -98,6 +100,8 @@ from .const import (
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
     SERVICE_FIELD_USER,
+    SERVICE_FIELD_USER_ID,
+    SERVICE_FIELD_USER_NAME,
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
@@ -122,6 +126,7 @@ from .const import (
     SERVICE_SET_HOST_DEVICE_TYPE,
     SERVICE_SET_HOST_DHCP_RESERVATION,
     SERVICE_SET_HOST_DNS_HOSTNAME,
+    SERVICE_SET_HOST_MEMBERSHIP,
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
@@ -155,6 +160,12 @@ from .const import (
     TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED,
     TRANS_KEY_EXCEPTION_INVALID_DURATION,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NAME_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_CONFLICT,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_REQUIRED,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND,
     TRANS_KEY_EXCEPTION_MULTIPLE_ENTRIES_LOADED,
     TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
@@ -170,6 +181,7 @@ from .const import (
     TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED,
+    TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS,
@@ -189,6 +201,8 @@ from .const import (
     TRANS_PLACEHOLDER_DURATION,
     TRANS_PLACEHOLDER_HOST_MATCHES,
     TRANS_PLACEHOLDER_HOST_NAME,
+    TRANS_PLACEHOLDER_MEMBERSHIP_MATCHES,
+    TRANS_PLACEHOLDER_MEMBERSHIP_TARGET,
     TRANS_PLACEHOLDER_NETWORK_NAME,
     TRANS_PLACEHOLDER_NETWORK_UUID,
     TRANS_PLACEHOLDER_RESERVED_IPV4,
@@ -562,6 +576,21 @@ SET_HOST_DHCP_RESERVATION_SCHEMA = vol.Schema(
     }
 )
 
+# A device holds exactly one membership, so a call either sets that one slot to a
+# group or a user, or clears it. The four target fields are mutually exclusive and
+# one of them (or ``clear``) is required; the handler enforces that because
+# voluptuous cannot express "exactly one of".
+SET_HOST_MEMBERSHIP_SCHEMA = vol.Schema(
+    {
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Optional(SERVICE_FIELD_GROUP_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CLEAR, default=False): cv.boolean,
+    }
+)
+
 GET_SPEED_TEST_RESULTS_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
@@ -688,6 +717,11 @@ def _service_validation_error(
 
 _USAGE_HISTORY_REQUEST_SCOPE_HOST = "host"
 _USAGE_HISTORY_REQUEST_SCOPE_TAG = "tag"
+
+# The classified host-tag collection holds plain groups and user affiliations
+# together; a membership selector is scoped by this discriminator.
+_MEMBERSHIP_KIND_GROUP = "group"
+_MEMBERSHIP_KIND_USER = "user"
 
 
 def _get_loaded_entry(
@@ -2249,6 +2283,116 @@ def _build_host_ip_allocation_policy_value(
             "allocations": allocations,
         }
     }
+
+
+def _build_host_membership_policy_value(tag_id: str | None) -> dict[str, object]:
+    """Build the membership policy payload for one host.
+
+    Sends only ``tags``. Finding 43 confirmed on the box that this leaves every
+    other policy key untouched, and a minimal payload is safer than the app's full
+    object because it cannot carry a key the caller did not intend to send. Tag ids
+    are integers in the write but strings in the read payload.
+    """
+    return {"tags": [] if tag_id is None else [int(tag_id)]}
+
+
+def _describe_membership(
+    entry: FirewallaConfigEntry, tag_id: str | None
+) -> dict[str, object] | None:
+    """Describe one membership slot as a kind, id and display name."""
+    if tag_id is None:
+        return None
+    for group in entry.runtime_data.integration_manager.get_groups():
+        if group.group_id == tag_id:
+            return {"kind": group.kind, "id": group.group_id, "name": group.name}
+    return None
+
+
+def _resolve_membership_target(
+    entry: FirewallaConfigEntry,
+    *,
+    group_name: str | None,
+    group_id: str | None,
+    user_name: str | None,
+    user_id: str | None,
+    clear: bool,
+) -> FirewallaGroupRuntime | None:
+    """Resolve one group or user membership target.
+
+    Resolution is scoped by kind: a group selector only ever matches a ``group``
+    entry and a user selector only a ``user`` entry. That guard is why the selector
+    is split by kind in the first place -- a group and a user on a real box can carry
+    the same name, so a single free-text target could silently pick the wrong one.
+    """
+    group_selectors = [
+        value for value in (group_name, group_id) if _optional_string(value)
+    ]
+    user_selectors = [
+        value for value in (user_name, user_id) if _optional_string(value)
+    ]
+
+    if clear:
+        if group_selectors or user_selectors:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_CONFLICT,
+            )
+        return None
+
+    if len(group_selectors) + len(user_selectors) != 1:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_REQUIRED,
+        )
+
+    is_group_target = bool(group_selectors)
+    wanted_kind = _MEMBERSHIP_KIND_GROUP if is_group_target else _MEMBERSHIP_KIND_USER
+    wanted_value = cast(str, group_name or group_id or user_name or user_id)
+    wanted_id = group_id if is_group_target else user_id
+    wanted_name = group_name if is_group_target else user_name
+
+    candidates = [
+        group
+        for group in entry.runtime_data.integration_manager.get_groups()
+        if group.kind == wanted_kind
+    ]
+
+    if wanted_id is not None:
+        exact = next(
+            (group for group in candidates if group.group_id == wanted_id), None
+        )
+        if exact is not None:
+            return exact
+    elif wanted_name is not None:
+        wanted_name_folded = wanted_name.casefold()
+        matches = [
+            group for group in candidates if group.name.casefold() == wanted_name_folded
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise _service_validation_error(
+                translation_key=(
+                    TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NAME_AMBIGUOUS
+                    if is_group_target
+                    else TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS
+                ),
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_MEMBERSHIP_MATCHES: ", ".join(
+                        f"{group.name} [{group.group_id}]" for group in matches
+                    ),
+                    TRANS_PLACEHOLDER_MEMBERSHIP_TARGET: wanted_name,
+                },
+            )
+
+    raise _service_validation_error(
+        translation_key=(
+            TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NOT_FOUND
+            if is_group_target
+            else TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND
+        ),
+        translation_placeholders={
+            TRANS_PLACEHOLDER_MEMBERSHIP_TARGET: wanted_value,
+        },
+    )
 
 
 def _resolve_network_interface_name(
@@ -4275,6 +4419,102 @@ async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
     }
 
 
+async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType:
+    """Set or clear the single group or user membership of one device.
+
+    A device holds exactly one membership, so this replaces whatever was there.
+    Assigning a group to a device that is currently assigned to a user therefore
+    removes the user assignment rather than adding alongside it.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    host = _resolve_requested_host(
+        entry,
+        host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
+        host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
+        host_name=cast(str | None, call.data.get(SERVICE_FIELD_HOST_NAME)),
+        required=True,
+    )
+    assert host is not None
+
+    clear = cast(bool, call.data[SERVICE_FIELD_CLEAR])
+    target = _resolve_membership_target(
+        entry,
+        group_name=cast(str | None, call.data.get(SERVICE_FIELD_GROUP_NAME)),
+        group_id=cast(str | None, call.data.get(SERVICE_FIELD_GROUP_ID)),
+        user_name=cast(str | None, call.data.get(SERVICE_FIELD_USER_NAME)),
+        user_id=cast(str | None, call.data.get(SERVICE_FIELD_USER_ID)),
+        clear=clear,
+    )
+
+    previous_tag_id = host.group_ids[0] if host.group_ids else None
+    before = _describe_membership(entry, previous_tag_id)
+    after = (
+        None
+        if target is None
+        else {"kind": target.kind, "id": target.group_id, "name": target.name}
+    )
+    policy_value = _build_host_membership_policy_value(
+        target.group_id if target is not None else None
+    )
+
+    try:
+        command_response = (
+            await entry.runtime_data.integration_manager.async_set_host_policy(
+                host.mac,
+                policy_value,
+            )
+        )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to update host membership",
+            translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
+        )
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "target": _serialize_report_target(
+            FirewallaReportTarget(
+                kind="host",
+                id=host.mac,
+                name=host.host_name,
+            )
+        ),
+        "query": {
+            "clear": clear,
+            "group_id": call.data.get(SERVICE_FIELD_GROUP_ID),
+            "group_name": call.data.get(SERVICE_FIELD_GROUP_NAME),
+            "user_id": call.data.get(SERVICE_FIELD_USER_ID),
+            "user_name": call.data.get(SERVICE_FIELD_USER_NAME),
+            "host_id": call.data.get(SERVICE_FIELD_HOST_ID),
+            "host_mac": call.data.get(SERVICE_FIELD_HOST_MAC),
+            "host_name": call.data.get(SERVICE_FIELD_HOST_NAME),
+            "refresh": refresh_requested,
+        },
+        "membership": {
+            "before": cast(JsonValueType, before),
+            "after": cast(JsonValueType, after),
+            "changed": before != after,
+        },
+        "command": {
+            "item": "policy",
+            "target": host.mac,
+            "value": cast(JsonObjectType, policy_value),
+        },
+        "command_response": cast(JsonObjectType, command_response),
+    }
+
+
 async def _async_handle_set_host_notification(
     call: ServiceCall,
     *,
@@ -5473,6 +5713,13 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_SET_HOST_DHCP_RESERVATION,
         _async_handle_set_host_dhcp_reservation,
         SET_HOST_DHCP_RESERVATION_SCHEMA,
+        SupportsResponse.ONLY,
+        True,
+    ),
+    (
+        SERVICE_SET_HOST_MEMBERSHIP,
+        _async_handle_set_host_membership,
+        SET_HOST_MEMBERSHIP_SCHEMA,
         SupportsResponse.ONLY,
         True,
     ),

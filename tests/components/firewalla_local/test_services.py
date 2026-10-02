@@ -5,6 +5,8 @@ from __future__ import annotations
 # pylint: disable=too-many-lines
 import json
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -44,6 +46,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
     SERVICE_FIELD_APPLIES_TO,
+    SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
@@ -53,6 +56,8 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_EXCEPTION_ID,
+    SERVICE_FIELD_GROUP_ID,
+    SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
@@ -89,6 +94,8 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
+    SERVICE_FIELD_USER_ID,
+    SERVICE_FIELD_USER_NAME,
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
@@ -111,6 +118,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_SET_HOST_DEVICE_TYPE,
     SERVICE_SET_HOST_DHCP_RESERVATION,
     SERVICE_SET_HOST_DNS_HOSTNAME,
+    SERVICE_SET_HOST_MEMBERSHIP,
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
@@ -825,6 +833,146 @@ def _zero_host_activity_network_interface_payload() -> dict[str, object]:
         },
     }
     return payload
+
+
+def _membership_snapshot() -> FirewallaRuntimeSnapshot:
+    """Return a snapshot with a classified group and user collection.
+
+    The collection deliberately holds a group and a user that share the name
+    "KADEN", and two groups that share the name "IOT_LIGHTS". Both are realistic
+    on a real box, and both are the reason a membership selector is split by kind
+    and why an ambiguous name has to fail rather than pick one.
+    """
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(
+            timezone_name="America/New_York"
+        ),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="00:AA:BB:CC:DD:26",
+                host_name="Plex Server",
+                ip_address="192.168.10.10",
+                group_name=None,
+                network_name="VLAN10 CORE",
+                connection_type=None,
+                last_active=None,
+                download_bytes=100,
+                upload_bytes=50,
+                stale=False,
+            ),
+            FirewallaHostRuntime(
+                mac="0C:85:E1:B0:1D:1C",
+                host_name="Kaden Phone",
+                ip_address="192.168.200.25",
+                group_name="KADEN",
+                network_name="VLAN10 CORE",
+                connection_type="phone",
+                last_active=None,
+                download_bytes=200,
+                upload_bytes=20,
+                stale=False,
+                group_ids=("10",),
+                user_ids=("21",),
+            ),
+        ),
+        groups=(
+            FirewallaGroupRuntime(group_id="12", name="Quarantine", kind="group"),
+            FirewallaGroupRuntime(group_id="53", name="IOT_LIGHTS", kind="group"),
+            FirewallaGroupRuntime(group_id="66", name="IOT_LIGHTS", kind="group"),
+            FirewallaGroupRuntime(group_id="99", name="KADEN", kind="group"),
+            FirewallaGroupRuntime(
+                group_id="10",
+                name="KADEN",
+                kind="user",
+                user_id="21",
+            ),
+            FirewallaGroupRuntime(
+                group_id="11",
+                name="PAYTON",
+                kind="user",
+                user_id="22",
+            ),
+            FirewallaGroupRuntime(
+                group_id="13",
+                name="PAYTON",
+                kind="user",
+                user_id="23",
+            ),
+        ),
+        users=(
+            FirewallaUserRuntime(
+                user_id="21",
+                name="KADEN",
+                affiliated_group_id="10",
+                affiliated_group_name="KADEN",
+                total_minutes_today=None,
+                unique_minutes_today=None,
+            ),
+            FirewallaUserRuntime(
+                user_id="22",
+                name="PAYTON",
+                affiliated_group_id="11",
+                affiliated_group_name="PAYTON",
+                total_minutes_today=None,
+                unique_minutes_today=None,
+            ),
+            FirewallaUserRuntime(
+                user_id="23",
+                name="PAYTON",
+                affiliated_group_id="13",
+                affiliated_group_name="PAYTON",
+                total_minutes_today=None,
+                unique_minutes_today=None,
+            ),
+        ),
+    )
+
+
+def _membership_entry() -> MockConfigEntry:
+    """Return a config entry for the membership service tests."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+
+
+@contextmanager
+def _membership_patches(write_mock: AsyncMock) -> Iterator[None]:
+    """Patch the runtime payload, snapshot, and host-policy writer."""
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_membership_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager.FirewallaIntegrationManager.async_set_host_policy",
+            new=write_mock,
+        ),
+    ):
+        yield
 
 
 def _usage_history_snapshot() -> FirewallaRuntimeSnapshot:
@@ -4266,6 +4414,280 @@ async def test_get_hosts_supports_filters(
     assert [host["host_name"] for host in by_name["hosts"]] == ["Plex Server"]
     assert vpn_only is not None
     assert [host["host_name"] for host in vpn_only["hosts"]] == ["WireGuard Kaden"]
+
+
+async def _call_set_host_membership(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    data: dict[str, object],
+) -> dict[str, Any]:
+    """Call the membership service and return its response."""
+    response = await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_HOST_MEMBERSHIP,
+        {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id, **data},
+        blocking=True,
+        return_response=True,
+    )
+    assert response is not None
+    return response
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_tag_id", "expected_kind", "expected_name", "expected_changed"),
+    [
+        pytest.param(
+            {SERVICE_FIELD_GROUP_NAME: "Quarantine"},
+            "12",
+            "group",
+            "Quarantine",
+            True,
+            id="group_by_name",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_GROUP_ID: "66"},
+            "66",
+            "group",
+            "IOT_LIGHTS",
+            True,
+            id="group_by_id_resolves_an_ambiguous_name",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_USER_NAME: "KADEN"},
+            "10",
+            "user",
+            "KADEN",
+            False,
+            id="user_by_name_writes_the_backing_tag",
+        ),
+    ],
+)
+async def test_set_host_membership_writes_the_resolved_tag(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_tag_id: str,
+    expected_kind: str,
+    expected_name: str,
+    expected_changed: bool,
+) -> None:
+    """Assign a device to a group or a user by writing the resolved backing tag.
+
+    A user assignment is expressed on the wire as the user's affiliated backing
+    tag, not the user id, so the user case asserts the tag and not `user_id`.
+    """
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+    write = AsyncMock(return_value={"ok": True})
+
+    with _membership_patches(write):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await _call_set_host_membership(
+            hass,
+            entry,
+            {
+                SERVICE_FIELD_HOST_MAC: "0C:85:E1:B0:1D:1C",
+                SERVICE_FIELD_REFRESH: False,
+                **data,
+            },
+        )
+
+    assert write.await_args is not None
+    assert write.await_args.args == (
+        "0C:85:E1:B0:1D:1C",
+        {"tags": [int(expected_tag_id)]},
+    )
+    assert response["membership"] == {
+        "before": {"kind": "user", "id": "10", "name": "KADEN"},
+        "after": {
+            "kind": expected_kind,
+            "id": expected_tag_id,
+            "name": expected_name,
+        },
+        "changed": expected_changed,
+    }
+
+
+async def test_set_host_membership_clears_the_current_assignment(
+    hass: HomeAssistant,
+) -> None:
+    """Clearing sends an explicit empty tag list and reports what was removed."""
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+    write = AsyncMock(return_value={"ok": True})
+
+    with _membership_patches(write):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await _call_set_host_membership(
+            hass,
+            entry,
+            {
+                SERVICE_FIELD_HOST_MAC: "0C:85:E1:B0:1D:1C",
+                SERVICE_FIELD_CLEAR: True,
+                SERVICE_FIELD_REFRESH: False,
+            },
+        )
+
+    assert write.await_args is not None
+    assert write.await_args.args == ("0C:85:E1:B0:1D:1C", {"tags": []})
+    assert response["membership"] == {
+        "before": {"kind": "user", "id": "10", "name": "KADEN"},
+        "after": None,
+        "changed": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_slug"),
+    [
+        pytest.param(
+            {SERVICE_FIELD_GROUP_NAME: "IOT_LIGHTS"},
+            "ambiguous",
+            id="ambiguous_group_name",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_USER_NAME: "PAYTON"},
+            "ambiguous",
+            id="ambiguous_user_name",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_GROUP_NAME: "No Such Group"},
+            "not_found",
+            id="unknown_group_name",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_GROUP_ID: "10"},
+            "not_found",
+            id="user_tag_id_rejected_as_a_group",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_USER_NAME: "NOSUCHUSER"},
+            "not_found",
+            id="unknown_user_name",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_USER_ID: "99"},
+            "not_found",
+            id="group_tag_id_rejected_as_a_user",
+        ),
+    ],
+)
+async def test_set_host_membership_rejects_bad_targets(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_slug: str,
+) -> None:
+    """Reject unknown targets, and keep group and user selectors apart.
+
+    Tag `10` is the user's backing tag and tag `99` is a plain group, so each
+    cross-kind case here would resolve if the selector were not scoped by kind.
+    """
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+    write = AsyncMock(return_value={"ok": True})
+
+    with _membership_patches(write):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await _call_set_host_membership(
+                hass,
+                entry,
+                {
+                    SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26",
+                    SERVICE_FIELD_REFRESH: False,
+                    **data,
+                },
+            )
+
+    assert write.await_count == 0
+    assert err.value.translation_key is not None
+    assert err.value.translation_key.endswith(expected_slug)
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_key"),
+    [
+        pytest.param(
+            {SERVICE_FIELD_REFRESH: False},
+            "membership_target_required",
+            id="no_target",
+        ),
+        pytest.param(
+            {
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_CLEAR: True,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            "membership_target_conflict",
+            id="clear_with_a_target",
+        ),
+        pytest.param(
+            {
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_USER_NAME: "KADEN",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            "membership_target_required",
+            id="group_and_user_together",
+        ),
+        pytest.param(
+            {
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_GROUP_ID: "12",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            "membership_target_required",
+            id="two_group_selectors",
+        ),
+    ],
+)
+async def test_set_host_membership_requires_exactly_one_target(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_key: str,
+) -> None:
+    """Require exactly one of a group, a user, or clear."""
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+    write = AsyncMock(return_value={"ok": True})
+
+    with _membership_patches(write):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await _call_set_host_membership(
+                hass,
+                entry,
+                {SERVICE_FIELD_HOST_MAC: "00:AA:BB:CC:DD:26", **data},
+            )
+
+    assert write.await_count == 0
+    assert err.value.translation_key == expected_key
+
+
+def test_set_host_membership_is_registered_as_an_admin_action() -> None:
+    """The membership service is admin-gated and returns a response.
+
+    The gate itself is exercised by the generic admin-service tests; this pins the
+    registration so a future edit cannot quietly drop either property.
+    """
+    from custom_components.firewalla_local.services import _SERVICE_REGISTRATIONS
+
+    registrations = {
+        name: (response, admin)
+        for name, _handler, _schema, response, admin in _SERVICE_REGISTRATIONS
+    }
+
+    assert registrations[SERVICE_SET_HOST_MEMBERSHIP] == (
+        SupportsResponse.ONLY,
+        True,
+    )
 
 
 async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode(

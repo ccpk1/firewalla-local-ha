@@ -247,6 +247,7 @@ Services added after 1.0.0:
 - `firewalla_local.set_host_notify_when_next_online`
 - `firewalla_local.set_host_notify_when_next_offline`
 - `firewalla_local.set_host_dhcp_reservation`
+- `firewalla_local.set_host_membership`
 - `firewalla_local.get_speed_test_results`
 - `firewalla_local.get_internet_quality_report`
 - `firewalla_local.get_time_usage_report`
@@ -1080,12 +1081,38 @@ it directly.
   existing reservations
 - `refresh` defaults to `true`
 
+#### Set host membership
+
+Use `firewalla_local.set_host_membership` to move a device into a Firewalla
+group or assign it to a Firewalla user, or to clear that assignment.
+
+**Requires an administrator.** This action is registered as an admin-only
+service. Automations and scripts are unaffected — Home Assistant only enforces
+the check for calls made by a signed-in user, so a non-admin user cannot invoke
+it directly.
+
+- choose one host with `host_mac`, `host_name`, or `host_id`
+- assign to a group with `group_name` or `group_id`, **or** to a user with
+  `user_name` or `user_id`, **or** pass `clear: true` to remove the current
+  assignment — provide exactly one of those
+- **a device has exactly one membership.** Assigning a group to a device that is
+  already assigned to a user therefore *replaces* the user assignment rather
+  than adding alongside it. This mirrors the Firewalla app, which shows groups
+  and users together but allows only one selection
+- group selectors match groups only, and user selectors match users only. A
+  group and a user can share a name, so this separation is what keeps a call
+  from silently targeting the wrong kind
+- if a name matches more than one group or user, the service fails with the
+  matching candidates and you should use the id field instead
+- `refresh` defaults to `true`
+- the response reports the membership `before` and `after` plus a `changed`
+  flag, so an automation can tell whether the call actually altered anything
+
 #### Delete host
 
 Use `firewalla_local.delete_host` to permanently remove one or more host
 devices from the Firewalla box. It is a destructive action and requires
 explicit acknowledgement.
-
 **Requires an administrator.** This action is registered as an admin-only
 service. Automations and scripts are unaffected — Home Assistant only enforces
 the check for calls made by a signed-in user, so a non-admin user cannot invoke

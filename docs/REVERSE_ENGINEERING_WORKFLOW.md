@@ -2911,6 +2911,77 @@ cloud path until the cloud contract is documented.
 - pre/post runtime pulls: `.tmp/capture_chads_before.json`,
   `.tmp/capture_chads_after.json`
 
+### Finding 43: The membership write can be minimal, and the box does not sweep stale rules
+
+Two questions left open by Findings 41 and 42 were resolved on the dev box on
+2026-10-02 with read-only pulls plus two reversible writes.
+
+**1. A `tags`-only payload is accepted and clobbers nothing — confirmed.**
+
+Finding 41 recorded the app sending the entire 16-key policy object, and the
+implementation impact note in that finding therefore said a faithful write must
+send the full object. That reading was too strong: the app's choice is not
+evidence that the box *requires* it.
+
+Test: on `shelly1pm-beerfridge` (an unassigned IoT host whose `host.policy`
+carries 20 keys), write `{"tags": []}` — the host's own current value, so no
+membership changes — over the local channel.
+
+Result:
+
+- the write was accepted, and the response returned the box's fully merged policy
+- all 20 policy keys were present before and after, with **zero** lost, changed
+  or added keys
+- `dap`, `deviceTags`, `ssidTags`, `isolation` and `userTags` all survived, even
+  though the app never sends them
+
+This matches how the DHCP reservation writer already behaves — it sends only its
+own `ipAllocation` sub-object — and confirms a membership write can send only
+`tags`. Sending the app's full object is not required, and a minimal payload is
+strictly safer because it cannot carry a policy key the caller did not intend to
+send.
+
+**2. The box does not sweep a host's stale device-scoped rules — confirmed.**
+
+Finding 41 showed the app issuing two `policy:delete` calls in the same
+`batchAction` as a tags write, and asked whether the box performs that sweep
+itself.
+
+Test: on `office-floor-light-bulb-1`, which owns exactly the two rule shapes
+Finding 41 described, clear the tags with a minimal payload only — no
+`policy:delete` — and compare the rule set.
+
+Result:
+
+- the box **kept both rules**. Nothing was swept
+- the rules in question are `block`/`mac`/`target=<mac>`/`disabled=1` and
+  `allow`/`category`/`scope=[<mac>]`/`disabled=1`
+- they are a per-host **pair**, and a pair exists on nearly every host on the
+  box: 323 policy rules total, ~2 per host
+
+Interpretation: the sweep is the app deleting **its own already-disabled
+leftovers**, not a protocol requirement of the membership change. This has a
+direct implementation consequence — an integration must **not** attempt to
+reproduce it. The rules are disabled, so leaving them has no behavioural effect,
+while "delete the stale device-scoped rules" is a destructive heuristic that
+would have to guess which of a host's rules are stale. On the same box there are
+live, *enabled* device-scoped `allow`/`ip` rules with a host in `scope`; a naive
+sweep would delete real user firewall rules.
+
+**Still open:** whether the box fires `host:syncAppTimeUsageToTags` on its own
+after a local write. The app sends it explicitly with an app-supplied `begin`
+epoch, so the same reasoning as above suggests it does not — but that is an
+inference, not a measurement. It affects usage-report re-attribution only, not
+membership correctness.
+
+**Artifacts:**
+
+- `.tmp/check_classification.py` (read-only: live classification check)
+- `.tmp/list_host_membership.py` (read-only: host membership dump)
+- `.tmp/list_device_rules.py` (read-only: device-scoped rule discovery)
+- `.tmp/test_minimal_write.py` (minimal-write key-preservation probe)
+- `.tmp/test_rule_sweep.py` (rule-sweep probe, self-restoring)
+
 ## Alarm findings
 
 ### Finding 26: Alarm state arrives in the init payload as two fields plus three counts
