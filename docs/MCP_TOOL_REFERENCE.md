@@ -308,9 +308,11 @@ Reads that tell you what exists — the first step before any control action.
   "Show past devices" toggle (RE Finding 21), so devices that have not been online
   for weeks are returned with `online: false`. Filtering by `group_name` therefore
   gives the group's whole device list, not just the recently-active ones; use
-  `online` to separate current from idle. A live Quarantine group returned 10
-  devices, of which 3 were online and 7 had been idle for 13–33 days — every one of
-  them present in the result.
+  `online` to separate current from idle. A live Quarantine group returned **10**
+  devices: the newest three had been seen within 5 days, and the other seven
+  between 13 and 33 days ago. All ten were in the result. Under the shared
+  activity-window definition **none** were `online`, because the window is measured
+  against the freshest host in the whole inventory, not against the group.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
   (bool, default true — performs a live poll; set false for a fast cached read);
   `config_entry_id` / `config_entry_name` (optional).
