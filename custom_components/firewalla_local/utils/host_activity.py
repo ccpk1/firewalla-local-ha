@@ -14,16 +14,24 @@ stale timestamps as current.
 The window is a parameter, but there is only one *connectivity* window shared by
 every surface that reports whether a device is online: the watched-device
 sensors, the device counts, the VPN peer counts, the runtime inventory summary,
-and the host list's ``online`` field. They previously diverged — a live check
-found the presence window reporting 0 online for a group the counts and the
-Firewalla app both showed as 1 — so the shared window is the fix.
+and the host list's ``online`` field. They previously diverged, so the same
+device could be online for one surface and offline for another; that is why
+there is one window and not three.
 
 "Online" here means *connected*, which is a different question from *home*:
 
-- **Connectivity** — is it connected? An idle device is still connected, so the
-  window is generous (`DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES`).
+- **Connectivity** — is it connected? Answered by
+  `DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES` (5 minutes): a device quiet for
+  longer than that is disconnected, not merely idle.
 - **Presence** — is it home? Answered separately by the device tracker, which
-  has its own away window, because a device can be connected while away.
+  has its own longer, wall-clock away window, because a device can be connected
+  while nobody is home.
+
+This difference is worth stating because it is the opposite of a rounding
+detail: classifying on last-activity age can disagree with the Firewalla app,
+which also sees the box's live association state. A device quiet for between
+5 and 15 minutes reads disconnected here while the app may still show it
+connected. The 5-minute tolerance is the intended behaviour for our surfaces.
 
 The box's own ``stale`` flag is a third signal and answers neither question the
 same way: it means "not seen in roughly 7 days", so it is not used for

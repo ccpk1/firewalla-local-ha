@@ -267,16 +267,18 @@ FIREWALLA_PROTOCOL_CLIENT_KEY: Final = "fbb05afa-9145-41f1-8076-9de8be56f104"
 FIREWALLA_PROTOCOL_CLIENT_VERSION: Final = "1.68.89"
 
 DEFAULT_UPDATE_INTERVAL_MINUTES: Final = 3
+# Presence: how long after going quiet a tracked device still counts as home.
+# This is the device tracker's own question ("is it home?"), deliberately longer
+# and wall-clock based, because a device can be connected while nobody is home.
 DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 15
-# How long a device can be idle and still count as online. This is a
-# connectivity question, not a presence one, so it is shared by the
-# watched-device sensors, the device counts, the VPN peer counts, and the
-# `online` field every host-facing surface reports. A presence window would be
-# too strict: on a live box a device active 6.9 minutes ago was reported
-# offline by the old 5-minute default while the Firewalla app showed it online.
-# 15 minutes is bounded by observation on that box (6.9 minutes reads online,
-# 63.8 minutes reads offline), not derived from a published contract.
-DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 15
+# Connectivity: how long a device can be idle and still count as *connected*.
+# This is the connectivity definition, so it is shared by every surface that
+# reports online state: the watched-device sensors, the device counts, the VPN
+# peer counts, the runtime inventory summary, and the `online` field in the host
+# list. Keep it distinct from the presence window above; only connectivity
+# belongs here, and 5 minutes is the intended tolerance: a device quiet longer
+# than that is treated as disconnected rather than still active.
+DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 5
 
 # LLM/MCP tool exposure. The summary tier registers one curated, non-identifying
 # report; read tools are the low-risk step up; control tools require an explicit

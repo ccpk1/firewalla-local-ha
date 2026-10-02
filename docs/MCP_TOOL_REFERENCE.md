@@ -308,21 +308,23 @@ Reads that tell you what exists — the first step before any control action.
   "Show past devices" toggle (RE Finding 21), so devices that have not been online
   for weeks are returned with `online: false`. Filtering by `group_name` therefore
   gives the group's whole device list, not just the recently-active ones; use
-  `online` to separate current from idle. A live Quarantine group returned **10**
-  devices — 3 recently active and 7 past — and all ten were in the result, with
-  exactly **1** reading `online: true`.
-- **`online` uses the one shared online window, and "is it home" is a different
+  `online` to separate current from idle. A live Quarantine group returned all
+  **10** of its devices, 7 of them past, in a single result.
+- **`online` is the connectivity answer, and "is it home" is a different
   question.** It measures against the freshest host in the whole inventory, with
-  `DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES` (15). The watched-device sensors,
+  `DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES` (5). The watched-device sensors,
   the device and VPN counts, the runtime inventory summary and this field all share
-  that window, so they cannot disagree. On a live box a 5-minute window reported a
-  device idle 6.9 minutes as offline while the Firewalla app showed it online, and
-  the watched-device sensor reported a different total again; one 15-minute window
-  makes all of them match. *Presence* — "is it home" — is answered separately by
-  the device tracker, which keeps its own wall-clock away window and is not a
-  connectivity signal. The box's own `stale` flag is a third signal again — it
-  means "not seen in roughly 7 days", so it is never used to answer a connectivity
-  question.
+  that one window, so they cannot disagree about the same device. *Presence* — "is
+  it home" — is answered separately by the device tracker, which keeps its own
+  longer, wall-clock away window, because a device can be connected while nobody is
+  home. The box's own `stale` flag is a third signal again — it means "not seen in
+  roughly 7 days", so it is never used to answer a connectivity question.
+- **A 5-minute tolerance can read a device as disconnected while the Firewalla app
+  still shows it connected.** We classify on last-activity age; the app also sees
+  the box's live association state, so a device quiet for between 5 and 15 minutes
+  is a case where the two can disagree. This is the intended behaviour for our
+  surfaces, and the window is user-tunable when a longer tolerance suits a network
+  better.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
   (bool, default true — performs a live poll; set false for a fast cached read);
   `config_entry_id` / `config_entry_name` (optional).

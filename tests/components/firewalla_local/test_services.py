@@ -3828,15 +3828,15 @@ async def test_connectivity_is_one_definition_across_every_surface(
 ) -> None:
     """The list, the counts and the watched-device sensor agree on `online`.
 
-    Reproduces a live observation: on the Quarantine group the box carried 10
-    devices, 7 past and 3 recently active, and the Firewalla app showed exactly
-    1 of those 3 online — the one idle 6.9 minutes. A 5-minute online window
-    reported 0 from the counts while the watched-device sensor could report a
-    different number again, because the two surfaces had separate windows.
+    The three surfaces previously kept separate windows, so the same device
+    could be online for one and offline for another. They now share the single
+    connectivity window, so this asserts the list, the overview counts and the
+    same host's watched-device sensor all agree.
 
-    They now share one window, so this asserts the list, the overview counts and
-    the same host's watched-device sensor all agree, including for a device that
-    is `stale: false` (the box's seven-day signal) yet not connected.
+    The windows are intentionally shorter than the device tracker's presence
+    window: `idle-but-fresh` carries `stale: false` (the box's seven-day signal)
+    and is still not connected, which is exactly the distinction `online` has to
+    make.
     """
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -3857,23 +3857,32 @@ async def test_connectivity_is_one_definition_across_every_surface(
     template = base.hosts[0]
     # Reference host sets the freshness baseline.
     reference = replace(template, mac="AA:BB:CC:DD:EE:01", last_active=1_000_000.0)
-    # Idle 6.9 min: within the shared online window, and not stale.
+    # Idle 2 min: inside the 5-minute connectivity window, and not stale.
     recent = replace(
         template,
         mac="AA:BB:CC:DD:EE:02",
         host_name="just-connected",
-        last_active=1_000_000.0 - 414.0,
+        last_active=1_000_000.0 - 120.0,
         stale=False,
     )
-    # Idle 63.8 min: within stale=False, outside both windows.
-    idle = replace(
+    # Idle 6 min: not stale, but past the connectivity tolerance, so this must
+    # read as not connected.
+    quiet = replace(
         template,
         mac="AA:BB:CC:DD:EE:03",
+        host_name="quiet-but-not-stale",
+        last_active=1_000_000.0 - 360.0,
+        stale=False,
+    )
+    # Idle 63.8 min: well past every window, and still not stale.
+    idle = replace(
+        template,
+        mac="AA:BB:CC:DD:EE:04",
         host_name="idle-but-fresh",
         last_active=1_000_000.0 - 3828.0,
         stale=False,
     )
-    snapshot = replace(base, hosts=(reference, recent, idle))
+    snapshot = replace(base, hosts=(reference, recent, quiet, idle))
 
     with (
         patch(
@@ -3908,19 +3917,21 @@ async def test_connectivity_is_one_definition_across_every_surface(
             return_response=True,
         )
 
-    # `idle-but-fresh` carries `stale: false` — the box's seven-day signal — yet
-    # is not connected, which is exactly the distinction `online` has to make.
+    # `quiet-but-not-stale` and `idle-but-fresh` both carry `stale: false` — the
+    # box's seven-day signal — yet neither is connected, which is exactly the
+    # distinction `online` has to make.
     assert hosts is not None
     online = {h["host_name"]: h["online"] for h in hosts["hosts"]}
     assert online == {
         "Firewalla": True,
         "just-connected": True,
+        "quiet-but-not-stale": False,
         "idle-but-fresh": False,
     }
 
     # And the summary counts agree with the list.
     assert overview is not None
-    assert overview["devices"]["total"] == 3
+    assert overview["devices"]["total"] == 4
     assert overview["devices"]["online"] == sum(1 for v in online.values() if v)
 
     # The watched-device sensor reads the same state, because it now shares the
