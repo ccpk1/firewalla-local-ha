@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 from typing import Final
 from unittest.mock import AsyncMock, patch
@@ -379,6 +380,64 @@ async def test_reference_documents_every_registered_tool(
     )
 
     assert undocumented == [], f"tools missing from the reference: {undocumented}"
+
+
+# Parameters documented once for every tool in the Conventions section rather
+# than repeated per tool, so sections are not required to name them.
+_SHARED_PARAMS: Final = frozenset(
+    {
+        "config_entry_id",
+        "config_entry_name",
+        "refresh",
+        # "Host-targeting tools accept a human-meaningful `host` (name or MAC)".
+        "host_mac",
+        "host_name",
+        # "Multi-entry: where you have more than one Firewalla box..." plus the
+        # per-tool "wan_uuid / wan_name (optional — for multi-WAN)" wording.
+        "wan_uuid",
+        "wan_name",
+    }
+)
+
+
+async def test_reference_documents_each_tools_declared_inputs(
+    hass: HomeAssistant,
+) -> None:
+    """A tool section must name the parameters the tool actually accepts.
+
+    The reference drifted four times in ways only a reader would notice — a
+    documented-but-required-optional network, `count`/`type` where the schema
+    says `limit`/`alarm_type`, and a "default 10" that the tool sets to 1. Each
+    would have caused a wrong or wasteful call. This checks the mechanical half:
+    every declared parameter is named in that tool's section, so an omission is
+    caught even though the prose around it still needs a human.
+    """
+    reference = _REFERENCE_PATH.read_text(encoding="utf-8")
+    sections = {
+        match.group(1): match.group(2)
+        for match in re.finditer(
+            r"^### `firewalla_local__([a-z_]+)`(.*?)(?=^### |^## |\Z)",
+            reference,
+            re.S | re.M,
+        )
+    }
+    api_instance = await _api_instance(hass)
+
+    gaps: list[str] = []
+    for tool in api_instance.tools:
+        action = tool.name.removeprefix(f"{DOMAIN}__")
+        section = sections.get(action)
+        if section is None:
+            # Combined headings (the notify pair) and the destructive list are
+            # covered by the coverage test above.
+            continue
+        for marker in tool.parameters.schema:
+            name = marker.schema
+            if name in _SHARED_PARAMS or f"`{name}`" in section:
+                continue
+            gaps.append(f"{tool.name}: {name}")
+
+    assert gaps == [], f"parameters missing from the reference: {gaps}"
 
 
 async def test_read_envelope_is_json_serializable(hass: HomeAssistant) -> None:

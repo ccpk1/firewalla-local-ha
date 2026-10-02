@@ -1,7 +1,7 @@
 # Builder handoff: MCP capabilities — Phase 4.1 (foundation & older-Core safety)
 
 **Target agent:** `Firewalla Builder`
-**Plan:** `plans/in-process/FIREWALLA_LOCAL_MCP_CAPABILITIES_IN-PROCESS.md` (initiative: MCP Capabilities / LLM tool surface)
+**Plan:** `plans/completed/FIREWALLA_LOCAL_MCP_CAPABILITIES_COMPLETED.md` (initiative: MCP Capabilities / LLM tool surface)
 **Spec:** `docs/MCP_TOOL_REFERENCE.md`
 
 ## Purpose
@@ -46,7 +46,7 @@ Confirm the branch is created and checked out before touching any code. (Adjust 
 If this handoff conflicts with these, **the plan and docs win**:
 
 1. `docs/MCP_TOOL_REFERENCE.md` (spec — tool shapes, conventions)
-2. `plans/in-process/FIREWALLA_LOCAL_MCP_CAPABILITIES_IN-PROCESS.md` §4.1 (and §3 constraints)
+2. `plans/completed/FIREWALLA_LOCAL_MCP_CAPABILITIES_COMPLETED.md` §4.1 (and §3 constraints)
 3. `custom_components/firewalla_local/quality_scale.yaml`, `docs/DEVELOPMENT_STANDARDS.md`
 4. this handoff
 

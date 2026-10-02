@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Record the completed investigation for Phase 4 of `FIREWALLA_LOCAL_SURFACE_COMPLETION_COMPLETED.md`. Phase 4 was deferred to `plans/in-process/FIREWALLA_LOCAL_MCP_CAPABILITIES_IN-PROCESS.md`; this note remains the research base for that plan.
+Record the completed investigation for Phase 4 of `FIREWALLA_LOCAL_SURFACE_COMPLETION_COMPLETED.md`. Phase 4 was deferred to `plans/completed/FIREWALLA_LOCAL_MCP_CAPABILITIES_COMPLETED.md`; this note remains the research base for that plan.
 
 The driving concern: **our data is rich and nuanced, and an LLM must not misinterpret it.** This note answers where response semantics can legally live, what specifically is ambiguous today, and how to make the contract enforceable rather than aspirational.
 

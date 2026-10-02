@@ -323,10 +323,13 @@ Reads that tell you what exists — the first step before any control action.
   device?" from the device's membership, not from device-scoped rules that exist in the
   inventory. *(Owner-provided product behaviour, 2026-10-01 — not yet reproduced from a
   live capture.)*
-- **Inputs:** optional filters (action, paused/enabled, target scope); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters);
+  `include_purpose` (`['dap']`, `['family']`) and `include_system_managed` (bool) to
+  reveal what the default hides; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
-  `action`, `is_paused`/`enabled`, target (`type`/`target`), scope, and the `aid`
-  alarm back-reference when the rule was created by an alarm block.
+  `action`, `is_paused`/`enabled`, `target`/`target_type`/`target_name`, `scope`,
+  `applies_to`/`tag_refs`, `purpose`, and the `aid` alarm back-reference when the rule
+  was created by an alarm block.
 - **Availability:** read, default-on (backed by the non-admin `get_rules` service).
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false` (coordinator-backed) or `true` (live).
 
@@ -370,7 +373,9 @@ Reads that explain what the network is doing and how it is performing.
   week** periods (the common question); history is roughly 12× the size, so ask
   for it explicitly. Not per-device (`get_network_usage`). Note: WAN windowed
   usage is limited — some windows are unavailable.
-- **Inputs:** `wan_name`/`wan_uuid` (for multi-WAN), `history_count`/`history_period`; `refresh`; `config_entry_id` / `config_entry_name`.
+- **Inputs:** `wan_name`/`wan_uuid` (for multi-WAN), `history_count`/`history_period`;
+  `current_periods` (default day + week — the period totals to return); `include`
+  (`['history']`, `['subperiods']`); `refresh`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with download/upload totals and periods (`*_bytes`/`*_megabytes`).
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
@@ -379,8 +384,13 @@ Reads that explain what the network is doing and how it is performing.
 
 - **Answers:** "Why did my internet drop?" / "When was the last WAN outage?"
 - **When to use / not:** WAN link events/outages, not usage volume (`get_wan_usage`).
-- **Inputs:** `refresh`; `config_entry_id` / `config_entry_name`.
-- **Returns:** read envelope — `result.events[]` with type, `*_timestamp`, duration.
+- **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `window_days` (default
+  7; `0` for no time bound); `limit` (default 100) and `offset` for paging;
+  `include_dns` (default false — the box's own resolver probes, which are not WAN
+  events); `refresh`; `config_entry_id` / `config_entry_name`.
+- **Returns:** read envelope — `result.events[]` with type, `*_timestamp`, duration. Real
+  link events only by default: the app's filter set (`wan_state`, `dualwan_state`,
+  `system_reboot`), with DNS excluded and latency/loss absent entirely.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
@@ -393,7 +403,10 @@ Reads that explain what the network is doing and how it is performing.
 - **Narrow it:** every section is returned by default, so pass `sections` (and
   `app_ids` when only some apps matter) to keep the report to what the question
   needs.
-- **Inputs:** `scope_kind` (`host`/`tag`/…), `scope_target`, `begin`/`end` (or a period), `granularity` (`day`/`hour`), `sections`, `app_ids`; `config_entry_id` / `config_entry_name`.
+- **Inputs:** `scope_kind` (`host`/`tag`/…), `scope_target`, `begin`/`end` (or a
+  period), `granularity` (`day`/`hour`), `sections` (`internet`, `app_totals`, `apps`,
+  `categories`), `app_ids`, `include` (`['intervals']`), `detail` (`summary` |
+  `standard`); `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result` with internet/app/category time summaries and periods.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
@@ -403,8 +416,8 @@ Reads that explain what the network is doing and how it is performing.
 - **Answers:** "How good is my internet right now?" / "What is my latency/loss?"
 - **When to use / not:** quality (latency, loss, jitter). For a point-in-time speed
   measurement use `run_internet_speed_test`; for past results use `get_speed_tests`.
-- **Inputs:** `refresh`; `config_entry_id` / `config_entry_name`.
-- **Returns:** read envelope — `result` with `latency_ms`, `loss_percent`, jitter, samples.
+- **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
+  raise for a short history of samples); `refresh`; `config_entry_id` / `config_entry_name`.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
@@ -412,7 +425,8 @@ Reads that explain what the network is doing and how it is performing.
 
 - **Answers:** "What were my last speed test results?"
 - **When to use / not:** historical speed-test results. To *run* a test use `run_internet_speed_test`.
-- **Inputs:** `limit` (default 10 — raise to see more; `meta.truncated` when cut); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
+  raise for more stored results); `refresh`; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result.results[]` with `download_mbps`, `upload_mbps`, `latency_ms`, `*_timestamp`.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
@@ -433,8 +447,8 @@ Reads that explain what the network is doing and how it is performing.
 - **When to use / not:** an on-demand measurement that **consumes WAN bandwidth** and
   takes time. Prefer `get_speed_tests` for recent results. Not idempotent — each call
   runs a new test.
-- **Inputs:** `config_entry_id` / `config_entry_name`.
-- **Returns:** action-result envelope (`result` carries the fresh measurement).
+- **Inputs:** `wan_uuid`/`wan_name` (optional — the only WAN is used when omitted);
+  `config_entry_id` / `config_entry_name`.
 - **Availability:** control (behind the toggle).
 - **Reversibility & undo:** not reversible (it is a measurement), but has a cost — stated in the description. No `undo`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=false`.
@@ -528,7 +542,8 @@ Broad access control. Read the blast radius carefully.
 
 - **Answers:** "Pause the kids' WiFi." / "Pause the guest network."
 - **When to use / not:** pauses/resumes one SSID across all APs. **Wide blast radius** — every client on that SSID disconnects, possibly including the client making the request or the host running Home Assistant. State this before using.
-- **Inputs:** `ssid_profile_id` (from `get_wireless_status`), `paused` (bool); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `ssid_profile_id` (from `get_wireless_status`), `enabled` (bool — `true`
+  pauses the SSID, `false` resumes it); `config_entry_id` / `config_entry_name`.
 - **Returns:** action-result (`before`/`after.paused`).
 - **Reversibility & undo:** fully reversible — `undo` sets `paused=false`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -543,7 +558,10 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "What is happening on my network?" / "What fired recently?"
 - **When to use / not:** the entry point for the alarm workflow. Defaults to the **10 most recent** — a large alarm payload is expensive context, so raise `count` deliberately.
-- **Inputs:** `count` (default 10, max 500), `include_archived` (bool), `type` (filter), `detail` (bool — adds enrichment); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `limit` (default 10, max 500), `include_archived` (bool), `alarm_type`
+  (filter — a raw `ALARM_*` type or a supported group), `detail` (bool — adds enrichment);
+  `config_entry_id` / `config_entry_name`. There is no time-window filter: the box keeps
+  roughly 30 days and ignores time parameters.
 - **Returns:** read envelope — `result.alarms[]` with `aid`, `type`, `fired_at`
   (ISO 8601) / `fired_at_timestamp` (epoch), target, device, `exception_id` when muted.
 - **Availability:** read, default-on.

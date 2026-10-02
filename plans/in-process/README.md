@@ -6,3 +6,8 @@ Place active Firewalla implementation plans in this folder.
 - Supporting note: `INITIATIVE_NAME_SUP_[DESCRIPTOR].md`
 
 Keep plans phase-based, executable, and tied to concrete files.
+
+When an initiative completes, move its plan and supporting notes to `plans/completed/`
+and rename the main plan to `INITIATIVE_NAME_COMPLETED.md`.
+
+**Currently no initiatives are in process.**
