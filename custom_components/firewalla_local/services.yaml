@@ -18,16 +18,82 @@ get_runtime_inventory:
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
 get_host_name_mapping:
-  name: Get host name mapping
-  description: Return the current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.
+  name: Get hosts
+  description: Return the Firewalla host (device) records with naming fields, IP address, device type, kind, group membership, and online state. Filters narrow the result on the box. Non-admin; for the full runtime inventory use get_runtime_inventory.
   fields:
+    detail:
+      required: false
+      example: "summary"
+      selector:
+        select:
+          options:
+            - value: "summary"
+              label: Summary (omits derivable and unreliable fields)
+            - value: "full"
+              label: Full record
+      name: Detail
+      description: Optional. 'summary' (default) omits the derivable dns_fqdn, the unreliable dhcp_name, and the nested ip_assignment, flattening its useful parts to ip_assignment_mode and reserved_ipv4. Use 'full' for the complete record.
+    host_name:
+      required: false
+      example: "plex"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Substring match on the host name. Use it to find one device instead of listing every host.
+    host_mac:
+      required: false
+      example: "00:AA:BB:CC:DD:26"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Exact host MAC address.
+    group_name:
+      required: false
+      example: "Quarantine"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Exact group or user name to filter by. Matches exactly, so filter one name at a time.
+    kind:
+      required: false
+      example: "mac_host"
+      selector:
+        select:
+          options:
+            - value: "mac_host"
+              label: A normal MAC-backed device
+            - value: "pseudo_host"
+              label: A VPN peer (no MAC)
+      name: Kind
+      description: Optional. 'mac_host' for a normal device, 'pseudo_host' to return only VPN peers. Peers have no MAC address, so they cannot be used with host actions that take one.
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Optional. Filter to the devices on one network.
+    online:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Online
+      description: Optional. Filter by connectivity. Uses the same activity-window definition as the device counts on the system-status sensor.
+    user:
+      required: false
+      example: "31"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Filter to hosts belonging to one user id.
     refresh:
       required: false
       example: true
       selector:
         boolean:
       name: Refresh first
-      description: Optional. Defaults to true. Refresh the Firewalla runtime before building the host identity records.
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before building the host records.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -68,6 +134,17 @@ get_network_segment_report:
         boolean:
       name: Refresh first
       description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the network selector and building the report.
+    include:
+      required: false
+      example: "hosts"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "hosts"
+              label: Include the devices on this network
+      name: Include
+      description: Optional. Add the network's device list. Absent by default because those rows carry MAC addresses, hostnames, IPs, and reservations; ask for it only when the devices are wanted.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1030,6 +1107,23 @@ get_wan_events:
           mode: box
       name: Event offset
       description: Optional. Defaults to 0 so you can page older events.
+    window_days:
+      required: false
+      example: 7
+      selector:
+        number:
+          min: 0
+          max: 366
+          mode: box
+      name: Window (days)
+      description: Optional. How many days back to look. Defaults to 7; use 0 for no time bound. Unlike the alarm reads, this time filter is genuinely honoured.
+    include_dns:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Include DNS probes
+      description: Optional. Defaults to false. The box's internal DNS health probes run roughly every 3 minutes and are not WAN events, so they are excluded by default.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1196,7 +1290,7 @@ get_alarms:
 
 get_rules:
   name: Get rules
-  description: Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, applies_to, tag_refs, purpose, and any originating alarm. Defaults to user-visible rules: product-owned DAP and family rules, and rules owned by a Firewalla subsystem, are hidden unless requested via include_purpose or include_system_managed. Use this to resolve the rule target for pause_rule and resume_rule.
+  description: Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, applies_to, tag_refs, purpose, and any originating alarm. Defaults to user-visible rules — product-owned DAP and family rules, and rules owned by a Firewalla subsystem, are hidden unless requested via include_purpose or include_system_managed. Use this to resolve the rule target for pause_rule and resume_rule.
   fields:
     enabled:
       required: false

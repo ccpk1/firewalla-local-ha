@@ -1314,6 +1314,30 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Optional. Filter by enabled state."
+        },
+        "action": {
+          "name": "Action",
+          "description": "Optional. Filter by action: 'block', 'allow', 'qos', or 'disturb'."
+        },
+        "target_type": {
+          "name": "Target type",
+          "description": "Optional. Filter by target type, for example 'category', 'mac', 'ip', 'dns', or 'network'."
+        },
+        "applies_to": {
+          "name": "Applies to",
+          "description": "Optional. Filter to rules governing one group, user, or network name. A host's group_name from get_host_name_mapping is the value to pass here. Matches exactly."
+        },
+        "include_purpose": {
+          "name": "Include purpose",
+          "description": "Optional. Include product-owned DAP or family rules, which are hidden by default."
+        },
+        "include_system_managed": {
+          "name": "Include system-managed",
+          "description": "Optional. Include rules owned by a Firewalla subsystem, such as alarm-intel auto-blocks. Hidden by default."
         }
       }
     },
@@ -1514,9 +1538,41 @@
       }
     },
     "get_host_name_mapping": {
-      "name": "Get host name mapping",
-      "description": "Return current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.",
+      "name": "Get hosts",
+      "description": "Return the Firewalla host (device) records with naming fields, IP address, device type, kind, group membership, and online state. Filters narrow the result on the box. Non-admin; for the full runtime inventory use get_runtime_inventory.",
       "fields": {
+        "detail": {
+          "name": "Detail",
+          "description": "Optional. 'summary' (default) omits the derivable dns_fqdn, the unreliable dhcp_name, and the nested ip_assignment, flattening its useful parts to ip_assignment_mode and reserved_ipv4. Use 'full' for the complete record."
+        },
+        "host_name": {
+          "name": "Host name",
+          "description": "Optional. Substring match on the host name. Use it to find one device instead of listing every host."
+        },
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Optional. Exact host MAC address."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Optional. Exact group or user name to filter by. Matches exactly, so filter one name at a time."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "Optional. 'mac_host' for a normal device, 'pseudo_host' to return only VPN peers. Peers have no MAC address, so they cannot be used with host actions that take one."
+        },
+        "network_uuid": {
+          "name": "Network UUID",
+          "description": "Optional. Filter to the devices on one network."
+        },
+        "online": {
+          "name": "Online",
+          "description": "Optional. Filter by connectivity. Uses the same activity-window definition as the device counts on the system-status sensor."
+        },
+        "user": {
+          "name": "User ID",
+          "description": "Optional. Filter to hosts belonging to one user id."
+        },
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before building the host records."
@@ -1568,6 +1624,10 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        },
+        "include": {
+          "name": "Include",
+          "description": "Optional. 'hosts' adds the network's device list, which is absent by default because those rows carry MAC addresses, hostnames, IPs, and reservations."
         }
       }
     },
@@ -2064,6 +2124,14 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        },
+        "window_days": {
+          "name": "Window (days)",
+          "description": "Optional. Defaults to 7. How many days back to look; use 0 for no time bound."
+        },
+        "include_dns": {
+          "name": "Include DNS probes",
+          "description": "Optional. Defaults to false. The box's internal DNS health probes are not WAN events and are excluded by default."
         }
       }
     },

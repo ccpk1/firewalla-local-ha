@@ -819,13 +819,27 @@ it directly.
 
 ### Get host name mapping
 
-Use `firewalla_local.get_host_name_mapping` to read the current normalized host
-identity records.
+Use `firewalla_local.get_host_name_mapping` to read the Firewalla host (device)
+records: identity, IP, device type, kind, group membership, and connectivity.
 
-- lightweight lookup for host IDs, MACs, IPs, names, and host kind
+- **Filters run on the box**, so narrow the result instead of listing every
+  device: `host_name` (substring), `host_mac`, `group_name`, `kind`,
+  `network_uuid`, `online`, and `user`
+- `detail` defaults to `summary`, which omits the derivable `dns_fqdn`, the
+  unreliable `dhcp_name`, and the nested `ip_assignment` (its useful parts are
+  flattened to `ip_assignment_mode` and `reserved_ipv4`); use `full` for the
+  complete record
 - `refresh` defaults to `true`
-- MAC-backed hosts appear as `kind=mac_host`
-- non-MAC pseudo-hosts can still appear as `kind=pseudo_host`
+- MAC-backed hosts appear as `kind=mac_host`; non-MAC pseudo-hosts (VPN peers)
+  appear as `kind=pseudo_host` and have no MAC, so they cannot be passed to host
+  actions that take one
+- `online` uses the same activity-window definition as the device counts on the
+  system-status sensor, so the two never disagree
+- `group_name` is the key for rule lookup: pass it to
+  `get_rules` as `applies_to` to find the rules that govern a device
+
+Non-admin. For the full runtime inventory (admin-gated, much larger) use
+`get_runtime_inventory`.
 
 ### Get network segment report
 

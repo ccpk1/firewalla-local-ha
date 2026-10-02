@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, cast
+from typing import Any, Final, cast
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
@@ -3552,6 +3552,15 @@ _SERVICES_YAML_PATH: Final = (
 )
 
 
+def _parse_services_yaml() -> dict[str, Any]:
+    """Return services.yaml parsed, so an invalid file fails loudly here."""
+    import yaml
+
+    parsed = yaml.safe_load(_SERVICES_YAML_PATH.read_text(encoding="utf-8"))
+    assert isinstance(parsed, dict)
+    return parsed
+
+
 def test_every_service_has_a_translation_and_no_orphans() -> None:
     """Every service is translated, and no translation describes a missing service.
 
@@ -3570,6 +3579,64 @@ def test_every_service_has_a_translation_and_no_orphans() -> None:
 
     assert declared - translated == set(), "services missing a translation"
     assert translated - declared == set(), "translation entries with no service"
+
+
+def test_every_service_field_is_documented() -> None:
+    """Every service field accepted by a schema is named in both doc surfaces.
+
+    The mirror of the LLM reference check, for the human-facing surface. It
+    caught `get_host_name_mapping` growing eight server-side filters for the AI
+    tools while the docs still described only `refresh` and the entry selectors,
+    and the same pattern in `get_rules` (six), `get_wan_events` (two), and
+    `get_network_segment_report` (one). Automations could not discover
+    capabilities the services already had. Schemas are the source of truth.
+    """
+    from custom_components.firewalla_local.services import _SERVICE_REGISTRATIONS
+
+    translations = json.loads(_TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+    yaml_services = _parse_services_yaml()
+    gaps: list[str] = []
+
+    for name, _handler, schema, _response, _admin in _SERVICE_REGISTRATIONS:
+        fields = {marker.schema for marker in schema.schema}
+        in_json = set((translations["services"].get(name) or {}).get("fields") or {})
+        in_yaml = set((yaml_services.get(name) or {}).get("fields") or {})
+        for field in sorted(fields - in_json):
+            gaps.append(f"{name}: {field} missing from translations")
+        for field in sorted(fields - in_yaml):
+            gaps.append(f"{name}: {field} missing from services.yaml")
+
+    assert gaps == [], f"undocumented service fields: {gaps}"
+
+
+def test_services_yaml_is_valid_and_matches_translations() -> None:
+    """services.yaml parses, and both surfaces document the same fields.
+
+    An unquoted colon inside a description silently makes the file invalid YAML.
+    One shipped that way in `get_rules` ("Defaults to user-visible rules: ..."),
+    which no test covered, because nothing parsed the file.
+    """
+    yaml_services = _parse_services_yaml()
+    translations = json.loads(_TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+
+    yaml_fields = {
+        name: set(entry.get("fields") or {}) for name, entry in yaml_services.items()
+    }
+    json_fields = {
+        name: set(entry.get("fields") or {})
+        for name, entry in translations["services"].items()
+    }
+
+    mismatched = {
+        name: {
+            "yaml": sorted(yaml_fields.get(name, set())),
+            "json": sorted(json_fields.get(name, set())),
+        }
+        for name in set(yaml_fields) | set(json_fields)
+        if yaml_fields.get(name, set()) != json_fields.get(name, set())
+    }
+
+    assert mismatched == {}, f"services.yaml and translations disagree: {mismatched}"
 
 
 async def test_get_system_overview_reports_counts_without_identities(
