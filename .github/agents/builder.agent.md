@@ -1,7 +1,7 @@
 ---
 name: Firewalla Builder
 description: Implementation agent for the Firewalla Home Assistant integration. Use when you need code changes, validation, phased execution, or scaffold-to-feature implementation work in this standalone repo.
-tools: ["search", "edit", "read", "execute", "web", "agent", "todo"]
+tools: [execute, read, agent, vscodeGeneral/rename, vscodeGeneral/usages, vscodeNotebooks/createJupyterNotebook, vscodeNotebooks/editNotebook, edit, search, web, 'dev-firewalla-mcp/*', todo]
 handoffs:
   - label: Create New Plan
     agent: Firewalla Strategist
