@@ -3819,10 +3819,29 @@ async def test_get_system_overview_counts_vpn_peers_separately(
             blocking=True,
             return_response=True,
         )
+        peers = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOST_NAME_MAPPING,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_KIND: "pseudo_host",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
 
     assert overview is not None
     assert overview["devices"]["total"] == 3
     assert overview["vpn_devices"] == {"total": 2, "online": 1, "offline": 1}
+
+    # The list agrees with the summary. Answering "how many are connected?"
+    # from the length of this list is the bug the smoke test found: both peers
+    # are returned, but only one is online.
+    assert peers is not None
+    assert len(peers["hosts"]) == 2
+    assert [host["online"] for host in peers["hosts"]] == [False, True]
+    assert sum(1 for host in peers["hosts"] if host["online"]) == 1
 
 
 async def test_get_host_name_mapping_defaults_to_summary_detail(
@@ -3885,6 +3904,8 @@ async def test_get_host_name_mapping_defaults_to_summary_detail(
                 "group_name": "Media Devices",
                 "host_device_type": "tablet",
                 "kind": "mac_host",
+                "online": True,
+                "last_active": None,
                 "vpn_client": None,
                 "ip_assignment_mode": "static",
                 "reserved_ipv4": "192.168.10.10",
@@ -3899,6 +3920,8 @@ async def test_get_host_name_mapping_defaults_to_summary_detail(
                 "group_name": None,
                 "host_device_type": None,
                 "kind": "pseudo_host",
+                "online": True,
+                "last_active": None,
                 "vpn_client": None,
                 "ip_assignment_mode": None,
                 "reserved_ipv4": None,

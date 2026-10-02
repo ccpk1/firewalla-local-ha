@@ -246,7 +246,10 @@ Reads that tell you what exists — the first step before any control action.
   names and ids that `get_user_usage` and the rule tools accept as selectors);
   `config_entry_id` / `config_entry_name` (optional).
 - **Returns:** read envelope — `result` with `appliance` (model, software version,
-  firmware, uptime, CPU/memory/disk), `devices` and `vpn_devices` counts,
+  firmware, uptime, CPU/memory/disk), `devices` and `vpn_devices` counts (each
+  `total`/`online`/`offline` — **`total` is not the connected count**; peers are
+  configured, so answer "connected" from `online`, and `vpn_devices` is a break-down
+  of `devices`, not an additional population),
   `networks[]` (uuid, name, kind, `ipv4_subnets`, device/online/offline counts),
   `groups` and `users` counts, `rules` counts, `alarms` counts, per-WAN `items[]`
   with nested `latest_speed_test` and `internet_quality`, and `llm_access`
@@ -295,13 +298,21 @@ Reads that tell you what exists — the first step before any control action.
   default and is the largest payload in the surface (~18k tokens live). Filters are
   applied server-side, so the model is expected to pass `host_name` (substring),
   `host_mac`, `group_name`, `user`, `network_uuid`, `online` or `kind` rather than
-  listing everything and filtering in context. `detail` defaults to `summary`; ask
-  for `full` only when a field that `summary` omits is actually needed.
+  listing everything and filtering in context. `online` uses the same
+  activity-window definition as the system-status counts and the summary's
+  `vpn_devices`, so "how many are connected?" cannot be answered two ways.
+  `detail` defaults to `summary`; ask for `full` only when a field that `summary`
+  omits is actually needed.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
   (bool, default true — performs a live poll; set false for a fast cached read);
   `config_entry_id` / `config_entry_name` (optional).
-- **Returns:** read envelope — `result.hosts[]`, each with `host_id`, `name`,
-  `device_type`, online status, and `ip_assignment` (`mode`: `dynamic`/`static`,
+- **Returns:** read envelope — `result.hosts[]`, each with `host_id`, `mac`,
+  `host_name`, `kind` (`mac_host`/`pseudo_host`), **`online`** (active now — the
+  connectivity signal to answer "is it connected?"), `last_active` (epoch), and
+  `ip_assignment` (`mode`: `dynamic`/`static`,
+  `reserved_ipv4`, `network_uuid`). **`online` is per-device**: a returned row is
+  not necessarily a connected device, and every configured VPN peer is returned by
+  default regardless of whether it has ever connected.
   `reserved_ipv4`, `network_uuid`).
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.

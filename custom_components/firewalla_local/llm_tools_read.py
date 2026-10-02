@@ -181,6 +181,12 @@ class ListHostsTool(_FirewallaReadTool):
         "that takes a MAC. `ip_assignment` is also null for them; do not assume "
         "it is always an object.\n"
         "\n"
+        "Connectivity: `online` is whether the device is active now, and "
+        "`last_active` is its last activity (epoch seconds). A peer in this list "
+        "is a *configured* peer, not necessarily a connected one — several may be "
+        "idle for weeks. When asked how many are connected, count `online: true` "
+        "(or filter `online=true`), never the length of the list.\n"
+        "\n"
         "This lists every host by default. Pass the filters to narrow it — a "
         "name, one network, online state or kind — rather than pulling the whole "
         "inventory, and keep the default `detail: summary` unless the full "
@@ -671,7 +677,14 @@ class GetSystemOverviewTool(_FirewallaReadTool):
         "It returns counts and identifiers only — never device or rule records. "
         "Use list_hosts for devices and list_rules for rules; do not answer a "
         "per-device question from this summary. Call it once per session unless "
-        "the network has changed."
+        "the network has changed.\n"
+        "\n"
+        "Reading the counts: `devices` and `vpn_devices` each report `total` "
+        "(everything known), `online` (active now), and `offline`. `total` is "
+        "not the connected count — a VPN peer is *configured*, and may have been "
+        'idle for weeks, so answer "how many are connected?" from `online`, '
+        "never from `total`. The two sections overlap: peers are already inside "
+        "`devices`, so `vpn_devices` is a breakdown of it, not a group to add."
     )
     parameters = vol.Schema(
         {
@@ -701,6 +714,13 @@ class GetSystemOverviewSummaryTool(GetSystemOverviewTool):
         "Answer general questions about this Firewalla network: appliance "
         "health, the networks with their device counts, and counts for devices, "
         "VPN peers, and alarms.\n"
+        "\n"
+        "Reading the counts: `devices` and `vpn_devices` each report `total` "
+        "(everything known), `online` (active now), and `offline`. `total` is "
+        "not the connected count — a VPN peer is *configured*, and may have been "
+        'idle for weeks, so answer "how many are connected?" from `online`, '
+        "never from `total`. The two sections overlap: peers are already inside "
+        "`devices`, so `vpn_devices` is a breakdown of it, not a group to add.\n"
         "\n"
         "This report is intentionally limited to counts, network names, and "
         "performance metrics — it carries no device addresses, no hardware "

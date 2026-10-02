@@ -335,6 +335,32 @@ _PAYLOAD_GUIDANCE: Final = (
 )
 
 
+async def test_count_totals_are_not_presented_as_connected(
+    hass: HomeAssistant,
+) -> None:
+    """The counts describe themselves, so `total` is not read as "connected".
+
+    A smoke test asked "are there any VPN devices connected?" and got five, all
+    named, because `list_hosts` returned every configured peer with no
+    connectivity signal and the overview's counts were the only place `online`
+    appeared. Every surface that reports a total now says what it means, and
+    `list_hosts` carries the per-device `online` the answer actually needs.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+
+    for tool_name in (
+        "firewalla_local__get_system_overview",
+        "firewalla_local__list_hosts",
+    ):
+        description = tools[tool_name].description
+        assert "connected" in description, tool_name
+        assert "online" in description, tool_name
+
+    config = tools["firewalla_local__list_hosts"].parameters.schema
+    assert any(marker.schema == "online" for marker in config)
+
+
 async def test_large_payload_tools_tell_the_model_to_narrow(
     hass: HomeAssistant,
 ) -> None:

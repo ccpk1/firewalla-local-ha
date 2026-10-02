@@ -3981,12 +3981,26 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
 
     detail = cast(str, call.data.get(SERVICE_FIELD_DETAIL, "summary"))
     raw_host_lookup = _build_raw_host_lookup(entry)
+    # One online definition for the whole surface: the same activity-window rule
+    # the system-status counts and the overview's vpn_devices use. The filter and
+    # the exposed `online` field both read from it, so "how many are connected?"
+    # cannot be answered two different ways depending on which tool was asked.
+    all_hosts = entry.runtime_data.host_manager.get_hosts()
+    online_window_seconds = (
+        entry.runtime_data.host_manager.watched_device_online_window_seconds
+    )
+    reference_activity = reference_last_active(all_hosts)
     hosts: list[JsonValueType] = []
     for host in sorted(
         entry.runtime_data.host_manager.get_hosts(),
         key=lambda host: host.mac,
     ):
-        if not _host_matches_filters(host, call.data):
+        is_online = is_host_online(
+            host,
+            reference_activity=reference_activity,
+            online_window_seconds=online_window_seconds,
+        )
+        if not _host_matches_filters(host, call.data, is_online=is_online):
             continue
         is_mac_host = _supports_wake_on_lan(host.mac)
         raw_host = raw_host_lookup.get(host.mac)
@@ -4010,6 +4024,8 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
             "group_name": host.group_name,
             "host_device_type": host.host_device_type,
             "kind": "mac_host" if is_mac_host else "pseudo_host",
+            "online": is_online,
+            "last_active": host.last_active,
             "vpn_client": (
                 {
                     "profile_id": host.vpn_client.profile_id,
@@ -4035,7 +4051,12 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
     return {"hosts": hosts}
 
 
-def _host_matches_filters(host: FirewallaHostRuntime, data: Mapping[str, Any]) -> bool:
+def _host_matches_filters(
+    host: FirewallaHostRuntime,
+    data: Mapping[str, Any],
+    *,
+    is_online: bool | None,
+) -> bool:
     """Return whether one host satisfies every supplied filter."""
     name_filter = cast(str | None, data.get(SERVICE_FIELD_HOST_NAME))
     if (
@@ -4066,11 +4087,8 @@ def _host_matches_filters(host: FirewallaHostRuntime, data: Mapping[str, Any]) -
         return False
 
     online_filter = cast(bool | None, data.get(SERVICE_FIELD_ONLINE))
-    if online_filter is not None:
-        # `stale` is the box's own signal; a host is online when it is False.
-        is_online = host.stale is False
-        if is_online is not online_filter:
-            return False
+    if online_filter is not None and is_online is not online_filter:
+        return False
 
     user_filter = cast(str | None, data.get(SERVICE_FIELD_USER))
     return not (user_filter is not None and user_filter not in host.user_ids)
