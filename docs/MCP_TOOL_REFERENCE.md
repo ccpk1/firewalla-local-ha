@@ -309,10 +309,17 @@ Reads that tell you what exists — the first step before any control action.
   for weeks are returned with `online: false`. Filtering by `group_name` therefore
   gives the group's whole device list, not just the recently-active ones; use
   `online` to separate current from idle. A live Quarantine group returned **10**
-  devices: the newest three had been seen within 5 days, and the other seven
-  between 13 and 33 days ago. All ten were in the result. Under the shared
-  activity-window definition **none** were `online`, because the window is measured
-  against the freshest host in the whole inventory, not against the group.
+  devices — 3 recently active and 7 past — and all ten were in the result, with
+  exactly **1** reading `online: true`.
+- **`online` uses a connectivity tolerance, not the presence window.** It measures
+  against the freshest host in the whole inventory, with a fixed
+  `CONNECTIVITY_ONLINE_WINDOW_MINUTES` (15). That is deliberately separate from the
+  user-tunable watched-device presence window: presence answers "is it home" and
+  an idle device can still be connected. On the same live box the 5-minute presence
+  default reported a device idle 6.9 minutes as offline while the Firewalla app
+  showed it online; 15 minutes matches. The box's own `stale` flag is a third
+  signal again — it means "not seen in roughly 7 days", so it is never used to
+  answer a connectivity question.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
   (bool, default true — performs a live poll; set false for a fast cached read);
   `config_entry_id` / `config_entry_name` (optional).

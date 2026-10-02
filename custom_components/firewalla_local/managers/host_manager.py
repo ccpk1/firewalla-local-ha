@@ -12,6 +12,7 @@ from ..const import (
     CONF_DEVICE_TRACKERS,
     CONF_WATCHED_DEVICE_ONLINE_WINDOW,
     CONF_WATCHED_DEVICES,
+    CONNECTIVITY_ONLINE_WINDOW_MINUTES,
     DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES,
@@ -194,6 +195,16 @@ class FirewallaHostManager(FirewallaBaseManager):
         )
 
     @property
+    def connectivity_online_window_seconds(self) -> int:
+        """Return the window that decides whether a device counts as online.
+
+        Distinct from the watched-device presence window: presence answers "is it
+        home" and is user-tunable, while connectivity answers "is it connected"
+        and tolerates a device being idle.
+        """
+        return CONNECTIVITY_ONLINE_WINDOW_MINUTES * 60
+
+    @property
     def device_tracker_away_window_seconds(self) -> int:
         """Return the device-tracker away window in seconds."""
         return (
@@ -236,7 +247,7 @@ class FirewallaHostManager(FirewallaBaseManager):
         """Return the number of hosts that appear online in the latest snapshot."""
         return count_online_hosts(
             self.get_hosts(),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            online_window_seconds=self.connectivity_online_window_seconds,
         )
 
     def count_offline_devices(self) -> int:
@@ -263,7 +274,7 @@ class FirewallaHostManager(FirewallaBaseManager):
         """
         return count_online_hosts(
             self.get_vpn_peers(),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            online_window_seconds=self.connectivity_online_window_seconds,
         )
 
     def count_vpn_offline_devices(self) -> int:

@@ -391,8 +391,7 @@ async def test_count_totals_are_not_presented_as_connected(
     # group returned 10 devices, 7 of them long-idle, so membership here is the
     # group's full device list.
     assert (
-        "Past devices are included"
-        in tools["firewalla_local__list_hosts"].description
+        "Past devices are included" in tools["firewalla_local__list_hosts"].description
     )
 
     config = tools["firewalla_local__list_hosts"].parameters.schema

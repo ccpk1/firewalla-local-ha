@@ -270,6 +270,16 @@ DEFAULT_UPDATE_INTERVAL_MINUTES: Final = 3
 DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 15
 DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 5
 
+# Connectivity reporting uses its own tolerance, deliberately separate from the
+# device-presence windows above. They answer different questions: presence asks
+# "is this device home", connectivity asks "is this device connected". An idle
+# device is still connected, so a presence window is far too strict here — on a
+# live box a device active 6.9 minutes ago was reported offline by the 5-minute
+# presence default while the Firewalla app showed it online. The value is bounded
+# by observation on that box (6.9 minutes reads online, 63.8 minutes reads
+# offline), not derived from a published contract.
+CONNECTIVITY_ONLINE_WINDOW_MINUTES: Final = 15
+
 # LLM/MCP tool exposure. The summary tier registers one curated, non-identifying
 # report; read tools are the low-risk step up; control tools require an explicit
 # opt-in. "full" additionally exposes destructive operations (data-destroying or

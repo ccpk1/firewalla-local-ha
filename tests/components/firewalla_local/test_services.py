@@ -3823,6 +3823,104 @@ async def test_get_system_overview_includes_identifiers_on_request(
     assert "items" in overview["groups"]
 
 
+async def test_connectivity_uses_its_own_window_not_the_presence_window(
+    hass: HomeAssistant,
+) -> None:
+    """A device idle longer than the presence window still reads connected.
+
+    Reproduces a live observation: on the Quarantine group the box carried 10
+    devices, 7 past and 3 recently active, and the Firewalla app showed exactly
+    1 of those 3 online — the one idle 6.9 minutes. The 5-minute watched-device
+    presence default reported it offline, because presence and connectivity are
+    different questions. The connectivity tolerance is 15 minutes.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    base = _snapshot()
+    template = base.hosts[0]
+    # Reference host sets the freshness baseline.
+    reference = replace(template, mac="AA:BB:CC:DD:EE:01", last_active=1_000_000.0)
+    # Idle 6.9 min: within the connectivity tolerance, outside the 5-min presence
+    # window, and not stale.
+    recent = replace(
+        template,
+        mac="AA:BB:CC:DD:EE:02",
+        host_name="just-connected",
+        last_active=1_000_000.0 - 414.0,
+        stale=False,
+    )
+    # Idle 63.8 min: within stale=False, outside both windows.
+    idle = replace(
+        template,
+        mac="AA:BB:CC:DD:EE:03",
+        host_name="idle-but-fresh",
+        last_active=1_000_000.0 - 3828.0,
+        stale=False,
+    )
+    snapshot = replace(base, hosts=(reference, recent, idle))
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        overview = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SYSTEM_OVERVIEW,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+        hosts = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOSTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    # `idle-but-fresh` carries `stale: false` — the box's seven-day signal — yet
+    # is not connected, which is exactly the distinction `online` has to make.
+    assert hosts is not None
+    online = {h["host_name"]: h["online"] for h in hosts["hosts"]}
+    assert online == {
+        "Firewalla": True,
+        "just-connected": True,
+        "idle-but-fresh": False,
+    }
+
+    # And the summary counts agree with the list.
+    assert overview is not None
+    assert overview["devices"]["total"] == 3
+    assert overview["devices"]["online"] == sum(1 for v in online.values() if v)
+
+
 async def test_get_system_overview_counts_vpn_peers_separately(
     hass: HomeAssistant,
 ) -> None:

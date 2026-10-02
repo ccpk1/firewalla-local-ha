@@ -194,7 +194,7 @@ class ListHostsTool(_FirewallaReadTool):
         "\n"
         "Past devices are included. The init request asks the box for inactive "
         "hosts (`includeInactiveHosts`), which is the same data behind the app's "
-        "\"Show past devices\" toggle, so a device that has not been online for "
+        '"Show past devices" toggle, so a device that has not been online for '
         "weeks still appears here with `online: false` and an old `last_active`. "
         "A group's membership here is therefore the group's full device list, "
         "not just the active ones — use `online` to separate the two.\n"

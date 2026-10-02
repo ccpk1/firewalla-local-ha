@@ -11,6 +11,19 @@ they were active within the configured window of it. A box where nothing has
 been active recently therefore reports no online hosts rather than treating
 stale timestamps as current.
 
+The window is a parameter, because two callers ask different questions:
+
+- **Presence** — the watched-device and device-tracker entities, which use the
+  user's configured window. "Is this device home?"
+- **Connectivity** — the device counts, the VPN peer counts, and the host list's
+  ``online`` field, which use ``CONNECTIVITY_ONLINE_WINDOW_MINUTES``. "Is this
+  device connected?" An idle device is still connected, so the presence window is
+  too strict here.
+
+The box's own ``stale`` flag is a third signal and answers neither question the
+same way: it means "not seen in roughly 7 days", so it is not used for
+connectivity.
+
 VPN peers are identified here too, for the same reason: the counted population
 has to be one definition shared by the system-status attributes and the summary
 report.

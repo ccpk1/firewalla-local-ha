@@ -788,7 +788,7 @@ class FirewallaRuleManager(FirewallaBaseManager):
             snapshot.policy_rules,
             hosts=snapshot.hosts,
             online_window_seconds=(
-                host_manager.watched_device_online_window_seconds
+                host_manager.connectivity_online_window_seconds
                 if host_manager is not None
                 else 0
             ),
