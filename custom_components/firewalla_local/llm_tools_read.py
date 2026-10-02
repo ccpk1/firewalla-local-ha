@@ -36,6 +36,7 @@ from .const import (
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_INCLUDE_ARCHIVED,
     SERVICE_FIELD_INCLUDE_DNS,
+    SERVICE_FIELD_INCLUDE_EXCEPTIONS,
     SERVICE_FIELD_INCLUDE_PURPOSE,
     SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
     SERVICE_FIELD_KIND,
@@ -179,6 +180,11 @@ class ListHostsTool(_FirewallaReadTool):
         "key for rule lookup: pass it to `list_rules` as `applies_to` to find "
         "the rules that govern this device. It can hold several names separated "
         'by ", ".\n'
+        "\n"
+        "Which network: every record carries `network_uuid` and `network_name`, "
+        "so a device's segment is stated rather than inferred from its IP. "
+        "`network_uuid` is also a filter if you only want one segment's devices."
+        "\n"
         "\n"
         'VPN peers: a device with `kind: "pseudo_host"` is a VPN peer. Those '
         "have NO MAC address (`mac` is null and `host_id` is a `wg_peer:`/"
@@ -358,7 +364,14 @@ class GetNetworkConfigTool(_FirewallaReadTool):
         "\n"
         "The network's device list is not included by default. Ask for it with "
         "`include: ['hosts']` only when the user wants the devices on that "
-        "network; use list_hosts for device questions."
+        "network; use list_hosts for device questions.\n"
+        "\n"
+        "Reading the counts: `summary.host_count` is the network's device count "
+        "from the host inventory, and it is the same whether or not you ask for "
+        "the device list — it is the number to quote. `summary."
+        "returned_host_count` is only present when `include: ['hosts']` is set "
+        "and reports how many rows that section actually returned, which can be "
+        "fewer than `host_count`."
     )
     parameters = vol.Schema(
         {
@@ -619,6 +632,9 @@ class GetInternetQualityTool(_FirewallaReadTool):
         "Answer 'how good is my internet right now?' with quality samples such "
         "as latency, jitter, and packet loss. For a point-in-time throughput "
         "test run run_internet_speed_test; for past results use get_speed_tests."
+        "\n\n"
+        "`samples` is newest first, so the current reading is `samples[0]`. "
+        "There is no separate latest record."
     )
     parameters = vol.Schema(
         {
@@ -647,7 +663,9 @@ class GetSpeedTestsTool(_FirewallaReadTool):
     description = (
         "Answer 'what were my last speed test results?' with stored download, "
         "upload, latency, and packet-loss measurements. To run a new test use "
-        "run_internet_speed_test."
+        "run_internet_speed_test.\n\n"
+        "`results` is newest first, so the most recent test is `results[0]`. "
+        "There is no separate latest record."
     )
     parameters = vol.Schema(
         {
@@ -778,7 +796,12 @@ class GetAlarmsTool(_FirewallaReadTool):
         "Answer 'what is happening on my network?' with the most recent alarms "
         "(active, and archived when requested). Defaults to the 10 newest; raise "
         "limit deliberately, since a large alarm payload is expensive context. "
-        "The box keeps roughly 30 days and offers no time-window filter."
+        "The box keeps roughly 30 days and offers no time-window filter.\n"
+        "\n"
+        "`limit` bounds the whole response. Silence records are omitted by "
+        "default; each alarm already carries its own `exception_id`, so you only "
+        "need `include_exceptions` when hunting a silence to remove — that list "
+        "is unbounded and is the expensive part of this response."
     )
     parameters = vol.Schema(
         {
@@ -796,8 +819,10 @@ class GetAlarmsTool(_FirewallaReadTool):
             vol.Optional(
                 SERVICE_FIELD_ALARM_TYPE,
                 description=(
-                    "Optional. A raw ALARM_* type or a supported group such as "
-                    "'security', 'abnormal_upload', or 'open_port'."
+                    "Optional. Filter by alarm type. A raw `ALARM_*` value "
+                    "(`ALARM_INTEL`, `ALARM_LARGE_UPLOAD`, …) or a supported "
+                    "group: `security`, `abnormal_upload`, `open_port`. Matches "
+                    "the `alarm_type` field on the returned records."
                 ),
             ): str,
             vol.Optional(
@@ -805,6 +830,15 @@ class GetAlarmsTool(_FirewallaReadTool):
                 description=(
                     "Optional. Fetch extended detail with one extra request per "
                     "returned alarm. Defaults to false."
+                ),
+            ): bool,
+            vol.Optional(
+                SERVICE_FIELD_INCLUDE_EXCEPTIONS,
+                description=(
+                    "Optional. Add the full silence-exception table, which is "
+                    "unbounded. Defaults to false: each alarm already carries "
+                    "its `exception_id`. Set this only to find a silence to "
+                    "unmute."
                 ),
             ): bool,
         }

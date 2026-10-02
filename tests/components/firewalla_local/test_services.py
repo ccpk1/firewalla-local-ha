@@ -2009,10 +2009,9 @@ async def test_get_speed_test_results_service_defaults_to_latest_result(
     assert response["refreshed"] is True
     assert response["count"] == 1
     assert response["wan"] is None
-    assert response["latest"] is not None
-    assert response["latest"]["wan_uuid"] == "wan-1"
-    assert response["latest"]["wan_name"] == "WAN-ONE"
-    assert response["results"] == [response["latest"]]
+    assert "latest" not in response
+    assert response["results"][0]["wan_uuid"] == "wan-1"
+    assert response["results"][0]["wan_name"] == "WAN-ONE"
 
 
 async def test_get_speed_test_results_service_filters_one_wan_without_refresh(
@@ -2065,7 +2064,7 @@ async def test_get_speed_test_results_service_filters_one_wan_without_refresh(
     assert response["refreshed"] is False
     assert response["wan"] == {"uuid": "wan-2", "name": "WAN-TWO"}
     assert response["count"] == 1
-    assert response["latest"]["wan_uuid"] == "wan-2"
+    assert response["results"][0]["wan_uuid"] == "wan-2"
 
 
 async def test_get_internet_quality_report_service_returns_latest_sample(
@@ -2133,16 +2132,15 @@ async def test_get_internet_quality_report_service_returns_latest_sample(
     assert response["refreshed"] is True
     assert response["count"] == 1
     assert response["wan"] is None
-    assert response["latest"] is not None
-    assert response["latest"]["wan_uuid"] == "wan-1"
-    assert response["latest"]["wan_name"] == "WAN-ONE"
-    assert response["latest"]["ping_target"] == "1.1.1.1"
-    assert response["latest"]["ping_latency_ms"] == 22.2
-    assert response["latest"]["ping_latency_max_ms"] == 73.7
-    assert response["latest"]["ping_latency_median_ms"] == 21
-    assert response["latest"]["ping_latency_min_ms"] == 19.2
-    assert response["latest"]["ping_packet_loss_percent"] == 0.17
-    assert response["samples"] == [response["latest"]]
+    assert "latest" not in response
+    assert response["samples"][0]["wan_uuid"] == "wan-1"
+    assert response["samples"][0]["wan_name"] == "WAN-ONE"
+    assert response["samples"][0]["ping_target"] == "1.1.1.1"
+    assert response["samples"][0]["ping_latency_ms"] == 22.2
+    assert response["samples"][0]["ping_latency_max_ms"] == 73.7
+    assert response["samples"][0]["ping_latency_median_ms"] == 21
+    assert response["samples"][0]["ping_latency_min_ms"] == 19.2
+    assert response["samples"][0]["ping_packet_loss_percent"] == 0.17
 
 
 async def test_get_internet_quality_report_service_filters_one_wan(
@@ -2223,7 +2221,7 @@ async def test_get_internet_quality_report_service_filters_one_wan(
     assert response["refreshed"] is False
     assert response["wan"] == {"uuid": "wan-2", "name": "WAN-TWO"}
     assert response["count"] == 1
-    assert response["latest"]["wan_uuid"] == "wan-2"
+    assert response["samples"][0]["wan_uuid"] == "wan-2"
 
 
 async def test_run_internet_speed_test_service_requires_selector_for_multiple_wans(
@@ -4089,6 +4087,8 @@ async def test_get_hosts_defaults_to_summary_detail(
                 "group_name": "Media Devices",
                 "host_device_type": "tablet",
                 "kind": "mac_host",
+                "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
+                "network_name": "VLAN10 CORE",
                 "online": True,
                 "last_active": None,
                 "vpn_client": None,
@@ -4105,6 +4105,8 @@ async def test_get_hosts_defaults_to_summary_detail(
                 "group_name": None,
                 "host_device_type": None,
                 "kind": "pseudo_host",
+                "network_uuid": None,
+                "network_name": "VLAN10 CORE",
                 "online": True,
                 "last_active": None,
                 "vpn_client": None,
@@ -5733,6 +5735,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     }
     assert response["summary"] == {
         "host_count": 2,
+        "returned_host_count": 2,
         "device_host_count": 2,
         "has_dhcp_config": True,
         "has_ipv4_addressing": True,
@@ -5915,7 +5918,10 @@ async def test_get_network_segment_report_service_omits_hosts_by_default(
         "dns",
         "dhcp",
     }
-    assert response["summary"]["host_count"] == 0
+    # The device count is reported whether or not the rows are asked for; only
+    # `returned_host_count` tracks the optional row set.
+    assert response["summary"]["host_count"] == 2
+    assert response["summary"]["returned_host_count"] is None
     assert response["metadata"]["applied"] == {"refresh": False, "include": []}
     assert "hosts" not in response["metadata"]["provenance"]
 

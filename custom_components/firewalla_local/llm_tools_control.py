@@ -827,7 +827,10 @@ class UnmuteAlarmTool(_FirewallaControlTool):
             ): str,
             vol.Optional(
                 SERVICE_FIELD_EXCEPTION_ID,
-                description="Optional. The silence id to remove directly.",
+                description=(
+                    "Optional. The silence id to remove directly. From "
+                    "`get_alarms` with `include_exceptions: true`."
+                ),
             ): str,
         }
     )

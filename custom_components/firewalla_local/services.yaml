@@ -1259,13 +1259,24 @@ get_alarms:
         boolean:
       name: Include archived
       description: Optional. Include archived alarm records.
-    type:
+    alarm_type:
       required: false
       example: "security"
       selector:
         text:
       name: Alarm type
-      description: Optional raw ALARM_* type or supported group security, abnormal_upload, or open_port.
+      description: Optional. Filter by alarm type. A raw ALARM_* value or a
+        supported group (security, abnormal_upload, or open_port). Matches the
+        alarm_type field on the returned records.
+    include_exceptions:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Include silence records
+      description: Optional. Add the full silence-exception table. Defaults to
+        false; each alarm already carries its exception_id. Set this only to
+        find a silence to unmute.
     detail:
       required: false
       example: false

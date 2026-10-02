@@ -294,6 +294,9 @@ Reads that tell you what exists — the first step before any control action.
 - **When to use / not:** the discovery feed for device work. Use before
   `set_host_name` / `set_host_dhcp_reservation`. For a host's *traffic*, use
   `get_network_usage`.
+- **Inputs:** `detail` (`summary`|`full`, default `summary`), `host_name`
+  (substring), `host_mac`, `group_name`, `kind` (`mac_host`|`pseudo_host`),
+  `network_uuid`, `online` (bool), `user`, `refresh` (bool, default true).
 - **Narrow it — do not pull the whole inventory:** this returns every host by
   default and is the largest payload in the surface (~18k tokens live). Filters are
   applied server-side, so the model is expected to pass `host_name` (substring),
@@ -310,6 +313,10 @@ Reads that tell you what exists — the first step before any control action.
   gives the group's whole device list, not just the recently-active ones; use
   `online` to separate current from idle. A live Quarantine group returned all
   **10** of its devices, 7 of them past, in a single result.
+- **Every record states its network.** `network_uuid` and `network_name` sit on
+  every row at both detail levels, so a device's segment is reported rather than
+  inferred from its IP address. `network_uuid` is also a filter when only one
+  segment's devices are wanted.
 - **`online` is the connectivity answer, and "is it home" is a different
   question.** It measures against the freshest host in the whole inventory, with
   `DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES` (5). The watched-device sensors,
@@ -600,13 +607,17 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 ### `firewalla_local__get_alarms`
 
 - **Answers:** "What is happening on my network?" / "What fired recently?"
-- **When to use / not:** the entry point for the alarm workflow. Defaults to the **10 most recent** — a large alarm payload is expensive context, so raise `count` deliberately.
+- **When to use / not:** the entry point for the alarm workflow. Defaults to the **10 most recent** — a large alarm payload is expensive context, so raise `limit` deliberately. `limit` bounds the whole response.
 - **Inputs:** `limit` (default 10, max 500), `include_archived` (bool), `alarm_type`
-  (filter — a raw `ALARM_*` type or a supported group), `detail` (bool — adds enrichment);
-  `config_entry_id` / `config_entry_name`. There is no time-window filter: the box keeps
+  (filter — a raw `ALARM_*` value or a group: `security`, `abnormal_upload`,
+  `open_port`), `detail` (bool — adds enrichment), `include_exceptions` (bool,
+  default false). There is no time-window filter: the box keeps
   roughly 30 days and ignores time parameters.
-- **Returns:** read envelope — `result.alarms[]` with `aid`, `type`, `fired_at`
-  (ISO 8601) / `fired_at_timestamp` (epoch), target, device, `exception_id` when muted.
+- **Returns:** read envelope — `result.alarms[]` with `alarm_id`, `alarm_type`,
+  `fired_at` (ISO 8601) / `fired_at_timestamp` (epoch), `device_name`, and
+  `exception_id` when that alarm is muted. `result.exceptions` — the full silence
+  table — is omitted unless `include_exceptions` is set; it is unbounded and is
+  the expensive part of this response. Set it only when hunting a silence to remove.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 

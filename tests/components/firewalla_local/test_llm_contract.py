@@ -539,14 +539,17 @@ _SHARED_PARAMS: Final = frozenset(
 async def test_reference_documents_each_tools_declared_inputs(
     hass: HomeAssistant,
 ) -> None:
-    """A tool section must name the parameters the tool actually accepts.
+    """A tool's Inputs line must name the parameters the tool actually accepts.
 
-    The reference drifted four times in ways only a reader would notice — a
+    The reference drifted in ways only a reader would notice — a
     documented-but-required-optional network, `count`/`type` where the schema
     says `limit`/`alarm_type`, and a "default 10" that the tool sets to 1. Each
-    would have caused a wrong or wasteful call. This checks the mechanical half:
-    every declared parameter is named in that tool's section, so an omission is
-    caught even though the prose around it still needs a human.
+    would have caused a wrong or wasteful call.
+
+    The check reads only the **Inputs** bullet, not the whole section. Matching
+    the whole section gave a false negative for exactly the case above: `type`
+    was misspelled as the input name but appeared in the *Returns* line as an
+    output field, so the check passed on the wrong word.
     """
     reference = _REFERENCE_PATH.read_text(encoding="utf-8")
     sections = {
@@ -567,9 +570,13 @@ async def test_reference_documents_each_tools_declared_inputs(
             # Combined headings (the notify pair) and the destructive list are
             # covered by the coverage test above.
             continue
+        inputs_match = re.search(
+            r"\*\*Inputs[^:]*:\*\*(.*?)(?=\n- \*\*|\Z)", section, re.S
+        )
+        inputs = inputs_match.group(1) if inputs_match else ""
         for marker in tool.parameters.schema:
             name = marker.schema
-            if name in _SHARED_PARAMS or f"`{name}`" in section:
+            if name in _SHARED_PARAMS or f"`{name}`" in inputs:
                 continue
             gaps.append(f"{tool.name}: {name}")
 

@@ -1281,7 +1281,7 @@
   "services": {
     "get_alarms": {
       "name": "Get alarms",
-      "description": "Return the newest active alarms and optionally archived alarms with normalized details and silence records.",
+      "description": "Return the newest active alarms and optionally archived alarms with normalized details and shared report metadata. Each alarm carries its own exception_id; the full silence-exception table is only included when requested.",
       "fields": {
         "limit": {
           "name": "Limit",
@@ -1291,9 +1291,13 @@
           "name": "Include archived",
           "description": "Optional. Include archived alarms in the result."
         },
-        "type": {
+        "alarm_type": {
           "name": "Alarm type",
-          "description": "Optional raw ALARM_* identifier or supported group such as security, abnormal_upload, or open_port."
+          "description": "Optional. Filter by alarm type. A raw ALARM_* value or a supported group (security, abnormal_upload, or open_port). Matches the alarm_type field on the returned records."
+        },
+        "include_exceptions": {
+          "name": "Include silence records",
+          "description": "Optional. Add the full silence-exception table. Defaults to false; each alarm already carries its exception_id. Set this only to find a silence to unmute."
         },
         "detail": {
           "name": "Fetch detail",
@@ -1633,7 +1637,7 @@
         },
         "include": {
           "name": "Include",
-          "description": "Optional. 'hosts' adds the network's device list, which is absent by default because those rows carry MAC addresses, hostnames, IPs, and reservations."
+          "description": "Optional. 'hosts' adds the network's device list, which is absent by default because those rows carry MAC addresses, hostnames, IPs, and reservations. The summary host_count is the device count and does not change with this option."
         }
       }
     },

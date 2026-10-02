@@ -67,6 +67,7 @@ from .const import (
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_INCLUDE_ARCHIVED,
     SERVICE_FIELD_INCLUDE_DNS,
+    SERVICE_FIELD_INCLUDE_EXCEPTIONS,
     SERVICE_FIELD_INCLUDE_PURPOSE,
     SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
     SERVICE_FIELD_KIND,
@@ -328,6 +329,7 @@ GET_ALARMS_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_INCLUDE_ARCHIVED, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_ALARM_TYPE): cv.string,
         vol.Optional(SERVICE_FIELD_DETAIL, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_INCLUDE_EXCEPTIONS, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -2597,7 +2599,13 @@ def _serialize_network_segment_report(
             )
         ),
         "summary": {
-            "host_count": len(host_details),
+            # Stable regardless of `include`: the network's device count from
+            # the host inventory, never the size of the optionally-returned row
+            # set. `returned_host_count` reports that row set when it is asked
+            # for, since the segment view can return fewer rows than the
+            # inventory counts.
+            "host_count": network.device_host_count,
+            "returned_host_count": len(host_details) if include_hosts else None,
             "device_host_count": network.device_host_count,
             "has_dhcp_config": dhcp_config is not None,
             "has_ipv4_addressing": bool(view.ipv4_addresses or view.ipv4_subnets),
@@ -3734,6 +3742,9 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     include_archived = cast(bool, call.data[SERVICE_FIELD_INCLUDE_ARCHIVED])
     alarm_type = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_TYPE))
     detail = cast(bool, call.data[SERVICE_FIELD_DETAIL])
+    include_exceptions = cast(
+        bool, call.data.get(SERVICE_FIELD_INCLUDE_EXCEPTIONS, False)
+    )
     try:
         alarms = await entry.runtime_data.alarm_manager.async_get_alarms(
             limit=limit,
@@ -3764,7 +3775,7 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
             note="The local runtime returns the newest records from its retained set.",
         ),
     )
-    return {
+    result: JsonObjectType = {
         "config_entry_id": entry.entry_id,
         "alarms": [
             _serialize_alarm(
@@ -3773,9 +3784,6 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
             )
             for alarm in alarms
         ],
-        "exceptions": [
-            _serialize_alarm_exception(exception) for exception in manager.exceptions
-        ],
         "returned_count": len(alarms),
         "active_count": manager.active_count,
         "archived_count": manager.archived_count,
@@ -3783,15 +3791,17 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
         "query": {
             "limit": limit,
             "include_archived": include_archived,
-            "type": alarm_type,
+            "alarm_type": alarm_type,
             "detail": detail,
+            "include_exceptions": include_exceptions,
         },
         "metadata": _serialize_report_metadata(
             applied={
                 "limit": limit,
                 "include_archived": include_archived,
-                "type": alarm_type,
+                "alarm_type": alarm_type,
                 "detail": detail,
+                "include_exceptions": include_exceptions,
             },
             provenance=provenance,
         ),
@@ -3806,6 +3816,14 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
             )
         ),
     }
+    # The silence table is the only unbounded part of this response, so it is
+    # opt-in: each alarm already carries its own `exception_id`, and the full
+    # table is wanted only when hunting a silence to remove.
+    if include_exceptions:
+        result["exceptions"] = [
+            _serialize_alarm_exception(exception) for exception in manager.exceptions
+        ]
+    return result
 
 
 def _get_alarm_scope_target(call: ServiceCall) -> tuple[str, str | None]:
@@ -4024,6 +4042,8 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
             "group_name": host.group_name,
             "host_device_type": host.host_device_type,
             "kind": "mac_host" if is_mac_host else "pseudo_host",
+            "network_uuid": host.network_uuid or raw_network_uuid,
+            "network_name": host.network_name,
             "online": is_online,
             "last_active": host.last_active,
             "vpn_client": (
@@ -4660,7 +4680,8 @@ async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectT
         "refreshed": refresh_requested,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "count": len(serialized_results),
-        "latest": serialized_results[0] if serialized_results else None,
+        # Newest first. `latest` used to repeat `results[0]` here, which doubled
+        # the payload and made `limit: 1` return the same record twice.
         "results": serialized_results,
     }
 
@@ -4699,7 +4720,7 @@ async def _async_handle_get_internet_quality_report(
         "refreshed": refresh_requested,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "count": len(serialized_samples),
-        "latest": serialized_samples[0] if serialized_samples else None,
+        # Newest first, as with speed tests: no separate `latest` copy.
         "samples": serialized_samples,
     }
 
