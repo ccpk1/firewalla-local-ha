@@ -108,7 +108,13 @@
           "update_interval": "Update interval (minutes)",
           "watched_device_online_window": "Watched-device online window (minutes)"
         },
-        "description": "Configure Firewalla runtime settings. Shorter intervals update faster but load the local API more, so keep the polling interval shorter than the windows you set below. The AI assistant (MCP) settings require Home Assistant Core 2026.10 or newer.",
+        "data_description": {
+          "device_tracker_away_window": "How long a tracked device stays home after its last activity. Presence only: this does not affect the device counters or connectivity.",
+          "llm_tool_mode": "Controls which tools the assistant can use. Levels above Summary only send network detail to your LLM provider, so use the lowest you need and consider who operates that model.",
+          "update_interval": "How often to poll the Firewalla box. Shorter intervals update faster but load the local API more, so keep this shorter than the windows below.",
+          "watched_device_online_window": "How long a device can be idle and still count as connected. Applies to the device counters, the VPN peer counts, and the device list, not only to watched devices."
+        },
+        "description": "Configure Firewalla runtime settings. The AI assistant (MCP) settings require Home Assistant Core 2026.10 or newer.",
         "title": "System settings"
       }
     }

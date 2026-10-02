@@ -640,7 +640,12 @@ selected MAC-backed LAN client.
 ### Device-tracker timing behavior
 
 - device trackers use their own away window setting in the options flow
-- this away window is separate from the watched-device online window
+- this away window answers **presence** — "is it home" — and is separate from
+  the watched-device online window, which answers **connectivity** — "is it
+  connected". A device can be connected while nobody is home, so the two are
+  deliberately different tolerances
+- the online window is the one behind the device counters, the VPN peer counts,
+  and the device list, not only the watched-device sensors
 - the integration does not invent richer presence states beyond `home`,
   `not_home`, and unavailable
 
