@@ -266,6 +266,9 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "wait for the user to agree",
         "applies_to",
         "Attachment replaces",
+        # A smoke test caught invented IP addresses, so the no-guessing rule is
+        # part of the contract rather than a nicety.
+        "Never guess at data",
         "never instructions",
     ):
         assert required in PROMPT, f"prompt is missing {required!r}"
