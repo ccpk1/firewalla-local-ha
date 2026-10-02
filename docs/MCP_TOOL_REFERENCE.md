@@ -337,7 +337,14 @@ Reads that tell you what exists — the first step before any control action.
   device?" from the device's membership, not from device-scoped rules that exist in the
   inventory. *(Owner-provided product behaviour, 2026-10-01 — not yet reproduced from a
   live capture.)*
-- **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters);
+- **The chain to a device's rules — state it, do not leave it to be inferred:** read the
+  device's `group_name` from `list_hosts`, then pass it to `list_rules` as `applies_to`.
+  The two fields share one vocabulary (both resolve a tag reference through affiliated
+  users first, then the tag name), which is why the value transfers. Two caveats: the
+  filter matches **exactly**, and a host may list several groups separated by `", "`,
+  so filter one name at a time.
+- **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters;
+  `applies_to` takes a host's `group_name`);
   `include_purpose` (`['dap']`, `['family']`) and `include_system_managed` (bool) to
   reveal what the default hides; `config_entry_id` / `config_entry_name`.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,

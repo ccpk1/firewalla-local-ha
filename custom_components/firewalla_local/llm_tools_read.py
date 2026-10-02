@@ -175,6 +175,11 @@ class ListHostsTool(_FirewallaReadTool):
         "unreliable (`nvidia-shield` carries `android-66fc79bd9bb55411`) — "
         "never use it to identify a device.\n"
         "\n"
+        "`group_name` is the device's group or user membership, and it is the "
+        "key for rule lookup: pass it to `list_rules` as `applies_to` to find "
+        "the rules that govern this device. It can hold several names separated "
+        'by ", ".\n'
+        "\n"
         'VPN peers: a device with `kind: "pseudo_host"` is a VPN peer. Those '
         "have NO MAC address (`mac` is null and `host_id` is a `wg_peer:`/"
         "`awg_peer:` identifier), so they cannot be passed to any host tool "
@@ -300,7 +305,9 @@ class ListRulesTool(_FirewallaReadTool):
                 SERVICE_FIELD_APPLIES_TO,
                 description=(
                     "Optional. Filter to rules governing one group, user or "
-                    "network name."
+                    "network name. A host's `group_name` (from list_hosts) is "
+                    "the value to pass here to find the rules that govern that "
+                    "device. Matches exactly, so filter one name at a time."
                 ),
             ): str,
             vol.Optional(

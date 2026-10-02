@@ -65,8 +65,10 @@ PROMPT: Final = (
     "and a rule with none of those applies globally. Attachment replaces, it "
     "does not add: once a device belongs to a group or user, the rules that "
     "reach it come from that group or user, and device-level rules no longer "
-    'apply to it. When answering "what rules affect this device?", follow the '
-    "device's group or user membership first.\n"
+    'apply to it. So to answer "what rules apply to this device?", read its '
+    "`group_name` from `list_hosts` and pass that to `list_rules` as "
+    '`applies_to`. A host can list several groups separated by ", " — filter '
+    "one name at a time, since the filter matches exactly.\n"
     "\n"
     "Report actions precisely. After a control call, name the target you acted "
     "on and state exactly what changed, using `before` and `after` — say which "

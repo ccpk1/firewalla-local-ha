@@ -328,6 +328,32 @@ async def test_rule_scope_precedence_is_stated_consistently(
     assert "no longer apply" in rules_description
 
 
+async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
+    """A host's group_name is named as the input to list_rules' applies_to.
+
+    A smoke test asked "what rules apply to <device>", and the model found the
+    host and its group_name, then stopped. Both descriptions were individually
+    complete but nothing connected them, so the answer required inferring that
+    the two fields share a vocabulary. They do — both resolve tag references
+    through affiliated users then tags — but that has to be said, not inferred.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+
+    hosts_description = tools["firewalla_local__list_hosts"].description
+    applies_to = next(
+        marker.description
+        for marker in tools["firewalla_local__list_rules"].parameters.schema
+        if marker.schema == "applies_to"
+    )
+
+    assert "`group_name`" in hosts_description
+    assert "rule lookup" in hosts_description
+    assert "group_name" in applies_to
+    assert "`applies_to`" in PROMPT
+    assert "group_name" in PROMPT
+
+
 # Each entry pairs a tool that returns a large payload with the phrase in its
 # description that tells the model how to avoid paying for all of it.
 _PAYLOAD_GUIDANCE: Final = (
