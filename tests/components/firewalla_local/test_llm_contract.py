@@ -386,11 +386,11 @@ async def test_count_totals_are_not_presented_as_connected(
         assert "connected" in description, tool_name
         assert "online" in description, tool_name
 
-    # A group's membership is every device the box still tracks, not only the
-    # current ones — a live Quarantine group held 10 devices of which 7 had been
-    # idle for 13-33 days.
+    # A group can hold past devices the box's local data does not carry, so the
+    # membership seen here can be smaller than the Firewalla app's. A live
+    # Quarantine group exposed 10 devices locally against 17 in the app.
     assert (
-        "not limited to current devices"
+        "cannot include the *past* devices"
         in tools["firewalla_local__list_hosts"].description
     )
 

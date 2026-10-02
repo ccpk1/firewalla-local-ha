@@ -303,6 +303,13 @@ Reads that tell you what exists — the first step before any control action.
   `vpn_devices`, so "how many are connected?" cannot be answered two ways.
   `detail` defaults to `summary`; ask for `full` only when a field that `summary`
   omits is actually needed.
+- **A group's membership here can be smaller than the app's.** The local data
+  carries the devices the box currently reports; a group can also hold *past*
+  devices that the Firewalla app still lists but the local API does not send. So
+  filtering by `group_name` gives the box's current membership, not necessarily
+  the group's full history — a live Quarantine group returned 10 here against 17
+  in the app (10 current + 7 past). State the count as what the box reports rather
+  than as the group's total.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
   (bool, default true — performs a live poll; set false for a fast cached read);
   `config_entry_id` / `config_entry_name` (optional).
