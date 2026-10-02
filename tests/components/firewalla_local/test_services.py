@@ -3548,6 +3548,7 @@ _SERVICES_YAML_PATH: Final = (
     / "firewalla_local"
     / "services.yaml"
 )
+_USER_GUIDE_PATH: Final = Path(__file__).parents[3] / "docs" / "USER_GUIDE.md"
 
 
 def _parse_services_yaml() -> dict[str, Any]:
@@ -3557,6 +3558,31 @@ def _parse_services_yaml() -> dict[str, Any]:
     parsed = yaml.safe_load(_SERVICES_YAML_PATH.read_text(encoding="utf-8"))
     assert isinstance(parsed, dict)
     return parsed
+
+
+def test_user_guide_catalog_lists_every_service() -> None:
+    """The user guide's service catalog names every registered service.
+
+    The catalog is the list a user scans to find out what exists, and nothing
+    kept it in step with the registrations, so `get_rules` and `create_rule`
+    shipped without appearing in it at all. Both directions are checked: a
+    missing service is undiscoverable, and a catalog entry for a service that no
+    longer exists sends the reader after something that cannot be called.
+    """
+    guide = _USER_GUIDE_PATH.read_text(encoding="utf-8")
+    catalog = {
+        match.group(1)
+        for match in re.finditer(r"^- `firewalla_local\.([a-z_]+)`$", guide, re.M)
+    }
+    registered = {
+        match.group(1)
+        for match in re.finditer(
+            r"^([a-z_]+):$", _SERVICES_YAML_PATH.read_text(encoding="utf-8"), re.M
+        )
+    }
+
+    assert registered - catalog == set(), "services absent from the user guide"
+    assert catalog - registered == set(), "catalog entries with no service"
 
 
 def test_every_service_has_a_translation_and_no_orphans() -> None:

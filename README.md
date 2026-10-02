@@ -80,6 +80,8 @@ You can read state or call services this way, and both return structured data yo
 * **Rich Local Reporting:** Leverage over two dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, WAN event timelines, and current or archived alarms with their silences—all pulled directly from the local data plane without touching the cloud.
 
 ### **AI Assistant & MCP Access**
+> **Requires Home Assistant Core 2026.10 or newer.** On older Core the integration works normally; the AI tools are simply not offered.
+
 * **Ask your network questions:** The integration registers its own MCP tool surface, so an AI assistant can answer questions like "how many devices are online?", "did my internet drop this week?", or "which devices on my guest network used the most bandwidth in the last hour?" — using real local data, with no sidecar and no cloud subscription.
 * **Use it from almost any AI client:** This is a standard MCP server, not an Assist-only feature. Home Assistant's native [Model Context Protocol Server](https://next.home-assistant.io/integrations/mcp_server/) serves these tools to **any MCP client** — ChatGPT, VS Code and other editors, Claude Desktop, or a custom agent — so you can query your network from whichever assistant you already use, and one integration reaches all of them. Requires enabling the MCP Server integration in Home Assistant.
 * **Multiple boxes appear as separate tool sets:** Each Firewalla box is registered as its own MCP API with its own URL, so you can point a client at one box or at several. Merged, Home Assistant namespaces each box's tools by the name you gave that entry, so the assistant always knows which box it is acting on.
@@ -93,11 +95,10 @@ You can read state or call services this way, and both return structured data yo
    * Gold Plus
    * Gold SE
    * Purple
-* **Home Assistant:** Requires Home Assistant Core version 2025.10 or newer.\*
+* **Home Assistant:** Requires Home Assistant Core version 2025.10 or newer.
 * **Network:** Your Home Assistant instance must be able to reach the Firewalla's local LAN IP.
 
-\* AI assistant / MCP tool support requires Home Assistant Core 2026.10 or newer.
-On older Core the integration works normally; the AI tools are simply not offered.
+The AI assistant and MCP tools need a newer Core; see the note at the top of the [AI Assistant & MCP Access](#ai-assistant--mcp-access) section.
 
 ## 🛡️ **A Note on Security & Privacy**
 Connecting any external system to your firewall’s management layer requires a high degree of trust.
