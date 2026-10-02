@@ -1351,10 +1351,6 @@ class FirewallaOptionsFlow(OptionsFlow):
                 CONF_ENABLE_SSID_ENTITIES,
                 default=self._get_stored_enable_ssid_entities(),
             ): bool,
-            vol.Optional(
-                _OPTION_RETURN_TO_MAIN_MENU,
-                default=False,
-            ): bool,
         }
         if llm_tools_supported():
             schema_fields[
@@ -1368,6 +1364,10 @@ class FirewallaOptionsFlow(OptionsFlow):
                     translation_key=CONF_LLM_TOOL_MODE,
                 )
             )
+
+        # Added after the conditional AI field so the back button stays last:
+        # building it into the literal above put it above that selector.
+        schema_fields[vol.Optional(_OPTION_RETURN_TO_MAIN_MENU, default=False)] = bool
 
         return self.async_show_form(
             step_id=_STEP_ID_SYSTEM_SETTINGS,

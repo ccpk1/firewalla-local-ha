@@ -27,6 +27,7 @@ from custom_components.firewalla_local.api.models import (
     GeneratedKeys,
 )
 from custom_components.firewalla_local.config_flow import (
+    _OPTION_RETURN_TO_MAIN_MENU,
     FirewallaOptionsFlow,
     _resolve_default_pairing_host,
 )
@@ -2507,6 +2508,51 @@ async def test_every_settings_field_explains_what_it_affects(
     # future gap, so the exemptions have to stay real.
     stale = sorted(_SETTINGS_FIELDS_WITHOUT_HELP - fields)
     assert stale == [], f"exempt fields that are not in the form: {stale}"
+
+
+@pytest.mark.parametrize("llm_supported", [True, False])
+async def test_settings_form_puts_the_back_button_last(
+    hass: HomeAssistant, llm_supported: bool
+) -> None:
+    """The back button stays at the bottom, whatever the AI field does.
+
+    The AI access selector is appended only on supported Core, and it used to be
+    appended *after* the back button, which pushed the back button into the
+    middle of the form on exactly the systems where the AI field appears. Both
+    branches are covered because the failure only shows up in one of them.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.config_flow.llm_tools_supported",
+        return_value=llm_supported,
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "general_options"},
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "system_settings"},
+        )
+
+    fields = [marker.schema for marker in result["data_schema"].schema]
+    assert fields[-1] == _OPTION_RETURN_TO_MAIN_MENU, f"field order: {fields}"
+    assert (CONF_LLM_TOOL_MODE in fields) is llm_supported
 
 
 async def test_system_settings_can_return_to_main_menu_without_saving(hass) -> None:
