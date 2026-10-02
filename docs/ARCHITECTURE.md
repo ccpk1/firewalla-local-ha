@@ -462,6 +462,27 @@ Instance isolation rules:
 - entity unique IDs must encode entry scope so future multi-instance cleanup remains deterministic
 - config-entry lifecycle operations must never mutate another entry's device, entities, or runtime data
 
+### LLM API scope
+
+The LLM/MCP tool surface follows the same rule: **one `llm.API` per config entry**,
+registered on setup and unregistered on unload, so every tool is permanently bound
+to the box it was created for.
+
+- each tool injects its own entry id into the backing service call, so a tool call
+ cannot target another box and the model never passes an entry identifier
+- the API id always carries a per-entry suffix derived from the entry title, so it
+ cannot change when another box is added; the id is both the MCP URL and the value
+ `mcp_server` stores to select an API
+- identical entry titles are disambiguated, because Home Assistant namespaces merged
+ tools by API *name* and would otherwise produce colliding tool names
+- the configured tool mode is per entry, so one box can be read-only while another
+ permits control
+
+Home Assistant exposes a registered LLM API through `mcp_server`, which serves it to
+Assist and to any MCP client. Each entry therefore appears as its own selectable API
+with its own URL; several can be merged, and Home Assistant then namespaces the tools
+by entry title.
+
 ## Entity architecture
 
 Entities are derived views over manager-owned state.

@@ -12,6 +12,13 @@ surface is built and tested against.
 - **How to read it:** the [Conventions](#conventions) apply to every tool; each tool
   below follows one fixed template. Read Conventions first.
 
+**Who can use these tools.** The surface is not Assist-only. Home Assistant's
+`mcp_server` integration serves it to **any MCP client** — desktop and editor
+assistants, third-party chat clients, and custom agents — as well as to Assist.
+Enabling it for external clients is therefore a disclosure decision, and the
+availability tier is the control that governs it. See
+[Model Context Protocol Server](https://next.home-assistant.io/integrations/mcp_server/).
+
 ---
 
 ## Conventions
@@ -182,10 +189,18 @@ Inputs are **flat** (nested objects are awkward for the LLM). Every parameter ca
 a `description`. Enums are described by meaning, and where a value is discoverable,
 the description says how (e.g. "`rule_id` comes from `list_rules`").
 
-**Multi-entry:** where you have more than one Firewalla box, any tool accepts optional
-`config_entry_id` or `config_entry_name` to pick one; otherwise the entry is resolved
-automatically. Host-targeting tools accept a human-meaningful `host` (name or MAC) and
-resolve it to one host.
+**One API per Firewalla box — tools are pre-bound to their box.** Each config entry
+registers its own LLM API, so a tool already knows which box it acts on: the entry
+id is injected into the backing service call, not passed by the model. There is
+therefore **no `config_entry_id` or `config_entry_name` tool input** — those exist on
+the *services* (for automations and scripts) but never on a tool. Calling a tool
+cannot reach the wrong box, and it must not be pointed at one. To use a specific
+box, connect to that box's API: Home Assistant lists each entry separately and
+serves it at its own URL (`/api/mcp/<api id>`), or several can be merged, in which
+case the tools arrive namespaced by the entry title.
+
+Host-targeting tools accept a human-meaningful `host` (name or MAC) and resolve it
+to one host.
 
 ---
 
@@ -243,8 +258,7 @@ Reads that tell you what exists — the first step before any control action.
   `list_hosts` for devices and `list_rules` for rules, and do not answer a
   per-device question from this summary.
 - **Inputs:** `include` (optional list — `"identifiers"` adds the group and user
-  names and ids that `get_user_usage` and the rule tools accept as selectors);
-  `config_entry_id` / `config_entry_name` (optional).
+  names and ids that `get_user_usage` and the rule tools accept as selectors).
 - **Returns:** read envelope — `result` with `appliance` (model, software version,
   firmware, uptime, CPU/memory/disk), `devices` and `vpn_devices` counts (each
   `total`/`online`/`offline` — **`total` is not the connected count**; peers are
@@ -274,7 +288,7 @@ Reads that tell you what exists — the first step before any control action.
 - **When to use / not:** when the user needs current data and the last snapshot may
   be stale. Call it, then read other tools with `refresh=false` — that is the cheap
   pattern. Do not call it before several tools expecting several polls.
-- **Inputs:** `config_entry_id` / `config_entry_name` (optional).
+- **Inputs:** none.
 - **Returns:** read envelope — `result` with `synced`, `synced_at` (ISO) and
   `synced_at_timestamp`.
 - **Coalescing:** HA's refresh debouncer (10 s) means calls inside that window cost
@@ -333,8 +347,7 @@ Reads that tell you what exists — the first step before any control action.
   surfaces, and the window is user-tunable when a longer tolerance suits a network
   better.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
-  (bool, default true — performs a live poll; set false for a fast cached read);
-  `config_entry_id` / `config_entry_name` (optional).
+  (bool, default true — performs a live poll; set false for a fast cached read).
 - **Returns:** read envelope — `result.hosts[]`, each with `host_id`, `mac`,
   `host_name`, `kind` (`mac_host`/`pseudo_host`), **`online`** (active now — the
   connectivity signal to answer "is it connected?"), `last_active` (epoch), and
@@ -375,7 +388,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters;
   `applies_to` takes a host's `group_name`);
   `include_purpose` (`['dap']`, `['family']`) and `include_system_managed` (bool) to
-  reveal what the default hides; `config_entry_id` / `config_entry_name`.
+  reveal what the default hides.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
   `action`, `is_paused`/`enabled`, `target`/`target_type`/`target_name`, `scope`,
   `applies_to`/`tag_refs`, `purpose`, and the `aid` alarm back-reference when the rule
@@ -391,8 +404,7 @@ Reads that tell you what exists — the first step before any control action.
   traffic (`get_network_usage`) or per-host reservations (`list_hosts`).
 - **Inputs:** `network_name` or `network_uuid` (**required** — one network per call;
   resolve from `get_system_overview`); `include` (`['hosts']` to add the per-network
-  device list, which is absent by default); `refresh`; `config_entry_id` /
-  `config_entry_name`.
+  device list, which is absent by default); `refresh`.
 - **Returns:** read envelope — `result.networks[]` with interface, subnet, DHCP range, VLAN, `block_icmp`, device counts, and the network-level `policy` block (settings, not rules — see [Policy controls](#policy-controls)); the `hosts` section only when requested.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
@@ -411,7 +423,7 @@ Reads that explain what the network is doing and how it is performing.
   segment, over a time window**. There is no whole-box usage tool: ask per
   network. Not for WAN totals (`get_wan_usage`) or a person's time-online
   (`get_user_usage`).
-- **Inputs:** `network_uuid` or `network_name` (**required** — resolve from `get_system_overview`); `window` (enum: which period — the valid windows differ by source; see the tool description), `top_n` (default 5 — a truncated ranking is flagged in `meta`), `include` (e.g. `"series"` to add raw samples), `refresh`, `config_entry_id` / `config_entry_name`.
+- **Inputs:** `network_uuid` or `network_name` (**required** — resolve from `get_system_overview`); `window` (enum: which period — the valid windows differ by source; see the tool description), `top_n` (default 5 — a truncated ranking is flagged in `meta`), `include` (e.g. `"series"` to add raw samples), `refresh`.
 - **Returns:** read envelope — `result` with top talkers, apps, categories, activity; `meta.truncated` when `top_n` cut data.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
@@ -425,7 +437,7 @@ Reads that explain what the network is doing and how it is performing.
   usage is limited — some windows are unavailable.
 - **Inputs:** `wan_name`/`wan_uuid` (for multi-WAN), `history_count`/`history_period`;
   `current_periods` (default day + week — the period totals to return); `include`
-  (`['history']`, `['subperiods']`); `refresh`; `config_entry_id` / `config_entry_name`.
+  (`['history']`, `['subperiods']`); `refresh`.
 - **Returns:** read envelope — `result` with download/upload totals and periods (`*_bytes`/`*_megabytes`).
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
@@ -437,7 +449,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `window_days` (default
   7; `0` for no time bound); `limit` (default 100) and `offset` for paging;
   `include_dns` (default false — the box's own resolver probes, which are not WAN
-  events); `refresh`; `config_entry_id` / `config_entry_name`.
+  events); `refresh`.
 - **Returns:** read envelope — `result.events[]` with type, `*_timestamp`, duration. Real
   link events only by default: the app's filter set (`wan_state`, `dualwan_state`,
   `system_reboot`), with DNS excluded and latency/loss absent entirely.
@@ -456,7 +468,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `scope_kind` (`host`/`tag`/…), `scope_target`, `begin`/`end` (or a
   period), `granularity` (`day`/`hour`), `sections` (`internet`, `app_totals`, `apps`,
   `categories`), `app_ids`, `include` (`['intervals']`), `detail` (`summary` |
-  `standard`); `config_entry_id` / `config_entry_name`.
+  `standard`).
 - **Returns:** read envelope — `result` with internet/app/category time summaries and periods.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
@@ -467,7 +479,7 @@ Reads that explain what the network is doing and how it is performing.
 - **When to use / not:** quality (latency, loss, jitter). For a point-in-time speed
   measurement use `run_internet_speed_test`; for past results use `get_speed_tests`.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
-  raise for a short history of samples); `refresh`; `config_entry_id` / `config_entry_name`.
+  raise for a short history of samples); `refresh`.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 
@@ -476,7 +488,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Answers:** "What were my last speed test results?"
 - **When to use / not:** historical speed-test results. To *run* a test use `run_internet_speed_test`.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
-  raise for more stored results); `refresh`; `config_entry_id` / `config_entry_name`.
+  raise for more stored results); `refresh`.
 - **Returns:** read envelope — `result.results[]` with `download_mbps`, `upload_mbps`, `latency_ms`, `*_timestamp`.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
@@ -486,7 +498,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Answers:** "Which AP is this device on?" / "How is my WiFi doing?" / "Which SSIDs
   exist?" — the discovery feed for `set_ssid_paused`.
 - **When to use / not:** wireless/SSDP/AP status. Not wired network config (`get_network_config`).
-- **Inputs:** `config_entry_id` / `config_entry_name`.
+- **Inputs:** none.
 - **Returns:** read envelope — `result` with SSIDs (`ssid_profile_id`, name, paused), access points, connected clients.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
@@ -497,8 +509,7 @@ Reads that explain what the network is doing and how it is performing.
 - **When to use / not:** an on-demand measurement that **consumes WAN bandwidth** and
   takes time. Prefer `get_speed_tests` for recent results. Not idempotent — each call
   runs a new test.
-- **Inputs:** `wan_uuid`/`wan_name` (optional — the only WAN is used when omitted);
-  `config_entry_id` / `config_entry_name`.
+- **Inputs:** `wan_uuid`/`wan_name` (optional — the only WAN is used when omitted).
 - **Availability:** control (behind the toggle).
 - **Reversibility & undo:** not reversible (it is a measurement), but has a cost — stated in the description. No `undo`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=false`.
@@ -514,7 +525,7 @@ echo it in `target`. All are reversible except where noted.
 
 - **Answers:** "Rename this device to something meaningful."
 - **When to use / not:** cosmetic rename. Not DNS hostname (`set_host_dns_hostname`) or type (`set_host_device_type`).
-- **Inputs:** `host` (name/MAC), `new_name`; `config_entry_id` / `config_entry_name`.
+- **Inputs:** `host` (name/MAC), `new_name`.
 - **Returns:** action-result (`before.name` → `after.name`).
 - **Reversibility & undo:** trivially reversible — `undo` sets the previous name back.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -523,7 +534,7 @@ echo it in `target`. All are reversible except where noted.
 
 - **Answers:** "Give this device a fixed IP." / "Reserve IPs for every device without one."
 - **When to use / not:** the standout device workflow. Paired with `list_hosts` (see `ip_assignment.mode`). Strong built-in validation (conflict / in-use / invalid / out-of-range / network-ambiguous) rejects bad writes with an actionable message.
-- **Inputs:** `host` (name/MAC), `mode` (`static`/`dynamic`), `reserved_ipv4`, `network_name`/`network_uuid` (when ambiguous); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `host` (name/MAC), `mode` (`static`/`dynamic`), `reserved_ipv4`, `network_name`/`network_uuid` (when ambiguous).
 - **Returns:** action-result (`before`/`after.ip_assignment`).
 - **Reversibility & undo:** reversible — `undo` sets `mode` back to `dynamic`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -532,7 +543,7 @@ echo it in `target`. All are reversible except where noted.
 
 - **Answers:** "Give this host a stable DNS name."
 - **When to use / not:** can **break name resolution** for the host if wrong. Not the display name (`set_host_name`), which is cosmetic.
-- **Inputs:** `host`, `dns_hostname`; `config_entry_id` / `config_entry_name`.
+- **Inputs:** `host`, `dns_hostname`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible but disruptive — `undo` restores the prior hostname.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -541,7 +552,7 @@ echo it in `target`. All are reversible except where noted.
 
 - **Answers:** "Classify this device (phone, tablet, tv, …) so reports make sense."
 - **When to use / not:** cosmetic classification.
-- **Inputs:** `host`, `host_device_type` (enum: `desktop`, `phone`, `tablet`, `wearable`, `personal_default`, `console`, `smart speaker`, `tv`, …); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `host`, `host_device_type` (enum: `desktop`, `phone`, `tablet`, `wearable`, `personal_default`, `console`, `smart speaker`, `tv`, …).
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible — `undo` restores the previous type.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -550,7 +561,7 @@ echo it in `target`. All are reversible except where noted.
 
 - **Answers:** "Tell me when this device comes online / drops offline."
 - **When to use / not:** notification preferences only; no network effect.
-- **Inputs:** `host`, `enabled` (bool); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `host`, `enabled` (bool).
 - **Returns:** action-result (`before`/`after.enabled`).
 - **Reversibility & undo:** reversible — `undo` flips `enabled` back.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -559,7 +570,7 @@ echo it in `target`. All are reversible except where noted.
 
 - **Answers:** "Wake the NAS / the PC (Wake-on-LAN)."
 - **When to use / not:** sends one packet; no persistent state change. **Not idempotent** — each call sends a packet (does not stack, but repeats).
-- **Inputs:** `host`; `config_entry_id` / `config_entry_name`.
+- **Inputs:** `host`.
 - **Returns:** action-result.
 - **Reversibility & undo:** no persistent change; no `undo`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=false`.
@@ -574,7 +585,7 @@ Broad access control. Read the blast radius carefully.
 
 - **Answers:** "Pause the rule blocking X." / "Temporarily disable this rule."
 - **When to use / not:** temporary, reversible rule disable. Resolve `rule_target` via `list_rules`. For a permanent change use a rule switch / `delete_rule` (not exposed here). Idempotent — pausing an already-paused rule reports `already_in_state`.
-- **Inputs:** `rule_target` (rule id), `duration` (e.g. `30m`, `4h`, `2d 4h 30m`) **or** `resume_at` (local datetime) — omit both to pause until resumed; `config_entry_id` / `config_entry_name`.
+- **Inputs:** `rule_target` (rule id), `duration` (e.g. `30m`, `4h`, `2d 4h 30m`) **or** `resume_at` (local datetime) — omit both to pause until resumed.
 - **Returns:** action-result (`before`/`after.enabled`, `undo` = `resume_rule`).
 - **Reversibility & undo:** fully reversible — `firewalla_local__resume_rule`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -583,7 +594,7 @@ Broad access control. Read the blast radius carefully.
 
 - **Answers:** "Resume the paused rule." / "Undo a pause."
 - **When to use / not:** the `undo` of `pause_rule`. Idempotent — resuming a running rule reports `already_in_state`.
-- **Inputs:** `rule_target`; `config_entry_id` / `config_entry_name`.
+- **Inputs:** `rule_target`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible (`pause_rule`).
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -593,7 +604,7 @@ Broad access control. Read the blast radius carefully.
 - **Answers:** "Pause the kids' WiFi." / "Pause the guest network."
 - **When to use / not:** pauses/resumes one SSID across all APs. **Wide blast radius** — every client on that SSID disconnects, possibly including the client making the request or the host running Home Assistant. State this before using.
 - **Inputs:** `ssid_profile_id` (from `get_wireless_status`), `enabled` (bool — `true`
-  pauses the SSID, `false` resumes it); `config_entry_id` / `config_entry_name`.
+  pauses the SSID, `false` resumes it).
 - **Returns:** action-result (`before`/`after.paused`).
 - **Reversibility & undo:** fully reversible — `undo` sets `paused=false`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -625,7 +636,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Stop alerting me about this." / "Silence this alarm type / domain / IP."
 - **When to use / not:** creates a **silence** (an exception) so future matching alarms stop alerting — it does **not** block traffic and does **not** remove the alarm. For blocking traffic use `block_alarm_target`; for clearing one alarm use `archive_alarm`. Idempotent (`already_in_state`).
-- **Inputs (flat):** `alarm_id` (optional — derive target from it), `target_type` (`alarm_type` | `domain` | `ip`), `target_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`); `config_entry_id` / `config_entry_name`.
+- **Inputs (flat):** `alarm_id` (optional — derive target from it), `target_type` (`alarm_type` | `domain` | `ip`), `target_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`).
 - **Returns:** action-result (`target`, `undo`).
 - **Reversibility & undo:** reversible — `undo` unmutes (removes the silence).
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -637,8 +648,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **When to use / not:** the undo for `set_alarm_muted`. Removing a silence only
   restores alerting — it does not block traffic (`block_alarm_target`) or dismiss an
   alarm (`archive_alarm`).
-- **Inputs:** `alarm_id` **or** `exception_id` (the silence id); `config_entry_id` /
-  `config_entry_name` (optional).
+- **Inputs:** `alarm_id` **or** `exception_id` (the silence id).
 - **Returns:** action-result envelope — the `target` is the silence, `undo` is null
   (it is itself the undo).
 - **Reversibility & undo:** reversible by re-muting. No `undo` is emitted, because
@@ -650,7 +660,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Block this." / "Block the domain/IP/device that caused this alarm."
 - **When to use / not:** creates a **block rule** for the alarm's target (traffic is actually blocked). It is **not** a mute (that is `set_alarm_muted`) and does not by itself clear the alarm (though it auto-archives it). Idempotent — blocking an already-blocked target reports `already_in_state`.
-- **Inputs (flat):** `alarm_id` (derive target/scope from the alarm) **or** `target_type`/`target_value` (`dns`/`ip`/`mac`) + `scope_kind`/`scope_target`; `config_entry_id` / `config_entry_name`.
+- **Inputs (flat):** `alarm_id` (derive target/scope from the alarm) **or** `target_type`/`target_value` (`dns`/`ip`/`mac`) + `scope_kind`/`scope_target`.
 - **Returns:** action-result (`target` = the created rule id + name, `undo`).
 - **Availability:** control (behind the toggle). *(Planned — a thin facade over `create_rule`.)*
 - **Reversibility & undo:** reversible — `firewalla_local__unblock_alarm_target`. Each block consumes a finite rule slot.
@@ -661,7 +671,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Unblock this." / "Remove the block I added for this alarm."
 - **When to use / not:** the `undo` of `block_alarm_target` — removes **only the rule created for that alarm**. Not general rule deletion.
-- **Inputs (flat):** `alarm_id` (resolve the rule via its `aid` back-reference) or the `rule_id` returned by block; `config_entry_id` / `config_entry_name`.
+- **Inputs (flat):** `alarm_id` (resolve the rule via its `aid` back-reference) or the `rule_id` returned by block.
 - **Returns:** action-result.
 - **Availability:** control (behind the toggle). *(Planned — a thin facade over `delete_rule`.)*
 - **Reversibility & undo:** reversible (`block_alarm_target`).
@@ -671,7 +681,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Dismiss this alarm." / "Clear it from the active list."
 - **When to use / not:** archives **one** alarm — dismisses it but keeps the record (unlike delete, which is not exposed). It does **not** stop future matching alarms (that is `set_alarm_muted`). Normal dismiss operation; there is no un-archive if you change your mind.
-- **Inputs:** `alarm_id` (single only — bulk archive is a Full-mode tool); `config_entry_id` / `config_entry_name`.
+- **Inputs:** `alarm_id` (single only — bulk archive is a Full-mode tool).
 - **Returns:** action-result.
 - **Reversibility & undo:** the archive itself cannot be undone, but the record is kept. No `undo`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.

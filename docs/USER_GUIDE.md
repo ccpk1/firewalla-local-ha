@@ -122,6 +122,33 @@ To turn it on:
 2. In this integration, open **Configure → System settings** and set
    **AI assistant (MCP) tool access**.
 
+The client does not have to be Assist. Home Assistant's MCP server exposes these
+tools as a standard MCP server, so anything that speaks MCP can connect — ChatGPT,
+VS Code and other editors, Claude Desktop, or your own agent. One integration
+therefore reaches every assistant you use.
+
+**If you have more than one Firewalla box,** each config entry registers its own
+set of tools, and Home Assistant lists each one separately with its own URL. You
+can point a client at a single box, or at several at once. A tool is permanently
+tied to the box it came from — it cannot act on a different one, and there is no
+setting to point it elsewhere.
+
+**Renaming an entry changes that box's MCP URL,** because the URL is built from
+the entry name. If your client is connected to a specific box by URL, re-point it
+after a rename; the old URL stops working. If you let Home Assistant serve **All
+LLM APIs** instead, no URL is stored anywhere and renames cause no problem.
+
+**Serving several boxes together is convenient, but it hands the assistant a
+choice.** Home Assistant prefixes each box's tool names with that entry's name and
+adds a short per-box instruction, which is what the assistant has to go on when
+deciding which box a request refers to. Nothing enforces that decision: a question
+like "is the printer online?" is genuinely ambiguous when either box could answer
+it, and with **Read and control** enabled a wrong guess is a real change on the
+wrong box. Give each entry a clearly distinct name, say which box you mean, and
+keep the tier no higher than your question needs. This is a limitation of asking
+one assistant to reason across two devices, not something the integration can
+resolve for you.
+
 Five settings are available. The default is the least disclosing option that still
 answers ordinary questions:
 

@@ -155,7 +155,7 @@ async def _api_instance(hass: HomeAssistant, *, mode: str = "full") -> llm.APIIn
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        return await llm.async_get_api(hass, DOMAIN, _llm_context())
+        return await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
 
 async def test_every_tool_declares_the_full_contract(hass: HomeAssistant) -> None:
@@ -522,14 +522,11 @@ async def test_reference_documents_every_registered_tool(
 # than repeated per tool, so sections are not required to name them.
 _SHARED_PARAMS: Final = frozenset(
     {
-        "config_entry_id",
-        "config_entry_name",
         "refresh",
         # "Host-targeting tools accept a human-meaningful `host` (name or MAC)".
         "host_mac",
         "host_name",
-        # "Multi-entry: where you have more than one Firewalla box..." plus the
-        # per-tool "wan_uuid / wan_name (optional — for multi-WAN)" wording.
+        # The per-tool "wan_uuid / wan_name (optional — for multi-WAN)" wording.
         "wan_uuid",
         "wan_name",
     }
@@ -671,3 +668,43 @@ def test_tool_output_paths_cannot_reach_credentials() -> None:
             offenders.append(f"{module_name}: literal {literal!r}")
 
     assert offenders == []
+
+
+def _api_id(hass: HomeAssistant) -> str:
+    """Return the id of the registered Firewalla LLM API.
+
+    The id always carries a per-entry suffix, so it is never the bare domain;
+    the suffix is derived from the entry title.
+    """
+    return next(
+        api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
+    )
+
+
+def test_reference_does_not_offer_a_config_entry_input() -> None:
+    """Tools are pre-bound to one box, so no tool input selects an entry.
+
+    The entry id is injected into the backing service call by the tool wrapper.
+    Documenting `config_entry_id` / `config_entry_name` as an input invites a
+    call the tool must reject, which is exactly the guidance an agent would
+    follow. The reference states the rule once, in Conventions; it must not
+    appear in any tool's Inputs.
+    """
+    reference = _REFERENCE_PATH.read_text(encoding="utf-8")
+    offenders: list[str] = []
+
+    for match in re.finditer(
+        r"^### `firewalla_local__([a-z_]+)`(.*?)(?=^### |^## |\Z)",
+        reference,
+        re.S | re.M,
+    ):
+        action, section = match.group(1), match.group(2)
+        for inputs in re.finditer(
+            r"\*\*Inputs[^:]*:\*\*(.*?)(?=\n- \*\*|\Z)", section, re.S
+        ):
+            if "config_entry_id" in inputs.group(1) or (
+                "config_entry_name" in inputs.group(1)
+            ):
+                offenders.append(action)
+
+    assert offenders == [], f"tools advertising a config-entry input: {offenders}"
