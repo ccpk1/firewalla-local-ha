@@ -987,12 +987,11 @@ def _membership_patches(
 
 
 def _membership_snapshot_with_dap() -> FirewallaRuntimeSnapshot:
-    """Return a membership snapshot carrying the device's Active Protect rules.
+    """Return a membership snapshot carrying the device's own rules.
 
-    The app clears a device's disabled `dap` rules as part of a membership change.
-    This snapshot pins every boundary of that cleanup: the device's own disabled
-    pair goes, another device's pair stays, a live user rule scoped to the same
-    device stays, and an enabled `dap` rule stays because it is actively blocking.
+    Modelled on the real box: a disabled `dap` pair belonging to this device (575
+    and 576), a device rule that is merely scoped to it (578), and 577 which
+    belongs to a different device and must never be attributed to this one.
     """
     return replace(
         _membership_snapshot(),
@@ -4752,15 +4751,16 @@ async def test_set_host_membership_requires_exactly_one_target(
     assert err.value.translation_key == expected_key
 
 
-async def test_set_host_membership_clears_the_device_active_protect_rules(
+async def test_set_host_membership_reports_the_device_rules_it_leaves_alone(
     hass: HomeAssistant,
 ) -> None:
-    """A membership change clears the device's disabled Active Protect rules.
+    """The service reports the device's own rules without deleting any of them.
 
-    The Firewalla app does this in the same batch as the tags write, so a device
-    does not keep a stale `dap` pair across a move. Only this device's disabled
-    `dap` rules are eligible: another device's pair, an enabled `dap` rule that is
-    actively blocking, and a live user rule merely scoped to this device all stay.
+    On a real box no device assigned to a group carries a device-scoped rule of
+    its own, which is exactly what the Firewalla app warns about when you assign
+    one. The rule handling behind that is still being established, so the service
+    surfaces what the device carries and changes nothing: deleting firewall rules
+    on an unconfirmed model would be unsafe.
     """
     entry = _membership_entry()
     entry.add_to_hass(hass)
@@ -4785,10 +4785,10 @@ async def test_set_host_membership_clears_the_device_active_protect_rules(
             },
         )
 
-    deleted = [call.args[0] for call in delete.await_args_list]
-    assert deleted == ["575", "576"]
-    assert response["device_active_protect"] == {
-        "rules_removed": ["575", "576"],
+    # Every rule scoped to this device is reported, and none is deleted.
+    assert delete.await_count == 0
+    assert response["device_rules"] == {
+        "present": ["575", "576", "578", "579"],
     }
     assert response["membership"]["after"] == {
         "kind": "group",
@@ -4797,10 +4797,10 @@ async def test_set_host_membership_clears_the_device_active_protect_rules(
     }
 
 
-async def test_set_host_membership_reports_no_dap_rules_when_there_are_none(
+async def test_set_host_membership_reports_no_device_rules_when_there_are_none(
     hass: HomeAssistant,
 ) -> None:
-    """A device with no Active Protect rules still reports the key."""
+    """A device carrying no rules of its own still reports the key."""
     entry = _membership_entry()
     entry.add_to_hass(hass)
     write = AsyncMock(return_value={"ok": True})
@@ -4821,7 +4821,7 @@ async def test_set_host_membership_reports_no_dap_rules_when_there_are_none(
         )
 
     assert delete.await_count == 0
-    assert response["device_active_protect"] == {"rules_removed": []}
+    assert response["device_rules"] == {"present": []}
 
 
 def test_set_host_membership_is_registered_as_an_admin_action() -> None:

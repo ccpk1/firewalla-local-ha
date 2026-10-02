@@ -2911,7 +2911,7 @@ cloud path until the cloud contract is documented.
 - pre/post runtime pulls: `.tmp/capture_chads_before.json`,
   `.tmp/capture_chads_after.json`
 
-### Finding 43: The membership write can be minimal, and the app's rule cleanup is DAP state
+### Finding 43: The membership write can be minimal, and group assignment strips a device's own rules
 
 Three questions left open by Findings 41 and 42 were resolved on the dev box on
 2026-10-02 with read-only pulls plus two reversible writes.
@@ -2941,79 +2941,64 @@ own `ipAllocation` sub-object — and confirms a membership write can send only
 strictly safer because it cannot carry a policy key the caller did not intend to
 send.
 
-**2. The app deletes the device's `dap` rules on a membership change, and the
-box does not do it by itself — confirmed. A first reading of this was wrong; the
-correction follows.**
+**2. A device assigned to a group carries none of its own rules — confirmed.
+What the app deletes on assignment is still open.**
 
 Finding 41 showed the app issuing two `policy:delete` calls in the same
-`batchAction` as a tags write. Two separate things were established.
+`batchAction` as a tags write, and noted the app "sweeps stale device-scoped
+rules". Two things were established, and one of them corrects an earlier reading.
 
-**The box does not do it on its own.** Test: on `office-floor-light-bulb-1`,
-clear the tags through the local channel with no `policy:delete`, then compare
-the rule set.
+**The box does not delete anything on its own.** Test: on
+`office-floor-light-bulb-1`, clear the tags through the local channel with no
+`policy:delete`, then compare the rule set.
 
 - the box **kept both rules**. Nothing was swept
 
-**The rules are Device Active Protect state, not membership state.** Reading the
-deleted ids out of the pre/post pulls around the *original* capture gives their
-full text:
+**A device assigned to a group carries no device-scoped rules of its own.** That
+is the owner's model, and the pre-capture pull of 211 hosts confirms it exactly:
 
-```json
-{"pid": "575", "action": "allow", "direction": "outbound", "type": "category",
- "target": "dap_00aabbcc6031", "scope": ["00:AA:BB:CC:60:31"],
- "disabled": "1", "purpose": "dap", "targetList": "1", "seq": 3}
-{"pid": "576", "action": "block", "direction": "bidirection", "type": "mac",
- "target": "00:AA:BB:CC:60:31",
- "disabled": "1", "purpose": "dap", "seq": 3}
-```
+| Host population | Hosts carrying a **non-`dap`** rule of their own |
+| --- | --- |
+| assigned to a **group** | **0 of 124** |
+| assigned to a **user** | 1 of 28 |
+| no membership | 8 of 59 |
 
-Both carry `"purpose": "dap"` — Device Active Protect — and both are
-`disabled: "1"`. Their `timestamp` is `1788978268`, roughly six hours **before**
-the capture, so the membership action did not create them; they were pre-existing
-product state.
+Not one group-assigned device carries a rule of its own, while unassigned devices
+do. This matches the app's own warning when you assign a device to a group: the
+device will only follow the group rules from then on. So the original Finding 41
+phrasing was closer to the truth than the correction that followed it.
 
-Box-wide they are a per-host **pair**: 184 `dap` rules, 92 hosts, exactly two
-each.
+**What that correction got wrong.** It read the two deleted rules as the app
+clearing its own `dap` leftovers, narrowed the behaviour to `purpose == "dap"`,
+and concluded the integration should reproduce that delete. Both halves are now
+contradicted:
 
-**They are not a group-membership artifact.** Across the pre-capture pull:
+- the deleted rules (575, 576) *are* `dap`-purposed, but `dap` is the **exception**
+  rather than the rule. 84 of the 124 group-assigned hosts still carry a `dap`
+  pair, so `dap` rules are not what membership removes
+- keying on `dap` therefore targets the one rule family that demonstrably
+  **survives** group assignment, while missing the rule family that is absent on
+  **every** group-assigned device
 
-| Host population | Hosts | Owning a `dap` pair |
-| --- | --- | --- |
-| assigned to a **group** | 124 | 84 (68%) |
-| assigned to a **user** | 28 | **0 (0%)** |
-| no membership | 59 | 8 (14%) |
+**The open question.** The captured device was moved group → group, and the app
+deleted its `dap` pair on the *removal* step, not the add. Its whole rule set was
+that pair, so the capture cannot distinguish "the app deletes the device's rules
+whenever its tags change" from "the app deletes `dap` state specifically when a
+device leaves a group". The population table says the former is closer — but the
+capture alone does not prove it, and 84 group-assigned hosts holding a `dap` pair
+sits awkwardly with it.
 
-The 68% is the part a first reading missed: **a device sitting in a group keeps
-its `dap` pair**. So the pair is not created by group membership and its
-presence says nothing about it. The 0% on user-assigned hosts is the signal
-pointing the other way, and is consistent with membership *changes* clearing it.
+Until that is measured, **the integration deletes nothing**. The service reports
+the device's own rule ids in its response (`device_rules.present`) so the
+behaviour is visible to a caller, and leaves the rules alone. Removing firewall
+rules on an unconfirmed model is not a safe default; a wrong guess would delete
+rules the owner created.
 
-**So the sweep is real and belongs to the app, not the box.** In the capture the
-host was moved out of `Quarantine` and into `SVR_NAS`; the app deleted the
-device's `dap` pair in the same batch as the removal, and the pair was gone
-before the add, so the add had nothing left to delete. The likely intent is that
-a device's Active Protect state is invalidated when its policy (its tags) moves,
-so the app clears the stale pair rather than leaving a `dap` block behind.
-
-**A first reading of this was wrong in two ways, both worth recording:**
-
-- It called the rules "the app's own disabled leftovers" and concluded an
-  integration must **not** reproduce the delete. The 0% user-assigned figure
-  contradicts "unrelated". The app is clearing state that belongs to the device
-  it is moving.
-- Its safety argument was that a sweep would delete real firewall rules, citing
-  live enabled device-scoped `allow`/`ip` rules with a host in `scope`. Those
-  rules are real, but they carry **no** `purpose: "dap"`, so a sweep keyed on
-  `purpose == "dap"` cannot reach them. The argument conflated "device-scoped
-  rules" with "DAP rules" and overstated the risk.
-
-**Implementation consequence — corrected.** The operation is precisely
-discriminable, so it is safe to reproduce: delete rules that are
-`purpose == "dap"` **and** device-scoped to this host (its MAC is the `target`
-or appears in `scope`) **and** disabled. The `purpose` key is the discriminator
-that keeps it away from user rules. A pair of disabled `dap` rules left behind is
-observable divergence from the app, which is what the integration is trying to
-avoid.
+**The test that would settle it:** take a device that is *unassigned* and *does*
+carry its own rules, assign it to a group **in the Firewalla app**, and capture
+what the app deletes. The pre-capture pull gives ready candidates — `portainer`
+(1 rule), `caddy-int` (1), `app-game1` (1), `app-docker1` (1) — all small,
+reversible, infrastructure devices. The answer is one capture away.
 
 **3. `host:syncAppTimeUsageToTags` — what it is.**
 
@@ -3060,6 +3045,9 @@ window from more than one sample.
 - `.tmp/reconstruct_capture.py` (pre/post pull diff for the 575/576 delete)
 - `.tmp/rule_correlation.py`, `.tmp/dap_analysis.py` (DAP rule correlation and
   the `begin` decode)
+- `.tmp/test_own_rules_hypothesis.py` (the group/user/none rule-ownership table)
+- `.tmp/capture_device_rules.py` (the captured device's full rule set)
+- `.tmp/verify_dap_selector.py` (read-only selector check)
 - `.artifacts/membership-capture/20261002-135538/` and `.../20261002-135842/`
   (the pre and post pulls the ids were read out of)
 

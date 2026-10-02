@@ -4420,14 +4420,13 @@ async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
     }
 
 
-def _find_device_dap_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> list[str]:
-    """Return the ids of one device's Device Active Protect rules.
+def _find_device_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> list[str]:
+    """Return the ids of a device's own device-scoped rules.
 
-    The Firewalla app clears these when a device's membership changes, because a
-    device's Active Protect state is invalidated when its tags move. ``purpose``
-    is what keeps this away from user rules: a live device-scoped rule carries no
-    ``dap`` purpose, so it is never matched. ``async_delete_rule`` sends the same
-    ``policy:delete`` payload the app does.
+    Kept as a pure lookup so the membership change can report what the device
+    carries. It deletes nothing: the app's own rule handling on a membership
+    change is not yet established (see Finding 43), and removing firewall rules on
+    an unconfirmed model is not safe.
     """
     snapshot = entry.runtime_data.coordinator.data
     if snapshot is None:
@@ -4437,12 +4436,8 @@ def _find_device_dap_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> lis
     return [
         rule.rule_id
         for rule in snapshot.policy_rules
-        if rule.purpose == RULE_PURPOSE_DAP
-        and not rule.enabled
-        and (
-            (rule.target_type == RULE_TARGET_TYPE_MAC and rule.target.upper() == mac)
-            or any(scope.upper() == mac for scope in rule.scope)
-        )
+        if (rule.target_type == RULE_TARGET_TYPE_MAC and rule.target.upper() == mac)
+        or any(scope.upper() == mac for scope in rule.scope)
     ]
 
 
@@ -4493,18 +4488,11 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
         target.group_id if target is not None else None
     )
 
-    # The app clears the device's Active Protect rules as part of the same batch,
-    # before the tags write, so the stale pair cannot outlive the move.
-    dap_rule_ids = _find_device_dap_rule_ids(entry, host.mac)
-    for rule_id in dap_rule_ids:
-        try:
-            await entry.runtime_data.rule_manager.async_delete_rule(rule_id)
-        except FirewallaApiError as err:
-            _raise_runtime_service_error(
-                err,
-                log_message="Failed to clear device Active Protect rules",
-                translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
-            )
+    # Reported, not acted on. On a real box no device assigned to a group carries a
+    # device-scoped rule of its own, which is what the app warns about when you
+    # assign one; the exact rule handling behind it is still being established, so
+    # this surfaces what the device carries without deleting anything.
+    device_rule_ids = _find_device_rule_ids(entry, host.mac)
 
     try:
         command_response = (
@@ -4546,8 +4534,8 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
             "after": cast(JsonValueType, after),
             "changed": before != after,
         },
-        "device_active_protect": {
-            "rules_removed": cast(JsonValueType, dap_rule_ids),
+        "device_rules": {
+            "present": cast(JsonValueType, device_rule_ids),
         },
         "command": {
             "item": "policy",

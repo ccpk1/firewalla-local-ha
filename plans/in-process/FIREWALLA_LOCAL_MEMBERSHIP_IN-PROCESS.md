@@ -334,28 +334,37 @@ mutually exclusive target fields, backing **four** LLM tools in Phase 4.
       `integration_manager` → `async_set_host_policy` path. The response carries
       `membership.before`, `membership.after` and a `changed` flag so a caller can
       tell whether the single slot actually moved.
-- [x] **2.4b DAP rule cleanup — corrected reading, now implemented.** A first
-      reading of the capture concluded the box should not reproduce the app's
-      `policy:delete` calls, on the grounds that they were unrelated disabled
-      leftovers and that a sweep risked deleting real firewall rules. **That was
-      wrong on both counts**, and the owner's challenge was right to press on it.
-      Reading the deleted ids out of the pre/post pulls shows both are
-      `"purpose": "dap"` — Device Active Protect — and `disabled: "1"`, created six
-      hours before the capture. Box-wide they are a per-host pair: 184 rules over 92
-      hosts.
-      The correlation is the decisive part: of hosts assigned to a **group**, 68%
-      still own their pair, so membership does not create them and their presence
-      says nothing about it. But of hosts assigned to a **user**, **0%** do. The app
-      is clearing state belonging to the device it is moving, not tidying unrelated
-      leftovers.
-      The safety argument also failed: it cited live enabled device-scoped
-      `allow`/`ip` rules as sweep casualties, but those carry **no** `purpose: "dap"`,
-      so a cleanup keyed on `purpose == "dap"` cannot reach them.
-      The integration now deletes the device's disabled `dap` rules as part of a
-      membership change, through the existing `async_delete_rule` path, which was
-      already byte-for-byte the app's captured payload (`mtype: "cmd"`,
-      `item: "policy:delete"`, `value: {"policyID": ...}`, `target: 0.0.0.0`).
-      See Finding 43.
+- [x] **2.4b Rule handling on a membership change — box behaviour confirmed, app
+      behaviour still open. Deletes nothing.** Two corrections in a row, both from
+      the owner pressing on the data rather than accepting a tidy story. The net
+      position:
+      1. **The box deletes nothing on its own — confirmed.** Clearing tags locally
+         left the device's rules intact.
+      2. **A device assigned to a group carries no rule of its own — confirmed.**
+         Across the pre-capture pull: **0 of 124** group-assigned hosts carry a
+         non-`dap` device-scoped rule, against 8 of 59 unassigned and 1 of 28
+         user-assigned. That is the app's own warning made real — a device in a
+         group follows only the group rules.
+      3. **What the app deletes on assignment is not established.** An intermediate
+         reading narrowed the behaviour to `purpose == "dap"` and deleted those
+         rules. That was wrong: `dap` is the *exception*, since 84 of the 124
+         group-assigned hosts still carry a `dap` pair. Keying on `dap` targeted
+         the one family that demonstrably survives assignment while missing the
+         family that is absent on every group-assigned device.
+      4. **The capture cannot settle it.** The captured device was moved group →
+         group and its entire rule set was that `dap` pair, so the capture cannot
+         distinguish "delete the device's rules on any tag change" from "delete
+         `dap` state on leaving a group".
+      Until it is measured the service **deletes nothing** and reports the device's
+      own rule ids as `device_rules.present`, so the behaviour is visible without
+      risking a wrong destructive guess. See Finding 43 for the decisive test.
+- [ ] **2.4b-test The decisive capture (owner-assisted, blocks nothing else).**
+      Take an *unassigned* device that carries its own rules — `portainer`,
+      `caddy-int`, `app-game1` or `app-docker1` all qualify with one rule each —
+      assign it to a group **in the app**, and capture what the app deletes. That
+      single capture decides between "delete the device's rules on any tag change"
+      and "delete `dap` state on leaving a group", and only then can the service
+      reproduce the app faithfully.
 - [x] **2.4c `host:syncAppTimeUsageToTags` — decoded, documented, deliberately not
       sent.** `begin` decodes to a midnight in the box's own timezone seven days
       back including the current day (26 Sep–2 Oct for the 2 Oct capture). Firewalla
