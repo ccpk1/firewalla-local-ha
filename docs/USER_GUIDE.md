@@ -129,26 +129,27 @@ therefore reaches every assistant you use.
 
 **If you have more than one Firewalla box,** each config entry registers its own
 set of tools and appears in Home Assistant as its own MCP entry, listed
-separately with its own URL. That identifier is the integration domain followed
-by the entry's name:
+separately with its own URL. That identifier is the integration domain followed by
+the config entry's own id:
 
 ```
-.../api/mcp/firewalla_local-firewalla_test_only
-.../api/mcp/firewalla_local-firewalla_192_168_200_129
+.../api/mcp/firewalla_local-01KY0E6H9YV3EYEPEZWHDSNCTT
+.../api/mcp/firewalla_local-8470685048AD4948B7401C01CC
 ```
 
-Reading the URL tells you which box it is. **Tool names stay the same in every
-case** (`firewalla_local__get_system_overview`) — the entry selects the box, not
-the tool name — so point your client at the URL for the box you want to work
-with, and the tools you already use keep working.
+Home Assistant shows the entry's name beside each URL in that list, so you can
+tell which box is which without reading the id.
+
+**Tool names stay the same in every case** (`firewalla_local__get_system_overview`)
+— the entry selects the box, not the tool name — so point your client at the URL
+for the box you want to work with, and the tools you already use keep working.
 
 A tool belongs to the box it was created for: it cannot act on a different one,
 and there is no setting to point it elsewhere.
 
-**Renaming an entry changes that box's MCP URL,** because the URL is built from
-the entry name. If your client is connected to a specific box by URL, re-point it
-after a rename; the old URL stops working. If you let Home Assistant serve **All
-LLM APIs** instead, no URL is stored anywhere and renames cause no problem.
+The id is the config entry's own identifier, so it never changes: renaming the
+entry, adding another box, or removing one leaves every other URL exactly as it
+was. You can rename freely without re-pointing a client.
 
 **Serving several boxes at once prefixes their tool names with the entry name.**
 When you select more than one API (or "All LLM APIs"), Home Assistant merges

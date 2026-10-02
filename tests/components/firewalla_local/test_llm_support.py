@@ -649,15 +649,16 @@ def _setup_patches() -> tuple[object, ...]:
     )
 
 
-async def test_api_id_is_stable_when_a_second_box_is_added(
+async def test_api_id_is_stable_across_rename_and_second_box(
     hass: HomeAssistant,
 ) -> None:
-    """The id must not move when another entry is added.
+    """The id must not move when the entry is renamed or another is added.
 
     The id is both the MCP URL and the value `mcp_server` stores to pick an API,
-    so an id that changed on the 1 -> 2 transition would silently break an
-    existing client. It is derived from the entry itself rather than from how
-    many entries exist, so adding a second box leaves the first box's id alone.
+    so anything that moves it silently breaks a configured client. It is built
+    from the config entry id, which Home Assistant assigns and never reissues,
+    so neither a rename nor a sibling entry can affect it. The title is the
+    display name only.
     """
     first = _entry()
     first.add_to_hass(hass)
@@ -677,14 +678,22 @@ async def test_api_id_is_stable_when_a_second_box_is_added(
         single = _firewalla_api_ids(hass)
         assert len(single) == 1
         (first_id,) = single
+        assert first_id == f"firewalla_local-{first.entry_id}"
+
+        # Renaming the box must not move its id, which is the whole point of
+        # not deriving the id from the title.
+        hass.config_entries.async_update_entry(first, title="Renamed Basement")
+        await hass.async_block_till_done()
+        assert _firewalla_api_ids(hass) == {first_id}
 
         second.add_to_hass(hass)
         assert await hass.config_entries.async_setup(second.entry_id)
         await hass.async_block_till_done()
 
-    assert len(_firewalla_api_ids(hass)) == 2
-    # The first box keeps the id it had before the second box existed.
-    assert first_id in _firewalla_api_ids(hass)
+    assert _firewalla_api_ids(hass) == {
+        first_id,
+        f"firewalla_local-{second.entry_id}",
+    }
 
 
 async def test_identical_entry_titles_still_give_uniquely_named_tools(
@@ -727,12 +736,12 @@ async def test_merged_tool_names_namespace_by_entry_title(
 ) -> None:
     """Merging boxes prefixes each tool with that entry's name.
 
-    Home Assistant derives the namespace with the `slugify` package, which
-    separates words with a **hyphen**, while this integration's API id uses
-    `homeassistant.util.slugify`, which uses **underscores**. The two appear side
-    by side in Home Assistant — the API URL and the merged tool names — so the
-    difference is pinned here rather than left to prose. It was documented wrong
-    once already for exactly this reason.
+    Home Assistant derives the merged namespace with the `slugify` package,
+    which separates words with a hyphen. The API id is a separate thing and is
+    built from the config entry id, so the two are unrelated by design: the
+    namespace follows the display name and the id does not. Pinned here because
+    both are easy to confuse when reading a tool list, and because the id was
+    documented wrong once already.
     """
     first = _entry()
     second = _second_entry(title="Main Router", host="10.0.0.1", license_="lic-ns")
@@ -755,14 +764,14 @@ async def test_merged_tool_names_namespace_by_entry_title(
     # One box on its own: the tool keeps the plain name.
     assert [t.name for t in solo.tools] == ["firewalla_local__get_system_overview"]
 
-    # Merged: namespaced by the entry title, with hyphens for word breaks.
-    assert [t.name for t in merged.tools] == [
+    # Merged: namespaced by the entry title, with hyphens for word breaks. Order
+    # is not asserted because it follows the sorted entry ids, which are random.
+    assert {t.name for t in merged.tools} == {
         "firewalla-192-168-200-1__firewalla_local__get_system_overview",
         "main-router__firewalla_local__get_system_overview",
-    ]
+    }
 
-    # The API id uses the other slug rule, so the two do not match.
-    assert ids == [
-        "firewalla_local-firewalla_192_168_200_1",
-        "firewalla_local-main_router",
-    ]
+    # The id is the config entry id, so it carries no title at all.
+    assert ids == sorted(
+        [f"firewalla_local-{first.entry_id}", f"firewalla_local-{second.entry_id}"]
+    )

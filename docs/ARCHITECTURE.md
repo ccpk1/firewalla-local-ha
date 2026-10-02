@@ -470,11 +470,14 @@ to the box it was created for.
 
 - each tool injects its own entry id into the backing service call, so a tool call
  cannot target another box and the model never passes an entry identifier
-- the API id always carries a per-entry suffix derived from the entry title, so it
- cannot change when another box is added; the id is both the MCP URL and the value
- `mcp_server` stores to select an API
-- identical entry titles are disambiguated, because Home Assistant namespaces merged
- tools by API *name* and would otherwise produce colliding tool names
+- the API id is `firewalla_local-<config entry id>`. The entry id is assigned by
+ Home Assistant, never reissued, and unaffected by a rename or by a sibling
+ entry, so the id cannot move; it is both the MCP URL and the value `mcp_server`
+ stores to select an API
+- the API *name* is the entry title, and the title is display only. It is kept
+ unique among entries because Home Assistant namespaces merged tools by API name
+ and would otherwise produce colliding tool names; identical titles are
+ disambiguated with a short entry-id suffix
 - the configured tool mode is per entry, so one box can be read-only while another
  permits control
 

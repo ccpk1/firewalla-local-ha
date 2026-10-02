@@ -14,7 +14,6 @@ from collections.abc import Callable
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm
-from homeassistant.util import slugify
 
 from .const import (
     DOMAIN,
@@ -98,28 +97,20 @@ def _resolve_api_name(hass: HomeAssistant, entry: ConfigEntry) -> str:
     return f"{title} [{entry.entry_id[:6]}]"
 
 
-def _resolve_api_id(api_name: str) -> str:
-    """Return the LLM API id for one config entry.
-
-    Always carries a suffix. An id that is the bare domain for a single box
-    would have to change the moment a second box is added, and that id is both
-    the MCP URL and the value `mcp_server` stores to pick an API — so adding a
-    box would silently break an existing client. Deriving the id from the
-    already-unique name keeps it stable and unique by construction, matching
-    how the `mcp` integration names its per-entry APIs.
-    """
-    return f"{DOMAIN}-{slugify(api_name) or 'box'}"
-
-
 def async_register_firewalla_api(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> Callable[[], None]:
     """Register the Firewalla Local LLM API for one config entry."""
-    entry_name = _resolve_api_name(hass, entry)
     api = FirewallaLocalAPI(
         hass,
-        api_id=_resolve_api_id(entry_name),
-        name=entry_name,
+        # The config entry id is the box's stable identity: assigned by Home
+        # Assistant, never reissued, and unaffected by a rename or by another
+        # entry appearing. This id is both the MCP URL and the value
+        # `mcp_server` stores to select an API, so it must not move.
+        api_id=f"{DOMAIN}-{entry.entry_id}",
+        # The title is the display name only, so renaming changes what users
+        # see without moving the id.
+        name=_resolve_api_name(hass, entry),
         entry_id=entry.entry_id,
         mode=get_llm_tool_mode(entry.options),
     )
