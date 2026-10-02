@@ -6,7 +6,7 @@ surface is built and tested against.
 
 - **Audience:** LLM/MCP tool authors, agent developers, and anyone wiring a client
   to this integration. Humans using the Home Assistant UI or service calls should
-  read [`USER_GUIDE.md`](USER_GUIDE.md) instead (which links here for the tool catalog).
+  read [`USER_GUIDE.md`](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md) instead (which links here for the tool catalog).
 - **Scope:** every available and planned tool. Tools marked *(planned)* do not exist
   yet; this document is the target they are built to.
 - **How to read it:** the [Conventions](#conventions) apply to every tool; each tool
@@ -735,5 +735,5 @@ and deliberately not built on:
 
 *This document is the authoritative tool-surface record and the spec the
 implementation and contract tests are built against. It is linked from
-[`USER_GUIDE.md`](USER_GUIDE.md); keep it in sync as tools land (the pinned
+[`USER_GUIDE.md`](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md); keep it in sync as tools land (the pinned
 tool-name set test enforces the catalog).*

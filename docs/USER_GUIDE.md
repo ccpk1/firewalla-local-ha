@@ -192,7 +192,7 @@ the integration works exactly as before; the setting is hidden and no tools are
 registered.
 
 The full tool list, with what each one does and how it should be used, is in the
-[MCP tool reference](MCP_TOOL_REFERENCE.md).
+[MCP tool reference](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/MCP_TOOL_REFERENCE.md).
 
 ## Service catalog at a glance
 
