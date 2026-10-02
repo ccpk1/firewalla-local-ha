@@ -12,6 +12,14 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
+    # Home Assistant's `llm.async_call_tool` imports
+    # `homeassistant.components.conversation` at call time, which imports
+    # `hassil` and `gazetteer_matcher`. The `homeassistant` package does not
+    # declare either, so every test that calls a tool fails with
+    # ModuleNotFoundError without them. Pinned to the versions Home Assistant
+    # constrains in `package_constraints.txt`.
+    "gazetteer-matcher==1.1.0",
+    "hassil==3.12.1",
     "mypy>=1.15.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
