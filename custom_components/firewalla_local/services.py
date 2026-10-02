@@ -3375,7 +3375,7 @@ def _build_network_overview_entries(
     """
     hosts = entry.runtime_data.host_manager.get_hosts()
     online_window_seconds = (
-        entry.runtime_data.host_manager.connectivity_online_window_seconds
+        entry.runtime_data.host_manager.watched_device_online_window_seconds
     )
     reference_activity = reference_last_active(hosts)
     online_macs = {
@@ -3987,7 +3987,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
     # cannot be answered two different ways depending on which tool was asked.
     all_hosts = entry.runtime_data.host_manager.get_hosts()
     online_window_seconds = (
-        entry.runtime_data.host_manager.connectivity_online_window_seconds
+        entry.runtime_data.host_manager.watched_device_online_window_seconds
     )
     reference_activity = reference_last_active(all_hosts)
     hosts: list[JsonValueType] = []

@@ -311,15 +311,18 @@ Reads that tell you what exists — the first step before any control action.
   `online` to separate current from idle. A live Quarantine group returned **10**
   devices — 3 recently active and 7 past — and all ten were in the result, with
   exactly **1** reading `online: true`.
-- **`online` uses a connectivity tolerance, not the presence window.** It measures
-  against the freshest host in the whole inventory, with a fixed
-  `CONNECTIVITY_ONLINE_WINDOW_MINUTES` (15). That is deliberately separate from the
-  user-tunable watched-device presence window: presence answers "is it home" and
-  an idle device can still be connected. On the same live box the 5-minute presence
-  default reported a device idle 6.9 minutes as offline while the Firewalla app
-  showed it online; 15 minutes matches. The box's own `stale` flag is a third
-  signal again — it means "not seen in roughly 7 days", so it is never used to
-  answer a connectivity question.
+- **`online` uses the one shared online window, and "is it home" is a different
+  question.** It measures against the freshest host in the whole inventory, with
+  `DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES` (15). The watched-device sensors,
+  the device and VPN counts, the runtime inventory summary and this field all share
+  that window, so they cannot disagree. On a live box a 5-minute window reported a
+  device idle 6.9 minutes as offline while the Firewalla app showed it online, and
+  the watched-device sensor reported a different total again; one 15-minute window
+  makes all of them match. *Presence* — "is it home" — is answered separately by
+  the device tracker, which keeps its own wall-clock away window and is not a
+  connectivity signal. The box's own `stale` flag is a third signal again — it
+  means "not seen in roughly 7 days", so it is never used to answer a connectivity
+  question.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
   (bool, default true — performs a live poll; set false for a fast cached read);
   `config_entry_id` / `config_entry_name` (optional).

@@ -3823,16 +3823,20 @@ async def test_get_system_overview_includes_identifiers_on_request(
     assert "items" in overview["groups"]
 
 
-async def test_connectivity_uses_its_own_window_not_the_presence_window(
+async def test_connectivity_is_one_definition_across_every_surface(
     hass: HomeAssistant,
 ) -> None:
-    """A device idle longer than the presence window still reads connected.
+    """The list, the counts and the watched-device sensor agree on `online`.
 
     Reproduces a live observation: on the Quarantine group the box carried 10
     devices, 7 past and 3 recently active, and the Firewalla app showed exactly
-    1 of those 3 online — the one idle 6.9 minutes. The 5-minute watched-device
-    presence default reported it offline, because presence and connectivity are
-    different questions. The connectivity tolerance is 15 minutes.
+    1 of those 3 online — the one idle 6.9 minutes. A 5-minute online window
+    reported 0 from the counts while the watched-device sensor could report a
+    different number again, because the two surfaces had separate windows.
+
+    They now share one window, so this asserts the list, the overview counts and
+    the same host's watched-device sensor all agree, including for a device that
+    is `stale: false` (the box's seven-day signal) yet not connected.
     """
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -3853,8 +3857,7 @@ async def test_connectivity_uses_its_own_window_not_the_presence_window(
     template = base.hosts[0]
     # Reference host sets the freshness baseline.
     reference = replace(template, mac="AA:BB:CC:DD:EE:01", last_active=1_000_000.0)
-    # Idle 6.9 min: within the connectivity tolerance, outside the 5-min presence
-    # window, and not stale.
+    # Idle 6.9 min: within the shared online window, and not stale.
     recent = replace(
         template,
         mac="AA:BB:CC:DD:EE:02",
@@ -3919,6 +3922,12 @@ async def test_connectivity_uses_its_own_window_not_the_presence_window(
     assert overview is not None
     assert overview["devices"]["total"] == 3
     assert overview["devices"]["online"] == sum(1 for v in online.values() if v)
+
+    # The watched-device sensor reads the same state, because it now shares the
+    # one online window rather than keeping its own.
+    host_manager = entry.runtime_data.host_manager
+    for host in host_manager.get_hosts():
+        assert host_manager.is_watched_device_online(host) == online[host.host_name]
 
 
 async def test_get_system_overview_counts_vpn_peers_separately(

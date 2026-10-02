@@ -11,14 +11,19 @@ they were active within the configured window of it. A box where nothing has
 been active recently therefore reports no online hosts rather than treating
 stale timestamps as current.
 
-The window is a parameter, because two callers ask different questions:
+The window is a parameter, but there is only one *connectivity* window shared by
+every surface that reports whether a device is online: the watched-device
+sensors, the device counts, the VPN peer counts, the runtime inventory summary,
+and the host list's ``online`` field. They previously diverged — a live check
+found the presence window reporting 0 online for a group the counts and the
+Firewalla app both showed as 1 — so the shared window is the fix.
 
-- **Presence** — the watched-device and device-tracker entities, which use the
-  user's configured window. "Is this device home?"
-- **Connectivity** — the device counts, the VPN peer counts, and the host list's
-  ``online`` field, which use ``CONNECTIVITY_ONLINE_WINDOW_MINUTES``. "Is this
-  device connected?" An idle device is still connected, so the presence window is
-  too strict here.
+"Online" here means *connected*, which is a different question from *home*:
+
+- **Connectivity** — is it connected? An idle device is still connected, so the
+  window is generous (`DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES`).
+- **Presence** — is it home? Answered separately by the device tracker, which
+  has its own away window, because a device can be connected while away.
 
 The box's own ``stale`` flag is a third signal and answers neither question the
 same way: it means "not seen in roughly 7 days", so it is not used for
