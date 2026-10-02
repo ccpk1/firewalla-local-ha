@@ -4957,7 +4957,9 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
     ) = _resolve_wan_data_usage_inputs(call)
     time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
     integration_manager = entry.runtime_data.integration_manager
-    manager_detail = "daily" if "subperiods" in applied_include else "summary"
+    manager_detail = (
+        "daily" if ("subperiods" in applied_include or detail == "full") else "summary"
+    )
 
     try:
         usage_reports = await integration_manager.async_get_wan_data_usage_reports(

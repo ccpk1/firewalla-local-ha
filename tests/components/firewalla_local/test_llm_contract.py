@@ -398,6 +398,79 @@ async def test_count_totals_are_not_presented_as_connected(
     assert any(marker.schema == "online" for marker in config)
 
 
+# Tool parameters deliberately not exposed, keyed by tool name, with the reason.
+# Anything not listed here must be reachable from the tool that wraps it.
+_INTENTIONAL_OMISSIONS: Final = frozenset(
+    {
+        # The destructive gate is set internally; asking the model to confirm
+        # itself would prove nothing.
+        ("unblock_alarm_target", "confirm"),
+        # Bulk tools act on a fixed mode; single-alarm tools act on an alarm id.
+        # Splitting them means neither tool exposes the other's selector, and
+        # `mode` is never taken from the model because "all_active" is the bulk
+        # archive the destructive tier gates separately.
+        ("archive_alarm", "mode"),
+        ("archive_all_alarms", "mode"),
+        ("archive_all_alarms", "alarm_id"),
+        ("delete_alarm", "mode"),
+        ("delete_all_alarms", "mode"),
+        ("delete_all_alarms", "alarm_id"),
+        # `detail` and `include: ['subperiods']` both select the nested
+        # breakdown, so the tool offers one lever rather than two.
+        ("get_wan_usage", "detail"),
+        # Writes refresh internally, and host_id is never threaded by hand
+        # because the tools take a human-meaningful name or MAC.
+        ("set_host_name", "host_id"),
+        ("set_host_name", "refresh"),
+        ("set_host_dns_hostname", "host_id"),
+        ("set_host_dns_hostname", "refresh"),
+        ("set_host_device_type", "host_id"),
+        ("set_host_device_type", "refresh"),
+        ("set_host_dhcp_reservation", "host_id"),
+        ("set_host_dhcp_reservation", "refresh"),
+        ("set_host_notify_when_next_online", "host_id"),
+        ("set_host_notify_when_next_online", "refresh"),
+        ("set_host_notify_when_next_offline", "host_id"),
+        ("set_host_notify_when_next_offline", "refresh"),
+        ("wake_host", "host_id"),
+        ("wake_host", "refresh"),
+        ("delete_host", "refresh"),
+    }
+)
+
+
+async def test_tools_expose_their_service_parameters(hass: HomeAssistant) -> None:
+    """A tool must accept everything its service accepts, or say why not.
+
+    `get_network_config`'s description told the model to pass `include: ['hosts']`
+    while the tool declared only the network selector and `refresh`, so the device
+    list the description promised was unreachable. `set_host_dhcp_reservation` had
+    the same shape: the service takes a network selector for multi-network
+    ambiguity, and the tool did not expose it.
+
+    The allowlist is deliberately explicit — an omission has to be justified here
+    rather than discovered in a user's session.
+    """
+    from custom_components.firewalla_local.services import _SERVICE_REGISTRATIONS
+
+    schemas = {name: schema for name, _h, schema, *_ in _SERVICE_REGISTRATIONS}
+    api_instance = await _api_instance(hass)
+
+    gaps: list[str] = []
+    for tool in api_instance.tools:
+        action = tool.name.removeprefix(f"{DOMAIN}__")
+        declared = {marker.schema for marker in tool.parameters.schema}
+        # config entry selectors are injected by the base class, not declared.
+        declared |= {"config_entry_id", "config_entry_name"}
+        service_fields = {marker.schema for marker in schemas[tool._service].schema}
+        for field in sorted(service_fields - declared):
+            if (action, field) in _INTENTIONAL_OMISSIONS:
+                continue
+            gaps.append(f"{tool.name} does not expose {tool._service}.{field}")
+
+    assert gaps == [], f"service parameters missing from tools: {gaps}"
+
+
 async def test_large_payload_tools_tell_the_model_to_narrow(
     hass: HomeAssistant,
 ) -> None:

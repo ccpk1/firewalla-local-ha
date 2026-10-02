@@ -369,6 +369,15 @@ class GetNetworkConfigTool(_FirewallaReadTool):
             vol.Optional(
                 SERVICE_FIELD_NETWORK_NAME, description=_NETWORK_NAME_DESCRIPTION
             ): str,
+            vol.Optional(
+                SERVICE_FIELD_INCLUDE,
+                description=(
+                    "Optional. Add the network's device list with "
+                    "`include: ['hosts']`. Those rows carry MAC addresses, "
+                    "hostnames, IPs, and reservations, so ask for them only "
+                    "when the devices themselves are wanted."
+                ),
+            ): vol.All(cv.ensure_list, [vol.In(("hosts",))]),
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )

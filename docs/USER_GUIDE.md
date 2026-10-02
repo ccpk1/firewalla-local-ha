@@ -202,6 +202,8 @@ Services added after 1.0.0:
 - `firewalla_local.mute_alarm`
 - `firewalla_local.unmute_alarm`
 - `firewalla_local.delete_rule`
+- `firewalla_local.sync_runtime`
+- `firewalla_local.get_system_overview`
 
 ## Installation
 
@@ -816,6 +818,35 @@ it directly.
   entity, plus `host_count` (the raw host records the box reported) and rule,
   group, user, and network counts
 - unlike the newer report services, it predates the shared report envelope
+
+### Get system overview
+
+Use `firewalla_local.get_system_overview` for one concise, high-level summary of
+the box in a single call: appliance health, the networks with their device
+counts, counts for devices, VPN peers, groups, users, rules, and alarms, and
+per-WAN speed-test and quality metrics.
+
+- **counts and identifiers only** — no device or rule records, so the payload
+  cannot grow with the size of the network
+- `devices` and `vpn_devices` each report `total`, `online`, and `offline`;
+  `total` is everything the box knows about, not the connected count, and
+  `vpn_devices` is a breakdown of `devices` rather than a separate population
+- `include: ["identifiers"]` adds the group and user names and ids that
+  `get_time_usage_report` and the rule services accept as selectors. They are
+  omitted by default so the summary carries no person-level data
+- `llm_access` reports the active AI tool mode and what it reaches
+- non-admin, and the same data the AI assistant's Summary-only tier is built on
+
+### Sync runtime
+
+Use `firewalla_local.sync_runtime` to poll the box now and report when the
+snapshot was taken.
+
+- returns `synced`, `synced_at` (ISO 8601), `synced_at_timestamp` (epoch), and
+  `config_entry_id`
+- requests within the coordinator's ~10 second debounce window are coalesced, so
+  calling it alongside other work still costs at most one poll
+- the `Sync runtime` button on the appliance device does the same thing
 
 ### Get host name mapping
 

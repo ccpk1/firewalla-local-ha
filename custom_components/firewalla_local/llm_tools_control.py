@@ -37,6 +37,8 @@ from .const import (
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_MODE,
+    SERVICE_FIELD_NETWORK_NAME,
+    SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
@@ -530,6 +532,20 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
                 SERVICE_FIELD_RESERVED_IPV4,
                 description=(
                     "Optional. The IPv4 address to reserve (required for 'static')."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_UUID,
+                description=(
+                    "Optional. The network to reserve in, when the address alone "
+                    "is ambiguous across networks."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_NAME,
+                description=(
+                    "Optional. The network to reserve in, by name, when the "
+                    "address alone is ambiguous across networks."
                 ),
             ): str,
         }
