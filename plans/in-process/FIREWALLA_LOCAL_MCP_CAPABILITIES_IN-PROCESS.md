@@ -68,7 +68,7 @@ These were verified during the original investigation. Do not re-derive them; th
 
 | Phase | Focus | Key deliverables | Status | Depends on |
 |---|---|---|---|---|
-| 4.0 | **MCP tool reference (the spec)** | `docs/MCP_TOOL_REFERENCE.md` — conventions + grouped tool catalog + per-tool template; the authoritative spec & surface record, referenced from the user guide | **Drafted** | none — **first step** |
+| 4.0 | **MCP tool reference (the spec)** | `docs/MCP_TOOL_REFERENCE.md` — conventions + grouped tool catalog + per-tool template; the authoritative spec & surface record, referenced from the user guide. **Complete** — covers all 34 tools; a contract test now fails if a registered tool is undocumented | **Complete** | none — **first step** |
 | 4.1 | Foundation and older-Core safety proof | version guard (`const.py` tuple + `helpers/llm_support.py` predicate), `llm_api.py` API shell, guarded registration + unload, options toggle, pre-2026.10 proof | **Complete** (329 tests pass) | 4.0 (spec exists) |
 | 4.2 | Read tools | **Complete** — 12 read tools in `llm_tools_read.py` (incl. `sync_runtime` and new `get_rules` service), available in read tiers | Complete | 4.1 |
 | 4.3 | Control tools | **Complete** — 16 control tools in `llm_tools_control.py` behind `read_and_control`; `create_rule` service + `from_alarm` + `aid` parity; effect tests | Complete | 4.2 |
@@ -81,7 +81,7 @@ These were verified during the original investigation. Do not re-derive them; th
 | Phase | Focus | Key deliverables | Status | Depends on |
 |---|---|---|---|---|
 | 5.0 | Correctness fixes from live pulls | **Complete** — D1 `window` default (`last_60_minutes`); D7 WAN events app filters + 7-day window + `system_reboot`; D8 WAN usage `["day","week"]`; D4/D5 VPN pseudo-host caveats; D6 naming roles | **Complete** (443 tests pass) | 4.5 |
-| 5.1 | Privacy defaults and disclosure | **Default flipped to `summary_only`** (implemented with 5.7); user-guide section rewritten with the tier ladder, the public-IP and external-endpoint lines, and the credential guarantee. Remaining: options-flow label wording and README | **Mostly complete** | 5.7 |
+| 5.1 | Privacy defaults and disclosure | **Complete** — default flipped to `summary_only`; user-guide tier ladder with the public-IP and external-endpoint lines; options labels describe what each tier sends ("recommended" removed); README section; credential guarantee **verified in code** and pinned by a test | **Complete** | 5.7 |
 | 5.2 | Payload reduction | **Complete** — `list_hosts` `detail: summary\|full` + filters; `list_rules` filters + product-purpose exclusion + `applies_to`/`tag_refs`/`purpose`; `vpn_client` exposed; default is the inventory's `visible_rules` (117) via a shared predicate. Measured live: hosts **−22%**, rules **−53%**, VPN-only **−98%**, rules-enabled **−78%** | **Complete** (452 tests pass) | 5.0 |
 | 5.3 | Discovery gaps | **Merged into 5.7** — `get_network_overview` is the shared discovery and curated-summary tool; no separate network/group/user list tools | **Merged into 5.7** | 5.2 |
 | 5.4 | Rule-model clarity | **Complete** — `applies_to` + `tag_refs` + `purpose` on rule summaries; GUI→name resolution needed **no work** (verified: 0 of 89 `applies_to` values are GUIDs). Prompt paragraph still owed under 5.6 | **Complete** (448 tests pass) | 5.2 |
@@ -253,7 +253,9 @@ The earlier checklist language describing all Tier C operations as excluded is s
 - [ ] **Lead with the anonymous tier.** The strongest sentence available is now *"summary mode sends network names and counts, never addresses or hardware identifiers."* Disclosure of what `read_only` adds comes second.
 - [ ] **Call out public IP on its own** — `get_speed_tests.public_ip` and `get_wan_events.wan_interface_address` identify the **household on the internet**, a different category from LAN device identity. It is the most sensitive field in the surface and deserves its own line, not a mention inside a list.
 - [ ] Frame it as capability and boundary, not apology: a firewall MCP that cannot see MAC and IP cannot answer firewall questions. Over-redacting `fqdn`/MAC would make the surface useless — the disclosure and the tier ladder are the honest answer, not removal.
-- [ ] Update `USER_GUIDE.md`, the options-flow label/description, and `README.md` consistently.
+- [x] Update `USER_GUIDE.md`, the options-flow label/description, and `README.md` consistently. **Done 2026-10-01** — user guide gained the five-tier table, the "be deliberate about raising it" warning, and the public-IP / external-endpoint / credential paragraphs; the options selector gained a `summary_only` label and lost "recommended" from `read_only`; the README gained an AI section that leads the risk rather than the reassurance.
+
+**Reference-coverage guard (2026-10-01).** `sync_runtime` and `unmute_alarm` shipped with no mention in `MCP_TOOL_REFERENCE.md` — the authoritative spec — and nothing tied the document to the code, so the drift was invisible. `test_reference_documents_every_registered_tool` now fails if any registered tool is unnamed in the reference, accepting either the prefixed heading form or the bare name used by the index and the destructive list.
 
 ### 5.2 — Payload reduction
 

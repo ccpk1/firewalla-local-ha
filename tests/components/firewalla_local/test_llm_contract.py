@@ -352,6 +352,35 @@ async def test_large_payload_tools_tell_the_model_to_narrow(
         assert expected_phrase in tools[tool_name].description, tool_name
 
 
+_REFERENCE_PATH: Final = Path(__file__).parents[3] / "docs" / "MCP_TOOL_REFERENCE.md"
+
+
+async def test_reference_documents_every_registered_tool(
+    hass: HomeAssistant,
+) -> None:
+    """Every registered tool is named in the reference, in some form.
+
+    The reference is the authoritative spec, but nothing tied it to the code:
+    `sync_runtime` and `unmute_alarm` shipped without a word in it, and the
+    `get_network_config` entry described an optional network selector the handler
+    requires. This asserts the cheap half of that contract — the reference must
+    at least name every tool — so a new tool cannot land undocumented.
+    """
+    reference = _REFERENCE_PATH.read_text(encoding="utf-8")
+    api_instance = await _api_instance(hass)
+
+    # Section headings use the full prefixed name; the index, the destructive
+    # list, and combined headings (the notify pair) use the bare action name.
+    undocumented = sorted(
+        tool.name
+        for tool in api_instance.tools
+        if f"`{tool.name}`" not in reference
+        and f"`{tool.name.removeprefix(f'{DOMAIN}__')}`" not in reference
+    )
+
+    assert undocumented == [], f"tools missing from the reference: {undocumented}"
+
+
 async def test_read_envelope_is_json_serializable(hass: HomeAssistant) -> None:
     """A read tool's result serializes with the stdlib JSON encoder."""
     api_instance = await _api_instance(hass)

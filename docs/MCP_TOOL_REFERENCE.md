@@ -194,6 +194,7 @@ resolve it to one host.
 | Group | Tool | Kind | Availability |
 |---|---|---|---|
 | Overview | `get_system_overview` | read | summary+ |
+| Overview | `sync_runtime` | read | read+ |
 | Know my network | `list_hosts` | read | read+ |
 | Know my network | `list_rules` | read | read+ |
 | Know my network | `get_network_config` | read | read+ |
@@ -217,6 +218,7 @@ resolve it to one host.
 | Control access | `set_ssid_paused` | control | control+ |
 | Respond to alarms | `get_alarms` | read | read+ |
 | Respond to alarms | `set_alarm_muted` | control | control+ |
+| Respond to alarms | `unmute_alarm` | control | control+ |
 | Respond to alarms | `block_alarm_target` | control | control+ |
 | Respond to alarms | `unblock_alarm_target` | control | control+ |
 | Respond to alarms | `archive_alarm` | control | control+ |
@@ -257,6 +259,25 @@ Reads that tell you what exists — the first step before any control action.
   public IP. Never a record collection, so the payload cannot grow with the
   network's size.
 - **Reversibility & undo:** read-only, nothing to undo.
+- **Annotations:** `read_only=true`, `destructive=false`, `idempotent=true`,
+  `open_world=false`.
+
+### `firewalla_local__sync_runtime`
+
+- **Answers:** "Is this data current?" / "Refresh now."
+- **When to use / not:** when the user needs current data and the last snapshot may
+  be stale. Call it, then read other tools with `refresh=false` — that is the cheap
+  pattern. Do not call it before several tools expecting several polls.
+- **Inputs:** `config_entry_id` / `config_entry_name` (optional).
+- **Returns:** read envelope — `result` with `synced`, `synced_at` (ISO) and
+  `synced_at_timestamp`.
+- **Coalescing:** HA's refresh debouncer (10 s) means calls inside that window cost
+  one poll, not N. Verified live: first call 13.63 s, immediate repeat 0.00 s with an
+  identical `synced_at`.
+- **Availability:** read tier — available in every enabled mode, including Summary
+  only, because re-polling is harmless and useful everywhere.
+- **Reversibility & undo:** read-only; `idempotent=true` (a repeat leaves the same
+  synced state; a longer first call is a transaction cost, not a state change).
 - **Annotations:** `read_only=true`, `destructive=false`, `idempotent=true`,
   `open_world=false`.
 
@@ -537,6 +558,21 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Reversibility & undo:** reversible — `undo` unmutes (removes the silence).
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 - **Caveats (must state):** scope is **mandatory** — a `matchAll`/`all` default mutes for **every** device; durations are the app's three fixed values (not free text).
+
+### `firewalla_local__unmute_alarm`
+
+- **Answers:** "Stop silencing these alarms" / "Undo that mute."
+- **When to use / not:** the undo for `set_alarm_muted`. Removing a silence only
+  restores alerting — it does not block traffic (`block_alarm_target`) or dismiss an
+  alarm (`archive_alarm`).
+- **Inputs:** `alarm_id` **or** `exception_id` (the silence id); `config_entry_id` /
+  `config_entry_name` (optional).
+- **Returns:** action-result envelope — the `target` is the silence, `undo` is null
+  (it is itself the undo).
+- **Reversibility & undo:** reversible by re-muting. No `undo` is emitted, because
+  the reversing call is `set_alarm_muted` with the same scope.
+- **Annotations:** `read_only=false`, `destructive=false`, `idempotent=true`,
+  `open_world=false`.
 
 ### `firewalla_local__block_alarm_target`
 
