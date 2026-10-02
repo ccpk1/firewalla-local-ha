@@ -477,6 +477,15 @@ to the box it was created for.
  tools by API *name* and would otherwise produce colliding tool names
 - the configured tool mode is per entry, so one box can be read-only while another
  permits control
+- **tool name length is a shared budget.** A merged name is
+ `<entry>__firewalla_local__<action>`, and MCP clients commonly cap a name at 64
+ characters. Measured live: the default entry title
+ (`Firewalla (192.168.200.129)`) leaves only 2 characters of the action name, so
+ `archive_alarm` and `archive_all_alarms` both arrive as the same truncated
+ string. Action names must therefore stay short enough to be unique under a
+ plausible namespace, and the entry title is user-editable, so this is not fully
+ under our control. Preferring short entry names, or a per-box URL instead of a
+ merge, is the mitigation.
 
 Home Assistant exposes a registered LLM API through `mcp_server`, which serves it to
 Assist and to any MCP client. Each entry therefore appears as its own selectable API

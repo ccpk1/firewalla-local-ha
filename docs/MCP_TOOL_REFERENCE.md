@@ -34,6 +34,16 @@ workflow is `block_alarm_target` / `unblock_alarm_target`, not `create_rule` /
 `delete_rule` (the generic rule operations are deliberately not exposed — see
 [Not exposed](#not-exposed)).
 
+**Name length is a real constraint, not a style preference.** MCP clients commonly
+cap a tool name at 64 characters, and a merged name is
+`<entry name>__firewalla_local__<action>`, so the action competes for space with a
+user-editable entry name. Measured against a 64-character client with the default
+entry title (`Firewalla (192.168.200.129)`), only **2 characters** of the action
+survive — `archive_alarm` and `archive_all_alarms` both arrive as `ar`. Keep new
+action names short enough to stay distinguishable, and treat any rename as needing
+a check against this budget. See the multi-box section of
+[`USER_GUIDE.md`](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md).
+
 ### Tool preference
 
 The API prompt asks clients to prefer these purpose-built tools over generic
