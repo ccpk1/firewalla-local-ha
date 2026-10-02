@@ -4423,10 +4423,16 @@ async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
 def _find_device_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> list[str]:
     """Return the ids of a device's own device-scoped rules.
 
-    Kept as a pure lookup so the membership change can report what the device
-    carries. It deletes nothing: the app's own rule handling on a membership
-    change is not yet established (see Finding 43), and removing firewall rules on
-    an unconfirmed model is not safe.
+    The app deletes all of these when the device's membership changes, so the
+    device follows only its group's rules from then on. Confirmed by capture on
+    2026-10-02: assigning an unassigned device to a group produced
+    ``policy:delete`` for all four of its rules -- two enabled user rules and two
+    disabled Active Protect rules -- followed by the tags write, in one batch.
+
+    A rule belongs to the device when the device's MAC is the ``target`` or
+    appears in ``scope``. That is deliberately broader than ``purpose == "dap"``:
+    an earlier version keyed on ``dap`` and would have left the device's enabled
+    user rules behind, which is the opposite of what the app does.
     """
     snapshot = entry.runtime_data.coordinator.data
     if snapshot is None:
@@ -4488,11 +4494,19 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
         target.group_id if target is not None else None
     )
 
-    # Reported, not acted on. On a real box no device assigned to a group carries a
-    # device-scoped rule of its own, which is what the app warns about when you
-    # assign one; the exact rule handling behind it is still being established, so
-    # this surfaces what the device carries without deleting anything.
+    # The app deletes the device's own rules as the first step of the same batch,
+    # before the tags write, so the device follows only its group's rules from then
+    # on. Order matters: the capture shows the deletes ahead of the policy write.
     device_rule_ids = _find_device_rule_ids(entry, host.mac)
+    for rule_id in device_rule_ids:
+        try:
+            await entry.runtime_data.rule_manager.async_delete_rule(rule_id)
+        except FirewallaApiError as err:
+            _raise_runtime_service_error(
+                err,
+                log_message="Failed to clear device rules",
+                translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
+            )
 
     try:
         command_response = (
@@ -4535,7 +4549,7 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
             "changed": before != after,
         },
         "device_rules": {
-            "present": cast(JsonValueType, device_rule_ids),
+            "removed": cast(JsonValueType, device_rule_ids),
         },
         "command": {
             "item": "policy",

@@ -986,12 +986,13 @@ def _membership_patches(
         yield
 
 
-def _membership_snapshot_with_dap() -> FirewallaRuntimeSnapshot:
+def _membership_snapshot_with_rules() -> FirewallaRuntimeSnapshot:
     """Return a membership snapshot carrying the device's own rules.
 
-    Modelled on the real box: a disabled `dap` pair belonging to this device (575
-    and 576), a device rule that is merely scoped to it (578), and 577 which
-    belongs to a different device and must never be attributed to this one.
+    Modelled on the real captured device: a disabled `dap` pair belonging to this
+    device (575 and 576), plus 578 and 579 which are scoped to it (578 is a live
+    rule the owner created and 579 is an enabled `dap` rule). 577 belongs to a
+    different device and must never be attributed to this one.
     """
     return replace(
         _membership_snapshot(),
@@ -4751,16 +4752,20 @@ async def test_set_host_membership_requires_exactly_one_target(
     assert err.value.translation_key == expected_key
 
 
-async def test_set_host_membership_reports_the_device_rules_it_leaves_alone(
+async def test_set_host_membership_removes_the_device_own_rules(
     hass: HomeAssistant,
 ) -> None:
-    """The service reports the device's own rules without deleting any of them.
+    """A membership change deletes every rule the device owns.
 
-    On a real box no device assigned to a group carries a device-scoped rule of
-    its own, which is exactly what the Firewalla app warns about when you assign
-    one. The rule handling behind that is still being established, so the service
-    surfaces what the device carries and changes nothing: deleting firewall rules
-    on an unconfirmed model would be unsafe.
+    Confirmed by capture on 2026-10-02: assigning an unassigned device to a group
+    sent `policy:delete` for all four of its rules -- two enabled user rules and
+    two disabled Active Protect rules -- before the tags write, in one batch. The
+    device then follows only its group's rules, which is what the app warns about
+    when you assign one.
+
+    The selector is "the device's MAC is the target or appears in scope". It is
+    deliberately not keyed on `purpose == "dap"`: an earlier version was, which
+    would have left the two enabled user rules behind.
     """
     entry = _membership_entry()
     entry.add_to_hass(hass)
@@ -4769,7 +4774,7 @@ async def test_set_host_membership_reports_the_device_rules_it_leaves_alone(
 
     with _membership_patches(
         write,
-        snapshot=_membership_snapshot_with_dap(),
+        snapshot=_membership_snapshot_with_rules(),
         delete_mock=delete,
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -4785,10 +4790,12 @@ async def test_set_host_membership_reports_the_device_rules_it_leaves_alone(
             },
         )
 
-    # Every rule scoped to this device is reported, and none is deleted.
-    assert delete.await_count == 0
+    # Every rule scoped to this device goes, including the enabled user rule.
+    # Rule 577 belongs to another device and must never be touched.
+    deleted = [call.args[0] for call in delete.await_args_list]
+    assert deleted == ["575", "576", "578", "579"]
     assert response["device_rules"] == {
-        "present": ["575", "576", "578", "579"],
+        "removed": ["575", "576", "578", "579"],
     }
     assert response["membership"]["after"] == {
         "kind": "group",
@@ -4797,10 +4804,10 @@ async def test_set_host_membership_reports_the_device_rules_it_leaves_alone(
     }
 
 
-async def test_set_host_membership_reports_no_device_rules_when_there_are_none(
+async def test_set_host_membership_removes_nothing_when_the_device_has_no_rules(
     hass: HomeAssistant,
 ) -> None:
-    """A device carrying no rules of its own still reports the key."""
+    """A device carrying no rules of its own reports an empty removal list."""
     entry = _membership_entry()
     entry.add_to_hass(hass)
     write = AsyncMock(return_value={"ok": True})
@@ -4821,7 +4828,7 @@ async def test_set_host_membership_reports_no_device_rules_when_there_are_none(
         )
 
     assert delete.await_count == 0
-    assert response["device_rules"] == {"present": []}
+    assert response["device_rules"] == {"removed": []}
 
 
 def test_set_host_membership_is_registered_as_an_admin_action() -> None:
