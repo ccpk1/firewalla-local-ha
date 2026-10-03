@@ -29,6 +29,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
+    SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_NEW_NAME,
@@ -39,14 +40,17 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TARGET_VALUE,
+    SERVICE_FIELD_USER_NAME,
 )
 from custom_components.firewalla_local.models import (
     FirewallaAlarm,
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
+    FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
     FirewallaRuntimeSnapshot,
+    FirewallaUserRuntime,
 )
 
 PAUSE_RULE = "firewalla_local__pause_rule"
@@ -63,6 +67,10 @@ DELETE_ALARM = "firewalla_local__delete_alarm"
 DELETE_ALL_ALARMS = "firewalla_local__delete_all_alarms"
 DELETE_HOST = "firewalla_local__delete_host"
 DELETE_RULE = "firewalla_local__delete_rule"
+SET_HOST_GROUP = "firewalla_local__set_host_group"
+CLEAR_HOST_GROUP = "firewalla_local__clear_host_group"
+SET_HOST_USER = "firewalla_local__set_host_user"
+CLEAR_HOST_USER = "firewalla_local__clear_host_user"
 
 _HOST_MAC = "0C:85:E1:B0:1D:1C"
 
@@ -157,6 +165,25 @@ def _snapshot(*, rule_enabled: bool = True) -> FirewallaRuntimeSnapshot:
                 protocol=None,
                 severity=None,
                 raw_payload={"p.device.mac": _HOST_MAC},
+            ),
+        ),
+        groups=(
+            FirewallaGroupRuntime(group_id="53", name="IOT_LIGHTS", kind="group"),
+            FirewallaGroupRuntime(
+                group_id="73",
+                name="KADENS_PHONE",
+                kind="user",
+                user_id="74",
+            ),
+        ),
+        users=(
+            FirewallaUserRuntime(
+                user_id="74",
+                name="KADENS_PHONE",
+                affiliated_group_id="73",
+                affiliated_group_name="KADENS_PHONE",
+                total_minutes_today=None,
+                unique_minutes_today=None,
             ),
         ),
     )
@@ -532,6 +559,179 @@ async def test_delete_host_deletes_host(hass: HomeAssistant) -> None:
     assert delete_host.await_count == 1
     assert result.data["status"] == "applied"
     assert result.data["warnings"] == ["irreversible"]
+
+
+async def test_set_host_group_deletes_the_device_rules_and_reports_them(
+    hass: HomeAssistant,
+) -> None:
+    """set_host_group assigns the group, deletes the device's rules, names the undo.
+
+    A membership change deletes the rules attached to the device -- confirmed by
+    two captures -- so the tool must surface that in `warnings` rather than report
+    a clean success, and its `undo` must point at the clear tool without implying
+    the deleted rules come back.
+    """
+    with (
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager."
+            "FirewallaIntegrationManager.async_set_host_policy",
+            new=AsyncMock(return_value={}),
+        ) as set_policy,
+        patch(
+            "custom_components.firewalla_local.managers.rule_manager."
+            "FirewallaRuleManager.async_delete_rule",
+            new=AsyncMock(return_value=True),
+        ) as delete_rule,
+    ):
+        api_instance = await _setup(hass, mode="full")
+        result = await _call(
+            api_instance,
+            SET_HOST_GROUP,
+            {
+                SERVICE_FIELD_HOST_MAC: _HOST_MAC,
+                SERVICE_FIELD_GROUP_NAME: "IOT_LIGHTS",
+            },
+        )
+
+    # The device's own rule (761, scoped to its MAC) is deleted before the write.
+    assert delete_rule.await_args is not None
+    assert delete_rule.await_args.args[0] == "761"
+    assert set_policy.await_args is not None
+    assert set_policy.await_args.args[1] == {"tags": [53]}
+
+    assert result.error is False
+    assert result.data["status"] == "applied"
+    assert result.data["changed"] is True
+    assert result.data["before"] is None
+    assert result.data["after"] == {"kind": "group", "id": "53", "name": "IOT_LIGHTS"}
+    assert "clear_host_group" in result.data["undo"]
+    assert len(result.data["warnings"]) == 1
+    assert "Deleted 1 rule" in result.data["warnings"][0]
+    assert "761" in result.data["warnings"][0]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "args", "expected_tags"),
+    [
+        pytest.param(
+            CLEAR_HOST_GROUP,
+            {},
+            [],
+            id="clear_group",
+        ),
+        pytest.param(
+            CLEAR_HOST_USER,
+            {},
+            [],
+            id="clear_user",
+        ),
+        pytest.param(
+            SET_HOST_USER,
+            {SERVICE_FIELD_USER_NAME: "KADENS_PHONE"},
+            # A user assignment writes the user's affiliated backing tag, not the
+            # user id: the device carries the tag in group_ids.
+            [73],
+            id="set_user_by_name",
+        ),
+    ],
+)
+async def test_membership_tools_write_through_the_one_service(
+    hass: HomeAssistant,
+    tool_name: str,
+    args: dict[str, object],
+    expected_tags: list[int],
+) -> None:
+    """All four tools delegate to set_host_membership with the right payload."""
+    with (
+        patch(
+            "custom_components.firewalla_local.managers.integration_manager."
+            "FirewallaIntegrationManager.async_set_host_policy",
+            new=AsyncMock(return_value={}),
+        ) as set_policy,
+        # Rule 761 is scoped to this host, so the membership change deletes it.
+        patch(
+            "custom_components.firewalla_local.managers.rule_manager."
+            "FirewallaRuleManager.async_delete_rule",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        api_instance = await _setup(hass, mode="full")
+        result = await _call(
+            api_instance,
+            tool_name,
+            {SERVICE_FIELD_HOST_MAC: _HOST_MAC, **args},
+        )
+
+    assert set_policy.await_args is not None
+    assert set_policy.await_args.args[1] == {"tags": expected_tags}
+    assert result.error is False
+    assert result.data["status"] == "applied"
+
+
+async def test_membership_tools_are_full_tier_only(hass: HomeAssistant) -> None:
+    """Membership tools are destructive, so they need the explicit full opt-in.
+
+    A membership change deletes the device's rules irreversibly, which is the
+    definition the destructive tier exists for. At read-and-control the tools are
+    absent rather than filtered, so the restriction holds by construction.
+    """
+    control_api = await _setup(hass, mode="read_and_control")
+    control_names = {tool.name for tool in control_api.tools}
+
+    for tool_name in (
+        SET_HOST_GROUP,
+        CLEAR_HOST_GROUP,
+        SET_HOST_USER,
+        CLEAR_HOST_USER,
+    ):
+        assert tool_name not in control_names
+
+
+async def test_membership_tools_are_destructive_and_present_in_full(
+    hass: HomeAssistant,
+) -> None:
+    """At full mode the four tools are registered and annotated destructive.
+
+    Kept separate from the read-and-control check because each `_setup` call
+    registers its own API, and looking one up by id would otherwise resolve to
+    whichever entry was set up first.
+    """
+    full_api = await _setup(hass, mode="full")
+    full_tools = {tool.name: tool for tool in full_api.tools}
+
+    for tool_name in (
+        SET_HOST_GROUP,
+        CLEAR_HOST_GROUP,
+        SET_HOST_USER,
+        CLEAR_HOST_USER,
+    ):
+        assert tool_name in full_tools
+        assert full_tools[tool_name].annotations.destructive is True
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "forbidden"),
+    [
+        pytest.param(SET_HOST_GROUP, SERVICE_FIELD_USER_NAME, id="group_tool"),
+        pytest.param(SET_HOST_USER, SERVICE_FIELD_GROUP_NAME, id="user_tool"),
+    ],
+)
+async def test_membership_tools_expose_only_their_own_kind(
+    hass: HomeAssistant,
+    tool_name: str,
+    forbidden: str,
+) -> None:
+    """Each tool declares only its own kind's selector.
+
+    A group and a user can share a name on a real box, so a tool accepting both
+    could silently target the wrong kind. The split is the whole reason there are
+    four tools instead of one with a free-text target.
+    """
+    api_instance = await _setup(hass, mode="full")
+    tool = next(tool for tool in api_instance.tools if tool.name == tool_name)
+
+    declared = {marker.schema for marker in tool.parameters.schema}
+    assert forbidden not in declared
 
 
 def _api_id(hass: HomeAssistant) -> str:

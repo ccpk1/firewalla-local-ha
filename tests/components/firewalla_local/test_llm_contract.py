@@ -191,6 +191,12 @@ async def test_destructive_annotation_matches_the_documented_set(
         "firewalla_local__delete_all_alarms",
         "firewalla_local__delete_host",
         "firewalla_local__delete_rule",
+        # A membership change deletes the rules attached to the device and cannot
+        # restore them, so all four are destructive rather than controls.
+        "firewalla_local__set_host_group",
+        "firewalla_local__clear_host_group",
+        "firewalla_local__set_host_user",
+        "firewalla_local__clear_host_user",
     }
     api_instance = await _api_instance(hass)
 
@@ -465,6 +471,35 @@ _INTENTIONAL_OMISSIONS: Final = frozenset(
         ("wake_host", "host_id"),
         ("wake_host", "refresh"),
         ("delete_host", "refresh"),
+        # The four membership tools each expose only their own kind's selector,
+        # which is the whole reason there are four of them rather than one tool
+        # with a free-text target. A group and a user can share a name on a real
+        # box, so a tool that accepted both could silently target the wrong kind.
+        # Exposing the other kind's fields here would reintroduce exactly that.
+        ("set_host_group", "user_name"),
+        ("set_host_group", "user_id"),
+        ("set_host_group", "clear"),
+        ("set_host_group", "host_id"),
+        ("set_host_group", "refresh"),
+        ("set_host_user", "group_name"),
+        ("set_host_user", "group_id"),
+        ("set_host_user", "clear"),
+        ("set_host_user", "host_id"),
+        ("set_host_user", "refresh"),
+        # The clear tools take a host and nothing else; the kind is in the tool
+        # name, so both selectors are absent.
+        ("clear_host_group", "group_name"),
+        ("clear_host_group", "group_id"),
+        ("clear_host_group", "user_name"),
+        ("clear_host_group", "user_id"),
+        ("clear_host_group", "host_id"),
+        ("clear_host_group", "refresh"),
+        ("clear_host_user", "group_name"),
+        ("clear_host_user", "group_id"),
+        ("clear_host_user", "user_name"),
+        ("clear_host_user", "user_id"),
+        ("clear_host_user", "host_id"),
+        ("clear_host_user", "refresh"),
     }
 )
 

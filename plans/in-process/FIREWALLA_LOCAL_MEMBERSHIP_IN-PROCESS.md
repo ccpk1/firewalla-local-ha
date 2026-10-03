@@ -237,7 +237,7 @@ Two claims in the original §3b review were wrong and are corrected above:
 | 1 | Resolve membership semantics and land the model | Single-membership confirmed; `kind` + `user_id` on the collection; one meaning for `affiliated_group_name`; single-path group count | **Complete 2026-10-02** |
 | 2 | Build the membership service | One admin-gated service (single-slot set/clear, group or user) backed by 4 LLM tools, with validation and tests | **Complete 2026-10-02** |
 | 3 | Make the reported surface accurate | Corrected overview counts, verified entity joins, updated read-tool text | **Complete 2026-10-02** |
-| 4 | Expose it to assistants | Four reversible LLM control tools, prompt fragment, contracts and docs | Not started |
+| 4 | Expose it to assistants | Four reversible LLM control tools, prompt fragment, contracts and docs | **Complete 2026-10-03** |
 
 ## 5. Phase details
 
@@ -486,7 +486,7 @@ rests on two captures — but the "a device in a group has no rules" claim was
 never true, and `dap` is not what survives assignment after all.
 
 
-### Phase 4 — Assistant exposure
+### Phase 4 — Assistant exposure — COMPLETE (2026-10-03)
 
 Goal: let an assistant change a device's membership, and be honest about the fact
 that the change deletes the device's rules.
@@ -511,34 +511,41 @@ call (`set_host_group` → `clear_host_group`, and so on) — that is the right 
 step — while the description states plainly that the deleted rules are not
 restored.
 
-- [ ] **4.1 Add the control tools.** In `llm_tools_control.py`, add **four** tools
-      — `set_host_group`, `clear_host_group`, `set_host_user`, `clear_host_user` —
-      each following the `SetHostDhcpReservationTool` pattern: host selector plus
-      (for the `set_` tools) the kind's name-or-id target, delegating to the one new
-      service with `_returns_response = True`. Four tools rather than one free-text
-      target because group and user names collide in real data;
-      `_SetHostNotifyTool` is the in-repo precedent for several tools over one
-      service.
-      Use `_DESTRUCTIVE_ANNOTATIONS`, not `_CONTROL_ANNOTATIONS`, and put the
-      rule-deletion warning in all four descriptions, bounded to the device
-      ("rules attached to groups or users are not affected"), with the deleted count
-      reported back from `device_rules.removed`.
-- [ ] **4.2 Update the prompt fragment.** **Partially done (2026-10-03):** `PROMPT`
-      already states that the four calls delete the device's rules, that the tool
-      cannot undo it, that group and user rules are unaffected, that the model must
-      check the device's rules first and escalate only when something would be lost,
-      and that `device_rules.removed` reports what went. A guard test asserts it.
-      Remaining: name the four tools explicitly once they exist.
-- [ ] **4.3 Document the contract.** Add the four tools to
-      `docs/MCP_TOOL_REFERENCE.md` in the existing per-tool format, using the same
-      annotation and availability fields as their neighbours, and carrying the
-      rule-deletion warning.
-- [ ] **4.4 Tests.** Cover each tool's schema, its service delegation, its
-      response envelope, and its registration tier. Update
-      `test_llm_contract.py` if it asserts an exact tool count or list.
-- [ ] **4.5 Verify availability tiers.** Confirm the tools appear at
-      read-and-control and above and not in summary-only, consistent with the other
-      reversible controls.
+- [x] **4.1 Add the control tools.** Four tools added: `set_host_group`,
+      `clear_host_group`, `set_host_user`, `clear_host_user`, all over the one
+      `set_host_membership` service with `_returns_response = True`. Each `set_`
+      tool takes the host plus its own kind's name-or-id target; each `clear_` tool
+      takes the host alone. They carry `_DESTRUCTIVE_ANNOTATIONS` and the bounded
+      rule-deletion warning, and the result envelope reports `before`/`after` plus a
+      `warning` naming the deleted rule ids.
+- [x] **4.2 Update the prompt fragment.** `PROMPT` names all four tools, states that
+      a device belongs to exactly one group or user so a set replaces and a clear
+      leaves it in neither, that leaving only stops that group's or user's rules
+      reaching the device, that all four delete the device's rules irreversibly,
+      that group and user rules are unaffected, and that the model must read the
+      device's rules first and escalate only when something would be lost. Guard
+      test `test_membership_change_warns_that_it_deletes_device_rules` asserts it.
+- [x] **4.3 Document the contract.** The four tools are in
+      `docs/MCP_TOOL_REFERENCE.md` as one combined per-tool section, plus four rows
+      in the tool index marked `destructive` / `full`, matching their neighbours.
+      The section states the single-membership rule, the rule deletion with its
+      capture evidence, the bounded blast radius, and that `undo` restores the
+      membership but not the rules.
+- [x] **4.4 Tests.** Six new tests in `test_llm_control.py`: the delete-and-report
+      path, three parametrized write-through cases asserting the exact payload
+      (including that a user assignment writes the affiliated **tag**, not the user
+      id), the destructive annotation and full-tier presence, the read-and-control
+      absence, and a per-kind schema check that each tool declares only its own
+      selector. `test_llm_contract.py`'s documented-destructive set and its
+      intentional-omission allowlist were extended for the four tools.
+- [x] **4.5 Verify availability tiers.** Confirmed by test, and this is a
+      **behaviour change worth calling out**: because `destructive=True` is paired
+      with the `full`-only tier everywhere in this repo, the four membership tools
+      are available only at the `full` access level. At `read_and_control` they are
+      absent rather than filtered, so the restriction holds by construction. That
+      is a deliberate consequence of treating the rule deletion as destructive; if
+      the tools were controls instead they would ship at `control+`, and a
+      read-and-control user would lose their device's rules on an ordinary call.
 
 ## 6. Validation strategy
 

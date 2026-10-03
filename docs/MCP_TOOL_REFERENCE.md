@@ -242,6 +242,10 @@ to one host.
 | Respond to alarms | `delete_all_alarms` | destructive | full |
 | Manage devices | `delete_host` | destructive | full |
 | Control access | `delete_rule` | destructive | full |
+| Manage devices | `set_host_group` | destructive | full |
+| Manage devices | `clear_host_group` | destructive | full |
+| Manage devices | `set_host_user` | destructive | full |
+| Manage devices | `clear_host_user` | destructive | full |
 
 ---
 
@@ -531,13 +535,39 @@ echo it in `target`. All are reversible except where noted.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
 
 ### `firewalla_local__set_host_dhcp_reservation`
-
 - **Answers:** "Give this device a fixed IP." / "Reserve IPs for every device without one."
 - **When to use / not:** the standout device workflow. Paired with `list_hosts` (see `ip_assignment.mode`). Strong built-in validation (conflict / in-use / invalid / out-of-range / network-ambiguous) rejects bad writes with an actionable message.
 - **Inputs:** `host` (name/MAC), `mode` (`static`/`dynamic`), `reserved_ipv4`, `network_name`/`network_uuid` (when ambiguous).
 - **Returns:** action-result (`before`/`after.ip_assignment`).
 - **Reversibility & undo:** reversible — `undo` sets `mode` back to `dynamic`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+
+### `firewalla_local__set_host_group` / `set_host_user` / `clear_host_group` / `clear_host_user`
+
+- **Answers:** "Put this device in the IoT group." / "Assign this tablet to Payton." / "Take this device out of its group."
+- **When to use / not:** a device has exactly **one** membership, so a `set_` call
+  **replaces** whatever group or user it belonged to, and a `clear_` call leaves it
+  in neither. Leaving a group or user only stops that group's or user's rules from
+  reaching the device — the group or user itself and its rules are untouched and
+  keep covering its other devices.
+- **Destructive:** any membership change **deletes the rules attached to that
+  device**, including enabled rules the user created. Verified by capture for both a
+  group and a user target: the app sends `policy:delete` for every rule the device
+  owns, then the tags write, in one batch. The rules are removed from the box rather
+  than detached, so re-creating them assigns new ids and nothing can restore them.
+  Rules attached to a **group or a user** are not affected, including the user the
+  device is leaving.
+- **Inputs:** `host` (name/MAC); then `set_host_group` takes `group_name`/`group_id`,
+  `set_host_user` takes `user_name`/`user_id`, and both `clear_` tools take the host
+  alone. Each tool exposes only its own kind's selector on purpose — a group and a
+  user can share a name, so a tool accepting both could target the wrong one.
+- **Returns:** action-result with `before`/`after` membership, and
+  `device_rules.removed` listing the rule ids that were deleted.
+- **Reversibility & undo:** the **membership slot** is reversible — `undo` names the
+  inverse call (`set_host_group` ↔ `clear_host_group`, `set_host_user` ↔
+  `clear_host_user`). The **deleted rules are not restored** by any tool.
+- **Annotations:** `read_only=false, destructive=true, idempotent=true, open_world=false`.
+  Registered in the `full` tier with the other destructive tools.
 
 ### `firewalla_local__set_host_dns_hostname`
 
