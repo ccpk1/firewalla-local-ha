@@ -1513,6 +1513,82 @@ on this must bound the response and lead with the summary, never dump the log.
 - `.artifacts/flow_reporting/20261003-134922/` and
   `.artifacts/block_reporting/20261003-132758/` — the accompanying pulls
 
+### Limits: retention, page size, and window validity
+
+Measured directly against the dev box on 2026-10-03, read-only. These are the
+constraints any service built on this must honor.
+
+**Retention is about 24 hours, with a hard cutoff.** Asking for events at or
+before a `ts`:
+
+| `ts` age | Rows returned | Oldest returned |
+| --- | --- | --- |
+| 1h back | 300 | same day |
+| 6h back | 300 | same day |
+| 12h back | 300 | same day |
+| 24h back | 175 | previous day, 16:16 |
+| **26h back** | **0** | — |
+| 30h / 48h / 72h / 168h back | **0** | — |
+
+So the event log spans roughly the last day and nothing older. **Do not promise a
+wider window**, and do not treat an empty result as "nothing happened" without
+also reporting the window that was searched.
+
+**`count` is caller-controlled, with no fixed cap observed.** `count: 300`
+returned 300 rows spanning ~0.3h; `count: 2000` returned 2000 rows spanning
+~5.7h. So a busier target fills a page faster — the page is a record count, not a
+time slice. Retrieving a full 24 hours on a busy target therefore needs
+`nextTs` pagination.
+
+**`hourblock` accepts 1 through at least 168.** Every value tested (1, 2, 3, 6,
+12, 24, 48, 96, 168) succeeded. An earlier `hourblock: 168` failure was **not**
+the hourblock: it was caused by a `start` older than the retention horizon.
+
+**An out-of-range window returns a protocol error, not an empty result.** A
+`tag` rollup with a `start` 7 days back returned **code 500**. So a caller that
+asks for too much gets a hard failure rather than zero rows, and the client must
+clamp the window rather than forward whatever it is given.
+
+### The rollup is the app's report, in one response
+
+A `tag` or `host` request returns everything the app's flow screen shows:
+
+| Field | Contents |
+| --- | --- |
+| `flows.download` | list of top destinations, largest first (~199 rows) |
+| `flows.upload` | same, upload direction (~199 rows) |
+| `flows.dnsB` | **blocked DNS** destinations (~139 rows) |
+| `flows.ipB:in` / `ipB:out` | **blocked IP** flows, by direction |
+| `flows.local:ipB:in` / `out` | blocked flows between local devices |
+| `hosts` | per-member totals — **`tag` requests only** |
+| `name`, `uid`, `policy` | the target's identity and policy |
+| `newLast24` | per-hour connection series |
+
+A destination row looks like:
+
+```json
+{"begin": 1790959800, "end": 1791046200, "count": "9826422542",
+ "device": "CC:28:AA:11:06:B7", "host": "egs-cloudfront-chunks.epicgamescdn.com",
+ "ip": "3.168.51.40", "port": ["443"], "country": "US", "fd": "in"}
+```
+
+**The domain/subdomain distinction is a field choice, not two lists.** DNS rows
+carry `domain` (e.g. `ssl.gstatic.com`), connection rows carry `host` (the full
+name) plus `ip`. The app presents "top destinations by domain" and "top flows by
+subdomain" from the same rows, so both views are derivable by grouping on one
+field or the other. That makes it a presentation decision, not a data fetch.
+
+**`hosts` is empty on a `host` request.** Confirmed: the same device returned
+`hosts` with 4 members on the `tag` request and 0 members on the `host` request.
+Per-member ranking is therefore only available at group/user level, which matches
+the app's own behaviour.
+
+**A `host` request returns the tag's flow rows.** Because the device was the tag's
+only active member, the `host` response carried the same `flows` lists. So the
+rollup's `flows` block is not automatically scoped to one device on a `host`
+request — rows still carry a `device` field, and a caller must filter on it rather
+than assume the response is already narrowed.
+
 ## Findings matrix
 
 This section is the durable record of confirmed findings. Update it after each
@@ -2359,14 +2435,18 @@ These items remain unconfirmed and should stay visible.
   removal the app deletes **every** rule the device owns — not only disabled ones,
   and not only `dap` — ahead of the tags write, in the same batch
 - whether `flows` / `auditLogs` / `tag` accept a `start`/`end` window wider than
-  the ~24 hours the app's UI offers, and whether `hourblock` scales beyond 24
-  (daily granularity) — the app exposes no such control, so this needs a direct
-  probe rather than a UI capture
-- whether the `flows` pagination has a depth limit, or whether `nextTs` will walk
-  back through retained history indefinitely. The box clearly retains some, but
-  the retention horizon is unknown
-- how long the box retains flow events at all. This determines whether the event
-  log can answer "last week" or only "last day"
+  the ~24 hours the app's UI offers — **answered: they do not. Retention is about
+  24 hours with a hard cutoff at ~26 hours, and asking for a window starting
+  before it returns a protocol error rather than partial data.** See *Limits:
+  retention, page size, and window validity*
+- ~~whether the `flows` pagination has a depth limit, or whether `nextTs` will walk
+  back through retained history indefinitely~~
+  — **answered: there is nothing to walk. `nextTs` only reaches back to the ~24h
+  retention horizon, so pagination depth is bounded by retention, not by a page
+  counter**
+- ~~how long the box retains flow events at all~~
+  — **answered: about 24 hours.** 24h back returned 175 rows; 26h back returned
+  zero
 - whether `exclude` on `flows` / `auditLogs` filters out specific categories or
   devices: it was sent empty in every capture, so its accepted values are unknown
 
