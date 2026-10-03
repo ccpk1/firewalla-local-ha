@@ -239,6 +239,19 @@ DEFAULT_NETWORK_USAGE_WINDOW: Final = "last_60_minutes"
 DEFAULT_WAN_USAGE_CURRENT_PERIODS: Final = ("day", "week")
 DEFAULT_WAN_EVENT_WINDOW_DAYS: Final = 7
 
+# The flow report's default window. The box serves its own 24-hour window when a
+# request carries no time bounds at all, which is what this mirrors; it is a
+# constant because the box can change that default, and a caller asking for a
+# wider window is served 24 hours anyway rather than being told.
+DEFAULT_FLOW_REPORT_WINDOW_HOURS: Final = 24
+
+# The most records one flow-log or block-log request will return, measured. The
+# box caps a positive ``count`` here and silently returns this many for anything
+# larger, so a full 24-hour window on a busy target needs pagination rather than a
+# bigger request. A non-positive ``count`` bypasses the cap and returns the whole
+# retained window, so a caller-supplied count is never forwarded unvalidated.
+MAX_FLOW_LOG_PAGE_SIZE: Final = 5000
+
 # Config entry data and options keys
 CONF_AID: Final = "aid"
 CONF_EID: Final = "eid"
