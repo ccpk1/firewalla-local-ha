@@ -414,6 +414,12 @@ Reads that tell you what exists — the first step before any control action.
   `applies_to`/`tag_refs`, `purpose`, `hit_count`/`last_hit`, and the `aid` alarm
   back-reference when the rule was created by an alarm block.
 - **Availability:** read, default-on (backed by the non-admin `get_rules` service).
+- **A rule id is not durable across a delete and re-create.** Firewalla issues a
+  new `rule_id` when a rule is deleted and created again, even if the new rule is
+  identical. So an id read from one call may belong to nothing on a later call,
+  and re-creating a rule does not restore its id. Re-resolve a target rather than
+  reusing an id from an earlier turn, and never assume two rules with the same
+  name are the same rule.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false` (coordinator-backed) or `true` (live).
 
 ### `firewalla_local__get_network_config`

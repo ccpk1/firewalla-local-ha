@@ -410,6 +410,19 @@ class FirewallaRuleManager(FirewallaBaseManager):
         self._selected_templates = self.load_selected_templates(
             self.entry.options, snapshot
         )
+        # One template resolves to at most one live rule, and this is the only
+        # place the mapping is built. Matching is by rule id, never by shape, so
+        # there is no way for a template to pick up a second rule: a selected
+        # rule is either still on the box or it is gone, and "gone" is a real
+        # state rather than a transient one. Firewalla issues a new rule id when
+        # a rule is deleted and re-created, so re-adding an identical rule does
+        # not restore the match; the switch stays unavailable until the user
+        # re-selects.
+        #
+        # Several helpers below carry plural names and iterate, which reads as if
+        # multiple rules were supported. They are written to tolerate a set that
+        # is never larger than one. Anything reading this should not infer
+        # multi-rule backing from those signatures.
         self._matching_rules_by_source_id = {
             template.source_rule_id: (
                 (rule,)

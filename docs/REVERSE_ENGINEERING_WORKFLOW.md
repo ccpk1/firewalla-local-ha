@@ -1240,6 +1240,45 @@ Current interpretation:
 - if `app_block` reappears in fresh captures, treat it as a specialized app
   enforcement shape rather than assuming all app rules use that action
 
+### Rule ids are not durable across a delete and re-create
+
+**Confirmed live on 2026-10-03.** Firewalla issues a **new `pid`** when a rule is
+deleted and created again, even when the replacement is identical in every
+visible field. A rule id is therefore only meaningful for as long as that specific
+rule instance exists.
+
+The integration turns on this: a rule-backed switch stores the rule id it was
+created from (`source_rule_id`) and matches **by id, never by shape**. The
+observable consequence, and the evidence from the dev box:
+
+- config entry `Firewalla (192.168.200.129)` has one selected template:
+  `source_rule_id: "551"`, name `route category Tiktok for VLAN60 IOT`,
+  `action: "route"`, `target: "TLX-rt-tiktok"`, `target_type: "category"`,
+  `tag_refs: ["intf:5d24cd11-8253-4557-bb6e-36f883a8e30b"]`
+- rule `551` is **absent** from the live payload (321 rules)
+- **no live rule matches it**: there are **zero `route` action rules** on the box,
+  and **no `TLX-rt-` target of any kind**. The `TLX-fw-tiktok` rules that do exist
+  are `block` rules for other groups — a different family entirely
+
+So the rule was deleted and nothing equivalent remains. The switch is unavailable,
+and the selection persists so the user can clean it up.
+
+**Two consequences worth stating:**
+
+- **Matching by shape would not have helped here.** There is no route rule at all,
+  so a shape-based re-match would have nothing to find. Matching by id is not a
+  limitation in this case; it is simply correct.
+- **A stale selection is a first-class state, not a bug.** It means "this switch's
+  rule no longer exists on the box", which is worth surfacing rather than silently
+  dropping the entity.
+
+**Not yet built:** a Home Assistant **repair** for the stale-selection case,
+recorded in the user guide as a planned improvement.
+
+**This generalizes:** an id read from one call can belong to nothing on a later
+call, and re-creating a rule does not restore its id. Anything that caches a rule
+id across time must re-resolve rather than trust it.
+
 ### Per-rule hit data: `hitCount` and `lastHitFlow`
 
 Confirmed live on 2026-10-03 against the dev box's init payload.
