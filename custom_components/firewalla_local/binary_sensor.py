@@ -80,6 +80,9 @@ from .const import (
     ATTR_SYSTEM_TIMEZONE,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
+    ATTR_SYSTEM_VPN_DEVICES_OFFLINE,
+    ATTR_SYSTEM_VPN_DEVICES_ONLINE,
+    ATTR_SYSTEM_VPN_DEVICES_TOTAL,
     ATTR_SYSTEM_WAN_IP,
     ATTR_SYSTEM_WAN_IPS,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
@@ -257,6 +260,13 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_SYSTEM_DEVICES_TOTAL: self.host_manager.count_total_devices(),
             ATTR_SYSTEM_DEVICES_ONLINE: self.host_manager.count_online_devices(),
             ATTR_SYSTEM_DEVICES_OFFLINE: self.host_manager.count_offline_devices(),
+            ATTR_SYSTEM_VPN_DEVICES_TOTAL: self.host_manager.count_vpn_total_devices(),
+            ATTR_SYSTEM_VPN_DEVICES_ONLINE: (
+                self.host_manager.count_vpn_online_devices()
+            ),
+            ATTR_SYSTEM_VPN_DEVICES_OFFLINE: (
+                self.host_manager.count_vpn_offline_devices()
+            ),
             ATTR_SYSTEM_CPU_USAGE_1M: (
                 system_status.cpu_usage_1m if system_status is not None else None
             ),

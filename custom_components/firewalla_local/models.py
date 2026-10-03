@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 from enum import StrEnum
-from typing import Final, TypedDict
+from typing import Final, Literal, NotRequired, TypedDict
 
 from cronsim import CronSim, CronSimError
 
@@ -29,9 +29,12 @@ from .const import (
     RULE_STATE_REASON_TIME_LIMIT_REACHED,
     RULE_TARGET_TAG,
     RULE_TARGET_TYPE_CATEGORY,
+    RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_IP,
     RULE_TARGET_TYPE_MAC,
     RULE_TARGET_TYPE_NETWORK,
 )
+from .utils.mac import normalize_mac_address
 
 _RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
 _RAW_UPDATE_NOTES_KEY: Final = "notes"
@@ -48,11 +51,13 @@ _RAW_UPDATE_QDISC_KEY: Final = "qdisc"
 _RAW_UPDATE_RATE_LIMIT_KEY: Final = "rateLimit"
 _RAW_UPDATE_TRAFFIC_DIRECTION_KEY: Final = "trafficDirection"
 _RAW_UPDATE_APP_NAME_KEY: Final = "app_name"
+_RAW_ALARM_DEVICE_MAC_KEY: Final = "p.device.mac"
 _RAW_UPDATE_APP_UID_KEY: Final = "app_uid"
 _RAW_UPDATE_DISTURB_LEVEL_KEY: Final = "disturbLevel"
 _RAW_UPDATE_DISTURB_METHOD_KEY: Final = "disturbMethod"
 _RAW_UPDATE_DURATION_KEY: Final = "duration"
 _RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
+_RAW_UPDATE_ALARM_ID_KEY: Final = "aid"
 _STATUS_DISABLED: Final = "disabled"
 _STATUS_ENABLED: Final = "enabled"
 _TEMPLATE_DATA_ACTION_KEY: Final = "action"
@@ -64,6 +69,7 @@ _TEMPLATE_DATA_TAG_REFS_KEY: Final = "tag_refs"
 _TEMPLATE_DATA_TARGET_KEY: Final = "target"
 _TEMPLATE_DATA_TARGET_TYPE_KEY: Final = "target_type"
 _TEMPLATE_DATA_USE_BF_KEY: Final = "use_bf"
+_TEMPLATE_DATA_ALARM_ID_KEY: Final = "alarm_id"
 _CREATE_PAYLOAD_ACTION_KEY: Final = "action"
 _CREATE_PAYLOAD_APP_TIME_USAGE_KEY: Final = "appTimeUsage"
 _CREATE_PAYLOAD_DISTURB_LEVEL_KEY: Final = "disturbLevel"
@@ -77,6 +83,7 @@ _CREATE_PAYLOAD_TRUST_KEY: Final = "trust"
 _CREATE_PAYLOAD_TYPE_KEY: Final = "type"
 _CREATE_PAYLOAD_UPDATED_TIME_KEY: Final = "updatedTime"
 _CREATE_PAYLOAD_USE_BF_KEY: Final = "useBf"
+_CREATE_PAYLOAD_ALARM_ID_KEY: Final = "aid"
 _INTERNAL_IDENTIFIER_SEPARATOR: Final = "-"
 _PRETTIFIED_TARGET_SEPARATOR: Final = "_"
 _PRETTIFIED_TARGET_REPLACEMENT: Final = " "
@@ -102,7 +109,10 @@ _EXCLUDED_SWITCH_RULE_PURPOSES: Final = frozenset(
 
 
 class FirewallaRuleTemplateDict(TypedDict):
-    """Serialized config-entry storage shape for a rule template."""
+    """Serialized config-entry storage shape for a rule template.
+
+    ``alarm_id`` is present only for templates created from an alarm.
+    """
 
     source_rule_id: str
     name: str
@@ -113,6 +123,7 @@ class FirewallaRuleTemplateDict(TypedDict):
     tag_refs: list[str]
     dnsmasq_only: bool | None
     use_bf: bool
+    alarm_id: NotRequired[str]
 
 
 class FirewallaRuleCreatePayload(TypedDict, total=False):
@@ -131,6 +142,7 @@ class FirewallaRuleCreatePayload(TypedDict, total=False):
     useBf: bool
     tag: list[str]
     dnsmasq_only: bool
+    aid: str
 
 
 def _looks_like_internal_identifier(value: str) -> bool:
@@ -827,10 +839,17 @@ class FirewallaHostRuntime:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaGroupRuntime:
-    """Minimal normalized group inventory used for scoped history queries."""
+    """One entry from the Firewalla host-tag collection.
+
+    Firewalla models a plain group and a user assignment as the same protocol
+    object — a host tag — so both live in one collection. ``kind`` is the
+    discriminator; ``user_id`` is set only on ``"user"`` entries.
+    """
 
     group_id: str
     name: str
+    kind: Literal["group", "user"]
+    user_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -993,6 +1012,17 @@ class FirewallaPolicyRule:
             return None
         stripped_notes = raw_notes.strip()
         return stripped_notes or None
+
+    @property
+    def alarm_id(self) -> str | None:
+        """Return the alarm that created this rule, if it was created from one.
+
+        Firewalla records the originating alarm id on block rules created from an
+        alarm; ordinary rules carry no value.
+        """
+        return _normalized_optional_string(
+            self.raw_update_payload.get(_RAW_UPDATE_ALARM_ID_KEY)
+        )
 
     @property
     def custom_name(self) -> str | None:
@@ -1462,6 +1492,7 @@ class FirewallaRuleTemplate:
     tag_refs: tuple[str, ...] = ()
     dnsmasq_only: bool | None = None
     use_bf: bool = True
+    alarm_id: str | None = None
 
     @classmethod
     def from_rule(cls, rule: FirewallaPolicyRule) -> FirewallaRuleTemplate:
@@ -1475,6 +1506,46 @@ class FirewallaRuleTemplate:
             scope=_normalize_ref_values(rule.scope),
             tag_refs=_normalize_ref_values(rule.tag_refs),
             dnsmasq_only=rule.dnsmasq_only,
+            alarm_id=rule.alarm_id,
+        )
+
+    @classmethod
+    def from_alarm(
+        cls,
+        alarm: FirewallaAlarm,
+        *,
+        action: str = RULE_ACTION_BLOCK,
+    ) -> FirewallaRuleTemplate | None:
+        """Build a block template from an alarm's target and device scope.
+
+        Blocking in the Firewalla app is an ordinary policy-rule create whose
+        target is the alarm's remote domain/IP and whose scope is the alarm's
+        device. The alarm id is carried as a back-reference so the resulting
+        rule can be resolved and removed later.
+        """
+        if alarm.remote_host:
+            target, target_type = alarm.remote_host, RULE_TARGET_TYPE_DNS
+        elif alarm.remote_ip:
+            target, target_type = alarm.remote_ip, RULE_TARGET_TYPE_IP
+        else:
+            return None
+
+        raw_mac = alarm.raw_payload.get(_RAW_ALARM_DEVICE_MAC_KEY)
+        device_mac = normalize_mac_address(
+            raw_mac if isinstance(raw_mac, str) else None
+        )
+        if not device_mac:
+            return None
+
+        return cls(
+            source_rule_id=alarm.alarm_id,
+            name=alarm.remote_host or alarm.remote_ip or alarm.alarm_id,
+            action=action,
+            target=target,
+            target_type=target_type,
+            scope=(device_mac,),
+            dnsmasq_only=True if target_type == RULE_TARGET_TYPE_DNS else None,
+            alarm_id=alarm.alarm_id,
         )
 
     @classmethod
@@ -1523,11 +1594,12 @@ class FirewallaRuleTemplate:
             tag_refs=_normalize_ref_values(tag_refs),
             dnsmasq_only=dnsmasq_only,
             use_bf=use_bf if isinstance(use_bf, bool) else True,
+            alarm_id=_normalized_optional_string(data.get(_TEMPLATE_DATA_ALARM_ID_KEY)),
         )
 
     def to_dict(self) -> FirewallaRuleTemplateDict:
         """Serialize the template for config entry option storage."""
-        return {
+        payload: FirewallaRuleTemplateDict = {
             _TEMPLATE_DATA_SOURCE_RULE_ID_KEY: self.source_rule_id,
             _TEMPLATE_DATA_NAME_KEY: self.name,
             _TEMPLATE_DATA_ACTION_KEY: self.action,
@@ -1538,6 +1610,9 @@ class FirewallaRuleTemplate:
             _TEMPLATE_DATA_DNSMASQ_ONLY_KEY: self.dnsmasq_only,
             _TEMPLATE_DATA_USE_BF_KEY: self.use_bf,
         }
+        if self.alarm_id is not None:
+            payload[_TEMPLATE_DATA_ALARM_ID_KEY] = self.alarm_id
+        return payload
 
     def build_create_value(self, *, updated_time: float) -> FirewallaRuleCreatePayload:
         """Build the confirmed persistent create payload for this template."""
@@ -1558,4 +1633,6 @@ class FirewallaRuleTemplate:
             payload[_CREATE_PAYLOAD_TAG_KEY] = list(self.tag_refs)
         if self.dnsmasq_only is not None:
             payload[_CREATE_PAYLOAD_DNSMASQ_ONLY_KEY] = self.dnsmasq_only
+        if self.alarm_id is not None:
+            payload[_CREATE_PAYLOAD_ALARM_ID_KEY] = self.alarm_id
         return payload

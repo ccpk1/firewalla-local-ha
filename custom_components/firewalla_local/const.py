@@ -10,6 +10,12 @@ DOMAIN: Final = "firewalla_local"
 LOGGER: Final = logging.getLogger(__name__)
 MANUFACTURER: Final = "Firewalla"
 
+# Minimum Home Assistant version that supports the LLM tool contract
+# (llm.ToolResult, llm.ToolAnnotations, Tool.integration). Kept here as a pure
+# tuple so this module stays free of homeassistant imports; the version
+# predicate lives in llm_support.py.
+MIN_LLM_TOOLS_HA_VERSION: Final = (2026, 10)
+
 # Entity state attributes
 ATTR_INTEGRATION: Final = "integration"
 ATTR_PURPOSE: Final = "purpose"
@@ -60,6 +66,9 @@ ATTR_SYSTEM_CLOUD_CONNECTED: Final = "cloud_connected"
 ATTR_SYSTEM_DEVICES_OFFLINE: Final = "devices_offline"
 ATTR_SYSTEM_DEVICES_ONLINE: Final = "devices_online"
 ATTR_SYSTEM_DEVICES_TOTAL: Final = "devices_total"
+ATTR_SYSTEM_VPN_DEVICES_OFFLINE: Final = "vpn_devices_offline"
+ATTR_SYSTEM_VPN_DEVICES_ONLINE: Final = "vpn_devices_online"
+ATTR_SYSTEM_VPN_DEVICES_TOTAL: Final = "vpn_devices_total"
 ATTR_SYSTEM_CURRENT_WAN_USAGE: Final = "current_wan_usage"
 ATTR_SYSTEM_DDNS: Final = "ddns"
 ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT: Final = "disk_usage_percent_by_mount"
@@ -187,6 +196,25 @@ SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: Final = "granularity"
 SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: Final = "scope_kind"
 SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: Final = "scope_target"
 SERVICE_FIELD_LIMIT: Final = "limit"
+SERVICE_FIELD_WINDOW_DAYS: Final = "window_days"
+SERVICE_FIELD_INCLUDE_DNS: Final = "include_dns"
+SERVICE_FIELD_GROUP_NAME: Final = "group_name"
+SERVICE_FIELD_GROUP_ID: Final = "group_id"
+SERVICE_FIELD_USER_NAME: Final = "user_name"
+SERVICE_FIELD_USER_ID: Final = "user_id"
+SERVICE_FIELD_CLEAR: Final = "clear"
+SERVICE_FIELD_KIND: Final = "kind"
+SERVICE_FIELD_ONLINE: Final = "online"
+SERVICE_FIELD_USER: Final = "user"
+SERVICE_FIELD_ACTION: Final = "action"
+SERVICE_FIELD_APPLIES_TO: Final = "applies_to"
+SERVICE_FIELD_INCLUDE_PURPOSE: Final = "include_purpose"
+SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED: Final = "include_system_managed"
+
+# Rule purposes that are product-owned and never user-facing. They are excluded
+# from rule listings unless explicitly requested: on a real box they outnumber
+# user rules several times over.
+HIDDEN_RULE_PURPOSES: Final = ("dap", "family")
 SERVICE_FIELD_NETWORK_NAME: Final = "network_name"
 SERVICE_FIELD_NETWORK_UUID: Final = "network_uuid"
 SERVICE_FIELD_OFFSET: Final = "offset"
@@ -201,6 +229,13 @@ SERVICE_FIELD_WAN_NAME: Final = "wan_name"
 SERVICE_FIELD_WAN_UUID: Final = "wan_uuid"
 SERVICE_FIELD_WINDOW: Final = "window"
 SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
+
+# Default query windows. The network usage default is the smallest supported
+# window so the common call stays cheap; the WAN usage default is day+week, the
+# periods callers actually ask for.
+DEFAULT_NETWORK_USAGE_WINDOW: Final = "last_60_minutes"
+DEFAULT_WAN_USAGE_CURRENT_PERIODS: Final = ("day", "week")
+DEFAULT_WAN_EVENT_WINDOW_DAYS: Final = 7
 
 # Config entry data and options keys
 CONF_AID: Final = "aid"
@@ -221,6 +256,7 @@ CONF_WATCHED_DEVICES: Final = "watched_devices"
 CONF_WATCHED_USERS: Final = "watched_users"
 CONF_ENABLE_NETWORK_ENTITIES: Final = "enable_network_entities"
 CONF_ENABLE_SSID_ENTITIES: Final = "enable_ssid_entities"
+CONF_LLM_TOOL_MODE: Final = "llm_tool_mode"
 
 DEFAULT_ENABLE_NETWORK_ENTITIES = True
 DEFAULT_ENABLE_SSID_ENTITIES = True
@@ -235,8 +271,36 @@ FIREWALLA_PROTOCOL_CLIENT_KEY: Final = "fbb05afa-9145-41f1-8076-9de8be56f104"
 FIREWALLA_PROTOCOL_CLIENT_VERSION: Final = "1.68.89"
 
 DEFAULT_UPDATE_INTERVAL_MINUTES: Final = 3
+# Presence: how long after going quiet a tracked device still counts as home.
+# This is the device tracker's own question ("is it home?"), deliberately longer
+# and wall-clock based, because a device can be connected while nobody is home.
 DEFAULT_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 15
+# Connectivity: how long a device can be idle and still count as *connected*.
+# This is the connectivity definition, so it is shared by every surface that
+# reports online state: the watched-device sensors, the device counts, the VPN
+# peer counts, the runtime inventory summary, and the `online` field in the host
+# list. Keep it distinct from the presence window above; only connectivity
+# belongs here, and 5 minutes is the intended tolerance: a device quiet longer
+# than that is treated as disconnected rather than still active.
 DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 5
+
+# LLM/MCP tool exposure. The summary tier registers one curated, non-identifying
+# report; read tools are the low-risk step up; control tools require an explicit
+# opt-in. "full" additionally exposes destructive operations (data-destroying or
+# bulk) for users prepared to monitor closely.
+LLM_TOOL_MODE_OFF: Final = "off"
+LLM_TOOL_MODE_SUMMARY_ONLY: Final = "summary_only"
+LLM_TOOL_MODE_READ_ONLY: Final = "read_only"
+LLM_TOOL_MODE_READ_AND_CONTROL: Final = "read_and_control"
+LLM_TOOL_MODE_FULL: Final = "full"
+LLM_TOOL_MODES: Final = (
+    LLM_TOOL_MODE_OFF,
+    LLM_TOOL_MODE_SUMMARY_ONLY,
+    LLM_TOOL_MODE_READ_ONLY,
+    LLM_TOOL_MODE_READ_AND_CONTROL,
+    LLM_TOOL_MODE_FULL,
+)
+DEFAULT_LLM_TOOL_MODE: Final = LLM_TOOL_MODE_SUMMARY_ONLY
 MIN_UPDATE_INTERVAL_MINUTES: Final = 1
 MIN_DEVICE_TRACKER_AWAY_WINDOW_MINUTES: Final = 5
 MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES: Final = 3
@@ -296,7 +360,7 @@ CONFIG_ERROR_INVALID_HOST: Final = "invalid_host"
 CONFIG_ERROR_INVALID_QR: Final = "invalid_qr"
 CONFIG_ERROR_WRONG_ACCOUNT: Final = "wrong_account"
 SERVICE_GET_RUNTIME_INVENTORY: Final = "get_runtime_inventory"
-SERVICE_GET_HOST_NAME_MAPPING: Final = "get_host_name_mapping"
+SERVICE_GET_HOSTS: Final = "get_hosts"
 SERVICE_GET_NETWORK_SEGMENT_REPORT: Final = "get_network_segment_report"
 SERVICE_GET_NETWORK_SEGMENT_USAGE: Final = "get_network_segment_usage"
 SERVICE_GET_SPEED_TEST_RESULTS: Final = "get_speed_test_results"
@@ -308,6 +372,7 @@ SERVICE_SET_HOST_NAME: Final = "set_host_name"
 SERVICE_SET_HOST_DNS_HOSTNAME: Final = "set_host_dns_hostname"
 SERVICE_SET_HOST_DEVICE_TYPE: Final = "set_host_device_type"
 SERVICE_SET_HOST_DHCP_RESERVATION: Final = "set_host_dhcp_reservation"
+SERVICE_SET_HOST_MEMBERSHIP: Final = "set_host_membership"
 SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE: Final = "set_host_notify_when_next_offline"
 SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE: Final = "set_host_notify_when_next_online"
 SERVICE_WAKE_HOST: Final = "wake_host"
@@ -318,13 +383,17 @@ SERVICE_RUN_INTERNET_SPEED_TEST: Final = "run_internet_speed_test"
 SERVICE_SET_SSID_PAUSED: Final = "set_ssid_paused"
 SERVICE_GET_WIRELESS_STATUS: Final = "get_wireless_status"
 SERVICE_GET_ALARMS: Final = "get_alarms"
+SERVICE_GET_RULES: Final = "get_rules"
+SERVICE_SYNC_RUNTIME: Final = "sync_runtime"
+SERVICE_GET_SYSTEM_OVERVIEW: Final = "get_system_overview"
+SERVICE_CREATE_RULE: Final = "create_rule"
 SERVICE_ARCHIVE_ALARMS: Final = "archive_alarms"
 SERVICE_DELETE_ALARMS: Final = "delete_alarms"
 SERVICE_MUTE_ALARM: Final = "mute_alarm"
 SERVICE_UNMUTE_ALARM: Final = "unmute_alarm"
 SERVICE_DELETE_RULE: Final = "delete_rule"
 SERVICE_FIELD_ALARM_ID: Final = "alarm_id"
-SERVICE_FIELD_ALARM_TYPE: Final = "type"
+SERVICE_FIELD_ALARM_TYPE: Final = "alarm_type"
 SERVICE_FIELD_DURATION: Final = "duration"
 SERVICE_FIELD_EXCEPTION_ID: Final = "exception_id"
 SERVICE_FIELD_TARGET_TYPE: Final = "target_type"
@@ -332,6 +401,7 @@ SERVICE_FIELD_TARGET_VALUE: Final = "target_value"
 SERVICE_FIELD_SCOPE_KIND: Final = "scope_kind"
 SERVICE_FIELD_SCOPE_TARGET: Final = "scope_target"
 SERVICE_FIELD_INCLUDE_ARCHIVED: Final = "include_archived"
+SERVICE_FIELD_INCLUDE_EXCEPTIONS: Final = "include_exceptions"
 SERVICE_FIELD_RULE_ID: Final = "rule_id"
 ALARM_SERVICE_MAX_LIMIT: Final = 500
 HOST_DEVICE_TYPE_OPTIONS: Final = (
@@ -361,6 +431,7 @@ HOST_DEVICE_TYPE_OPTIONS: Final = (
     "medical",
     "ap",
 )
+VPN_PEER_MAC_PREFIXES: Final = ("wg_peer", "awg_peer")
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS: Final = "config_entry_name_ambiguous"
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND: Final = "config_entry_name_not_found"
 TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NOT_FOUND: Final = "config_entry_not_found"
@@ -391,6 +462,16 @@ TRANS_KEY_EXCEPTION_HOST_RESERVATION_IPV4_REQUIRED: Final = (
 TRANS_KEY_EXCEPTION_HOST_REQUIRED: Final = "host_required"
 TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT: Final = "host_selector_conflict"
 TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED: Final = "host_wake_not_supported"
+TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NAME_AMBIGUOUS: Final = (
+    "membership_group_name_ambiguous"
+)
+TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NOT_FOUND: Final = "membership_group_not_found"
+TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_CONFLICT: Final = "membership_target_conflict"
+TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_REQUIRED: Final = "membership_target_required"
+TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS: Final = (
+    "membership_user_name_ambiguous"
+)
+TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND: Final = "membership_user_not_found"
 TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED: Final = (
     "network_segment_report_failed"
 )
@@ -398,9 +479,6 @@ TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED: Final = "network_segment_usage
 TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS: Final = "network_name_ambiguous"
 TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND: Final = "network_not_found"
 TRANS_KEY_EXCEPTION_NETWORK_REQUIRED: Final = "network_required"
-TRANS_KEY_EXCEPTION_NETWORK_USAGE_WINDOW_REQUIRED: Final = (
-    "network_usage_window_required"
-)
 TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT: Final = "network_selector_conflict"
 TRANS_KEY_ENTITY_BUTTON_SYNC_RUNTIME: Final = "sync_runtime"
 TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT: Final = "pause_rule_timing_conflict"
@@ -416,6 +494,7 @@ TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED: Final = (
 TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED: Final = "set_host_dns_hostname_failed"
 TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED: Final = "set_host_device_type_failed"
 TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED: Final = "set_host_name_failed"
+TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED: Final = "set_host_membership_failed"
 TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED: Final = "set_host_notify_failed"
 TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS: Final = (
     "speed_test_wan_name_ambiguous"
@@ -497,6 +576,8 @@ TRANS_KEY_OPTION_LABEL_UNAVAILABLE_USER: Final = "unavailable_user"
 TRANS_PLACEHOLDER_DURATION: Final = "duration"
 TRANS_PLACEHOLDER_HOST_MATCHES: Final = "host_matches"
 TRANS_PLACEHOLDER_HOST_NAME: Final = "host_name"
+TRANS_PLACEHOLDER_MEMBERSHIP_MATCHES: Final = "membership_matches"
+TRANS_PLACEHOLDER_MEMBERSHIP_TARGET: Final = "membership_target"
 TRANS_PLACEHOLDER_NETWORK_NAME: Final = "network_name"
 TRANS_PLACEHOLDER_NETWORK_UUID: Final = "network_uuid"
 TRANS_PLACEHOLDER_RESERVED_IPV4: Final = "reserved_ipv4"

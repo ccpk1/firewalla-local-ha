@@ -103,12 +103,30 @@
           "device_tracker_away_window": "Device-tracker away window (minutes)",
           "enable_network_entities": "Enable network status entities",
           "enable_ssid_entities": "Enable SSID status entities",
+          "llm_tool_mode": "AI assistant (MCP) tool access",
           "return_to_main_menu": "Back to main menu without saving",
           "update_interval": "Update interval (minutes)",
           "watched_device_online_window": "Watched-device online window (minutes)"
         },
-        "description": "Configure coordinator-owned Firewalla runtime settings. Lower intervals (1m) provide faster updates but increase load on the Firewalla local API. Watched-device online windows can be as low as 3 minutes, but only make sense when the polling interval is shorter than that. Device-tracker away windows must be at least 5 minutes and usually work best at roughly double the polling interval or more. Network status entities expose one connectivity binary sensor per Firewalla network (LAN/VLAN/VPN/WAN) with addressing, advanced options, and usage details. SSID status entities expose one connectivity binary sensor and one toggle switch per Firewalla wireless network (SSID) when AP7 access points are present.",
+        "data_description": {
+          "device_tracker_away_window": "How long a tracked device stays home after its last activity. Presence only: this does not affect the device counters or connectivity.",
+          "llm_tool_mode": "Controls which tools the assistant can use. Levels above Summary only send network detail to your LLM provider, so use the lowest you need and consider who operates it. Requires Core 2026.10 or newer.",
+          "update_interval": "How often to poll the Firewalla box. Shorter intervals update faster but load the local API more, so keep this shorter than the windows below.",
+          "watched_device_online_window": "How long a device can be idle and still count as connected. Applies to the device counters, the VPN peer counts, and the device list, not only to watched devices."
+        },
+        "description": "Configure Firewalla runtime settings.",
         "title": "System settings"
+      }
+    }
+  },
+  "selector": {
+    "llm_tool_mode": {
+      "options": {
+        "full": "Full (includes destructive actions)",
+        "off": "Off (expose no tools)",
+        "read_and_control": "Read and control (adds reversible control actions)",
+        "read_only": "Read only (adds device names and addresses)",
+        "summary_only": "Summary only (counts and network names, no device identity)"
       }
     }
   },
@@ -217,6 +235,15 @@
           },
           "uptime_seconds": {
             "name": "Uptime seconds"
+          },
+          "vpn_devices_offline": {
+            "name": "VPN devices offline"
+          },
+          "vpn_devices_online": {
+            "name": "VPN devices online"
+          },
+          "vpn_devices_total": {
+            "name": "VPN devices total"
           },
           "purpose": {
             "name": "Purpose",
@@ -1118,6 +1145,24 @@
     "host_wake_not_supported": {
       "message": "The selected host does not appear to support Wake-on-LAN."
     },
+    "membership_group_name_ambiguous": {
+      "message": "More than one Firewalla group matches the name \"{membership_target}\". Matching groups: {membership_matches}. Use the group ID instead."
+    },
+    "membership_group_not_found": {
+      "message": "No Firewalla group matched \"{membership_target}\". Groups and users are separate, so check the group name or ID and try again."
+    },
+    "membership_target_conflict": {
+      "message": "Provide either a group or a user to assign, or clear set to true, but not both."
+    },
+    "membership_target_required": {
+      "message": "Provide exactly one of group_name, group_id, user_name, or user_id to assign, or set clear to true to remove the current assignment."
+    },
+    "membership_user_name_ambiguous": {
+      "message": "More than one Firewalla user matches the name \"{membership_target}\". Matching users: {membership_matches}. Use the user ID instead."
+    },
+    "membership_user_not_found": {
+      "message": "No Firewalla user matched \"{membership_target}\". Groups and users are separate, so check the user name or ID and try again."
+    },
     "unavailable_device": {
       "message": "Unavailable device"
     },
@@ -1148,9 +1193,6 @@
     "network_required": {
       "message": "Provide a network UUID or network name for this service call."
     },
-    "network_usage_window_required": {
-      "message": "Provide a window for this network segment usage service call."
-    },
     "network_selector_conflict": {
       "message": "Provide either a network UUID or a network name, not both."
     },
@@ -1180,6 +1222,9 @@
     },
     "set_host_name_failed": {
       "message": "The integration could not rename the host. Check the Firewalla connection and try again."
+    },
+    "set_host_membership_failed": {
+      "message": "The integration could not update the host membership. Check the Firewalla connection and try again."
     },
     "set_host_notify_failed": {
       "message": "The integration could not update the host notification setting. Check the Firewalla connection and try again."
@@ -1257,7 +1302,7 @@
   "services": {
     "get_alarms": {
       "name": "Get alarms",
-      "description": "Return the newest active alarms and optionally archived alarms with normalized details and silence records.",
+      "description": "Return the newest active alarms and optionally archived alarms with normalized details and shared report metadata. Each alarm carries its own exception_id; the full silence-exception table is only included when requested.",
       "fields": {
         "limit": {
           "name": "Limit",
@@ -1267,13 +1312,121 @@
           "name": "Include archived",
           "description": "Optional. Include archived alarms in the result."
         },
-        "type": {
+        "alarm_type": {
           "name": "Alarm type",
-          "description": "Optional raw ALARM_* identifier or supported group such as security, abnormal_upload, or open_port."
+          "description": "Optional. Filter by alarm type. A raw ALARM_* value or a supported group (security, abnormal_upload, or open_port). Matches the alarm_type field on the returned records."
+        },
+        "include_exceptions": {
+          "name": "Include silence records",
+          "description": "Optional. Add the full silence-exception table. Defaults to false; each alarm already carries its exception_id. Set this only to find a silence to unmute."
         },
         "detail": {
           "name": "Fetch detail",
           "description": "Optional. Fetch extended details with one additional request per returned alarm."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_rules": {
+      "name": "Get rules",
+      "description": "Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, and any originating alarm. Use this to resolve the rule target for pause_rule and resume_rule.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Optional. Filter by enabled state."
+        },
+        "action": {
+          "name": "Action",
+          "description": "Optional. Filter by action: 'block', 'allow', 'qos', or 'disturb'."
+        },
+        "target_type": {
+          "name": "Target type",
+          "description": "Optional. Filter by target type, for example 'category', 'mac', 'ip', 'dns', or 'network'."
+        },
+        "applies_to": {
+          "name": "Applies to",
+          "description": "Optional. Filter to rules governing one group, user, or network name. A host's group_name from get_hosts is the value to pass here. Matches exactly."
+        },
+        "include_purpose": {
+          "name": "Include purpose",
+          "description": "Optional. Include product-owned DAP or family rules, which are hidden by default."
+        },
+        "include_system_managed": {
+          "name": "Include system-managed",
+          "description": "Optional. Include rules owned by a Firewalla subsystem, such as alarm-intel auto-blocks. Hidden by default."
+        }
+      }
+    },
+    "get_system_overview": {
+      "name": "Get system overview",
+      "description": "Return a curated system summary: appliance health, the networks with per-network device counts, and counts for devices, VPN peers, groups, users, rules, and alarms, plus per-WAN speed-test and quality metrics. Counts and identities only, never record collections. Use include to add the group and user names and ids that other services accept as selectors.",
+      "fields": {
+        "include": {
+          "name": "Include",
+          "description": "Optional. 'identifiers' adds the group and user names and ids. Other services accept those ids as selectors."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "sync_runtime": {
+      "name": "Sync runtime",
+      "description": "Poll the Firewalla box now and report when the snapshot was taken. Requests within the coordinator's debounce window are coalesced, so calling this alongside other actions still costs at most one poll.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this when you have more than one Firewalla setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "create_rule": {
+      "name": "Create rule",
+      "description": "Create a persistent block rule, optionally scoped to an alarm's target. Blocking a target from an alarm creates an ordinary policy rule that records the alarm id as a back-reference.",
+      "fields": {
+        "alarm_id": {
+          "name": "Alarm ID",
+          "description": "Optional. Build the block from an alarm's target and device scope, recording the alarm id on the new rule. Provide this or target_type and target_value."
+        },
+        "target_type": {
+          "name": "Target type",
+          "description": "Optional. Required with target_value when alarm_id is omitted."
+        },
+        "target_value": {
+          "name": "Target value",
+          "description": "Optional. Required with target_type when alarm_id is omitted. The domain, IP, or MAC to block."
+        },
+        "scope_kind": {
+          "name": "Scope kind",
+          "description": "Optional. Where the rule applies. Defaults to everywhere when omitted."
+        },
+        "scope_target": {
+          "name": "Scope target",
+          "description": "Optional. The scope value for the chosen kind (a MAC for device, a network uuid for network)."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -1415,10 +1568,42 @@
         }
       }
     },
-    "get_host_name_mapping": {
-      "name": "Get host name mapping",
-      "description": "Return current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.",
+    "get_hosts": {
+      "name": "Get hosts",
+      "description": "Return the Firewalla host (device) records with naming fields, IP address, device type, kind, group membership, and online state. Filters narrow the result on the box. Non-admin; for the full runtime inventory use get_runtime_inventory.",
       "fields": {
+        "detail": {
+          "name": "Detail",
+          "description": "Optional. 'summary' (default) omits the derivable dns_fqdn, the unreliable dhcp_name, and the nested ip_assignment, flattening its useful parts to ip_assignment_mode and reserved_ipv4. Use 'full' for the complete record."
+        },
+        "host_name": {
+          "name": "Host name",
+          "description": "Optional. Substring match on the host name. Use it to find one device instead of listing every host."
+        },
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Optional. Exact host MAC address."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Optional. Exact group or user name to filter by. Matches exactly, so filter one name at a time."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "Optional. 'mac_host' for a normal device, 'pseudo_host' to return only VPN peers. Peers have no MAC address, so they cannot be used with host actions that take one."
+        },
+        "network_uuid": {
+          "name": "Network UUID",
+          "description": "Optional. Filter to the devices on one network."
+        },
+        "online": {
+          "name": "Online",
+          "description": "Optional. Filter by connectivity. Uses the same activity-window definition as the device counts on the system-status sensor."
+        },
+        "user": {
+          "name": "User ID",
+          "description": "Optional. Filter to hosts belonging to one user id."
+        },
         "refresh": {
           "name": "Refresh first",
           "description": "Optional. Defaults to true. Refresh the Firewalla runtime before building the host records."
@@ -1470,6 +1655,10 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        },
+        "include": {
+          "name": "Include",
+          "description": "Optional. 'hosts' adds the network's device list, which is absent by default because those rows carry MAC addresses, hostnames, IPs, and reservations. The summary host_count is the device count and does not change with this option."
         }
       }
     },
@@ -1843,6 +2032,56 @@
         }
       }
     },
+    "set_host_membership": {
+      "name": "Set host membership",
+      "description": "Set or clear the single group or user a device belongs to on the Firewalla box. DESTRUCTIVE - assigning a device to a group or a user permanently DELETES THE RULES ATTACHED TO THAT DEVICE, including enabled rules you created, and they cannot be restored. Rules attached to groups or users are NOT affected, including the user this device is leaving. This matches the Firewalla app, which warns about it when you assign a device.",
+      "fields": {
+        "group_name": {
+          "name": "Group name (Optional)",
+          "description": "Assign the device to this group. Provide this or Group ID, and nothing else unless you are clearing. Names are matched against groups only, never against users. Permanently deletes the rules attached to this device; group and user rules are unaffected."
+        },
+        "group_id": {
+          "name": "Group ID (Optional)",
+          "description": "Assign the device to the group with this Firewalla tag id. Use this instead of Group name when two groups share a name. Permanently deletes the rules attached to this device; group and user rules are unaffected."
+        },
+        "user_name": {
+          "name": "User name (Optional)",
+          "description": "Assign the device to this Firewalla user. Provide this or User ID, and nothing else unless you are clearing. Names are matched against users only, never against groups. Permanently deletes the rules attached to this device; group and user rules are unaffected."
+        },
+        "user_id": {
+          "name": "User ID (Optional)",
+          "description": "Assign the device to the user with this Firewalla user id. Use this instead of User name when two users share a name. Permanently deletes the rules attached to this device; group and user rules are unaffected."
+        },
+        "clear": {
+          "name": "Clear membership (Optional)",
+          "description": "Defaults to false. Set to true to remove the device's current group or user assignment. Cannot be combined with a group or user field. The rules attached to this device are permanently deleted here too, leaving it with no rules until you add some; group and user rules are unaffected."
+        },
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Use the Firewalla host MAC for deterministic automations."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Use the current Firewalla host display name or full host label for interactive use."
+        },
+        "host_id": {
+          "name": "Host ID (Optional)",
+          "description": "Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and membership selectors and sending the change."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "get_time_usage_report": {
       "name": "Get time usage report",
       "description": "Return one normalized scoped time-usage report from the Firewalla local API.",
@@ -1966,6 +2205,14 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        },
+        "window_days": {
+          "name": "Window (days)",
+          "description": "Optional. Defaults to 7. How many days back to look; use 0 for no time bound."
+        },
+        "include_dns": {
+          "name": "Include DNS probes",
+          "description": "Optional. Defaults to false. The box's internal DNS health probes are not WAN events and are excluded by default."
         }
       }
     },
@@ -2017,53 +2264,9 @@
         }
       }
     },
-    "pause_rule_control_only": {
-      "name": "Pause rule (control only)",
-      "description": "Experimental. Pause one managed Firewalla rule using only the rule ID and pause control fields in the update payload. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.",
-      "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
-        },
-        "duration": {
-          "name": "Duration",
-          "description": "Optional. How long to pause the rule, for example 30m, 4h, or 2d 4h 30m."
-        },
-        "resume_at": {
-          "name": "Resume at",
-          "description": "Optional. A local date and time when the rule should resume."
-        },
-        "config_entry_id": {
-          "name": "Config entry ID (Optional)",
-          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
-        },
-        "config_entry_name": {
-          "name": "Config entry name (Optional)",
-          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
-        }
-      }
-    },
     "resume_rule": {
       "name": "Resume rule",
       "description": "Resume one managed Firewalla rule immediately.",
-      "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
-        },
-        "config_entry_id": {
-          "name": "Config entry ID (Optional)",
-          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
-        },
-        "config_entry_name": {
-          "name": "Config entry name (Optional)",
-          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
-        }
-      }
-    },
-    "resume_rule_control_only": {
-      "name": "Resume rule (control only)",
-      "description": "Experimental. Resume one managed Firewalla rule using only the rule ID and pause control fields in the update payload.",
       "fields": {
         "rule_target": {
           "name": "Rule target",

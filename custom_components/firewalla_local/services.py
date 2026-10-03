@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from datetime import UTC, datetime, tzinfo
 from ipaddress import AddressValueError, IPv4Address, IPv4Network
 from typing import Any, cast
@@ -25,15 +25,31 @@ from .api import FirewallaApiError
 from .const import (
     ALARM_SERVICE_MAX_LIMIT,
     DEFAULT_INIT_TARGET,
+    DEFAULT_NETWORK_USAGE_WINDOW,
+    DEFAULT_WAN_EVENT_WINDOW_DAYS,
+    DEFAULT_WAN_USAGE_CURRENT_PERIODS,
     DOMAIN,
+    HIDDEN_RULE_PURPOSES,
     HOST_DEVICE_TYPE_OPTIONS,
+    LLM_TOOL_MODE_OFF,
+    LLM_TOOL_MODE_READ_AND_CONTROL,
+    LLM_TOOL_MODE_READ_ONLY,
+    LLM_TOOL_MODE_SUMMARY_ONLY,
     LOGGER,
+    RULE_ACTION_BLOCK,
+    RULE_PURPOSE_DAP,
+    RULE_PURPOSE_FAMILY,
+    RULE_TARGET_TYPE_MAC,
     SERVICE_ARCHIVE_ALARMS,
+    SERVICE_CREATE_RULE,
     SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
+    SERVICE_FIELD_ACTION,
     SERVICE_FIELD_ALARM_ID,
     SERVICE_FIELD_ALARM_TYPE,
+    SERVICE_FIELD_APPLIES_TO,
+    SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_FIELD_CONFIRM,
@@ -43,6 +59,8 @@ from .const import (
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_EXCEPTION_ID,
+    SERVICE_FIELD_GROUP_ID,
+    SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
     SERVICE_FIELD_HOST_DEVICE_TYPE,
@@ -51,12 +69,18 @@ from .const import (
     SERVICE_FIELD_HOST_NAME,
     SERVICE_FIELD_INCLUDE,
     SERVICE_FIELD_INCLUDE_ARCHIVED,
+    SERVICE_FIELD_INCLUDE_DNS,
+    SERVICE_FIELD_INCLUDE_EXCEPTIONS,
+    SERVICE_FIELD_INCLUDE_PURPOSE,
+    SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
+    SERVICE_FIELD_KIND,
     SERVICE_FIELD_LIMIT,
     SERVICE_FIELD_MODE,
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_OFFSET,
+    SERVICE_FIELD_ONLINE,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_DURATION,
@@ -76,16 +100,22 @@ from .const import (
     SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
+    SERVICE_FIELD_USER,
+    SERVICE_FIELD_USER_ID,
+    SERVICE_FIELD_USER_NAME,
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_FIELD_WINDOW_DAYS,
     SERVICE_GET_ALARMS,
-    SERVICE_GET_HOST_NAME_MAPPING,
+    SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_USAGE,
+    SERVICE_GET_RULES,
     SERVICE_GET_RUNTIME_INVENTORY,
     SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SYSTEM_OVERVIEW,
     SERVICE_GET_TIME_USAGE_REPORT,
     SERVICE_GET_WAN_DATA_USAGE,
     SERVICE_GET_WAN_EVENTS,
@@ -97,10 +127,12 @@ from .const import (
     SERVICE_SET_HOST_DEVICE_TYPE,
     SERVICE_SET_HOST_DHCP_RESERVATION,
     SERVICE_SET_HOST_DNS_HOSTNAME,
+    SERVICE_SET_HOST_MEMBERSHIP,
     SERVICE_SET_HOST_NAME,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE,
     SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE,
     SERVICE_SET_SSID_PAUSED,
+    SERVICE_SYNC_RUNTIME,
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
@@ -129,6 +161,12 @@ from .const import (
     TRANS_KEY_EXCEPTION_HOST_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_HOST_WAKE_NOT_SUPPORTED,
     TRANS_KEY_EXCEPTION_INVALID_DURATION,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NAME_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_CONFLICT,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_REQUIRED,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND,
     TRANS_KEY_EXCEPTION_MULTIPLE_ENTRIES_LOADED,
     TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
@@ -136,7 +174,6 @@ from .const import (
     TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED,
     TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED,
     TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT,
-    TRANS_KEY_EXCEPTION_NETWORK_USAGE_WINDOW_REQUIRED,
     TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT,
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
     TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
@@ -145,6 +182,7 @@ from .const import (
     TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED,
+    TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_NAME_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_NOTIFY_FAILED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS,
@@ -164,6 +202,8 @@ from .const import (
     TRANS_PLACEHOLDER_DURATION,
     TRANS_PLACEHOLDER_HOST_MATCHES,
     TRANS_PLACEHOLDER_HOST_NAME,
+    TRANS_PLACEHOLDER_MEMBERSHIP_MATCHES,
+    TRANS_PLACEHOLDER_MEMBERSHIP_TARGET,
     TRANS_PLACEHOLDER_NETWORK_NAME,
     TRANS_PLACEHOLDER_NETWORK_UUID,
     TRANS_PLACEHOLDER_RESERVED_IPV4,
@@ -174,7 +214,12 @@ from .const import (
     TRANS_PLACEHOLDER_WAN_NAME,
     TRANS_PLACEHOLDER_WAN_UUID,
 )
-from .coordinator import FirewallaConfigEntry
+from .coordinator import FirewallaConfigEntry, get_llm_tool_mode
+from .managers.rule_manager import (
+    build_switch_rule_evaluations_for_rules,
+    is_system_managed_rule,
+    is_user_visible_rule,
+)
 from .models import (
     FirewallaAlarm,
     FirewallaAlarmException,
@@ -189,6 +234,7 @@ from .models import (
     FirewallaNetworkHostNotifications,
     FirewallaNetworkHostRanking,
     FirewallaNetworkHostTotals,
+    FirewallaNetworkKind,
     FirewallaNetworkMetricSample,
     FirewallaNetworkMetricSeries,
     FirewallaNetworkSegment,
@@ -196,10 +242,12 @@ from .models import (
     FirewallaNetworkUsageBucket,
     FirewallaNetworkUsageSummary,
     FirewallaNetworkUsageWindow,
+    FirewallaPolicyRule,
     FirewallaReportProvenance,
     FirewallaReportTarget,
     FirewallaReportTimeBasis,
     FirewallaReportWarning,
+    FirewallaRuleTemplate,
     FirewallaSpeedTestResult,
     FirewallaUsageHistoryDeviceUsage,
     FirewallaUsageHistoryEntry,
@@ -216,8 +264,10 @@ from .models import (
     FirewallaWanEventFailure,
     FirewallaWanEventStatus,
     FirewallaWanInterface,
+    format_policy_rule_name,
 )
 from .utils.duration import parse_duration_to_seconds
+from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
@@ -238,6 +288,54 @@ GET_RUNTIME_INVENTORY_SCHEMA = vol.Schema(
     }
 )
 
+GET_RULES_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ENABLED): cv.boolean,
+        vol.Optional(SERVICE_FIELD_ACTION): vol.In(
+            ("block", "allow", "qos", "disturb")
+        ),
+        vol.Optional(SERVICE_FIELD_TARGET_TYPE): cv.string,
+        vol.Optional(SERVICE_FIELD_APPLIES_TO): cv.string,
+        vol.Optional(SERVICE_FIELD_INCLUDE_PURPOSE): vol.All(
+            cv.ensure_list_csv,
+            [vol.In(HIDDEN_RULE_PURPOSES)],
+        ),
+        vol.Optional(SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+SYNC_RUNTIME_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_SYSTEM_OVERVIEW_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_INCLUDE): vol.All(
+            cv.ensure_list_csv,
+            [vol.In(("identifiers",))],
+        ),
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+CREATE_RULE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_TARGET_TYPE): vol.In(("dns", "ip", "mac")),
+        vol.Optional(SERVICE_FIELD_TARGET_VALUE): cv.string,
+        vol.Optional(SERVICE_FIELD_SCOPE_KIND): vol.In(("device", "network", "all")),
+        vol.Optional(SERVICE_FIELD_SCOPE_TARGET): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
 GET_ALARMS_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_LIMIT, default=10): vol.All(
@@ -246,6 +344,7 @@ GET_ALARMS_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_INCLUDE_ARCHIVED, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_ALARM_TYPE): cv.string,
         vol.Optional(SERVICE_FIELD_DETAIL, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_INCLUDE_EXCEPTIONS, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -311,6 +410,16 @@ DELETE_RULE_SCHEMA = vol.Schema(
 
 GET_HOST_NAME_MAPPING_SCHEMA = vol.Schema(
     {
+        vol.Optional(SERVICE_FIELD_DETAIL, default="summary"): vol.In(
+            ("summary", "full")
+        ),
+        vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_KIND): vol.In(("mac_host", "pseudo_host")),
+        vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
+        vol.Optional(SERVICE_FIELD_ONLINE): cv.boolean,
+        vol.Optional(SERVICE_FIELD_USER): cv.string,
         vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
@@ -321,6 +430,10 @@ GET_NETWORK_SEGMENT_REPORT_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_INCLUDE): vol.All(
+            cv.ensure_list_csv,
+            [vol.In(("hosts",))],
+        ),
         vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
@@ -331,7 +444,9 @@ GET_NETWORK_SEGMENT_USAGE_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
-        vol.Optional(SERVICE_FIELD_WINDOW): vol.In(
+        vol.Optional(
+            SERVICE_FIELD_WINDOW, default=DEFAULT_NETWORK_USAGE_WINDOW
+        ): vol.In(
             (
                 "last_60_minutes",
                 "last_24_hours",
@@ -462,6 +577,21 @@ SET_HOST_DHCP_RESERVATION_SCHEMA = vol.Schema(
     }
 )
 
+# A device holds exactly one membership, so a call either sets that one slot to a
+# group or a user, or clears it. The four target fields are mutually exclusive and
+# one of them (or ``clear``) is required; the handler enforces that because
+# voluptuous cannot express "exactly one of".
+SET_HOST_MEMBERSHIP_SCHEMA = vol.Schema(
+    {
+        **_HOST_TARGET_SCHEMA_FIELDS,
+        vol.Optional(SERVICE_FIELD_GROUP_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CLEAR, default=False): cv.boolean,
+    }
+)
+
 GET_SPEED_TEST_RESULTS_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
@@ -545,6 +675,14 @@ GET_WAN_EVENTS_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_LIMIT, default=100): cv.positive_int,
         vol.Optional(SERVICE_FIELD_OFFSET, default=0): cv.positive_int,
+        vol.Optional(
+            SERVICE_FIELD_WINDOW_DAYS,
+            default=DEFAULT_WAN_EVENT_WINDOW_DAYS,
+        ): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=0, max=366),
+        ),
+        vol.Optional(SERVICE_FIELD_INCLUDE_DNS, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -580,6 +718,11 @@ def _service_validation_error(
 
 _USAGE_HISTORY_REQUEST_SCOPE_HOST = "host"
 _USAGE_HISTORY_REQUEST_SCOPE_TAG = "tag"
+
+# The classified host-tag collection holds plain groups and user affiliations
+# together; a membership selector is scoped by this discriminator.
+_MEMBERSHIP_KIND_GROUP = "group"
+_MEMBERSHIP_KIND_USER = "user"
 
 
 def _get_loaded_entry(
@@ -635,6 +778,31 @@ def _get_loaded_entry(
 async def _async_refresh_runtime_state(entry: FirewallaConfigEntry) -> None:
     """Force a fresh runtime refresh before mutating rules."""
     await entry.runtime_data.coordinator.async_request_refresh()
+
+
+def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
+    """Serialize one live policy rule into the flat, agent-facing shape.
+
+    `applies_to` and `tag_refs` carry a rule's group/user and network
+    attachments, which are otherwise invisible: the scope-based `scope` field
+    only covers device-scoped rules, so without these an agent cannot tell that
+    a rule governs a group or a whole network.
+    """
+    return {
+        "rule_id": rule.rule_id,
+        "name": format_policy_rule_name(rule),
+        "action": rule.action,
+        "enabled": rule.enabled,
+        "is_paused": rule.is_paused,
+        "target": rule.target,
+        "target_name": rule.target_name,
+        "target_type": rule.target_type,
+        "scope": list(rule.scope),
+        "applies_to": list(rule.applies_to),
+        "tag_refs": list(rule.tag_refs),
+        "purpose": rule.purpose,
+        "alarm_id": rule.alarm_id,
+    }
 
 
 def _serialize_speed_test_result(
@@ -1000,7 +1168,12 @@ def _serialize_alarm(
         "message": alarm.message,
         "state": alarm.state,
         "is_archived": alarm.is_archived,
-        "fired_at": alarm.fired_at,
+        "fired_at": (
+            datetime.fromtimestamp(alarm.fired_at, UTC).isoformat()
+            if alarm.fired_at is not None
+            else None
+        ),
+        "fired_at_timestamp": alarm.fired_at,
         "remote_category": alarm.remote_category,
         "remote_host": alarm.remote_host,
         "remote_ip": alarm.remote_ip,
@@ -1027,7 +1200,12 @@ def _serialize_alarm_exception(
         "target_type": exception.target_type,
         "target": exception.target,
         "target_name": exception.target_name,
-        "expires_at": exception.expires_at,
+        "expires_at": (
+            datetime.fromtimestamp(exception.expires_at, UTC).isoformat()
+            if exception.expires_at is not None
+            else None
+        ),
+        "expires_at_timestamp": exception.expires_at,
     }
 
 
@@ -2108,6 +2286,116 @@ def _build_host_ip_allocation_policy_value(
     }
 
 
+def _build_host_membership_policy_value(tag_id: str | None) -> dict[str, object]:
+    """Build the membership policy payload for one host.
+
+    Sends only ``tags``. Finding 43 confirmed on the box that this leaves every
+    other policy key untouched, and a minimal payload is safer than the app's full
+    object because it cannot carry a key the caller did not intend to send. Tag ids
+    are integers in the write but strings in the read payload.
+    """
+    return {"tags": [] if tag_id is None else [int(tag_id)]}
+
+
+def _describe_membership(
+    entry: FirewallaConfigEntry, tag_id: str | None
+) -> dict[str, object] | None:
+    """Describe one membership slot as a kind, id and display name."""
+    if tag_id is None:
+        return None
+    for group in entry.runtime_data.integration_manager.get_groups():
+        if group.group_id == tag_id:
+            return {"kind": group.kind, "id": group.group_id, "name": group.name}
+    return None
+
+
+def _resolve_membership_target(
+    entry: FirewallaConfigEntry,
+    *,
+    group_name: str | None,
+    group_id: str | None,
+    user_name: str | None,
+    user_id: str | None,
+    clear: bool,
+) -> FirewallaGroupRuntime | None:
+    """Resolve one group or user membership target.
+
+    Resolution is scoped by kind: a group selector only ever matches a ``group``
+    entry and a user selector only a ``user`` entry. That guard is why the selector
+    is split by kind in the first place -- a group and a user on a real box can carry
+    the same name, so a single free-text target could silently pick the wrong one.
+    """
+    group_selectors = [
+        value for value in (group_name, group_id) if _optional_string(value)
+    ]
+    user_selectors = [
+        value for value in (user_name, user_id) if _optional_string(value)
+    ]
+
+    if clear:
+        if group_selectors or user_selectors:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_CONFLICT,
+            )
+        return None
+
+    if len(group_selectors) + len(user_selectors) != 1:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_MEMBERSHIP_TARGET_REQUIRED,
+        )
+
+    is_group_target = bool(group_selectors)
+    wanted_kind = _MEMBERSHIP_KIND_GROUP if is_group_target else _MEMBERSHIP_KIND_USER
+    wanted_value = cast(str, group_name or group_id or user_name or user_id)
+    wanted_id = group_id if is_group_target else user_id
+    wanted_name = group_name if is_group_target else user_name
+
+    candidates = [
+        group
+        for group in entry.runtime_data.integration_manager.get_groups()
+        if group.kind == wanted_kind
+    ]
+
+    if wanted_id is not None:
+        exact = next(
+            (group for group in candidates if group.group_id == wanted_id), None
+        )
+        if exact is not None:
+            return exact
+    elif wanted_name is not None:
+        wanted_name_folded = wanted_name.casefold()
+        matches = [
+            group for group in candidates if group.name.casefold() == wanted_name_folded
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise _service_validation_error(
+                translation_key=(
+                    TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NAME_AMBIGUOUS
+                    if is_group_target
+                    else TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS
+                ),
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_MEMBERSHIP_MATCHES: ", ".join(
+                        f"{group.name} [{group.group_id}]" for group in matches
+                    ),
+                    TRANS_PLACEHOLDER_MEMBERSHIP_TARGET: wanted_name,
+                },
+            )
+
+    raise _service_validation_error(
+        translation_key=(
+            TRANS_KEY_EXCEPTION_MEMBERSHIP_GROUP_NOT_FOUND
+            if is_group_target
+            else TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND
+        ),
+        translation_placeholders={
+            TRANS_PLACEHOLDER_MEMBERSHIP_TARGET: wanted_value,
+        },
+    )
+
+
 def _resolve_network_interface_name(
     entry: FirewallaConfigEntry,
     *,
@@ -2426,9 +2714,16 @@ def _serialize_network_segment_report(
     view: FirewallaNetworkSegmentView,
     network: FirewallaNetwork,
     refresh_requested: bool,
+    applied_include: tuple[str, ...] = (),
 ) -> JsonObjectType:
-    """Serialize one configuration-oriented network segment report."""
-    host_details = _build_network_host_detail_rows(entry, view)
+    """Serialize one configuration-oriented network segment report.
+
+    Host rows are identity-bearing (MAC, hostname, IP, reservation), so they are
+    omitted unless explicitly requested, and the section is absent rather than
+    present-and-empty when it is not.
+    """
+    include_hosts = "hosts" in applied_include
+    host_details = _build_network_host_detail_rows(entry, view) if include_hosts else []
     dhcp_config = _build_network_dhcp_config(entry, interface_name=view.interface_name)
     return {
         "config_entry_id": entry.entry_id,
@@ -2449,58 +2744,30 @@ def _serialize_network_segment_report(
             )
         ),
         "summary": {
-            "host_count": len(host_details),
+            # Stable regardless of `include`: the network's device count from
+            # the host inventory, never the size of the optionally-returned row
+            # set. `returned_host_count` reports that row set when it is asked
+            # for, since the segment view can return fewer rows than the
+            # inventory counts.
+            "host_count": network.device_host_count,
+            "returned_host_count": len(host_details) if include_hosts else None,
             "device_host_count": network.device_host_count,
             "has_dhcp_config": dhcp_config is not None,
             "has_ipv4_addressing": bool(view.ipv4_addresses or view.ipv4_subnets),
             "has_ipv6_addressing": bool(view.ipv6_addresses or view.ipv6_subnets),
         },
-        "sections": {
-            "configuration": {
-                "kind": network.kind.value,
-                "interface_name": view.interface_name,
-                "vlan_id": network.vlan_id,
-                "ports": list(network.ports),
-                "enabled": network.enabled,
-                "mdns_relay": network.mdns_relay,
-                "ssdp_relay": network.ssdp_relay,
-                "block_icmp": network.block_icmp,
-                "type": view.network_type,
-                "monitoring": view.monitoring,
-                "active": view.active,
-                "ready": view.ready,
-                "pending_test": view.pending_test,
-                "policy": cast(JsonObjectType | None, view.policy),
-            },
-            "usage": _serialize_unified_usage_summary(network.usage),
-            "addressing": {
-                "gateway": view.gateway,
-                "gateway6": view.gateway6,
-                "route_id": view.route_id,
-                "ipv4_addresses": list(view.ipv4_addresses),
-                "ipv4_subnets": list(view.ipv4_subnets),
-                "ipv6_addresses": list(view.ipv6_addresses),
-                "ipv6_subnets": list(view.ipv6_subnets),
-                "route4_subnets": list(view.route4_subnets),
-                "route6_subnets": list(view.route6_subnets),
-            },
-            "dns": {
-                "servers": list(view.dns_servers),
-                "servers6": list(view.dns6_servers),
-                "original_servers": list(view.original_dns_servers),
-                "original_servers6": list(view.original_dns6_servers),
-            },
-            "dhcp": _serialize_network_dhcp_config(dhcp_config),
-            "hosts": {
-                "count": len(host_details),
-                "items": [
-                    _serialize_network_host_detail(host_detail)
-                    for host_detail in host_details
-                ],
-            },
-        },
+        **_network_segment_report_sections(
+            view,
+            network=network,
+            dhcp_config=dhcp_config,
+            host_details=host_details,
+            include_hosts=include_hosts,
+        ),
         "metadata": _serialize_report_metadata(
-            applied={"refresh": refresh_requested},
+            applied={
+                "refresh": refresh_requested,
+                "include": list(applied_include),
+            },
             provenance=(
                 FirewallaReportProvenance(
                     section="configuration",
@@ -2529,11 +2796,17 @@ def _serialize_network_segment_report(
                         "the matching interface"
                     ),
                 ),
-                FirewallaReportProvenance(
-                    section="hosts",
-                    source="derived",
-                    source_field="hostManager",
-                    note="Host rows are derived from runtime host inventory",
+                *(
+                    (
+                        FirewallaReportProvenance(
+                            section="hosts",
+                            source="derived",
+                            source_field="hostManager",
+                            note="Host rows are derived from runtime host inventory",
+                        ),
+                    )
+                    if include_hosts
+                    else ()
                 ),
                 FirewallaReportProvenance(
                     section="usage",
@@ -2547,6 +2820,67 @@ def _serialize_network_segment_report(
             ),
         ),
     }
+
+
+def _network_segment_report_sections(
+    view: FirewallaNetworkSegmentView,
+    *,
+    network: FirewallaNetwork,
+    dhcp_config: FirewallaNetworkDhcpConfig | None,
+    host_details: Sequence[FirewallaNetworkHostDetail],
+    include_hosts: bool,
+) -> JsonObjectType:
+    """Build the section payload for one configuration-oriented report.
+
+    The `hosts` section is present only when explicitly included, and never as an
+    empty placeholder, so its absence is unambiguous.
+    """
+    sections: dict[str, object] = {
+        "configuration": {
+            "kind": network.kind.value,
+            "interface_name": view.interface_name,
+            "vlan_id": network.vlan_id,
+            "ports": list(network.ports),
+            "enabled": network.enabled,
+            "mdns_relay": network.mdns_relay,
+            "ssdp_relay": network.ssdp_relay,
+            "block_icmp": network.block_icmp,
+            "type": view.network_type,
+            "monitoring": view.monitoring,
+            "active": view.active,
+            "ready": view.ready,
+            "pending_test": view.pending_test,
+            "policy": cast(JsonObjectType | None, view.policy),
+        },
+        "usage": _serialize_unified_usage_summary(network.usage),
+        "addressing": {
+            "gateway": view.gateway,
+            "gateway6": view.gateway6,
+            "route_id": view.route_id,
+            "ipv4_addresses": list(view.ipv4_addresses),
+            "ipv4_subnets": list(view.ipv4_subnets),
+            "ipv6_addresses": list(view.ipv6_addresses),
+            "ipv6_subnets": list(view.ipv6_subnets),
+            "route4_subnets": list(view.route4_subnets),
+            "route6_subnets": list(view.route6_subnets),
+        },
+        "dns": {
+            "servers": list(view.dns_servers),
+            "servers6": list(view.dns6_servers),
+            "original_servers": list(view.original_dns_servers),
+            "original_servers6": list(view.original_dns6_servers),
+        },
+        "dhcp": _serialize_network_dhcp_config(dhcp_config),
+    }
+    if include_hosts:
+        sections["hosts"] = {
+            "count": len(host_details),
+            "items": [
+                _serialize_network_host_detail(host_detail)
+                for host_detail in host_details
+            ],
+        }
+    return cast(JsonObjectType, {"sections": sections})
 
 
 def _serialize_network_segment_usage(
@@ -3013,7 +3347,16 @@ def _resolve_usage_history_target(
             },
         )
 
-    groups = entry.runtime_data.integration_manager.get_groups()
+    # Group scope. The tag collection holds plain groups and user affiliations
+    # together, and a user entry carries the user's own name, so filtering to
+    # plain groups is what keeps a group-scoped request from resolving to a
+    # user's backing tag and returning that user's usage labelled as a group.
+    # Users resolve through the user branch above, not here.
+    groups = [
+        group
+        for group in entry.runtime_data.integration_manager.get_groups()
+        if group.kind == _MEMBERSHIP_KIND_GROUP
+    ]
     exact_match = next(
         (group for group in groups if group.group_id == scope_target),
         None,
@@ -3071,6 +3414,486 @@ async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectTy
     }
 
 
+async def _async_handle_get_rules(call: ServiceCall) -> JsonObjectType:
+    """Return the live policy rules as a flat, selectable list.
+
+    Defaults to user-visible rules: product-owned DAP and family rules, and
+    rules owned by a Firewalla subsystem (the alarm-intel auto-blocks), are
+    hidden because including them buries the rules a user manages.
+    `include_purpose` and `include_system_managed` opt each set back in.
+    Filters are applied server-side so a caller can ask a narrow question
+    without pulling the whole rule table.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    include_purpose = cast(list[str], call.data.get(SERVICE_FIELD_INCLUDE_PURPOSE, []))
+    include_system_managed = cast(
+        bool, call.data.get(SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED, False)
+    )
+    live_rules = entry.runtime_data.rule_manager.get_rules()
+    evaluations = build_switch_rule_evaluations_for_rules(live_rules)
+    rules = [
+        rule
+        for rule in live_rules
+        if _rule_matches_filters(
+            rule,
+            call.data,
+            include_purpose=include_purpose,
+            include_system_managed=include_system_managed,
+            raw_extras=evaluations[rule.rule_id].raw_extras,
+        )
+    ]
+    return {
+        "config_entry_id": entry.entry_id,
+        "rules": [_serialize_rule_summary(rule) for rule in rules],
+    }
+
+
+def _rule_matches_filters(
+    rule: FirewallaPolicyRule,
+    data: Mapping[str, Any],
+    *,
+    include_purpose: list[str],
+    include_system_managed: bool,
+    raw_extras: Mapping[str, object],
+) -> bool:
+    """Return whether one rule passes the default exclusion and every filter."""
+    if not is_user_visible_rule(rule, raw_extras):
+        opted_in_by_purpose = rule.purpose in include_purpose
+        opted_in_by_classification = include_system_managed and is_system_managed_rule(
+            raw_extras
+        )
+        if not (opted_in_by_purpose or opted_in_by_classification):
+            return False
+
+    enabled_filter = cast(bool | None, data.get(SERVICE_FIELD_ENABLED))
+    if enabled_filter is not None and rule.enabled is not enabled_filter:
+        return False
+
+    action_filter = cast(str | None, data.get(SERVICE_FIELD_ACTION))
+    if action_filter is not None and rule.action != action_filter:
+        return False
+
+    target_type_filter = cast(str | None, data.get(SERVICE_FIELD_TARGET_TYPE))
+    if target_type_filter is not None and rule.target_type != target_type_filter:
+        return False
+
+    applies_to_filter = cast(str | None, data.get(SERVICE_FIELD_APPLIES_TO))
+    return not (
+        applies_to_filter is not None and applies_to_filter not in rule.applies_to
+    )
+
+
+def _build_llm_access_note(mode: str) -> str:
+    """Return what the current AI access level does and does not reach.
+
+    Written from the active mode rather than as fixed text: a static "raise
+    access for rules and alarms" line is false once the user is in `read_only`
+    or above, and would have the assistant tell someone to unlock what they
+    already have. It also names the next tier, so the assistant can answer
+    "what else could you do?" without guessing.
+    """
+    if mode == LLM_TOOL_MODE_OFF:
+        return (
+            "AI tool access is off; no Firewalla tools are registered. The user "
+            "can enable it in the integration options."
+        )
+    if mode == LLM_TOOL_MODE_SUMMARY_ONLY:
+        return (
+            "This report is intentionally limited to counts, network names, and "
+            "performance metrics. For device names and addresses, rules, alarms, "
+            "or usage detail, the user must raise Firewalla's AI access level to "
+            "Read only in the integration options."
+        )
+    if mode == LLM_TOOL_MODE_READ_ONLY:
+        return (
+            "Read-only access. Device names, addresses, rules, alarms, and usage "
+            "detail are available. To change anything, the user must raise access "
+            "to Read and control; Full additionally allows destructive actions."
+        )
+    if mode == LLM_TOOL_MODE_READ_AND_CONTROL:
+        return (
+            "Read and reversible control access. Destructive actions (deleting a "
+            "host, rule, or alarm, and bulk archive) are NOT available; the user "
+            "must raise access to Full to enable them, and they cannot be undone."
+        )
+    return (
+        "Full access, including destructive actions that cannot be undone. "
+        "Confirm with the user before using them."
+    )
+
+
+def _build_network_overview_entries(
+    entry: FirewallaConfigEntry,
+) -> list[JsonObjectType]:
+    """Return one entry per network with its device counts.
+
+    Device counts are computed from the same host inventory and online
+    definition the system-status attributes use, so a network's total plus the
+    global total can never disagree about the same box.
+    """
+    hosts = entry.runtime_data.host_manager.get_hosts()
+    online_window_seconds = (
+        entry.runtime_data.host_manager.watched_device_online_window_seconds
+    )
+    reference_activity = reference_last_active(hosts)
+    online_macs = {
+        host.mac
+        for host in hosts
+        if is_host_online(
+            host,
+            reference_activity=reference_activity,
+            online_window_seconds=online_window_seconds,
+        )
+        is True
+    }
+
+    entries: list[JsonObjectType] = []
+    for network in entry.runtime_data.integration_manager.get_networks():
+        network_hosts = [host for host in hosts if host.network_uuid == network.uuid]
+        online = sum(1 for host in network_hosts if host.mac in online_macs)
+        entries.append(
+            {
+                "uuid": network.uuid,
+                "name": network.name,
+                "kind": network.kind.value,
+                "ipv4_subnets": list(network.ipv4_subnets),
+                "device_count": len(network_hosts),
+                "online": online,
+                "offline": len(network_hosts) - online,
+            }
+        )
+    return entries
+
+
+def _build_wan_overview_entries(
+    entry: FirewallaConfigEntry,
+) -> list[JsonObjectType]:
+    """Return one entry per WAN, with its metrics nested rather than pooled.
+
+    Speed-test and quality records both carry a WAN identity, so nesting them
+    here states that identity once and removes any chance of a reader matching
+    a record to the wrong WAN. Metrics only — never the public IP or ISP.
+    """
+    manager = entry.runtime_data.integration_manager
+    speed_tests = manager.get_speed_test_results(limit=1)
+    quality_samples = manager.get_internet_quality_samples(limit=1)
+
+    entries: list[JsonObjectType] = []
+    for network in manager.get_networks():
+        if network.kind is not FirewallaNetworkKind.WAN:
+            continue
+
+        latest_speed_test = next(
+            (test for test in speed_tests if test.wan_uuid == network.uuid), None
+        )
+        quality = next(
+            (sample for sample in quality_samples if sample.wan_uuid == network.uuid),
+            None,
+        )
+        entries.append(
+            {
+                "uuid": network.uuid,
+                "name": network.name,
+                "kind": network.kind.value,
+                "enabled": network.enabled,
+                "latest_speed_test": (
+                    {
+                        "tested_at": (
+                            dt_util.utc_from_timestamp(
+                                latest_speed_test.tested_at_timestamp
+                            ).isoformat()
+                            if latest_speed_test.tested_at_timestamp is not None
+                            else None
+                        ),
+                        "download_mbps": latest_speed_test.download_mbps,
+                        "upload_mbps": latest_speed_test.upload_mbps,
+                        "latency_ms": latest_speed_test.latency_ms,
+                        "jitter_ms": latest_speed_test.jitter_ms,
+                        "packet_loss_percent": latest_speed_test.packet_loss_percent,
+                    }
+                    if latest_speed_test is not None
+                    else None
+                ),
+                "internet_quality": (
+                    {
+                        "sampled_at": (
+                            dt_util.utc_from_timestamp(quality.timestamp).isoformat()
+                            if quality.timestamp is not None
+                            else None
+                        ),
+                        "ping_latency_ms": quality.ping_latency_ms,
+                        "ping_latency_max_ms": quality.ping_latency_max_ms,
+                        "ping_latency_median_ms": quality.ping_latency_median_ms,
+                        "ping_latency_min_ms": quality.ping_latency_min_ms,
+                        "ping_packet_loss_percent": quality.ping_packet_loss_percent,
+                    }
+                    if quality is not None
+                    else None
+                ),
+            }
+        )
+    return entries
+
+
+def _build_rule_overview_counts(entry: FirewallaConfigEntry) -> JsonObjectType:
+    """Return the rule counts by ownership and visibility."""
+    rules = entry.runtime_data.rule_manager.get_rules()
+    evaluations = build_switch_rule_evaluations_for_rules(rules)
+    visible = 0
+    visible_enabled = 0
+    dap = 0
+    family = 0
+    system_managed = 0
+    for rule in rules:
+        raw_extras = evaluations[rule.rule_id].raw_extras
+        if is_system_managed_rule(raw_extras):
+            system_managed += 1
+        if rule.purpose == RULE_PURPOSE_DAP:
+            dap += 1
+        elif rule.purpose == RULE_PURPOSE_FAMILY:
+            family += 1
+        if is_user_visible_rule(rule, raw_extras):
+            visible += 1
+            if rule.enabled:
+                visible_enabled += 1
+
+    return {
+        "total": len(rules),
+        "visible": visible,
+        "visible_enabled": visible_enabled,
+        "dap": dap,
+        "family": family,
+        "system_managed": system_managed,
+    }
+
+
+async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType:
+    """Return the curated system summary.
+
+    Counts, network identities, and performance metrics — never a record
+    collection, so the payload cannot grow with the size of the network. The
+    group and user identities the other tools need are only included when
+    ``include: ["identifiers"]`` is requested; the anonymous tier registers a
+    tool that cannot request them, so nothing is filtered at runtime.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    include = cast(list[str], call.data.get(SERVICE_FIELD_INCLUDE, []))
+    include_identifiers = "identifiers" in include
+
+    runtime_data = entry.runtime_data
+    system_status = runtime_data.integration_manager.system_status
+    system_info = runtime_data.integration_manager.system_info
+    snapshot = runtime_data.coordinator.data
+
+    groups = snapshot.groups if snapshot is not None else ()
+    users = snapshot.users if snapshot is not None else ()
+
+    # The tag collection holds plain groups and user affiliations together. The
+    # `groups` section reports only the plain groups, so its count matches what a
+    # caller means by "groups"; the user population has its own section below.
+    group_entries = [group for group in groups if group.kind == _MEMBERSHIP_KIND_GROUP]
+
+    groups_section: JsonObjectType = {"count": len(group_entries)}
+    if include_identifiers:
+        groups_section["items"] = cast(
+            JsonValueType,
+            [
+                {"id": group.group_id, "name": group.name, "kind": group.kind}
+                for group in group_entries
+            ],
+        )
+
+    users_section: JsonObjectType = {"count": len(users)}
+    if include_identifiers:
+        users_section["items"] = cast(
+            JsonValueType,
+            [
+                {
+                    "id": user.user_id,
+                    "name": user.name,
+                    "kind": _MEMBERSHIP_KIND_USER,
+                    "affiliated_group_id": user.affiliated_group_id,
+                    "affiliated_group_name": user.affiliated_group_name,
+                }
+                for user in users
+            ],
+        )
+
+    network_entries = _build_network_overview_entries(entry)
+    wan_entries = _build_wan_overview_entries(entry)
+    mode = get_llm_tool_mode(entry.options)
+    return {
+        "config_entry_id": entry.entry_id,
+        "llm_access": {
+            "mode": mode,
+            "note": _build_llm_access_note(mode),
+        },
+        "appliance": {
+            "model": system_info.model,
+            "software_version": system_info.software_version,
+            "firmware_release_type": (
+                system_status.firmware_release_type if system_status else None
+            ),
+            "box_image_codename": (
+                system_status.box_image_codename if system_status else None
+            ),
+            "box_image_version": (
+                system_status.box_image_version if system_status else None
+            ),
+            "cloud_connected": (
+                system_status.cloud_connected if system_status else None
+            ),
+            "booting_complete": (
+                system_status.booting_complete if system_status else None
+            ),
+            "uptime_seconds": system_status.uptime_seconds if system_status else None,
+            "timezone_name": system_status.timezone_name if system_status else None,
+            "cpu_usage_1m": system_status.cpu_usage_1m if system_status else None,
+            "memory_usage_percent": (
+                system_status.memory_usage_percent if system_status else None
+            ),
+            "memory_free_mb": (system_status.memory_free_mb if system_status else None),
+            "disk_usage_percent_by_mount": (
+                cast(
+                    JsonValueType,
+                    system_status.disk_usage_percent_by_mount,
+                )
+                if system_status
+                else None
+            ),
+        },
+        "devices": {
+            "total": runtime_data.host_manager.count_total_devices(),
+            "online": runtime_data.host_manager.count_online_devices(),
+            "offline": runtime_data.host_manager.count_offline_devices(),
+        },
+        "vpn_devices": {
+            "total": runtime_data.host_manager.count_vpn_total_devices(),
+            "online": runtime_data.host_manager.count_vpn_online_devices(),
+            "offline": runtime_data.host_manager.count_vpn_offline_devices(),
+        },
+        "networks": {
+            "count": len(network_entries),
+            "items": cast(JsonValueType, network_entries),
+        },
+        "groups": groups_section,
+        "users": users_section,
+        "rules": _build_rule_overview_counts(entry),
+        "alarms": {
+            "active": runtime_data.alarm_manager.active_count,
+            "archived": runtime_data.alarm_manager.archived_count,
+        },
+        "wan": {
+            "count": len(wan_entries),
+            "items": cast(JsonValueType, wan_entries),
+        },
+    }
+
+
+async def _async_handle_sync_runtime(call: ServiceCall) -> JsonObjectType:
+    """Poll the Firewalla box now and report the resulting snapshot time.
+
+    Requests within the coordinator's debounce window are coalesced, so calling
+    this alongside other tools still costs at most one box poll. The returned
+    timestamp is what a caller can use to confirm the snapshot moved.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    await _async_refresh_runtime_state(entry)
+    updated_at = entry.runtime_data.coordinator.last_runtime_data_updated_at
+    return {
+        "config_entry_id": entry.entry_id,
+        "synced": True,
+        "synced_at": (
+            datetime.fromtimestamp(updated_at.timestamp(), UTC).isoformat()
+            if updated_at is not None
+            else None
+        ),
+        "synced_at_timestamp": (
+            updated_at.timestamp() if updated_at is not None else None
+        ),
+    }
+
+
+async def _async_handle_create_rule(call: ServiceCall) -> JsonObjectType:
+    """Create a policy rule, optionally scoped to an alarm's target.
+
+    Blocking a target from an alarm is ordinary rule creation: the alarm is used
+    as the rule source and its id is recorded as a back-reference.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
+    target_type = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_TYPE))
+    target_value = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_VALUE))
+
+    if alarm_id is not None:
+        alarm = entry.runtime_data.alarm_manager.get_alarm(alarm_id)
+        if alarm is None:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
+            )
+        template = FirewallaRuleTemplate.from_alarm(alarm)
+        if template is None:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
+            )
+    else:
+        if target_type is None or target_value is None:
+            raise _service_validation_error(
+                translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
+            )
+        scope_kind = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_KIND))
+        scope_target = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_TARGET))
+        scope = (
+            (scope_target,)
+            if scope_kind == "device" and scope_target is not None
+            else ()
+        )
+        template = FirewallaRuleTemplate(
+            source_rule_id="",
+            name=f"block {target_value}",
+            action=RULE_ACTION_BLOCK,
+            target=target_value,
+            target_type=target_type,
+            scope=scope,
+            dnsmasq_only=True if target_type == "dns" else None,
+        )
+
+    try:
+        new_rule_id = await entry.runtime_data.rule_manager.async_create_rule(template)
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to create Firewalla rule",
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
+        )
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "rule_id": new_rule_id,
+        "action": template.action,
+        "target": template.target,
+        "target_type": template.target_type,
+        "scope": list(template.scope),
+        "alarm_id": template.alarm_id,
+    }
+
+
 async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     """Return active and optionally archived alarms with shared report metadata."""
     entry = _get_loaded_entry(
@@ -3082,6 +3905,9 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     include_archived = cast(bool, call.data[SERVICE_FIELD_INCLUDE_ARCHIVED])
     alarm_type = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_TYPE))
     detail = cast(bool, call.data[SERVICE_FIELD_DETAIL])
+    include_exceptions = cast(
+        bool, call.data.get(SERVICE_FIELD_INCLUDE_EXCEPTIONS, False)
+    )
     try:
         alarms = await entry.runtime_data.alarm_manager.async_get_alarms(
             limit=limit,
@@ -3112,7 +3938,7 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
             note="The local runtime returns the newest records from its retained set.",
         ),
     )
-    return {
+    result: JsonObjectType = {
         "config_entry_id": entry.entry_id,
         "alarms": [
             _serialize_alarm(
@@ -3121,9 +3947,6 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
             )
             for alarm in alarms
         ],
-        "exceptions": [
-            _serialize_alarm_exception(exception) for exception in manager.exceptions
-        ],
         "returned_count": len(alarms),
         "active_count": manager.active_count,
         "archived_count": manager.archived_count,
@@ -3131,15 +3954,17 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
         "query": {
             "limit": limit,
             "include_archived": include_archived,
-            "type": alarm_type,
+            "alarm_type": alarm_type,
             "detail": detail,
+            "include_exceptions": include_exceptions,
         },
         "metadata": _serialize_report_metadata(
             applied={
                 "limit": limit,
                 "include_archived": include_archived,
-                "type": alarm_type,
+                "alarm_type": alarm_type,
                 "detail": detail,
+                "include_exceptions": include_exceptions,
             },
             provenance=provenance,
         ),
@@ -3154,6 +3979,14 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
             )
         ),
     }
+    # The silence table is the only unbounded part of this response, so it is
+    # opt-in: each alarm already carries its own `exception_id`, and the full
+    # table is wanted only when hunting a silence to remove.
+    if include_exceptions:
+        result["exceptions"] = [
+            _serialize_alarm_exception(exception) for exception in manager.exceptions
+        ]
+    return result
 
 
 def _get_alarm_scope_target(call: ServiceCall) -> tuple[str, str | None]:
@@ -3309,8 +4142,14 @@ async def _async_handle_delete_rule(call: ServiceCall) -> None:
         )
 
 
-async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectType:
-    """Return the current host identity mapping for Firewalla hosts."""
+async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
+    """Return the current host identity mapping for Firewalla hosts.
+
+    `summary` drops derivable and provenance-only fields (`dns_fqdn`,
+    `dhcp_name`, nested `ip_assignment`); `full` returns the complete shape.
+    Filters narrow the result server-side so "find one device" does not require
+    pulling every host.
+    """
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
@@ -3321,12 +4160,40 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
+    detail = cast(str, call.data.get(SERVICE_FIELD_DETAIL, "summary"))
     raw_host_lookup = _build_raw_host_lookup(entry)
+    # One online definition for the whole surface: the same activity-window rule
+    # the system-status counts and the overview's vpn_devices use. The filter and
+    # the exposed `online` field both read from it, so "how many are connected?"
+    # cannot be answered two different ways depending on which tool was asked.
+    all_hosts = entry.runtime_data.host_manager.get_hosts()
+    online_window_seconds = (
+        entry.runtime_data.host_manager.watched_device_online_window_seconds
+    )
+    reference_activity = reference_last_active(all_hosts)
+    user_filter = cast(str | None, call.data.get(SERVICE_FIELD_USER))
+    user_tag_ids = (
+        _resolve_user_filter_tag_ids(entry, user_filter)
+        if user_filter is not None
+        else frozenset()
+    )
     hosts: list[JsonValueType] = []
     for host in sorted(
         entry.runtime_data.host_manager.get_hosts(),
         key=lambda host: host.mac,
     ):
+        is_online = is_host_online(
+            host,
+            reference_activity=reference_activity,
+            online_window_seconds=online_window_seconds,
+        )
+        if not _host_matches_filters(
+            host,
+            call.data,
+            is_online=is_online,
+            user_tag_ids=user_tag_ids,
+        ):
+            continue
         is_mac_host = _supports_wake_on_lan(host.mac)
         raw_host = raw_host_lookup.get(host.mac)
         raw_network_uuid = (
@@ -3334,28 +4201,121 @@ async def _async_handle_get_host_name_mapping(call: ServiceCall) -> JsonObjectTy
             if isinstance(raw_host, dict)
             else None
         )
-        hosts.append(
-            {
-                "host_id": host.mac,
-                "mac": host.mac if is_mac_host else None,
-                "ip_address": host.ip_address,
-                "host_name": host.host_name,
-                "dns_hostname": host.dns_hostname,
-                "dns_domain": host.dns_domain,
-                "dns_fqdn": host.dns_fqdn,
-                "dhcp_name": host.dhcp_name,
-                "group_name": host.group_name,
-                "host_device_type": host.host_device_type,
-                "ip_assignment": _serialize_network_host_ip_assignment(
-                    _resolve_host_ip_assignment(raw_host, network_uuid=raw_network_uuid)
-                    if raw_network_uuid is not None
-                    else None
-                ),
-                "kind": "mac_host" if is_mac_host else "pseudo_host",
-            }
+        ip_assignment = (
+            _resolve_host_ip_assignment(raw_host, network_uuid=raw_network_uuid)
+            if raw_network_uuid is not None
+            else None
         )
+        record: dict[str, object] = {
+            "host_id": host.mac,
+            "mac": host.mac if is_mac_host else None,
+            "ip_address": host.ip_address,
+            "host_name": host.host_name,
+            "dns_hostname": host.dns_hostname,
+            "dns_domain": host.dns_domain,
+            "group_name": host.group_name,
+            "host_device_type": host.host_device_type,
+            "kind": "mac_host" if is_mac_host else "pseudo_host",
+            "network_uuid": host.network_uuid or raw_network_uuid,
+            "network_name": host.network_name,
+            "online": is_online,
+            "last_active": host.last_active,
+            "vpn_client": (
+                {
+                    "profile_id": host.vpn_client.profile_id,
+                    "state": host.vpn_client.state,
+                }
+                if host.vpn_client is not None
+                else None
+            ),
+        }
+        if detail == "full":
+            record["dns_fqdn"] = host.dns_fqdn
+            record["dhcp_name"] = host.dhcp_name
+            record["ip_assignment"] = _serialize_network_host_ip_assignment(
+                ip_assignment
+            )
+        else:
+            record["ip_assignment_mode"] = ip_assignment.mode if ip_assignment else None
+            record["reserved_ipv4"] = (
+                ip_assignment.reserved_ipv4 if ip_assignment else None
+            )
+        hosts.append(cast(JsonValueType, record))
 
     return {"hosts": hosts}
+
+
+def _resolve_user_filter_tag_ids(
+    entry: FirewallaConfigEntry,
+    user_filter: str,
+) -> frozenset[str]:
+    """Resolve a `get_hosts` user filter to that user's backing tag ids.
+
+    Accepts a user id or a user name. Returns the user's affiliated backing tag,
+    which is what a host assigned to that user carries in `group_ids`. An
+    unknown user resolves to nothing, so the call returns no hosts rather than
+    raising, which is how the filter behaved before.
+    """
+    snapshot = entry.runtime_data.coordinator.data
+    if snapshot is None:
+        return frozenset()
+
+    folded = user_filter.casefold()
+    for user in snapshot.users:
+        if (
+            user.user_id == user_filter or user.name.casefold() == folded
+        ) and user.affiliated_group_id is not None:
+            return frozenset({user.affiliated_group_id})
+    return frozenset()
+
+
+def _host_matches_filters(
+    host: FirewallaHostRuntime,
+    data: Mapping[str, Any],
+    *,
+    is_online: bool | None,
+    user_tag_ids: frozenset[str] = frozenset(),
+) -> bool:
+    """Return whether one host satisfies every supplied filter."""
+    name_filter = cast(str | None, data.get(SERVICE_FIELD_HOST_NAME))
+    if (
+        name_filter is not None
+        and name_filter.casefold() not in (host.host_name or "").casefold()
+    ):
+        return False
+
+    mac_filter = cast(str | None, data.get(SERVICE_FIELD_HOST_MAC))
+    if mac_filter is not None and host.mac.casefold() != mac_filter.casefold():
+        return False
+
+    group_filter = cast(str | None, data.get(SERVICE_FIELD_GROUP_NAME))
+    if (
+        group_filter is not None
+        and group_filter.casefold() != (host.group_name or "").casefold()
+    ):
+        return False
+
+    kind_filter = cast(str | None, data.get(SERVICE_FIELD_KIND))
+    if kind_filter is not None:
+        host_kind = "mac_host" if _supports_wake_on_lan(host.mac) else "pseudo_host"
+        if host_kind != kind_filter:
+            return False
+
+    network_filter = cast(str | None, data.get(SERVICE_FIELD_NETWORK_UUID))
+    if network_filter is not None and host.network_uuid != network_filter:
+        return False
+
+    online_filter = cast(bool | None, data.get(SERVICE_FIELD_ONLINE))
+    if online_filter is not None and is_online is not online_filter:
+        return False
+
+    user_filter = cast(str | None, data.get(SERVICE_FIELD_USER))
+    if user_filter is None or user_filter in host.user_ids:
+        return True
+    # A device assigned to a user carries the user's affiliated backing tag in
+    # `group_ids`. The host-level `userTags` array that feeds `user_ids` is always
+    # empty on a real box, so matching on `user_ids` alone never matches anything.
+    return any(tag_id in user_tag_ids for tag_id in host.group_ids)
 
 
 async def _async_handle_run_internet_speed_test(call: ServiceCall) -> JsonObjectType:
@@ -3516,6 +4476,146 @@ async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
             "item": "host:delete",
         },
         "results": results,
+    }
+
+
+def _find_device_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> list[str]:
+    """Return the ids of a device's own device-scoped rules.
+
+    The app deletes all of these when the device's membership changes, so the
+    device follows only its group's rules from then on. Confirmed by capture on
+    2026-10-02: assigning an unassigned device to a group produced
+    ``policy:delete`` for all four of its rules -- two enabled user rules and two
+    disabled Active Protect rules -- followed by the tags write, in one batch.
+
+    A rule belongs to the device when the device's MAC is the ``target`` or
+    appears in ``scope``. That is deliberately broader than ``purpose == "dap"``:
+    an earlier version keyed on ``dap`` and would have left the device's enabled
+    user rules behind, which is the opposite of what the app does.
+    """
+    snapshot = entry.runtime_data.coordinator.data
+    if snapshot is None:
+        return []
+
+    mac = host_mac.upper()
+    return [
+        rule.rule_id
+        for rule in snapshot.policy_rules
+        if (rule.target_type == RULE_TARGET_TYPE_MAC and rule.target.upper() == mac)
+        or any(scope.upper() == mac for scope in rule.scope)
+    ]
+
+
+async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType:
+    """Set or clear the single group or user membership of one device.
+
+    A device holds exactly one membership, so this replaces whatever was there.
+    Assigning a group to a device that is currently assigned to a user therefore
+    removes the user assignment rather than adding alongside it.
+    """
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    host = _resolve_requested_host(
+        entry,
+        host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
+        host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
+        host_name=cast(str | None, call.data.get(SERVICE_FIELD_HOST_NAME)),
+        required=True,
+    )
+    assert host is not None
+
+    clear = cast(bool, call.data[SERVICE_FIELD_CLEAR])
+    target = _resolve_membership_target(
+        entry,
+        group_name=cast(str | None, call.data.get(SERVICE_FIELD_GROUP_NAME)),
+        group_id=cast(str | None, call.data.get(SERVICE_FIELD_GROUP_ID)),
+        user_name=cast(str | None, call.data.get(SERVICE_FIELD_USER_NAME)),
+        user_id=cast(str | None, call.data.get(SERVICE_FIELD_USER_ID)),
+        clear=clear,
+    )
+
+    previous_tag_id = host.group_ids[0] if host.group_ids else None
+    before = _describe_membership(entry, previous_tag_id)
+    after = (
+        None
+        if target is None
+        else {"kind": target.kind, "id": target.group_id, "name": target.name}
+    )
+    policy_value = _build_host_membership_policy_value(
+        target.group_id if target is not None else None
+    )
+
+    # The app deletes the device's own rules as the first step of the same batch,
+    # before the tags write, so the device follows only its group's rules from then
+    # on. Order matters: the capture shows the deletes ahead of the policy write.
+    device_rule_ids = _find_device_rule_ids(entry, host.mac)
+    for rule_id in device_rule_ids:
+        try:
+            await entry.runtime_data.rule_manager.async_delete_rule(rule_id)
+        except FirewallaApiError as err:
+            _raise_runtime_service_error(
+                err,
+                log_message="Failed to clear device rules",
+                translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
+            )
+
+    try:
+        command_response = (
+            await entry.runtime_data.integration_manager.async_set_host_policy(
+                host.mac,
+                policy_value,
+            )
+        )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to update host membership",
+            translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
+        )
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "refreshed": refresh_requested,
+        "target": _serialize_report_target(
+            FirewallaReportTarget(
+                kind="host",
+                id=host.mac,
+                name=host.host_name,
+            )
+        ),
+        "query": {
+            "clear": clear,
+            "group_id": call.data.get(SERVICE_FIELD_GROUP_ID),
+            "group_name": call.data.get(SERVICE_FIELD_GROUP_NAME),
+            "user_id": call.data.get(SERVICE_FIELD_USER_ID),
+            "user_name": call.data.get(SERVICE_FIELD_USER_NAME),
+            "host_id": call.data.get(SERVICE_FIELD_HOST_ID),
+            "host_mac": call.data.get(SERVICE_FIELD_HOST_MAC),
+            "host_name": call.data.get(SERVICE_FIELD_HOST_NAME),
+            "refresh": refresh_requested,
+        },
+        "membership": {
+            "before": cast(JsonValueType, before),
+            "after": cast(JsonValueType, after),
+            "changed": before != after,
+        },
+        "device_rules": {
+            "removed": cast(JsonValueType, device_rule_ids),
+        },
+        "command": {
+            "item": "policy",
+            "target": host.mac,
+            "value": cast(JsonObjectType, policy_value),
+        },
+        "command_response": cast(JsonObjectType, command_response),
     }
 
 
@@ -3924,7 +5024,8 @@ async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectT
         "refreshed": refresh_requested,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "count": len(serialized_results),
-        "latest": serialized_results[0] if serialized_results else None,
+        # Newest first. `latest` used to repeat `results[0]` here, which doubled
+        # the payload and made `limit: 1` return the same record twice.
         "results": serialized_results,
     }
 
@@ -3963,7 +5064,7 @@ async def _async_handle_get_internet_quality_report(
         "refreshed": refresh_requested,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "count": len(serialized_samples),
-        "latest": serialized_samples[0] if serialized_samples else None,
+        # Newest first, as with speed tests: no separate `latest` copy.
         "samples": serialized_samples,
     }
 
@@ -4082,7 +5183,7 @@ def _resolve_wan_data_usage_inputs(
     current_periods = (
         tuple(str(period) for period in cast(list[str], raw_current_periods))
         if raw_current_periods is not None
-        else (() if history_count > 0 else ("month",))
+        else (() if history_count > 0 else DEFAULT_WAN_USAGE_CURRENT_PERIODS)
     )
 
     if history_count > 0 and history_period is None:
@@ -4221,7 +5322,9 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
     ) = _resolve_wan_data_usage_inputs(call)
     time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
     integration_manager = entry.runtime_data.integration_manager
-    manager_detail = "daily" if "subperiods" in applied_include else "summary"
+    manager_detail = (
+        "daily" if ("subperiods" in applied_include or detail == "full") else "summary"
+    )
 
     try:
         usage_reports = await integration_manager.async_get_wan_data_usage_reports(
@@ -4379,6 +5482,10 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
         view=network_views[0],
         network=full_network,
         refresh_requested=refresh_requested,
+        applied_include=_normalize_report_include(
+            call.data.get(SERVICE_FIELD_INCLUDE),
+            allowed=("hosts",),
+        ),
     )
 
 
@@ -4399,11 +5506,6 @@ async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObje
         network_uuid=call.data.get(SERVICE_FIELD_NETWORK_UUID),
         network_name=call.data.get(SERVICE_FIELD_NETWORK_NAME),
     )
-    if not isinstance(call.data.get(SERVICE_FIELD_WINDOW), str):
-        raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_NETWORK_USAGE_WINDOW_REQUIRED,
-        )
-
     window = cast(str, call.data[SERVICE_FIELD_WINDOW])
     top_n = cast(int, call.data[SERVICE_FIELD_TOP_N])
     requested_include = _normalize_report_include(
@@ -4466,6 +5568,8 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
             wan_uuid=wan.uuid if wan is not None else None,
             limit=limit,
             offset=offset,
+            window_days=cast(int, call.data[SERVICE_FIELD_WINDOW_DAYS]),
+            include_dns=cast(bool, call.data[SERVICE_FIELD_INCLUDE_DNS]),
         )
     except FirewallaApiError as err:
         _raise_runtime_service_error(
@@ -4484,6 +5588,8 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
         "query": {
             "limit": limit,
             "offset": offset,
+            "window_days": cast(int, call.data[SERVICE_FIELD_WINDOW_DAYS]),
+            "include_dns": cast(bool, call.data[SERVICE_FIELD_INCLUDE_DNS]),
         },
         "count": len(serialized_events),
         "results": serialized_events,
@@ -4631,8 +5737,8 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         True,
     ),
     (
-        SERVICE_GET_HOST_NAME_MAPPING,
-        _async_handle_get_host_name_mapping,
+        SERVICE_GET_HOSTS,
+        _async_handle_get_hosts,
         GET_HOST_NAME_MAPPING_SCHEMA,
         SupportsResponse.ONLY,
         False,
@@ -4715,6 +5821,13 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         True,
     ),
     (
+        SERVICE_SET_HOST_MEMBERSHIP,
+        _async_handle_set_host_membership,
+        SET_HOST_MEMBERSHIP_SCHEMA,
+        SupportsResponse.ONLY,
+        True,
+    ),
+    (
         SERVICE_GET_SPEED_TEST_RESULTS,
         _async_handle_get_speed_test_results,
         GET_SPEED_TEST_RESULTS_SCHEMA,
@@ -4783,6 +5896,34 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         GET_ALARMS_SCHEMA,
         SupportsResponse.ONLY,
         False,
+    ),
+    (
+        SERVICE_GET_RULES,
+        _async_handle_get_rules,
+        GET_RULES_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_GET_SYSTEM_OVERVIEW,
+        _async_handle_get_system_overview,
+        GET_SYSTEM_OVERVIEW_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_SYNC_RUNTIME,
+        _async_handle_sync_runtime,
+        SYNC_RUNTIME_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_CREATE_RULE,
+        _async_handle_create_rule,
+        CREATE_RULE_SCHEMA,
+        SupportsResponse.ONLY,
+        True,
     ),
     (
         SERVICE_ARCHIVE_ALARMS,

@@ -5,13 +5,15 @@ from __future__ import annotations
 # pylint: disable=too-many-lines
 import logging
 from types import SimpleNamespace
-from typing import cast
+from typing import Final, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.translation import async_get_translations
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.api import FirewallaApiError
@@ -25,6 +27,7 @@ from custom_components.firewalla_local.api.models import (
     GeneratedKeys,
 )
 from custom_components.firewalla_local.config_flow import (
+    _OPTION_RETURN_TO_MAIN_MENU,
     FirewallaOptionsFlow,
     _resolve_default_pairing_host,
 )
@@ -38,6 +41,7 @@ from custom_components.firewalla_local.const import (
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
     CONF_QR_JSON,
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
@@ -50,6 +54,7 @@ from custom_components.firewalla_local.const import (
     DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_ENABLE_SSID_ENTITIES,
     DEFAULT_FIREWALLA_HOST,
+    DEFAULT_LLM_TOOL_MODE,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DEFAULT_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
     DOMAIN,
@@ -97,6 +102,7 @@ def _expected_options(overrides: dict[str, object] | None = None) -> dict[str, o
         CONF_WATCHED_USERS: [],
         CONF_ENABLE_NETWORK_ENTITIES: DEFAULT_ENABLE_NETWORK_ENTITIES,
         CONF_ENABLE_SSID_ENTITIES: DEFAULT_ENABLE_SSID_ENTITIES,
+        CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE,
     }
     if overrides:
         payload.update(overrides)
@@ -2422,6 +2428,131 @@ async def test_system_settings_returns_to_main_menu_after_save(hass) -> None:
             CONF_WATCHED_DEVICE_ONLINE_WINDOW: 6,
         }
     )
+
+
+_SETTINGS_FIELDS_WITHOUT_HELP: Final = frozenset(
+    {
+        # Self-evident toggles and the back button; help text would only restate
+        # the label.
+        "enable_network_entities",
+        "enable_ssid_entities",
+        "return_to_main_menu",
+    }
+)
+
+
+async def test_every_settings_field_explains_what_it_affects(
+    hass: HomeAssistant,
+) -> None:
+    """Each settings field carries help text unless the label is self-evident.
+
+    The two window fields are easy to confuse and neither label says what it
+    drives: one is the connectivity tolerance behind the device counters, the
+    VPN peer counts and the device list, the other is the device tracker's
+    presence window. The description is the only place that distinction is
+    visible, so an undescribed field is a real gap rather than a style choice.
+
+    Resolved through HA's own translation loader, so a mistyped key fails here
+    instead of silently rendering no help text for a user.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.config_flow.llm_tools_supported",
+        return_value=True,
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "general_options"},
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "system_settings"},
+        )
+
+    fields = {
+        marker.schema
+        for marker in result["data_schema"].schema
+        if isinstance(getattr(marker, "schema", None), str)
+    }
+    assert fields, "the settings step must expose fields"
+
+    translations = await async_get_translations(
+        hass, "en", "options", integrations={DOMAIN}
+    )
+    missing = sorted(
+        field
+        for field in fields
+        if field not in _SETTINGS_FIELDS_WITHOUT_HELP
+        and not translations.get(
+            f"component.{DOMAIN}.options.step.system_settings.data_description.{field}"
+        )
+    )
+    assert missing == [], f"settings fields with no help text: {missing}"
+
+    # An allowlist entry for a field that no longer exists would quietly hide a
+    # future gap, so the exemptions have to stay real.
+    stale = sorted(_SETTINGS_FIELDS_WITHOUT_HELP - fields)
+    assert stale == [], f"exempt fields that are not in the form: {stale}"
+
+
+@pytest.mark.parametrize("llm_supported", [True, False])
+async def test_settings_form_puts_the_back_button_last(
+    hass: HomeAssistant, llm_supported: bool
+) -> None:
+    """The back button stays at the bottom, whatever the AI field does.
+
+    The AI access selector is appended only on supported Core, and it used to be
+    appended *after* the back button, which pushed the back button into the
+    middle of the form on exactly the systems where the AI field appears. Both
+    branches are covered because the failure only shows up in one of them.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (fire.walla)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "fire.walla",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.config_flow.llm_tools_supported",
+        return_value=llm_supported,
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "general_options"},
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={"next_step_id": "system_settings"},
+        )
+
+    fields = [marker.schema for marker in result["data_schema"].schema]
+    assert fields[-1] == _OPTION_RETURN_TO_MAIN_MENU, f"field order: {fields}"
+    assert (CONF_LLM_TOOL_MODE in fields) is llm_supported
 
 
 async def test_system_settings_can_return_to_main_menu_without_saving(hass) -> None:

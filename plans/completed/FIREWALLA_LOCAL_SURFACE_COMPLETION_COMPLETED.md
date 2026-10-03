@@ -471,7 +471,7 @@ So the app's "security / abnormal upload / open port" filters map to **`ALARM_IN
 
 ### Phase 4 — MCP implementation — DEFERRED
 
-**Status: DEFERRED to `plans/in-process/FIREWALLA_LOCAL_MCP_CAPABILITIES_IN-PROCESS.md`**, created 2026-09-30 when this initiative closed.
+**Status: DEFERRED to `plans/completed/FIREWALLA_LOCAL_MCP_CAPABILITIES_COMPLETED.md`**, created 2026-09-30 when this initiative closed.
 
 Phase 4 is a distinct, self-contained body of work — a new version-gated LLM/MCP surface with its own platform constraints, safety design and test strategy — so it was split into its own plan rather than holding up the release of Phases 1–3.
 

@@ -12,6 +12,7 @@ from ..api import FirewallaApiClient
 from ..const import (
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
+    HIDDEN_RULE_PURPOSES,
     RULE_TARGET_TAG,
 )
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
@@ -45,6 +46,7 @@ _RAW_RULE_TARGET_NAME_KEY: Final = "target_name"
 _RAW_RULE_TYPE_KEY: Final = "type"
 _RAW_RULE_UPDATED_TIME_KEY: Final = "updatedTime"
 _RAW_RULE_IDLE_TS_KEY: Final = "idleTs"
+_RAW_RULE_AID_KEY: Final = "aid"
 
 _RULE_MANAGEMENT_CLASSIFICATION_SYSTEM: Final = "system_managed"
 _RULE_MANAGEMENT_CLASSIFICATION_USER: Final = "user_managed"
@@ -209,6 +211,21 @@ def _get_system_managed_reasons(raw_extras: Mapping[str, object]) -> list[str]:
 def is_system_managed_rule(raw_extras: Mapping[str, object]) -> bool:
     """Return whether direct raw rule attributes mark the rule as system-managed."""
     return bool(_get_system_managed_reasons(raw_extras))
+
+
+def is_user_visible_rule(
+    rule: FirewallaPolicyRule,
+    raw_extras: Mapping[str, object],
+) -> bool:
+    """Return whether a rule belongs to the default user-visible set.
+
+    User-visible means user-managed and not one of the product-owned purposes.
+    This is the single definition behind both the runtime inventory's
+    ``visible_rules`` and the ``get_rules`` default, so the two cannot drift.
+    """
+    return rule.purpose not in HIDDEN_RULE_PURPOSES and not is_system_managed_rule(
+        raw_extras
+    )
 
 
 def is_switch_rule_candidate(
@@ -493,6 +510,10 @@ class FirewallaRuleManager(FirewallaBaseManager):
             )
         )
 
+    def get_rules(self) -> tuple[FirewallaPolicyRule, ...]:
+        """Return every live policy rule known to the manager, ordered by id."""
+        return tuple(sorted(self._rule_index.values(), key=lambda rule: rule.rule_id))
+
     def get_switch_candidate_choices(self) -> dict[str, str]:
         """Return selectable rule choices for the options flow."""
         return {
@@ -609,6 +630,52 @@ class FirewallaRuleManager(FirewallaBaseManager):
         self._apply_optimistic_rule_update(
             tuple(rule.rule_id for rule in rules), enabled=True, idle_ts=None
         )
+
+    async def async_create_rule(self, template: FirewallaRuleTemplate) -> str | None:
+        """Create one rule from a template and register it optimistically.
+
+        Returns the new rule id when the box reports it. Registering the created
+        rule in the live index lets a same-session delete resolve it without a
+        refresh.
+        """
+        new_rule_id = await self.client.async_create_rule(template)
+        if new_rule_id is not None:
+            self._register_created_rule(new_rule_id, template)
+        return new_rule_id
+
+    def _register_created_rule(
+        self, rule_id: str, template: FirewallaRuleTemplate
+    ) -> None:
+        """Add a newly created rule to the live index and snapshot."""
+        rule = FirewallaPolicyRule(
+            rule_id=rule_id,
+            action=template.action,
+            target=template.target,
+            target_type=template.target_type,
+            direction="bidirection",
+            enabled=True,
+            purpose=None,
+            scope=template.scope,
+            tag_refs=template.tag_refs,
+            target_name=template.name,
+            dnsmasq_only=template.dnsmasq_only,
+            raw_update_payload={
+                _RAW_RULE_PID_KEY: rule_id,
+                _RAW_RULE_ACTION_KEY: template.action,
+                _RAW_RULE_TARGET_KEY: template.target,
+                _RAW_RULE_TYPE_KEY: template.target_type,
+                _RAW_RULE_SCOPE_KEY: list(template.scope),
+                **({_RAW_RULE_AID_KEY: template.alarm_id} if template.alarm_id else {}),
+            },
+        )
+        self._rule_index[rule_id] = rule
+        if (snapshot := self.coordinator.data) is not None:
+            self.coordinator.async_set_updated_data(
+                replace(
+                    snapshot,
+                    policy_rules=(*snapshot.policy_rules, rule),
+                )
+            )
 
     async def async_delete_rule(self, rule_id: str) -> bool:
         """Delete one rule resolved from the live rule index by its ID."""

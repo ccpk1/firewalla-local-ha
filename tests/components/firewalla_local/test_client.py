@@ -599,8 +599,13 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
     assert rules[5].dnsmasq_only is True
     assert rules[5].is_temporary is True
     assert snapshot.groups == (
-        FirewallaGroupRuntime(group_id="10", name="KADEN's Devices"),
-        FirewallaGroupRuntime(group_id="12", name="Quarantine"),
+        FirewallaGroupRuntime(
+            group_id="10",
+            name="KADEN",
+            kind="user",
+            user_id="21",
+        ),
+        FirewallaGroupRuntime(group_id="12", name="Quarantine", kind="group"),
     )
 
 
@@ -1164,7 +1169,7 @@ async def test_get_runtime_snapshot_derives_user_totals_and_group_links() -> Non
             user_id="23",
             name="PAYTON",
             affiliated_group_id="11",
-            affiliated_group_name="PAYTON's Devices",
+            affiliated_group_name="PAYTON",
             total_minutes_today=44,
             unique_minutes_today=42,
             app_usage_today=(
@@ -1243,7 +1248,7 @@ async def test_get_runtime_snapshot_prefers_internet_usage_totals_for_users() ->
             user_id="21",
             name="KADEN",
             affiliated_group_id="10",
-            affiliated_group_name=None,
+            affiliated_group_name="KADEN",
             total_minutes_today=99,
             unique_minutes_today=99,
             app_usage_today=(
@@ -1716,6 +1721,41 @@ async def test_create_rule_sends_confirmed_persistent_payload() -> None:
         },
         "target": "0.0.0.0",
     }
+
+
+@pytest.mark.asyncio
+async def test_create_rule_returns_new_rule_id() -> None:
+    """Test rule creation returns the box-reported rule id for undo."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        template = FirewallaRuleTemplate(
+            source_rule_id="1728",
+            name="vimeo.com",
+            action="block",
+            target="vimeo.com",
+            target_type="dns",
+            scope=("0C:85:E1:B0:1D:1C",),
+            dnsmasq_only=True,
+            alarm_id="1728",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(return_value={"policy": {"pid": "652"}}),
+        ) as mock_send:
+            new_rule_id = await client.async_create_rule(template)
+
+    assert new_rule_id == "652"
+    assert mock_send.await_args.kwargs["data"]["value"]["aid"] == "1728"
 
 
 @pytest.mark.asyncio

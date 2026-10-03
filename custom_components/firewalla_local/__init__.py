@@ -15,8 +15,12 @@ from .const import (
     CONF_GID,
     CONF_HOST,
     CONF_SYMMETRIC_KEY,
+    DEFAULT_LLM_TOOL_MODE,
     DEFAULT_PAIRING_DEVICE_NAME,
     DOMAIN,
+    LLM_TOOL_MODE_OFF,
+    LOGGER,
+    MIN_LLM_TOOLS_HA_VERSION,
 )
 from .coordinator import (
     FirewallaConfigEntry,
@@ -25,7 +29,9 @@ from .coordinator import (
     async_migrate_entry_host,
     get_enabled_network_entities,
     get_enabled_ssid_entities,
+    get_llm_tool_mode,
 )
+from .helpers.llm_support import llm_tools_supported
 from .managers import (
     FirewallaAlarmManager,
     FirewallaHostManager,
@@ -46,6 +52,44 @@ PLATFORMS: list[Platform] = [
 
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+def _async_setup_llm_api(hass: HomeAssistant, entry: FirewallaConfigEntry) -> None:
+    """Register the Firewalla Local LLM API when supported and enabled.
+
+    Nothing is registered on Home Assistant Core older than the LLM tool
+    contract, and the module that imports the Core 2026.10-only LLM names is
+    imported lazily so it is never evaluated there.
+    """
+    mode = get_llm_tool_mode(entry.options)
+    if mode == LLM_TOOL_MODE_OFF:
+        return
+    if not llm_tools_supported():
+        if mode != DEFAULT_LLM_TOOL_MODE:
+            LOGGER.warning(
+                "LLM tool mode %r requires Home Assistant Core %d.%d or newer; "
+                "no LLM tools were registered",
+                mode,
+                *MIN_LLM_TOOLS_HA_VERSION,
+            )
+        return
+
+    # The AI tools are optional, so a failure here must never take the whole
+    # integration down with it. The version guard above covers the known Core
+    # boundary only; this contains unknown failures (a Core contract change, a
+    # defect in a tool module) on any version.
+    try:
+        from .llm_api import async_register_firewalla_api
+
+        unregister = async_register_firewalla_api(hass, entry)
+    except Exception:
+        LOGGER.exception(
+            "Failed to register Firewalla Local AI tools; the integration "
+            "continues without them"
+        )
+        return
+
+    entry.async_on_unload(unregister)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -131,6 +175,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     entry.async_on_unload(
         entry.add_update_listener(coordinator.async_handle_entry_reload_requested)
     )
+
+    _async_setup_llm_api(hass, entry)
 
     if PLATFORMS:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

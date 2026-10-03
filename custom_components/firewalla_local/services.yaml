@@ -11,23 +11,89 @@ get_runtime_inventory:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_host_name_mapping:
-  name: Get host name mapping
-  description: Return the current Firewalla host identity records with explicit normalized host naming fields, IP address, host device type, and host kind.
+get_hosts:
+  name: Get hosts
+  description: Return the Firewalla host (device) records with naming fields, IP address, device type, kind, group membership, and online state. Filters narrow the result on the box. Non-admin; for the full runtime inventory use get_runtime_inventory.
   fields:
+    detail:
+      required: false
+      example: "summary"
+      selector:
+        select:
+          options:
+            - value: "summary"
+              label: Summary (omits derivable and unreliable fields)
+            - value: "full"
+              label: Full record
+      name: Detail
+      description: Optional. 'summary' (default) omits the derivable dns_fqdn, the unreliable dhcp_name, and the nested ip_assignment, flattening its useful parts to ip_assignment_mode and reserved_ipv4. Use 'full' for the complete record.
+    host_name:
+      required: false
+      example: "living-room-tv"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Substring match on the host name. Use it to find one device instead of listing every host.
+    host_mac:
+      required: false
+      example: "AA:BB:CC:DD:EE:FF"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Exact host MAC address.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Exact group or user name to filter by. Matches exactly, so filter one name at a time.
+    kind:
+      required: false
+      example: "mac_host"
+      selector:
+        select:
+          options:
+            - value: "mac_host"
+              label: A normal MAC-backed device
+            - value: "pseudo_host"
+              label: A VPN peer (no MAC)
+      name: Kind
+      description: Optional. 'mac_host' for a normal device, 'pseudo_host' to return only VPN peers. Peers have no MAC address, so they cannot be used with host actions that take one.
+    network_uuid:
+      required: false
+      example: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+      selector:
+        text:
+      name: Network UUID
+      description: Optional. Filter to the devices on one network.
+    online:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Online
+      description: Optional. Filter by connectivity. Uses the same activity-window definition as the device counts on the system-status sensor.
+    user:
+      required: false
+      example: "12"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Filter to hosts belonging to one user id.
     refresh:
       required: false
       example: true
       selector:
         boolean:
       name: Refresh first
-      description: Optional. Defaults to true. Refresh the Firewalla runtime before building the host identity records.
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before building the host records.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -37,7 +103,7 @@ get_host_name_mapping:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -49,14 +115,14 @@ get_network_segment_report:
   fields:
     network_uuid:
       required: false
-      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      example: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
       selector:
         text:
       name: Network UUID
       description: Required unless you provide network name. Use the Firewalla network UUID for deterministic automations.
     network_name:
       required: false
-      example: "VLAN10 CORE"
+      example: "Guest VLAN"
       selector:
         text:
       name: Network name
@@ -68,6 +134,17 @@ get_network_segment_report:
         boolean:
       name: Refresh first
       description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the network selector and building the report.
+    include:
+      required: false
+      example: "hosts"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "hosts"
+              label: Include the devices on this network
+      name: Include
+      description: Optional. Add the network's device list. Absent by default because those rows carry MAC addresses, hostnames, IPs, and reservations; ask for it only when the devices are wanted.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -77,7 +154,7 @@ get_network_segment_report:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -89,14 +166,14 @@ get_network_segment_usage:
   fields:
     network_uuid:
       required: false
-      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      example: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
       selector:
         text:
       name: Network UUID
       description: Optional. Use the Firewalla network UUID for deterministic automations. If omitted for a static reservation, the integration will try to infer the network from the reserved IPv4 address.
     network_name:
       required: false
-      example: "VLAN10 CORE"
+      example: "Guest VLAN"
       selector:
         text:
       name: Network name
@@ -154,7 +231,7 @@ get_network_segment_usage:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -166,7 +243,7 @@ run_internet_speed_test:
   fields:
     wan_uuid:
       required: false
-      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      example: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
       selector:
         text:
       name: WAN UUID
@@ -187,7 +264,7 @@ run_internet_speed_test:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -199,21 +276,21 @@ wake_host:
   fields:
     host_mac:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
-      example: "Plex Server"
+      example: "Living Room TV"
       selector:
         text:
       name: Host name
-      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
     host_id:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host ID
@@ -234,7 +311,7 @@ wake_host:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -246,7 +323,7 @@ delete_host:
   fields:
     host_mac:
       required: true
-      example: "00:AA:BB:CC:DD:26, 12:A9:78:EB:EA:02"
+      example: "AA:BB:CC:DD:EE:FF, 11:22:33:44:55:66"
       selector:
         text:
       name: Host MAC
@@ -274,7 +351,7 @@ delete_host:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -286,28 +363,28 @@ set_host_name:
   fields:
     new_name:
       required: true
-      example: "Carens Phone"
+      example: "Living Room TV"
       selector:
         text:
       name: New name
       description: Required. Send this exact host name to Firewalla without additional normalization.
     host_mac:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
-      example: "Plex Server"
+      example: "Living Room TV"
       selector:
         text:
       name: Host name
-      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
     host_id:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host ID
@@ -328,7 +405,7 @@ set_host_name:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -340,28 +417,28 @@ set_host_dns_hostname:
   fields:
     dns_hostname:
       required: true
-      example: "paytons.chromebook.3"
+      example: "living-room-tv"
       selector:
         text:
       name: DNS hostname
       description: Required. Send this exact DNS hostname override to Firewalla without additional normalization.
     host_mac:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
-      example: "Plex Server"
+      example: "Living Room TV"
       selector:
         text:
       name: Host name
-      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
     host_id:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host ID
@@ -382,7 +459,7 @@ set_host_dns_hostname:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -452,21 +529,21 @@ set_host_device_type:
       description: Required. Choose one known Firewalla host device type value from the current runtime category set.
     host_mac:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
-      example: "Plex Server"
+      example: "Living Room TV"
       selector:
         text:
       name: Host name
-      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
     host_id:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host ID
@@ -487,7 +564,7 @@ set_host_device_type:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -506,21 +583,21 @@ set_host_notify_when_next_online:
       description: Required. Turn the selected host's notify-when-next-online setting on or off.
     host_mac:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text: {}
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
-      example: "Plex Server"
+      example: "Living Room TV"
       selector:
         text: {}
       name: Host name
-      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
     host_id:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text: {}
       name: Host ID
@@ -541,7 +618,7 @@ set_host_notify_when_next_online:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text: {}
       name: Config entry name (Optional)
@@ -560,21 +637,21 @@ set_host_notify_when_next_offline:
       description: Required. Turn the selected host's notify-when-next-offline setting on or off.
     host_mac:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
-      example: "Plex Server"
+      example: "Living Room TV"
       selector:
         text:
       name: Host name
-      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
     host_id:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host ID
@@ -595,7 +672,7 @@ set_host_notify_when_next_offline:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -619,42 +696,42 @@ set_host_dhcp_reservation:
       description: Required. Choose static to reserve an IPv4 address for the selected host on the selected network, or dynamic to clear the reservation.
     reserved_ipv4:
       required: false
-      example: "192.168.10.50"
+      example: "192.168.1.50"
       selector:
         text:
       name: Reserved IPv4
       description: Optional. Required when mode is static. The address must belong to the selected network's IPv4 subnet. Omit it when mode is dynamic.
     host_mac:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host MAC
       description: Optional. Use the Firewalla host MAC for deterministic automations.
     host_name:
       required: false
-      example: "Plex Server"
+      example: "Living Room TV"
       selector:
         text:
       name: Host name
-      description: Optional. Use the current Firewalla host display name or full host label, such as Plex Server (192.168.10.10), for interactive use.
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
     host_id:
       required: false
-      example: "00:AA:BB:CC:DD:26"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
       name: Host ID
       description: Optional. Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC.
     network_uuid:
       required: false
-      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      example: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
       selector:
         text:
       name: Network UUID
       description: Required unless you provide network name. Use the Firewalla network UUID for deterministic automations.
     network_name:
       required: false
-      example: "VLAN10 CORE"
+      example: "Guest VLAN"
       selector:
         text:
       name: Network name
@@ -675,7 +752,89 @@ set_host_dhcp_reservation:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
+
+set_host_membership:
+  name: Set host membership
+  description: Set or clear the single group or user a device belongs to on the Firewalla box. DESTRUCTIVE - assigning a device to a group or a user permanently DELETES THE RULES ATTACHED TO THAT DEVICE, including enabled rules you created, and they cannot be restored. Rules attached to groups or users are NOT affected, including the user this device is leaving. This matches the Firewalla app, which warns about it when you assign a device.
+  fields:
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Assign the device to this group. Provide this or group id, and nothing else unless you are clearing. Group names are matched against groups only, never against users. Permanently deletes the rules attached to this device; group and user rules are unaffected.
+    group_id:
+      required: false
+      example: "4"
+      selector:
+        text:
+      name: Group ID
+      description: Optional. Assign the device to the group with this Firewalla tag id. Use this instead of group name when two groups share a name. Permanently deletes the rules attached to this device; group and user rules are unaffected.
+    user_name:
+      required: false
+      example: "KIDS_DEVICES"
+      selector:
+        text:
+      name: User name
+      description: Optional. Assign the device to this Firewalla user. Provide this or user id, and nothing else unless you are clearing. User names are matched against users only, never against groups. Permanently deletes the rules attached to this device; group and user rules are unaffected.
+    user_id:
+      required: false
+      example: "8"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Assign the device to the user with this Firewalla user id. Use this instead of user name when two users share a name. Permanently deletes the rules attached to this device; group and user rules are unaffected.
+    clear:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Clear membership
+      description: Optional. Defaults to false. Set to true to remove the device's current group or user assignment. Cannot be combined with a group or user field. The rules attached to this device are permanently deleted here too, leaving it with no rules until you add some; group and user rules are unaffected.
+    host_mac:
+      required: false
+      example: "AA:BB:CC:DD:EE:FF"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Use the Firewalla host MAC for deterministic automations.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Use the current Firewalla host display name or full host label, such as Living Room TV (192.168.1.50), for interactive use.
+    host_id:
+      required: false
+      example: "AA:BB:CC:DD:EE:FF"
+      selector:
+        text:
+      name: Host ID
+      description: Optional. Alternate host identity selector. It currently resolves to the same normalized Firewalla host identity as the host MAC.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the host and membership selectors and sending the change.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -687,7 +846,7 @@ get_speed_test_results:
   fields:
     wan_uuid:
       required: false
-      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      example: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
       selector:
         text:
       name: WAN UUID
@@ -725,7 +884,7 @@ get_speed_test_results:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -737,7 +896,7 @@ get_internet_quality_report:
   fields:
     wan_uuid:
       required: false
-      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      example: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
       selector:
         text:
       name: WAN UUID
@@ -775,7 +934,7 @@ get_internet_quality_report:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -798,7 +957,7 @@ get_time_usage_report:
       description: Required. Choose whether the target is a device, group, or user.
     scope_target:
       required: true
-      example: "EC:0D:51:CC:BA:BC"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text: {}
       name: Scope target
@@ -883,7 +1042,7 @@ get_time_usage_report:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text: {}
       name: Config entry name (Optional)
@@ -895,7 +1054,7 @@ get_wan_data_usage:
   fields:
     wan_uuid:
       required: false
-      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      example: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
       selector:
         text:
       name: WAN UUID
@@ -986,7 +1145,7 @@ get_wan_data_usage:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -998,7 +1157,7 @@ get_wan_events:
   fields:
     wan_uuid:
       required: false
-      example: "c28e3135-0f97-4a6e-8c78-a929a82d47f3"
+      example: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
       selector:
         text:
       name: WAN UUID
@@ -1030,6 +1189,23 @@ get_wan_events:
           mode: box
       name: Event offset
       description: Optional. Defaults to 0 so you can page older events.
+    window_days:
+      required: false
+      example: 7
+      selector:
+        number:
+          min: 0
+          max: 366
+          mode: box
+      name: Window (days)
+      description: Optional. How many days back to look. Defaults to 7; use 0 for no time bound. Unlike the alarm reads, this time filter is genuinely honoured.
+    include_dns:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Include DNS probes
+      description: Optional. Defaults to false. The box's internal DNS health probes run roughly every 3 minutes and are not WAN events, so they are excluded by default.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1039,7 +1215,7 @@ get_wan_events:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1051,7 +1227,7 @@ pause_rule:
   fields:
     rule_target:
       required: true
-      example: "761"
+      example: "100"
       selector:
         text:
       name: Rule target
@@ -1079,7 +1255,7 @@ pause_rule:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1091,7 +1267,7 @@ resume_rule:
   fields:
     rule_target:
       required: true
-      example: "761"
+      example: "100"
       selector:
         text:
       name: Rule target
@@ -1105,7 +1281,7 @@ resume_rule:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1117,7 +1293,7 @@ set_ssid_paused:
   fields:
     ssid_profile_id:
       required: true
-      example: "f185dc47-2730-48a8-844c-b57aa31af4ba"
+      example: "c3d4e5f6-a7b8-4c9d-8e1f-2a3b4c5d6e7f"
       selector:
         text:
       name: SSID profile
@@ -1138,7 +1314,7 @@ set_ssid_paused:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1165,13 +1341,24 @@ get_alarms:
         boolean:
       name: Include archived
       description: Optional. Include archived alarm records.
-    type:
+    alarm_type:
       required: false
       example: "security"
       selector:
         text:
       name: Alarm type
-      description: Optional raw ALARM_* type or supported group security, abnormal_upload, or open_port.
+      description: Optional. Filter by alarm type. A raw ALARM_* value or a
+        supported group (security, abnormal_upload, or open_port). Matches the
+        alarm_type field on the returned records.
+    include_exceptions:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Include silence records
+      description: Optional. Add the full silence-exception table. Defaults to
+        false; each alarm already carries its exception_id. Set this only to
+        find a silence to unmute.
     detail:
       required: false
       example: false
@@ -1188,11 +1375,204 @@ get_alarms:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
       description: Use this if names are unique. If names repeat, use Config Entry ID.
+
+get_rules:
+  name: Get rules
+  description: Return the current live policy rules as a flat, selectable list with rule id, action, enabled and paused state, target, scope, applies_to, tag_refs, purpose, and any originating alarm. Defaults to user-visible rules — product-owned DAP and family rules, and rules owned by a Firewalla subsystem, are hidden unless requested via include_purpose or include_system_managed. Use this to resolve the rule target for pause_rule and resume_rule.
+  fields:
+    enabled:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Enabled
+      description: Optional. Filter by enabled state.
+    action:
+      required: false
+      example: "block"
+      selector:
+        select:
+          options:
+            - value: "block"
+              label: Block
+            - value: "allow"
+              label: Allow
+            - value: "qos"
+              label: QoS
+            - value: "disturb"
+              label: Disturb
+      name: Action
+      description: Optional. Filter by rule action.
+    target_type:
+      required: false
+      example: "category"
+      selector:
+        text:
+      name: Target type
+      description: Optional. Filter by target type, for example category, mac, ip, dns or network.
+    applies_to:
+      required: false
+      example: "Kids Devices"
+      selector:
+        text:
+      name: Applies to
+      description: Optional. Filter to rules governing one group, user or network name.
+    include_purpose:
+      required: false
+      example: "dap"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "dap"
+              label: Device Active Protect rules
+            - value: "family"
+              label: Family rules
+      name: Include purpose
+      description: Optional. Include product-owned rules that are hidden by default.
+    include_system_managed:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Include system-managed
+      description: Optional. Include rules owned by a Firewalla subsystem, such as alarm-intel auto-blocks. Hidden by default with the product-owned purposes.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.1.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and their names are unique. If names repeat, use Config Entry ID.
+
+get_system_overview:
+  name: Get system overview
+  description: Return a curated system summary — appliance health, network identities with per-network device counts, and counts for devices, VPN peers, groups, users, rules, and alarms, plus per-WAN speed-test and quality metrics. Counts and identities only, never record collections. Group and user names and ids are only included when requested via include.
+  fields:
+    include:
+      required: false
+      example: "identifiers"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "identifiers"
+              label: Group and user names and ids
+      name: Include
+      description: Optional. Add the group and user names and ids that other tools accept as selectors. Omitted by default so the summary discloses no person-level data.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.1.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and their names are unique. If names repeat, use Config Entry ID.
+
+sync_runtime:
+  name: Sync runtime
+  description: Poll the Firewalla box now and report the resulting snapshot time. Requests within the coordinator's debounce window are coalesced, so calling this alongside other actions still costs at most one poll.
+  fields:
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.1.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and their names are unique. If names repeat, use Config Entry ID.
+
+create_rule:
+  name: Create rule
+  description: Create a persistent block rule, optionally scoped to an alarm's target. Blocking a target from an alarm creates an ordinary policy rule that records the alarm id as a back-reference.
+  fields:
+    alarm_id:
+      required: false
+      example: "1001"
+      selector:
+        text:
+      name: Alarm ID
+      description: Optional. Build the block from an alarm's target and device scope, recording the alarm id on the new rule. Provide this or target_type and target_value.
+    target_type:
+      required: false
+      example: "dns"
+      selector:
+        select:
+          options:
+            - value: "dns"
+              label: Domain (DNS)
+            - value: "ip"
+              label: IP address
+            - value: "mac"
+              label: Device (MAC)
+      name: Target type
+      description: Optional. Required with target_value when alarm_id is omitted.
+    target_value:
+      required: false
+      example: "vimeo.com"
+      selector:
+        text:
+      name: Target value
+      description: Optional. Required with target_type when alarm_id is omitted. The domain, IP, or MAC to block.
+    scope_kind:
+      required: false
+      example: "device"
+      selector:
+        select:
+          options:
+            - value: "device"
+              label: One device
+            - value: "network"
+              label: One network
+            - value: "all"
+              label: Everywhere
+      name: Scope kind
+      description: Optional. Where the rule applies. Defaults to everywhere when omitted.
+    scope_target:
+      required: false
+      example: "0C:85:E1:B0:1D:1C"
+      selector:
+        text:
+      name: Scope target
+      description: Optional. The scope value for the chosen kind (a MAC for device, a network uuid for network).
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.1.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and their names are unique. If names repeat, use Config Entry ID.
 
 archive_alarms:
   name: Archive alarms
@@ -1212,7 +1592,7 @@ archive_alarms:
       description: Choose one alarm or the entire active set.
     alarm_id:
       required: false
-      example: "1728"
+      example: "1001"
       selector:
         text:
       name: Alarm ID
@@ -1226,7 +1606,7 @@ archive_alarms:
       description: Use this if you have more than one Firewalla setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1252,7 +1632,7 @@ delete_alarms:
       description: Select which alarm set to permanently delete.
     alarm_id:
       required: false
-      example: "1728"
+      example: "1001"
       selector:
         text:
       name: Alarm ID
@@ -1273,7 +1653,7 @@ delete_alarms:
       description: Use this if you have more than one Firewalla setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1285,7 +1665,7 @@ mute_alarm:
   fields:
     alarm_id:
       required: false
-      example: "1728"
+      example: "1001"
       selector:
         text:
       name: Alarm ID (Optional)
@@ -1359,7 +1739,7 @@ mute_alarm:
       description: Use this if you have more than one Firewalla setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1371,14 +1751,14 @@ unmute_alarm:
   fields:
     alarm_id:
       required: false
-      example: "1728"
+      example: "1001"
       selector:
         text:
       name: Alarm ID (Optional)
       description: Use the originating alarm ID for an alarm-linked silence.
     exception_id:
       required: false
-      example: "106"
+      example: "1002"
       selector:
         text:
       name: Exception ID (Optional)
@@ -1392,7 +1772,7 @@ unmute_alarm:
       description: Use this if you have more than one Firewalla setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1404,7 +1784,7 @@ delete_rule:
   fields:
     rule_id:
       required: true
-      example: "652"
+      example: "100"
       selector:
         text:
       name: Rule ID
@@ -1425,7 +1805,7 @@ delete_rule:
       description: Use this if you have more than one Firewalla setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)
@@ -1444,7 +1824,7 @@ get_wireless_status:
       description: Use this if you have more than one Firewalla setup. It targets one specific setup.
     config_entry_name:
       required: false
-      example: "Firewalla (192.168.200.1)"
+      example: "Firewalla (192.168.1.1)"
       selector:
         text:
       name: Config entry name (Optional)

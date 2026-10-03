@@ -89,6 +89,17 @@ Identity presentation rule:
 - this rule applies to normalized rule applicability, watched-user associations, and host-backed entity attributes derived from group membership
 - when normalized rule applicability uses an affiliated user identity in place of a backing group name, the accompanying applicability kind must also be `user` so label and kind stay aligned on Home Assistant-facing surfaces
 
+Group and user collection rule:
+
+- the runtime group collection mirrors the Firewalla app: it holds plain groups and user assignments together in **one collection**, because both are host tags at the protocol level
+- every entry carries a kind discriminator of `group` or `user`; consumers must use it rather than inferring from the entry's name or id
+- an entry is a `user` entry when its tag appears as some user record's `affiliatedTag` (equivalently, when the tag's `policy.userTags` is populated). Classification is by **linkage, never by name**
+- a user entry's display name is the **user's** name. The backing tag's own name is an implementation detail and must never be rendered: it may be a bare UUID, or a stale legacy label left over from the period when a Firewalla user was modelled as a group
+- a user entry also carries the affiliated user id, so a consumer can resolve the full user record without a second lookup
+- counts are reported from the same classification that produced the collection: the group count counts `group` entries only, and user affiliations are legible through the user collection and user count rather than a second derived field. A separately computed affiliation count could only ever disagree through a defect, so it is deliberately not reported
+- device-to-user association joins continue to use the backing tag id in `host.group_ids`; the kind discriminator does not change how membership is resolved on a host
+- **`host.user_ids` is always empty on a real box.** It is built from the host-level `userTags` array, which Firewalla never populates: a device assigned to a user carries the user's affiliated backing tag in `host.tags` instead (measured on the dev box: 0 of 211 hosts have any `userTags`, while 32 are assigned to a user). Each user maps 1:1 to exactly one backing tag, so that tag id is the whole association. Any consumer resolving "which devices belong to this user" must go through the tag, never through `host.user_ids` alone
+
 ## Protocol baseline
 
 The repository assumes the following protocol facts:
@@ -451,6 +462,30 @@ Instance isolation rules:
 - manager signaling, helper lookups, and cleanup paths must remain scoped to one config entry
 - entity unique IDs must encode entry scope so future multi-instance cleanup remains deterministic
 - config-entry lifecycle operations must never mutate another entry's device, entities, or runtime data
+
+### LLM API scope
+
+The LLM/MCP tool surface follows the same rule: **one `llm.API` per config entry**,
+registered on setup and unregistered on unload, so every tool is permanently bound
+to the box it was created for.
+
+- each tool injects its own entry id into the backing service call, so a tool call
+ cannot target another box and the model never passes an entry identifier
+- the API id is `firewalla_local-<config entry id>`. The entry id is assigned by
+ Home Assistant, never reissued, and unaffected by a rename or by a sibling
+ entry, so the id cannot move; it is both the MCP URL and the value `mcp_server`
+ stores to select an API
+- the API *name* is the entry title, and the title is display only. It is kept
+ unique among entries because Home Assistant namespaces merged tools by API name
+ and would otherwise produce colliding tool names; identical titles are
+ disambiguated with a short entry-id suffix
+- the configured tool mode is per entry, so one box can be read-only while another
+ permits control
+
+Home Assistant exposes a registered LLM API through `mcp_server`, which serves it to
+Assist and to any MCP client. Each entry therefore appears as its own selectable API
+with its own URL; several can be merged, and Home Assistant then namespaces the tools
+by entry title.
 
 ## Entity architecture
 

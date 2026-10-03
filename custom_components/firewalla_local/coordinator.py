@@ -21,6 +21,7 @@ from .const import (
     CONF_ENABLE_SSID_ENTITIES,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
     CONF_LOCAL_IP,
     CONF_SELECTED_RULE_IDS,
     CONF_UPDATE_INTERVAL,
@@ -28,9 +29,11 @@ from .const import (
     CONF_WATCHED_USERS,
     DEFAULT_ENABLE_NETWORK_ENTITIES,
     DEFAULT_ENABLE_SSID_ENTITIES,
+    DEFAULT_LLM_TOOL_MODE,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
+    LLM_TOOL_MODES,
     LOGGER,
     MAX_UPDATE_INTERVAL_MINUTES,
     MIN_UPDATE_INTERVAL_MINUTES,
@@ -110,6 +113,12 @@ def get_enabled_ssid_entities(options: Mapping[str, object]) -> bool:
     """Return whether per-SSID status entities should be created."""
     raw_value = options.get(CONF_ENABLE_SSID_ENTITIES, DEFAULT_ENABLE_SSID_ENTITIES)
     return raw_value if isinstance(raw_value, bool) else DEFAULT_ENABLE_SSID_ENTITIES
+
+
+def get_llm_tool_mode(options: Mapping[str, object]) -> str:
+    """Return the configured LLM tool exposure mode."""
+    raw_value = options.get(CONF_LLM_TOOL_MODE, DEFAULT_LLM_TOOL_MODE)
+    return raw_value if raw_value in LLM_TOOL_MODES else DEFAULT_LLM_TOOL_MODE
 
 
 def get_configured_update_interval(options: Mapping[str, object]) -> timedelta:
@@ -200,6 +209,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
             config_entry.options
         )
         self._enable_ssid_entities = get_enabled_ssid_entities(config_entry.options)
+        self._llm_tool_mode = get_llm_tool_mode(config_entry.options)
         self._unavailable_logged = False
         super().__init__(
             hass,
@@ -303,6 +313,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         enable_network_entities = get_enabled_network_entities(entry.options)
         current_enable_ssid_entities = self._enable_ssid_entities
         enable_ssid_entities = get_enabled_ssid_entities(entry.options)
+        # The LLM tool mode changes which tools are registered, so a change must
+        # reload the entry to re-register the API.
+        current_llm_tool_mode = self._llm_tool_mode
+        llm_tool_mode = get_llm_tool_mode(entry.options)
         if (
             current_selected_rule_ids == _get_selected_rule_ids(entry.options)
             and current_watched_device_macs == _get_watched_device_macs(entry.options)
@@ -310,12 +324,14 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
             and current_watched_user_ids == _get_watched_user_ids(entry.options)
             and current_enable_network_entities == enable_network_entities
             and current_enable_ssid_entities == enable_ssid_entities
+            and current_llm_tool_mode == llm_tool_mode
         ):
             self.async_update_listeners()
             return
 
         self._enable_network_entities = enable_network_entities
         self._enable_ssid_entities = enable_ssid_entities
+        self._llm_tool_mode = llm_tool_mode
         await hass.config_entries.async_reload(entry.entry_id)
 
     @callback

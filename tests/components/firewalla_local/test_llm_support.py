@@ -1,0 +1,777 @@
+"""Tests for the LLM/MCP tool surface foundation (Phase 4.1)."""
+
+from __future__ import annotations
+
+import ast
+import contextlib
+import sys
+from pathlib import Path
+from typing import Final
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import Context, HomeAssistant
+from homeassistant.helpers import llm
+from homeassistant.helpers.translation import async_get_translations
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+import custom_components.firewalla_local as firewalla_local
+from custom_components.firewalla_local.const import (
+    CONF_AID,
+    CONF_EID,
+    CONF_GID,
+    CONF_HOST,
+    CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
+    CONF_SYMMETRIC_KEY,
+    DEFAULT_LLM_TOOL_MODE,
+    DOMAIN,
+    LLM_TOOL_MODE_OFF,
+    LLM_TOOL_MODE_READ_ONLY,
+    LLM_TOOL_MODES,
+    MIN_LLM_TOOLS_HA_VERSION,
+)
+from custom_components.firewalla_local.helpers.llm_support import llm_tools_supported
+from custom_components.firewalla_local.models import (
+    FirewallaApplianceIdentityInput,
+    FirewallaApplianceRuntimeInput,
+    FirewallaHostRuntime,
+    FirewallaRuntimeSnapshot,
+)
+
+# Modules that are guard-loaded (imported only when LLM tools are supported) and
+# are therefore allowed to import Core 2026.10-only LLM names at module level.
+_GUARD_LOADED_MODULES: Final = frozenset(
+    {
+        "llm_api.py",
+        "llm_tools_read.py",
+        "llm_tools_control.py",
+        "llm_tools_common.py",
+    }
+)
+
+_PROBATIO: Final = "probatio"
+_LLM_HELPER_MODULE: Final = "homeassistant.helpers.llm"
+_LLM_API_MODULE: Final = "custom_components.firewalla_local.llm_api"
+_LLM_TOOL_CONTRACT_NAMES: Final = frozenset({"ToolResult", "ToolAnnotations"})
+
+
+def _entry(*, options: dict[str, object] | None = None) -> MockConfigEntry:
+    """Return a provisioned Firewalla config entry."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options=options or {},
+    )
+
+
+def _llm_context() -> llm.LLMContext:
+    """Return a minimal LLM context."""
+    return llm.LLMContext(
+        platform="test",
+        context=Context(),
+        language="en",
+        assistant="conversation",
+        device_id=None,
+    )
+
+
+def _mock_snapshot() -> FirewallaRuntimeSnapshot:
+    """Return a minimal runtime snapshot for setup tests."""
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="AA:BB:CC:DD:EE:00",
+                host_name="Firewalla",
+                ip_address="192.168.200.1",
+                group_name=None,
+                network_name=None,
+                connection_type=None,
+                last_active=None,
+                download_bytes=None,
+                upload_bytes=None,
+                stale=False,
+            ),
+        ),
+        users=(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("major", "minor", "expected"),
+    [
+        pytest.param(
+            MIN_LLM_TOOLS_HA_VERSION[0],
+            MIN_LLM_TOOLS_HA_VERSION[1] - 1,
+            False,
+            id="just_below",
+        ),
+        pytest.param(*MIN_LLM_TOOLS_HA_VERSION, True, id="at_boundary"),
+        pytest.param(
+            MIN_LLM_TOOLS_HA_VERSION[0],
+            MIN_LLM_TOOLS_HA_VERSION[1] + 1,
+            True,
+            id="just_above",
+        ),
+    ],
+)
+def test_llm_tools_supported_boundaries(major: int, minor: int, expected: bool) -> None:
+    """The version predicate compares the integration's bound version tuple."""
+    with (
+        patch(
+            "custom_components.firewalla_local.helpers.llm_support.MAJOR_VERSION",
+            major,
+        ),
+        patch(
+            "custom_components.firewalla_local.helpers.llm_support.MINOR_VERSION",
+            minor,
+        ),
+    ):
+        assert llm_tools_supported() is expected
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_registered"),
+    [
+        pytest.param(DEFAULT_LLM_TOOL_MODE, True, id="default_mode_registers"),
+        pytest.param(LLM_TOOL_MODE_OFF, False, id="off_registers_nothing"),
+    ],
+)
+async def test_setup_registers_api_only_when_enabled(
+    hass: HomeAssistant, mode: str, expected_registered: bool
+) -> None:
+    """Setup registers the LLM API for enabled modes and nothing for off."""
+    entry = _entry(options={CONF_LLM_TOOL_MODE: mode})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    registered_ids = {api.id for api in llm.async_get_apis(hass)}
+    firewalla_ids = {
+        api_id for api_id in registered_ids if api_id.startswith(f"{DOMAIN}-")
+    }
+    assert bool(firewalla_ids) is expected_registered
+    # The id is never the bare domain: it always carries a per-entry suffix so
+    # that it cannot change when another box is added.
+    assert DOMAIN not in registered_ids
+
+
+async def test_default_mode_registers_only_the_anonymous_summary(
+    hass: HomeAssistant,
+) -> None:
+    """A fresh entry defaults to summary_only with exactly one tool registered."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
+
+    assert {tool.name for tool in api_instance.tools} == {
+        "firewalla_local__get_system_overview"
+    }
+
+
+async def test_anonymous_summary_cannot_request_identifiers(
+    hass: HomeAssistant,
+) -> None:
+    """The anonymous tier's tool offers no way to ask for group/user identity.
+
+    The privacy claim is structural: rather than filtering identities out of a
+    response, the tier's tool has no parameter that could ask for them, and the
+    other tools are not registered at all.
+    """
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
+
+    (tool,) = api_instance.tools
+    assert not tool.parameters.schema
+
+
+async def test_read_mode_registers_the_full_read_set(
+    hass: HomeAssistant,
+) -> None:
+    """read_only registers the summary alongside every other read tool."""
+    entry = _entry(options={CONF_LLM_TOOL_MODE: LLM_TOOL_MODE_READ_ONLY})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
+
+    names = {tool.name for tool in api_instance.tools}
+    assert "firewalla_local__get_system_overview" in names
+    assert "firewalla_local__list_hosts" in names
+
+
+async def test_setup_succeeds_without_llm_tools_on_old_core(
+    hass: HomeAssistant,
+) -> None:
+    """On unsupported Core, setup succeeds and no LLM API is registered."""
+    entry = _entry(options={CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=False,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert not _firewalla_api_ids(hass)
+
+
+async def test_setup_survives_llm_layer_failure(hass: HomeAssistant) -> None:
+    """A failure in the optional AI layer must not break entry setup.
+
+    Reproduces the real failure mode: on Core older than the tool contract the
+    guard-loaded tool modules raise on import. Setup must still succeed and the
+    integration must stay usable.
+    """
+    entry = _entry(options={CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+        patch.dict(sys.modules, {_LLM_API_MODULE: None}),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert not _firewalla_api_ids(hass)
+
+
+async def test_api_is_unregistered_on_entry_unload(hass: HomeAssistant) -> None:
+    """Unloading the entry removes the registered LLM API."""
+    entry = _entry(options={CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert bool(_firewalla_api_ids(hass))
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert not _firewalla_api_ids(hass)
+
+
+async def test_options_change_to_llm_mode_re_registers_without_manual_reload(
+    hass: HomeAssistant,
+) -> None:
+    """Changing the LLM tool mode must re-register the API on its own.
+
+    The options update listener only reloads when a *meaningful* setting changed.
+    The LLM tool mode was missing from that comparison, so a mode change left the
+    API registered with its old tool set until the user reloaded by hand.
+    """
+    entry = _entry(options={CONF_LLM_TOOL_MODE: LLM_TOOL_MODE_OFF})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert not _firewalla_api_ids(hass)
+
+        # A mode change alone must trigger the reload, with no manual reload.
+        hass.config_entries.async_update_entry(
+            entry,
+            options={**entry.options, CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE},
+        )
+        await hass.async_block_till_done()
+
+        assert bool(_firewalla_api_ids(hass))
+
+
+async def test_options_change_unrelated_to_llm_does_not_reload(
+    hass: HomeAssistant,
+) -> None:
+    """An option change that alters nothing meaningful must not reload.
+
+    Guard against over-correcting: adding the LLM mode to the reload comparison
+    must not make every options save reload the entry.
+    """
+    entry = _entry(options={CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE})
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with patch.object(
+            hass.config_entries, "async_reload", new=AsyncMock()
+        ) as mock_reload:
+            hass.config_entries.async_update_entry(
+                entry,
+                options={
+                    **entry.options,
+                    CONF_LLM_TOOL_MODE: DEFAULT_LLM_TOOL_MODE,
+                },
+            )
+            await hass.async_block_till_done()
+
+        mock_reload.assert_not_awaited()
+
+    assert bool(_firewalla_api_ids(hass))
+
+
+@pytest.mark.parametrize(
+    ("supported", "expected_present"),
+    [
+        pytest.param(True, True, id="supported_shows_field"),
+        pytest.param(False, False, id="unsupported_hides_field"),
+    ],
+)
+async def test_options_toggle_visibility(
+    hass: HomeAssistant, supported: bool, expected_present: bool
+) -> None:
+    """The LLM tool-mode field appears in options only when supported."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.config_flow.llm_tools_supported",
+        return_value=supported,
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "general_options"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "system_settings"}
+        )
+
+    schema_keys = {marker.schema for marker in result["data_schema"].schema}
+    assert (CONF_LLM_TOOL_MODE in schema_keys) is expected_present
+
+
+async def test_every_llm_mode_option_has_a_label(hass: HomeAssistant) -> None:
+    """Each mode in the picker resolves to a human label, in every layer.
+
+    A SelectSelector with a translation_key renders the raw value when its
+    translation is missing, so a new mode can ship showing "summary_only"
+    rather than "Summary only (...)". This walks the real options flow, reads
+    the selector HA is actually given, and resolves it through HA's own
+    translation loader — so a mistyped key or a missing entry fails here rather
+    than in a user's options dialog.
+    """
+    entry = _entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.firewalla_local.config_flow.llm_tools_supported",
+        return_value=True,
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "general_options"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={"next_step_id": "system_settings"}
+        )
+
+    selector = next(
+        value
+        for marker, value in result["data_schema"].schema.items()
+        if marker.schema == CONF_LLM_TOOL_MODE
+    )
+    selector_config = selector.config
+    assert selector_config["translation_key"] == CONF_LLM_TOOL_MODE
+    assert tuple(selector_config["options"]) == LLM_TOOL_MODES
+
+    translations = await async_get_translations(
+        hass, "en", "selector", integrations={DOMAIN}
+    )
+    missing = [
+        mode
+        for mode in LLM_TOOL_MODES
+        if not translations.get(
+            f"component.{DOMAIN}.selector.{CONF_LLM_TOOL_MODE}.options.{mode}"
+        )
+    ]
+    assert missing == [], f"modes with no label: {missing}"
+
+
+def test_no_eager_llm_imports() -> None:
+    """Unconditionally-loaded modules must not import Core 2026.10-only names.
+
+    A module-level import of ``probatio`` or of ``ToolResult``/``ToolAnnotations``
+    is an ``ImportError`` at load time on older Core, which a latest-only CI run
+    never surfaces. Only the guard-loaded ``llm_api.py`` may contain them.
+    """
+    package_root = Path(firewalla_local.__file__).parent
+    offenders: list[str] = []
+
+    for path in package_root.rglob("*.py"):
+        if path.name in _GUARD_LOADED_MODULES:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:  # module level only
+            if isinstance(node, ast.Import):
+                if any(
+                    alias.name.partition(".")[0] == _PROBATIO for alias in node.names
+                ):
+                    offenders.append(f"{path}: import {_PROBATIO}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module.partition(".")[0] == _PROBATIO:
+                    offenders.append(f"{path}: from {module} import ...")
+                elif module == _LLM_HELPER_MODULE:
+                    imported = {alias.name for alias in node.names}
+                    forbidden = imported & _LLM_TOOL_CONTRACT_NAMES
+                    if forbidden:
+                        offenders.append(
+                            f"{path}: from {module} import {sorted(forbidden)}"
+                        )
+
+    assert not offenders, "Eager LLM imports found:\n" + "\n".join(offenders)
+
+
+def _api_id(hass: HomeAssistant) -> str:
+    """Return the id of the registered Firewalla LLM API.
+
+    The id always carries a per-entry suffix, so it is never the bare domain;
+    the suffix is derived from the entry title.
+    """
+    return next(
+        api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
+    )
+
+
+def _firewalla_api_ids(hass: HomeAssistant) -> set[str]:
+    """Return the registered Firewalla LLM API ids.
+
+    The id always carries a per-entry suffix, so it is never the bare domain.
+    """
+    return {
+        api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
+    }
+
+
+def _second_entry(*, title: str, host: str, license_: str) -> MockConfigEntry:
+    """Return a second provisioned Firewalla entry for multi-box tests."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title=title,
+        unique_id=license_,
+        data={
+            CONF_LICENSE: license_,
+            CONF_HOST: host,
+            CONF_GID: f"gid-{license_}",
+            CONF_EID: f"eid-{license_}",
+            CONF_AID: f"aid-{license_}",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={},
+    )
+
+
+def _setup_patches() -> tuple[object, ...]:
+    """Return the patches needed to set up an entry without a real box."""
+    return (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value={"policyRules": []}),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_mock_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.llm_tools_supported",
+            return_value=True,
+        ),
+    )
+
+
+async def test_api_id_is_stable_across_rename_and_second_box(
+    hass: HomeAssistant,
+) -> None:
+    """The id must not move when the entry is renamed or another is added.
+
+    The id is both the MCP URL and the value `mcp_server` stores to pick an API,
+    so anything that moves it silently breaks a configured client. It is built
+    from the config entry id, which Home Assistant assigns and never reissues,
+    so neither a rename nor a sibling entry can affect it. The title is the
+    display name only.
+    """
+    first = _entry()
+    first.add_to_hass(hass)
+    second = _second_entry(
+        title="Firewalla (192.168.200.2)",
+        host="192.168.200.2",
+        license_="license-456",
+    )
+
+    with contextlib.ExitStack() as stack:
+        for ctx in _setup_patches():
+            stack.enter_context(ctx)
+
+        assert await hass.config_entries.async_setup(first.entry_id)
+        await hass.async_block_till_done()
+
+        single = _firewalla_api_ids(hass)
+        assert len(single) == 1
+        (first_id,) = single
+        assert first_id == f"firewalla_local-{first.entry_id}"
+
+        # Renaming the box must not move its id, which is the whole point of
+        # not deriving the id from the title.
+        hass.config_entries.async_update_entry(first, title="Renamed Basement")
+        await hass.async_block_till_done()
+        assert _firewalla_api_ids(hass) == {first_id}
+
+        second.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+
+    assert _firewalla_api_ids(hass) == {
+        first_id,
+        f"firewalla_local-{second.entry_id}",
+    }
+
+
+async def test_identical_entry_titles_still_give_uniquely_named_tools(
+    hass: HomeAssistant,
+) -> None:
+    """Two boxes titled the same must not produce colliding tool names.
+
+    Merged tools are namespaced by the API *name*, and Home Assistant enforces
+    unique ids but not unique names. Identical titles would therefore yield two
+    identically-named tools, leaving the model no way to tell which box it is
+    acting on — a real risk on the write tools.
+    """
+    first = _second_entry(title="Firewalla", host="10.0.0.1", license_="license-a")
+    second = _second_entry(title="Firewalla", host="10.0.0.2", license_="license-b")
+    first.add_to_hass(hass)
+
+    with contextlib.ExitStack() as stack:
+        for ctx in _setup_patches():
+            stack.enter_context(ctx)
+
+        assert await hass.config_entries.async_setup(first.entry_id)
+        await hass.async_block_till_done()
+        second.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+
+        names = [api.name for api in llm.async_get_apis(hass)]
+        merged = await llm.async_get_api(
+            hass, sorted(_firewalla_api_ids(hass)), _llm_context()
+        )
+
+    assert len(names) == 2
+    assert len(set(names)) == 2
+    tool_names = [tool.name for tool in merged.tools]
+    assert len(tool_names) == len(set(tool_names))
+
+
+async def test_merged_tool_names_namespace_by_entry_title(
+    hass: HomeAssistant,
+) -> None:
+    """Merging boxes prefixes each tool with that entry's name.
+
+    Home Assistant derives the merged namespace with the `slugify` package,
+    which separates words with a hyphen. The API id is a separate thing and is
+    built from the config entry id, so the two are unrelated by design: the
+    namespace follows the display name and the id does not. Pinned here because
+    both are easy to confuse when reading a tool list, and because the id was
+    documented wrong once already.
+    """
+    first = _entry()
+    second = _second_entry(title="Main Router", host="10.0.0.1", license_="lic-ns")
+    first.add_to_hass(hass)
+
+    with contextlib.ExitStack() as stack:
+        for ctx in _setup_patches():
+            stack.enter_context(ctx)
+
+        assert await hass.config_entries.async_setup(first.entry_id)
+        await hass.async_block_till_done()
+        second.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(second.entry_id)
+        await hass.async_block_till_done()
+
+        ids = sorted(_firewalla_api_ids(hass))
+        solo = await llm.async_get_api(hass, ids[0], _llm_context())
+        merged = await llm.async_get_api(hass, ids, _llm_context())
+
+    # One box on its own: the tool keeps the plain name.
+    assert [t.name for t in solo.tools] == ["firewalla_local__get_system_overview"]
+
+    # Merged: namespaced by the entry title, with hyphens for word breaks. Order
+    # is not asserted because it follows the sorted entry ids, which are random.
+    assert {t.name for t in merged.tools} == {
+        "firewalla-192-168-200-1__firewalla_local__get_system_overview",
+        "main-router__firewalla_local__get_system_overview",
+    }
+
+    # The id is the config entry id, so it carries no title at all.
+    assert ids == sorted(
+        [f"firewalla_local-{first.entry_id}", f"firewalla_local-{second.entry_id}"]
+    )

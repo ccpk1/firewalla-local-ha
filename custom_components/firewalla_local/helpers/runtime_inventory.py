@@ -8,6 +8,7 @@ from typing import Final, TypedDict
 from custom_components.firewalla_local.managers.rule_manager import (
     RuleManagementInfo,
     build_switch_rule_evaluations,
+    is_user_visible_rule,
 )
 from custom_components.firewalla_local.models import (
     FirewallaHostRuntime,
@@ -24,6 +25,8 @@ _RAW_GROUPS_KEY: Final = "tags"
 _RAW_GROUP_POLICY_KEY: Final = "policy"
 _RAW_NAME_KEY: Final = "name"
 _RAW_AFFILIATED_TAG_KEY: Final = "affiliatedTag"
+_RAW_USER_TYPE_KEY: Final = "type"
+_RAW_USER_TYPE_USER: Final = "user"
 _RAW_POLICY_RULES_KEY: Final = "policyRules"
 _RAW_RULE_ID_KEY: Final = "pid"
 _RAW_RULE_TAG_REFS_KEY: Final = "tag"
@@ -122,10 +125,17 @@ class RuntimeUserRecord(TypedDict):
 
 
 class RuntimeGroupRecord(TypedDict):
-    """Normalized runtime group entry used inside inventory helpers."""
+    """One entry from the Firewalla host-tag collection.
+
+    A plain group and a user assignment are the same protocol object, so both
+    live in one collection. ``kind`` is the discriminator and ``user_id`` is set
+    only on ``"user"`` entries.
+    """
 
     id: str
     name: str | None
+    kind: str
+    user_id: str | None
     policy: dict[str, object]
     user_ids: list[str]
     user_names: list[str]
@@ -305,7 +315,11 @@ def _flatten_policy(value: object) -> object:
 
 
 def _build_user_index(data: dict[str, object]) -> dict[str, RuntimeUserRecord]:
-    """Build a typed user index from the raw init payload."""
+    """Build a typed user index from the raw init payload.
+
+    The ``type`` filter matches the client's user normalization, so the
+    inventory and the runtime snapshot can never disagree about who is a user.
+    """
     raw_user_tags = data.get(_RAW_USERS_KEY)
     if not isinstance(raw_user_tags, dict):
         return {}
@@ -313,6 +327,10 @@ def _build_user_index(data: dict[str, object]) -> dict[str, RuntimeUserRecord]:
     user_index: dict[str, RuntimeUserRecord] = {}
     for user_id, raw_user in raw_user_tags.items():
         if not isinstance(user_id, str) or not isinstance(raw_user, dict):
+            continue
+
+        user_type = raw_user.get(_RAW_USER_TYPE_KEY)
+        if isinstance(user_type, str) and user_type != _RAW_USER_TYPE_USER:
             continue
 
         user_name = raw_user.get(_RAW_NAME_KEY)
@@ -329,12 +347,26 @@ def _build_user_index(data: dict[str, object]) -> dict[str, RuntimeUserRecord]:
 
 
 def _build_group_inventory(data: dict[str, object]) -> list[RuntimeGroupRecord]:
-    """Build a readable inventory of Firewalla groups."""
+    """Build a readable inventory of Firewalla groups and user affiliations.
+
+    A plain group and a user assignment are the same protocol object — a host
+    tag — so both live in one collection. ``kind`` is the discriminator, and it
+    is resolved by linkage, never by name: a tag is a user entry when a user
+    record names it as its ``affiliatedTag``. The backing tag's own name is
+    discarded for user entries, because it may be a bare UUID or a stale legacy
+    label left over from when a Firewalla user was modelled as a group.
+    """
     raw_groups = data.get(_RAW_GROUPS_KEY)
     if not isinstance(raw_groups, dict):
         return []
 
     user_index = _build_user_index(data)
+    affiliated_users = {
+        user["affiliated_group_id"]: user
+        for user in user_index.values()
+        if isinstance(user["affiliated_group_id"], str)
+    }
+
     groups: list[RuntimeGroupRecord] = []
     for group_id, raw_group in raw_groups.items():
         if not isinstance(group_id, str) or not isinstance(raw_group, dict):
@@ -363,11 +395,20 @@ def _build_group_inventory(data: dict[str, object]) -> list[RuntimeGroupRecord]:
             if (user_record := user_index.get(user_id)) and user_record["name"]
         ]
 
-        group_name = raw_group.get(_RAW_NAME_KEY)
+        raw_group_name = raw_group.get(_RAW_NAME_KEY)
+        affiliated_user = affiliated_users.get(group_id)
         groups.append(
             {
                 "id": group_id,
-                "name": group_name if isinstance(group_name, str) else None,
+                "name": (
+                    affiliated_user["name"]
+                    if affiliated_user is not None
+                    else (raw_group_name if isinstance(raw_group_name, str) else None)
+                ),
+                "kind": "user" if affiliated_user is not None else "group",
+                "user_id": (
+                    affiliated_user["id"] if affiliated_user is not None else None
+                ),
                 "policy": flattened_policy,
                 "user_ids": group_user_ids,
                 "user_names": group_user_names,
@@ -399,9 +440,17 @@ def _build_user_inventory(
 def _build_group_policy_controls(
     groups: list[RuntimeGroupRecord],
 ) -> list[GroupPolicyControlRecord]:
-    """Build a flattened list of group-backed policy controls."""
+    """Build a flattened list of group-backed policy controls.
+
+    User entries are skipped outright. Their backing tag only ever carries
+    ``userTags`` in practice, but skipping by kind keeps that out of the report
+    by construction rather than by the contents of one key.
+    """
     controls: list[GroupPolicyControlRecord] = []
     for group in groups:
+        if group["kind"] != "group":
+            continue
+
         policy = group["policy"]
 
         for policy_key, policy_value in sorted(policy.items()):
@@ -582,7 +631,7 @@ def build_runtime_inventory_report(
             dap_rules.append(rule_record)
         elif rule.purpose == _RULE_PURPOSE_FAMILY:
             family_rules.append(rule_record)
-        elif management["classification"] == _RULE_MANAGEMENT_CLASSIFICATION_USER:
+        elif is_user_visible_rule(rule, raw_extras):
             visible_rules.append(rule_record)
             if rule.enabled:
                 visible_enabled_rules.append(rule_record)
@@ -591,6 +640,7 @@ def build_runtime_inventory_report(
         if review_reasons:
             rules_needing_review.append(rule_record)
 
+    group_count = sum(1 for group in groups if group["kind"] == "group")
     group_policy_controls = _build_group_policy_controls(groups)
     target_list_references = _build_target_list_references(rules)
     devices_total = len(hosts)
@@ -601,7 +651,7 @@ def build_runtime_inventory_report(
 
     return {
         "summary": {
-            "group_count": len(groups),
+            "group_count": group_count,
             "group_policy_control_count": len(group_policy_controls),
             "user_count": len(users),
             "policy_rule_count": len(rules),
@@ -696,8 +746,10 @@ def render_runtime_inventory_markdown(report: dict[str, object]) -> str:
         for group in groups:
             if not isinstance(group, dict):
                 continue
+            kind = group.get("kind") or "group"
             lines.append(
-                f"- {group.get('name') or group.get('id')} (id: {group.get('id')})"
+                f"- {group.get('name') or group.get('id')} "
+                f"(kind: {kind}, id: {group.get('id')})"
             )
             user_names = group.get("user_names")
             if isinstance(user_names, list) and user_names:

@@ -79,6 +79,16 @@ You can read state or call services this way, and both return structured data yo
 * **Per-AP Device Monitoring (AP7):** Each Firewalla AP7 access point becomes its own Home Assistant device (linked to the box), with a system-status binary sensor exposing channel, LED, TX power, country, mesh mode, timezone, pause-WiFi/ACL state, and live client count.
 * **Rich Local Reporting:** Leverage over two dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, WAN event timelines, and current or archived alarms with their silences—all pulled directly from the local data plane without touching the cloud.
 
+### **AI Assistant & MCP Access**
+> **Requires Home Assistant Core 2026.10 or newer.** On older Core the integration works normally; the AI tools are simply not offered.
+
+* **Ask your network questions:** The integration registers its own MCP tool surface, so an AI assistant can answer questions like "how many devices are online?", "did my internet drop this week?", or "which devices on my guest network used the most bandwidth in the last hour?" — using real local data, with no sidecar and no cloud subscription.
+* **Use it from almost any AI client:** This is a standard MCP server, not an Assist-only feature. Home Assistant's native [Model Context Protocol Server](https://next.home-assistant.io/integrations/mcp_server/) serves these tools to **any MCP client** — ChatGPT, VS Code and other editors, Claude Desktop, or a custom agent — so you can query your network from whichever assistant you already use, and one integration reaches all of them. Requires enabling the MCP Server integration in Home Assistant.
+* **Multiple boxes appear as separate tool sets:** Each Firewalla box is registered as its own MCP API with its own URL, so you can point a client at one box or at several. Merged, Home Assistant namespaces each box's tools by the name you gave that entry, so the assistant always knows which box it is acting on.
+* **Graduated access, privacy-first default:** Five settings control what the assistant can reach. The default, **Summary only**, answers general questions using counts, network names, and performance metrics — **no device addresses, hardware identifiers, group or user names, or public IP**. Raise it to **Read only** for device names and addresses, then **Read and control** for reversible actions, and finally **Full** for destructive ones.
+* **Read access is useful, and it is a real trade:** Anything above Summary only sends actual network detail to whichever LLM provider the assistant talks to — device names, IP and MAC addresses, rule and alarm detail (including remote endpoints and, for some alarms, approximate location), and your public IP. That is enough to build a detailed picture of a household, so consider who operates the model you are using, and raise the setting only as far as you need it, for as long as you need it.
+* **Structural safeguards:** In Summary only the other tools are not registered at all, so there is no sensitive field to filter out and nothing to leak. Every control action is admin-gated, so a non-admin user can never change your network through the assistant, and credentials, pairing keys, and symmetric keys cannot appear in tool output at all.
+
 ## **Supported Hardware & Prerequisites**
 * **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. Confirmed working on the following models running the Firewalla Box software that supports the local API:
    * Gold
@@ -87,6 +97,8 @@ You can read state or call services this way, and both return structured data yo
    * Purple
 * **Home Assistant:** Requires Home Assistant Core version 2025.10 or newer.
 * **Network:** Your Home Assistant instance must be able to reach the Firewalla's local LAN IP.
+
+The AI assistant and MCP tools need a newer Core; see the note at the top of the [AI Assistant & MCP Access](#ai-assistant--mcp-access) section.
 
 ## 🛡️ **A Note on Security & Privacy**
 Connecting any external system to your firewall’s management layer requires a high degree of trust.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-firewalla-local"
-version = "2.1.0"
+version = "2.5.0-beta.1"
 description = "Local-first Home Assistant custom integration for Firewalla"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -12,6 +12,14 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
+    # Home Assistant's `llm.async_call_tool` imports
+    # `homeassistant.components.conversation` at call time, which imports
+    # `hassil` and `gazetteer_matcher`. The `homeassistant` package does not
+    # declare either, so every test that calls a tool fails with
+    # ModuleNotFoundError without them. Pinned to the versions Home Assistant
+    # constrains in `package_constraints.txt`.
+    "gazetteer-matcher==1.1.0",
+    "hassil==3.12.1",
     "mypy>=1.15.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
@@ -59,6 +67,24 @@ files = ["custom_components/firewalla_local"]
 [[tool.mypy.overrides]]
 module = "homeassistant.components.device_tracker"
 ignore_errors = true
+
+# Home Assistant 2026.10 replaced voluptuous with probatio and installs a
+# runtime shim aliasing `voluptuous` to probatio, but mypy still resolves the
+# real voluptuous package (pulled transitively). Their schema types are not
+# identical, so skip analyzing voluptuous to avoid false arg-type errors.
+# Runtime behavior is unaffected; this is version-agnostic.
+[[tool.mypy.overrides]]
+module = "voluptuous.*"
+follow_imports = "skip"
+
+# Home Assistant 2026.10 moved device-class enums into per-platform `const`
+# modules and re-exports them from the package. Relax implicit-reexport checking
+# for this one module so package-level imports keep working. Importing from
+# `homeassistant.components.binary_sensor.const` would break older Core, where
+# that module does not exist.
+[[tool.mypy.overrides]]
+module = "homeassistant.components.binary_sensor"
+no_implicit_reexport = false
 
 [tool.pylint.main]
 ignore-paths = [
