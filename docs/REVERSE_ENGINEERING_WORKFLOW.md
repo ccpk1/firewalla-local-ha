@@ -531,6 +531,40 @@ Limitations: it inspects only `POST` bodies on port `8833`. It does not report
 other HTTP methods, does not decode server-sent events, and cannot see an action
 that leaves the box. Use the widened helper below for those.
 
+**It also cannot inspect responses, which matters more than it sounds.** Two
+independent limits stack up:
+
+- response bodies are printed **truncated to 800 characters**
+- responses are **zlib-compressed inside the encrypted envelope**, so the print
+  shows the compressed blob, not the data
+
+Any question whose answer is in a response body — which is most read-side
+reverse engineering — needs the untruncated dumper described next.
+
+### Response dumper (compressed-response aware)
+
+- `.tmp/dump_all.py <pcap> <out.json> [client-ip]`
+
+Prints every decrypted message in **both directions** with full bodies, and
+decompresses responses. Response payloads arrive as:
+
+```json
+{"compressed": 1, "payload": "<base64 of zlib-compressed JSON>"}
+```
+
+and decompress to:
+
+```json
+{"code": 200, "data": [{"msg": {...request echo...}, "result": {"data": {...}}}]}
+```
+
+So the useful body is `data[].result.data`, keyed by the echoed `msg.data.item`.
+
+**Use this whenever the finding lives in a response.** It is a `.tmp/` helper
+rather than a tracked util because it was written for one investigation, but the
+decoding itself is now documented here so the next reader does not have to
+rediscover it.
+
 ### Widened capture analysis helper
 
 - `utils/analyze_capture_wide.py`
@@ -1277,14 +1311,33 @@ Artifacts: `.tmp/survey_flows.py`, `.tmp/probe_flow_containers.py`,
 `.tmp/probe_blocked_flows.py`, `.tmp/probe_hit_freshness.py`,
 `.tmp/verify_rule_hits.py` (all read-only against the live box).
 
-### Flow reporting endpoints: the block event log
+## Flow reporting and the local block log
 
 **Confirmed by capture on 2026-10-03.** This is the local data behind the
 Firewalla app's flow report, and it is **three distinct queries**, not one. All
 are `mtype: "get"` with a `type` of `tag` or `host` and a `target` of the tag id
 or the device MAC.
 
-**1. The rollup — `item: "tag"` or `item: "host"`**
+This section exists because an earlier revision of this document claimed no local
+blocked-history query existed. That was wrong, and it was wrong for a specific
+reason worth remembering: **the claim was inferred from the init payload alone**,
+and flow reporting is not in the init payload at all. It is only visible by
+capturing the app while it displays the report.
+
+### The three queries at a glance
+
+| Query | `item` | Target | Answers | Pagination |
+| --- | --- | --- | --- | --- |
+| **Rollup** | `tag` / `host` | tag id / MAC | top destinations, per-member ranking, byte totals | none (windowed) |
+| **Event log** | `flows` | tag id / MAC | what was blocked, by which rule, for which device | `nextTs` |
+| **Audit log** | `auditLogs` | tag id / MAC | same as `flows`, plus `category` / `ets` filters | `nextTs` |
+
+**Drilling down switches the `type`, not just the target.** Selecting a member
+inside a group changes `type` from `tag` to `host` and `target` from the tag id to
+the device MAC. The same three queries serve both levels, so a group report and a
+device report are the same code path with a different target.
+
+### 1. The rollup — `item: "tag"` or `item: "host"`
 
 ```json
 {"item": "tag", "apiVer": 2, "audit": true, "target": "31",
@@ -1296,32 +1349,46 @@ init payload caches. Its response carries:
 
 - **`flows`** — the blocked breakdown, split into `dnsB`, `ipB:in`, `ipB:out`,
   `local:ipB:in`, `local:ipB:out`, plus `download` and `upload`. Each block holds
-  a `flows[]` of **aggregated top destinations**: `{host, ip, port[], count,
-  country, category?, app?, flowTags?, device, begin, end}`. This is the app's
-  "top destinations" and "top flows" — grouped by `host`, so a subdomain is its
-  own row (`ye2.c.lencr.org` rather than `lencr.org`).
-- **`hosts`** — **per-member attribution**, keyed by device MAC. This is what
-  drives "top download member in KADENS_DEVICES". Only populated on a `tag`
-  request, which is why a group/user report can rank members and a device report
-  cannot.
-- **`newLast24` / `last60` / `last30` / `last12Months`** — windowed totals.
+  a `flows[]` of **aggregated top destinations**:
+
+  ```json
+  {"host": "catalog.gamepass.com", "ip": "23.1.254.210", "port": ["443"],
+   "count": "236214", "country": "FR", "category": "games", "device":
+   "CC:28:AA:11:06:B7", "begin": 1790948400, "end": 1791034800,
+   "flowTags": ["noise"]}
+  ```
+
+  This is the app's **"top destinations"** and **"top flows"**. Grouping is by
+  `host`, so a subdomain is its own row — `ye2.c.lencr.org` rather than
+  `lencr.org`, and `catalog.gamepass.com` rather than `gamepass.com`. That is the
+  granularity distinction the app presents as two separate lists.
+- **`hosts`** — **per-member attribution**, keyed by device MAC, each with its own
+  byte and blocked totals. This is what drives "top download member in
+  KADENS_DEVICES". Only populated on a `tag` request, which is exactly why a
+  group or user report can rank members and a device report cannot.
+- **`newLast24` / `last60` / `last30` / `last12Months`** — windowed totals, the
+  same windows the `item=intf` payload uses.
 - **`policy`**, **`name`**, **`uid`**, **`createTs`**.
 
-**2. The event log — `item: "flows"`**
+### 2. The event log — `item: "flows"`
 
 ```json
 {"item": "flows", "type": "tag", "target": "31", "audit": true,
  "count": 300, "ts": 1791036000, "exclude": []}
 ```
 
-**This is the block log.** Response: `{count, flows[], nextTs}`. Verified live:
-**300 records per call**, and `nextTs` feeds the next call's `ts` — the app
-paginates by walking `ts` backwards (observed calling it three times with
-descending `ts`).
+**This is the block log, and it is the most useful of the three.** Response:
+`{count, flows[], nextTs}`. Verified live: **300 records per call**, and `nextTs`
+feeds the next call's `ts` — the app paginates by walking `ts` backwards,
+observed calling it three times in a row with descending `ts`.
 
-Each record names the rule that blocked it:
+`audit: true` restricts it to audit events, which is the "blocked only" filter in
+the app's UI.
 
-| Field | Coverage over 300 rows | Meaning |
+Each record names the rule that blocked it. Field coverage measured over a
+300-row response:
+
+| Field | Coverage | Meaning |
 | --- | --- | --- |
 | `device`, `deviceIP`, `tags`, `userTags`, `dTags` | 300/300 | Full attribution |
 | `ts`, `count`, `port`, `protocol`, `intf`, `ltype` | 300/300 | `ltype: "audit"` |
@@ -1329,42 +1396,76 @@ Each record names the rule that blocked it:
 | `type` | 296/300 | `dns` / `ip` |
 | `domain` | 283/300 | DNS match |
 | `flowTags` | 238/300 | `["noise"]` marks background traffic |
-| `category`, `app` | 91 / 30 | When identified |
+| `category`, `app` | 91 / 30 | When the box identified them |
 | `host`, `ip`, `fd`, `devicePort` | 15–17/300 | Resolved connection detail |
 
-`pid` is the join back to `policyRules`, so a blocked event can be attributed to
-**the rule that caused it** — which the rollup cannot do.
+Example record:
 
-**3. The audit log — `item: "auditLogs"`**
+```json
+{"ltype": "audit", "ts": 1791035437.587, "pid": 6, "type": "dns",
+ "device": "CC:28:AA:11:06:B7", "deviceIP": "192.168.200.122",
+ "domain": "graph.oculus.com", "port": 53, "protocol": "dns",
+ "tags": ["31"], "userTags": ["32"], "dTags": ["1"],
+ "flowTags": ["noise"], "count": 2,
+ "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2"}
+```
+
+**`pid` is the join back to `policyRules`**, so a blocked event can be attributed
+to **the rule that caused it** — which the rollup cannot do. That makes the
+chain complete: *device → membership → rules → the rule that blocked this flow →
+the destination it blocked*.
+
+### 3. The audit log — `item: "auditLogs"`
 
 ```json
 {"item": "auditLogs", "type": "tag", "target": "31", "count": 300,
  "ts": 1791036000, "exclude": []}
 ```
 
-Response: `{count, logs[], nextTs}`. Same pagination. Accepts two extra filters
-the `flows` query does not: **`category`** (e.g. `games`) and **`ets`** (an end
-bound), so a caller can narrow to a category or a sub-window.
+Response: `{count, logs[], nextTs}`. Same pagination. Accepts two filters the
+`flows` query does not: **`category`** (e.g. `games`) and **`ets`** (an end
+bound), so a caller can narrow to one category or a sub-window without paging
+through everything.
 
-**What the time filter does.** The app's window selector is expressed as
-`start`/`end` plus **`hourblock`**: `hourblock: 24` with a 24-hour
-`start`/`end` for the default view, `hourblock: 1` with a one-hour window after
-narrowing. So the granularity and the window are two separate parameters.
+### What the time filter actually is
 
-**Drilling down switches the `type`, not just the target.** Selecting a member
-inside a group changes `type` from `tag` to `host` and `target` from the tag id
-to the device MAC. The same three queries serve both levels.
+The app's window selector is **two separate parameters**:
 
-Artifacts: `.tmp/firewalla_capture_20261003-135000_flow-reporting.pcap`, decoded
-with `.tmp/dump_all.py` (which handles the zlib-compressed response envelope) and
-summarised by `.tmp/summarise_flow_capture.py`; record shapes via
-`.tmp/show_flow_records.py`. Pulls in `.artifacts/flow_reporting/`.
+- **`start` / `end`** — the window bounds, in epoch seconds
+- **`hourblock`** — the granularity: `24` for the default 24-hour view, `1` after
+  narrowing
 
-> **Response decoding note.** Responses are **zlib-compressed and base64-encoded
-> inside the encrypted envelope**: `{"compressed": 1, "payload": "<base64 zlib>"}`,
-> and the decompressed body is `{code, data: [{msg, result}]}`. `analyze_capture.py`
-> truncates bodies to 800 characters, so it is not sufficient for inspecting
-> responses — use `.tmp/dump_all.py`.
+Captured transitions on the same tag: `start=1790949600, end=1791036000,
+hourblock=24` → `start=1791032400, end=1791036000, hourblock=1`. So narrowing
+moved `start` forward and dropped `hourblock` to 1 in one step, which is why the
+two must not be conflated.
+
+**The app offers no window beyond about 24 hours.** The `start`/`end` parameters
+may accept more, but nothing observed does, so a longer window is unverified —
+see *Open questions*.
+
+### Live data volume
+
+Measured against the dev box for one group (`tag: 31`, KADENS_DEVICES):
+
+- the rollup returned **6 blocked families** plus per-member rows
+- one `flows` page returned **300 records**, and the app immediately asked for
+  another
+
+So a single "what was blocked" question is hundreds of records. Any surface built
+on this must bound the response and lead with the summary, never dump the log.
+
+### Artifacts
+
+- `.tmp/firewalla_capture_20261003-135000_flow-reporting.pcap` — the capture,
+  covering Payton's Devices (`tag: 29`), KADENS_DEVICES (`tag: 31`), several time
+  filter changes, and a drill-down into `CC:28:AA:11:06:B7`
+- `.tmp/firewalla_capture_20261003-132919_block-reporting.pcap` — the first
+  attempt, which established the request shapes
+- decoded with `.tmp/dump_all.py`, summarised by
+  `.tmp/summarise_flow_capture.py`, record shapes via `.tmp/show_flow_records.py`
+- `.artifacts/flow_reporting/20261003-134922/` and
+  `.artifacts/block_reporting/20261003-132758/` — the accompanying pulls
 
 ## Findings matrix
 
@@ -2168,6 +2269,20 @@ same shape as a group write. **A local write path is confirmed working**: the
 existing host-scoped `set item=policy value.tags=[<affiliated tag>]` assigns a
 user directly. No further capture is required for the user path.
 
+**Rule handling on a membership change resolved (2026-10-03):** See Finding 43.
+A membership change deletes the rules attached to the device — set or clear,
+group or user — ahead of the tags write, in one batch. No further capture needed.
+
+### Flow reporting
+
+**Resolved (2026-10-03):** the three flow-reporting queries are captured and
+documented in *Flow reporting and the local block log*. The request shapes, the
+response shapes, the pagination and the window parameters are all confirmed.
+
+**Still open:** whether `start`/`end` accept a window longer than the ~24 hours
+the app's own UI offers. Confirming needs a widened capture, because a longer
+window is not reachable through the UI.
+
 ## Open questions
 
 These items remain unconfirmed and should stay visible.
@@ -2197,6 +2312,17 @@ These items remain unconfirmed and should stay visible.
   box does not require it (a `tags`-only write keeps every other key). On a rule
   removal the app deletes **every** rule the device owns — not only disabled ones,
   and not only `dap` — ahead of the tags write, in the same batch
+- whether `flows` / `auditLogs` / `tag` accept a `start`/`end` window wider than
+  the ~24 hours the app's UI offers, and whether `hourblock` scales beyond 24
+  (daily granularity) — the app exposes no such control, so this needs a direct
+  probe rather than a UI capture
+- whether the `flows` pagination has a depth limit, or whether `nextTs` will walk
+  back through retained history indefinitely. The box clearly retains some, but
+  the retention horizon is unknown
+- how long the box retains flow events at all. This determines whether the event
+  log can answer "last week" or only "last day"
+- whether `exclude` on `flows` / `auditLogs` filters out specific categories or
+  devices: it was sent empty in every capture, so its accepted values are unknown
 
 ## AP7 wireless controller findings
 
