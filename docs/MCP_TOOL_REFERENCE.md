@@ -389,14 +389,25 @@ Reads that tell you what exists — the first step before any control action.
   users first, then the tag name), which is why the value transfers. Two caveats: the
   filter matches **exactly**, and a host may list several groups separated by `", "`,
   so filter one name at a time.
+- **Did this rule ever fire, and at what?** Each rule carries `hit_count` (how
+  many times it has matched) and `last_hit` (the most recent single match). The
+  box keeps only the **last** match per rule, not a log, so this answers "what did
+  this rule stop most recently?" and never "everything it blocked". A rule that
+  has never matched carries **neither** field — absent means never matched, not
+  zero. Two uses: troubleshooting ("why can't this device reach YouTube?" — read
+  the rules governing it, then see which one last matched and for which device),
+  and cleanup (enabled rules with no hit data are candidates for removal).
+  `last_hit` carries `device_mac`/`device_ip`, a single resolved `destination`
+  with its `destination_kind` (`domain`/`host`/`ip`), `destination_ip` when known,
+  `port`, `protocol`, and `app`/`category` when the box identified them.
 - **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters;
   `applies_to` takes a host's `group_name`);
   `include_purpose` (`['dap']`, `['family']`) and `include_system_managed` (bool) to
   reveal what the default hides.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
   `action`, `is_paused`/`enabled`, `target`/`target_type`/`target_name`, `scope`,
-  `applies_to`/`tag_refs`, `purpose`, and the `aid` alarm back-reference when the rule
-  was created by an alarm block.
+  `applies_to`/`tag_refs`, `purpose`, `hit_count`/`last_hit`, and the `aid` alarm
+  back-reference when the rule was created by an alarm block.
 - **Availability:** read, default-on (backed by the non-admin `get_rules` service).
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false` (coordinator-backed) or `true` (live).
 

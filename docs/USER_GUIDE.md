@@ -740,10 +740,38 @@ In practice:
 - if a previously selected rule later disappears, Home Assistant can still show
   enough context for you to remove the stale selection cleanly
 
+### Rule hit data (`hit_count` and `last_hit`)
+
+Every rule-backed switch exposes two extra attributes, and the same values are
+returned by the `firewalla_local.get_rules` service and the AI assistant's
+`list_rules` tool:
+
+- **`hit_count`** — how many times the rule has matched since it was created
+- **`last_hit`** — the **most recent single match**: the device involved, the
+  destination, the port and protocol, and when it happened
+
+They answer two questions the integration could not answer before:
+
+- **"Why can't this device reach something?"** Find the rules governing the
+  device, then read each one's `last_hit` — you can see which rule last matched,
+  which device it was, and what it was reaching for.
+- **"Which of my rules can I clean up?"** An enabled rule with no `hit_count`
+  and no `last_hit` has never fired.
+
+Two things worth knowing:
+
+- **This is one observation, not a log.** Firewalla keeps only the last match per
+  rule, so `last_hit` cannot tell you everything a rule has ever blocked, and it
+  may be days or weeks old.
+- **Absent means never matched**, not unknown. A rule that has never fired has a
+  `hit_count` of `null` rather than `0`, so the two stay distinguishable.
+
+The hidden attribute `last_hit` is a dictionary; `hit_count` is a number. Both
+update on each refresh.
+
 ### Persistent rules versus temporary rules
 
 Persistent rules:
-
 - stay installed in Firewalla until you explicitly change or delete them
 - can be paused and resumed in place
 - are the rule family that the integration can expose as Home Assistant

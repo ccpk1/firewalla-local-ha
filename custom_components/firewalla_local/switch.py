@@ -16,8 +16,10 @@ from .const import (
     ATTR_RULE_CATEGORY,
     ATTR_RULE_CURRENT_STATE_REASON,
     ATTR_RULE_CUSTOM_NAME,
+    ATTR_RULE_HIT_COUNT,
     ATTR_RULE_ID,
     ATTR_RULE_IS_PAUSED,
+    ATTR_RULE_LAST_HIT,
     ATTR_RULE_NAME,
     ATTR_RULE_NOTES,
     ATTR_RULE_PAUSE_REMAINING_SECONDS,
@@ -55,6 +57,7 @@ from .managers.wireless_manager import FirewallaSsidProfile
 from .models import (
     FirewallaPolicyRule,
     FirewallaRuleTemplate,
+    build_rule_hit_attributes,
     format_policy_rule_name,
 )
 
@@ -190,6 +193,15 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
 
         if notes:
             attributes[ATTR_RULE_NOTES] = "; ".join(dict.fromkeys(notes))
+
+        # Shared with the rule service payload, so a hit reads the same here and
+        # there. Only on the matched rule: a template can own several live rules
+        # and merging their hits would invent a number that describes neither.
+        if matched_rule is not None:
+            attributes[ATTR_RULE_HIT_COUNT] = matched_rule.hit_count
+            attributes[ATTR_RULE_LAST_HIT] = build_rule_hit_attributes(
+                matched_rule.last_hit
+            )
 
         attributes[ATTR_RULE_ACTION] = self._template.action
         attributes[ATTR_RULE_IS_PAUSED] = any(rule.is_paused for rule in matching_rules)

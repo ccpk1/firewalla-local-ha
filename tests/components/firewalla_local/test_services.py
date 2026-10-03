@@ -140,6 +140,7 @@ from custom_components.firewalla_local.models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
+    FirewallaRuleHit,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
     FirewallaUserRuntime,
@@ -3622,6 +3623,98 @@ async def test_get_rules_returns_attachment_and_purpose_fields(
     assert rule["applies_to"] == ["AV_SMART_TV"]
     assert rule["tag_refs"] == ["tag:17"]
     assert rule["purpose"] is None
+
+
+async def test_get_rules_exposes_hit_count_and_last_hit(
+    hass: HomeAssistant,
+) -> None:
+    """A rule reports whether it fires, and what it last matched.
+
+    This is what makes the rule list answer two questions it could not before:
+    "why is this device blocked?", from the device and destination on the last
+    hit, and "what can I clean up?", from rules that have never fired.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    snapshot = replace(
+        _snapshot(),
+        policy_rules=(
+            replace(
+                _snapshot().policy_rules[0],
+                hit_count=26617,
+                last_hit=FirewallaRuleHit(
+                    timestamp=1790990234.243,
+                    device_mac="74:A7:EA:24:44:44",
+                    device_ip="192.168.202.43",
+                    destination="www.youtube.com",
+                    destination_kind="domain",
+                    destination_ip=None,
+                    port=53,
+                    protocol="dns",
+                    app="youtube",
+                    category="av",
+                ),
+            ),
+            replace(_snapshot(rule_id="672").policy_rules[0], hit_count=None),
+        ),
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    by_id = {rule["rule_id"]: rule for rule in response["rules"]}
+    fired, never = by_id["744"], by_id["672"]
+
+    assert fired["hit_count"] == 26617
+    assert fired["last_hit"] == {
+        "timestamp": 1790990234.243,
+        "at": "2026-10-03T01:17:14.243000+00:00",
+        "device_mac": "74:A7:EA:24:44:44",
+        "device_ip": "192.168.202.43",
+        "destination": "www.youtube.com",
+        "destination_kind": "domain",
+        "destination_ip": None,
+        "port": 53,
+        "protocol": "dns",
+        "app": "youtube",
+        "category": "av",
+    }
+    # Absent stays absent: a cleanup report must not read "never matched" as a
+    # count of zero and conclude the rule fires.
+    assert never["hit_count"] is None
+    assert never["last_hit"] is None
 
 
 async def test_get_rules_excludes_product_owned_purposes_by_default(

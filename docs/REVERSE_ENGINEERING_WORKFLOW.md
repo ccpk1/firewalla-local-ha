@@ -1028,6 +1028,51 @@ zero and the box-wide init windows are aggregate (not per-WAN) — so a WAN
 WAN monthly totals also remain on the System Status `current_wan_usage` /
 `get_wan_data_usage` surface.
 
+#### Per-host flow and block counters (`item=intf`)
+
+The same `item=intf` payload that carries the windows above also carries
+**per-host flow counters** under its `hosts` map, and these are genuinely
+per-device rather than per-network. Each host entry exposes:
+
+| Key | Meaning |
+| --- | --- |
+| `conn` / `dns` / `ntp` | connection, DNS and NTP flow counts |
+| **`dnsB`** | **DNS queries blocked** |
+| **`ipB`** | **IP flows blocked** |
+| **`ipD`** | **IP flows denied** |
+| `download` / `upload` | byte totals per host |
+
+Normalized to `FirewallaNetworkHostTotals` and surfaced through
+`_serialize_network_host_totals` as `dns_blocked` / `ip_blocked` / `ip_denied`,
+reachable via the `get_network_segment_report` (`hosts[]`) and
+`get_network_segment_usage` services. `view.activity_hosts` carries the richer
+per-host rows built from the payload's `flows` families
+(`_build_network_activity_hosts`).
+
+**This is the local block accounting the integration already had.** It is
+per-host and windowed by whatever the `item=intf` request asks for, so it answers
+"how much is being blocked for this device" — a count — where the rule hit data
+answers "what exactly was blocked, and by which rule". The two are complementary:
+the counter is aggregate and per-network-request scoped, the rule hit is
+specific and arrives on every init pull.
+
+Also on the init payload, for completeness, are three box-wide 24-hour flow
+windows in `systemFlows` — `upload`, `download` and `dnsB` — each
+`{begin, end, flows[]}` where a flow is `{domain, count, app?, category?,
+flowTags?}`. These are **aggregate across the box**, not per-device, so they
+answer "what is this network talking to" and not "what is this device doing".
+Nothing in the integration consumes them today.
+
+Two further per-device sources exist but are **Device Active Protect state, not a
+flow log**: `host.policy.dap.flows` / `last24` / `ipFlows` / `dnsFlows` /
+`icmpFlows` hold the destinations DAP has learned for that device, and
+`host.policy.dap.finalRuleSet` reports its `defaultAction`, `isolation` and the
+allow/block rule ids DAP installed. They are only present for DAP-managed
+devices, and they describe what DAP permits rather than what actually crossed.
+
+**Per-rule hit data** is the fourth source and the most directly useful: see the
+rule hit findings under *Inventory-confirmed durable rule findings*.
+
 ### Box identity and port detail
 
 The System Status entity surfaces box-level identity and physical-port detail
@@ -1160,6 +1205,66 @@ Current interpretation:
   control family
 - if `app_block` reappears in fresh captures, treat it as a specialized app
   enforcement shape rather than assuming all app rules use that action
+
+### Per-rule hit data: `hitCount` and `lastHitFlow`
+
+Confirmed live on 2026-10-03 against the dev box's init payload.
+
+Every policy rule may carry two extra fields:
+
+| Key | Meaning | Coverage on the dev box |
+| --- | --- | --- |
+| `hitCount` | times the rule has matched, as a **string** | 76 of 321 rules |
+| `lastHitFlow` | the **most recent single match** | 54 of 321 rules |
+
+`lastHitFlow` is a flat object. Fields, with their observed coverage across the
+54 rules that had one:
+
+| Field | Coverage | Meaning |
+| --- | --- | --- |
+| `ltype`, `type`, `ts`, `count`, `intf`, `protocol`, `port` | 54/54 | Always present |
+| `device`, `deviceIP` | 54/54 | **The device the flow belonged to** |
+| `fd` (direction), `devicePort`, `ip` | 47/47/47 | |
+| `pid` | 28/54 | The originating rule id |
+| `duration`, `apid`, `upload`, `download` | 26/54 | |
+| `country`, `dIntf`, `dstMac`, `local`, `dTags` | 23/54 | |
+| `host` | 19/54 | Resolved hostname |
+| `tags`, `dstTags` | 16/54 | |
+| `wanIntf`, `flowTags`, `category`, `app` | 9–15/54 | |
+| `domain` | 7/54 | DNS match |
+| `userTags` | 6/54 | |
+
+**The destination arrives under one of three keys, and the set is exclusive in
+practice:** `host` for a resolved connection, `domain` for a DNS match, and `ip`
+when neither resolved. Normalize to one destination plus its kind rather than
+leaving the caller to know which family produced it.
+
+**It is a last-hit record, not a log.** Confirmed empirically: `ts` values on the
+dev box ranged from **0.0 to 66.5 days** old on rules that were all currently
+enabled. A rule's history is not recoverable locally; only its most recent match
+is.
+
+**Absent means never matched.** A rule with no `hitCount` and no `lastHitFlow`
+has never fired — which is the cleanup signal, and must stay distinguishable
+from a count of zero.
+
+**The block case is the useful one.** A `block` rule carrying a `lastHitFlow`
+names the device and the destination that rule stopped, so "why can't this device
+reach X?" is answerable by reading the rules governing the device and inspecting
+their hits. On the dev box 27 `block` rules carried hit data.
+
+**What remains offline:** there is no local query for "everything blocked for
+this device over a period". The full history is in the app's cloud. Locally the
+available answers are the per-rule last hit (above) and the aggregate per-host
+block counters on `item=intf` (`dnsB`/`ipB`/`ipD`, see *Data usage*).
+
+Used by: `_normalize_rule_hit` in `api/client.py`, surfaced identically to the
+`get_rules` service payload (`_serialize_rule_summary`) and to rule-backed switch
+entities via the shared `build_rule_hit_attributes` in `models.py`.
+
+Artifacts: `.tmp/survey_flows.py`, `.tmp/probe_flow_containers.py`,
+`.tmp/probe_blocked_flows.py`, `.tmp/probe_hit_freshness.py`,
+`.tmp/verify_rule_hits.py` (all read-only against the live box).
 
 ## Findings matrix
 
