@@ -7,7 +7,15 @@ consumers so intensive, complex flow-data handling has one logic path and stays
 efficient* — and then pressure-test the draft plan against its own gaps, traps and
 opportunities.
 
-Written 2026-10-03 against `main` (rule hit data merged).
+Written 2026-10-03 against `main` (rule hit data merged). Revised the same day
+against `feature/flow-reporting` after Phase 1 landed and after Firewalla's
+published MSP flow model was cross-checked; sections 2b, 3 and the resolved-item
+notes reflect that.
+
+**Scope note:** Firewalla documents this model for its **MSP** cloud API. The
+integration uses local access, which has no MSP layer, so the published model is
+used as a statement of **intent** and not as an interface. Where the two disagree,
+the measurement wins and the disagreement is recorded.
 
 ---
 
@@ -59,13 +67,19 @@ Inside those builders, the same decoding is written out repeatedly:
 
 | Step | Copies | Where |
 | --- | --- | --- |
-| Device id from `device` / `mac` / `deviceMac` | **3** | `_build_network_flow_rankings`, `_build_network_activity_hosts` (×2 blocks), `_build_network_usage_buckets` |
+| Device id from `device` / `mac` / `deviceMac` | **5** | `_build_network_flow_rankings`, `_build_network_activity_hosts` (×3 blocks), `_build_network_usage_buckets` |
 | Metric from `<metric>` / `bytes` / `count` | **2** | `_build_network_flow_rankings`, `_build_network_activity_hosts` |
 | Destination from `host` / `domain` + `ip` | 1 | `_build_network_flow_rankings` |
 | Ranking-payload unwrapping | 1 | `_resolve_network_ranking_payload` |
 | Download/upload window shape | **3 ser/deser** | extractor, service serializer, attribute serializer |
+| Per-host sort key | **2 identical** | `_build_network_top_talkers`, `_build_network_hosts` |
 
 A field-name variation is currently fixed in three places or silently missed in one.
+
+(An earlier revision of this note gave the device-id count as three and the
+integer-coercer count as seven helpers in one place. Both were understated: the
+count is five for the device id, and there are seven **integer** helpers plus six
+**boolean** helpers plus two further ad-hoc numeric coercers found on review.)
 
 ### The efficiency problem
 
@@ -115,31 +129,76 @@ those are latent bugs this initiative surfaces rather than creates.
 
 ---
 
+## 2b. Boolean coercion: six implementations, two incompatible conventions
+
+Found by re-auditing after the first pass missed the client's helper because its name
+does not match the `_normalized_*` / `_optional_*` pattern the first grep used.
+
+| Helper | Location | `bool` | `int` | `str` |
+| --- | --- | --- | --- | --- |
+| `_coerce_boolish` | `api/client.py:2444` | ✓ | `bool(v)` | `{"1","true","yes"}` / `{"0","false","no",""}` |
+| `_optional_bool` | `managers/integration_manager.py:1301` | ✓ | `bool(v)` | **None** |
+| `_optional_bool` | `services.py:1984` | ✓ | `bool(v)` | **None** |
+| `_normalized_bool` | `managers/integration_manager.py:2308` | ✓ | **None** | `"true"`/`"false"` |
+| `_normalized_optional_bool` | `models.py:179` | ✓ | **None** | `"true"`/`"false"` |
+| `_normalized_bool` | `utils/network.py:83` | ✓ | **None** | `"true"`/`"false"` |
+
+Two camps: three accept integers and no strings, three accept `"true"`/`"false"` and
+no integers. A field was readable by whichever camp happened to be wired to it.
+
+**Measured against live payloads**, the box uses four encodings:
+
+| Field | Live encodings | Read correctly by |
+| --- | --- | --- |
+| 16 assorted flags (`active`, `ready`, `trust`, …) | real `bool` | either camp |
+| **`autoDeleteWhenExpires`** | **`"0"`×24, `"1"`×1** | only the integer camp (`_coerce_boolish`) |
+| **`useBf`** | **`""`×36, `True`×24** | **neither** — `""` needs declining, not answering |
+| `disabled` | `"1"`/`"0"` | its own dedicated membership test |
+
+**Two defects, one of them a latent trap rather than a live bug:**
+
+1. **`autoDeleteWhenExpires` was read by the string-only camp** and so returned
+   `None` for all 25 live values. It has no caller, which is why nothing broke; the
+   client path reads the same field correctly through `_coerce_boolish`.
+2. **`""` must not be read as `False`.** `useBf` is present exactly on DNS-only
+   rules: the 36 `""` rules and 24 `True` rules are all `dnsmasq_only: True`, and
+   `_coerce_boolish` would read those 36 as `False`. It is not routed through that
+   field today, and the template default (`None` → `True`) happens to be correct —
+   but reading `""` as `False` anywhere near this field would **invert the flag** on
+   rule creation, since the create payload sends `useBf` verbatim.
+
+**Recommendation.** One union coercer accepting all four encodings and **declining
+the empty string**, since `""` is an opaque per-field marker rather than a value.
+
+---
+
 ## 3. Ranking: one question, three implementations waiting to happen
 
-`_build_network_top_talkers` already ranks devices by
-`(-(download + upload), name.casefold(), mac)` and truncates at
-`_TOP_TALKER_LIMIT = 5`. `_build_network_hosts` sorts by a near-identical key,
-`_build_network_flow_rankings` by `(-value, host_name, host_id)`, and
-`_build_network_usage_buckets` by `(-total, -sessions, key)`.
+`_build_network_top_talkers` already ranked devices by
+`(-(download + upload), name.casefold(), mac)` and truncated at
+`_TOP_TALKER_LIMIT = 5`; `_build_network_hosts` used a byte-identical key; and
+`_build_network_flow_rankings` used `(-value, name, id)` — the same shape **without
+the casefold**, so a top-destination list ordered by codepoint could place
+`"Zebra"` before `"apple"` while a top-talker list of the same equal-valued pair did
+the opposite.
 
-Four sort keys that all answer "rank by traffic, break ties deterministically" and
-each does it slightly differently — `_build_network_hosts` includes `host_name`
-before `host_id`, `_build_network_flow_rankings` does not casefold, and only the
-top-talker path has a limit. The flow report's `top_members` and `top_destinations`
-need the same questions answered.
+**Resolved in Phase 1.** The two identical keys collapsed into
+`host_traffic_sort_key` and the flow ranking now shares the casefold via
+`metric_ranking_sort_key`. The three remaining keys are documented in
+`utils/flow.py` with why their **primary** keys legitimately differ — one ranks by a
+combined total, one by a single metric, one by a session-count tie-break — so the
+differences are intentional and stated rather than accidental and silent.
 
-**Recommendation.** Phase 1.4 makes these target-agnostic with **one tie-break
-rule**, keeping `5` as a parameter default rather than a second constant. Where the
-four keys genuinely disagree on ordering of same-value rows, that is a **finding to
-report**, not something to silently normalize — the output ordering of the existing
-services is observable behaviour.
+Measured impact on real data: **zero** ordering changes across 414 captured ranking
+rows (no duplicate-value group contains a mixed-case name), so this removed a latent
+inconsistency without altering any output.
+
 
 ---
 
 ## 4. Gaps in the draft plan
 
-- **No stated answer for "count returned vs count available".** The events response
+- **No stated answer for "count returned vs count available".** A record response
   carries the box's own `count`. If we return 300 of 1,400, the summary must say so,
   or a reader will conclude the target was quiet. Phase 3.6's envelope has room for
   this in `summary`; it is not yet a step. **Add it to 3.5.**
@@ -147,18 +206,18 @@ services is observable behaviour.
   its name or whether it is opaque. Recommendation: `next_cursor`, carrying `ts`
   verbatim, documented as opaque so a future change to the cursor's meaning is not a
   breaking change.
-- **No plan for what `time_basis` means on the events view.** The rollup is a
-  windowed aggregate; the event log is a *reverse walk from a timestamp*. These are
+- **No plan for what `time_basis` means on the log views.** The rollup is a
+  windowed aggregate; a record log is a *reverse walk from a timestamp*. These are
   genuinely different time semantics and `kind` must distinguish them, or `is_partial`
   will be meaningless. **Add to 3.6.**
 - **No coverage target for the fail-soft path (2.7).** A behaviour that only appears
   when the box misbehaves needs a test that fabricates the bad shape, otherwise
   2.7 is untested prose.
 - **No decision on where the flow manager code lives.**
-  `managers/integration_manager.py` is already the largest module in the repo and
-  holds four of the seven coercers. Recommendation: a new
-  `managers/flow_manager.py` for the flow view building, with the *shared* core
-  lifted to `utils/` in Phase 1. Do not grow `integration_manager.py` further.
+  `managers/integration_manager.py` is already the largest module in the repo.
+  Recommendation, **agreed and now in the plan**: a new `managers/flow_manager.py`
+  in Phase 2 for the flow view building, with the *shared* core in `utils/` as of
+  Phase 1. Do not grow `integration_manager.py` further.
 - ~~No confirmed answer on default identity exposure.~~ **Closed 2026-10-03.** The
   owner confirmed: gate by default exactly as the segment report does, but keep it
   retrievable — `include: ["device_detail"]` returns per-device attribution at both
@@ -170,7 +229,31 @@ services is observable behaviour.
   initiative exists to remove.
 - **No before/after evidence for the efficiency work.** Step 1.5 asks for a single
   pass, which is an assertion until measured. The validation table now requires a
-  row-throughput measurement on a 2000-row page across four families.
+  row-throughput measurement on a 2000-row page across four families. **Dropped by
+  owner decision** as one-off activity; the change is reasoned rather than
+  benchmarked.
+
+### Resolved by the MSP cross-check (2026-10-03)
+
+The plan claimed `item: "flows"` was the block log and that `audit: true` filtered
+it to blocks. **Both were wrong**, and the error was structural. Measured:
+
+| Query | `ltype` breakdown |
+| --- | --- |
+| `item: "flows"`, `audit: true` | 26 `audit` + 274 `flow` |
+| `item: "flows"`, `audit: false` | 300 `flow` |
+| `item: "auditLogs"`, `audit: true` | **300 `audit`** |
+
+So `auditLogs` is the block log and `audit` **adds** blocked records rather than
+filtering to them. A report built on the original reading would have been ~91%
+regular traffic while claiming to show blocks. Recorded as Q4b, with Q10 inverted
+(the assertion must be that a blocked read is all-`audit`, not the reverse) and
+Phase 2 split into three named client methods.
+
+A second probe settled direction. `fd` is `"in"` on all 199 `download` **and** all
+199 `upload` rows, with 100 endpoints appearing in both families at the same `fd`
+and different totals, and it is absent on `dnsB` entirely. **Direction must come
+from the family name** — recorded as Q4c so nothing depends on `fd`.
 
 ---
 
@@ -180,18 +263,23 @@ services is observable behaviour.
 | --- | --- | --- | --- |
 | **T1** | A fourth flow-processing path | The five existing builders already answer these questions for `item=intf` (§1); a new path diverges silently | Phase 1 generalizes them; Phase 3 adds no builder |
 | **T2** | A second usage-window parser | Rollup reuses `newLast24`/`last60`/`last30`/`last12Months` | Phase 1.4 shares the extractor |
-| **T3** | A second device ranker | Four near-identical sort keys already exist; `top_talkers` answers this | Phase 1.4, one tie-break rule, `5` as a parameter default |
+| **T3** | A second device ranker | Near-identical sort keys already exist; `top_talkers` answers this | Phase 1.4/1.9: two shared keys, `5` as a parameter default, the three legitimate primary-key differences documented |
 | **T4** | Empty reported as "nothing happened" | Retention is a hard ~24h cutoff; an empty page is indistinguishable from a quiet target | Always return the window searched, the served window, and the box's own `count` |
 | **T5** | Duplicate rows across a page boundary | `ts` bounds are inclusive, so adjacent pages overlap | Dedupe on `(ts, device, pid, domain or ip, port)` — Phase 2.5 |
 | **T6** | A bespoke response envelope | Four report services share an envelope; a fifth shape fragments the surface | Phase 3.6 reuses the existing serializers |
 | **T7** | Conflating `hourblock` with retention | An earlier probe blamed `hourblock: 168` for a failure actually caused by an out-of-range `start` | Documented explicitly in 2.4; every `hourblock` 1–168 works |
 | **T8** | Unbounded service response | 300 rows per 0.3h on a busy group; a full day is thousands of identity-bearing rows | Summary default, bounded page default, explicit opt-in for all-available (Q1) |
-| **T9** | A silent filter no-op | `audit: true` unverified; `exclude` values unknown | Q10's `ltype` assertion; `exclude` stays internal (Q4) |
-| **T10** | Implying the block log is complete | `domain` is 283/300 but `category` is 91 and `app` is 30; `host`/`ip` only 15–17 | Phase 3.5 must not summarize absent fields as zero |
+| **T9** | A silent filter no-op | `audit: true` does not filter to blocks, it adds them | Phase 2 names one method per query; Phase 3 discriminates on `ltype`; `exclude` stays internal (Q4) |
+| **T10** | Implying a record set is complete | Blocked coverage is uneven: `domain` 265/300 but `category` 52 and `app` 10; regular records are near-complete on `host`/`ip` but `category` is 111/300 | Phase 3.5 must not summarize absent fields as zero |
 | **T11** | `pid` → rule join dropping rows | Rule ids are not durable across delete/re-create (issue #53) | Q5: keep the row, null the name, count it |
 | **T12** | Ambiguous target name | A name can be both a group and a device | Reuse the existing resolver's ambiguity error — Phase 3.1 |
-| **T13** | Refactor changing observable ordering | The four existing sort keys disagree on same-value rows; ordering is visible in service output and snapshots | Phase 1.4 reports such rows as a finding rather than normalizing silently |
-| **T14** | Consolidation changing a coercion result | Three of the seven coercers disagree; strictness changes what some call sites return | Phase 1.2: record every call site whose behaviour changes |
+| **T13** | Refactor changing observable ordering | The existing sort keys disagreed on same-value rows; ordering is visible in service output and snapshots | Phase 1.9 aligned the flow keys; measured **zero** ordering changes on 414 real rows |
+| **T14** | Consolidation changing a coercion result | The coercers disagreed; strictness changes what some call sites return | Phase 1.2 recorded every change; 601 tests pass with no snapshot touched |
+| **T17** | Reporting `fd` as direction | `fd` is `"in"` on both byte families and 100 endpoints carry it on two opposite rows | Q4c: direction comes from the family name only |
+| **T18** | One `count` field, two units | `count` is bytes on `download`/`upload` and a block count on `ipB`/`dnsB`, exactly as Firewalla documents | Phase 3.5c derives the unit from the family and forbids a generic `value` field name |
+| **T19** | Assuming one shape for `port` | `port` is a list on rollup rows (207/207) and an int on records (1500/1500) | Phase 3.5d coerces both to tuples |
+| **T20** | A local flow with no hostname | `local:` families carry `dstMac` and no `host`/`domain`, so a domain-or-ip destination kind cannot represent them | Phase 3.5e adds a `mac` destination kind |
+| **T21** | Reading a blocked record's absent bytes as zero | Blocked flows are intercepted before travelling, so they have no bytes at all | Phase 3.5: report absent, never `0` |
 | **T15** | A default gate becoming a wall | Gating per-device attribution off by default is fine only if it stays reachable | Phase 3.4 plus a test on both sides of the gate |
 | **T16** | Efficiency work trading correctness | Single-pass accumulation can drop the deterministic tie-break | Step 1.5 keeps sort keys identical and measures before/after |
 
@@ -206,15 +294,16 @@ services is observable behaviour.
   subsystem — provided Phase 1 lands first.
 - **O1 — the `pid` join is genuinely new capability.** `device → membership → rule →
   the rule that blocked this flow → the destination it blocked` cannot be answered by
-  any existing surface. This is the differentiator, and it is why the events detail
+  any existing surface. This is the differentiator, and it is why the record detail
   belongs in the initiative's scope rather than a later increment.
 - **O2 — one normalization, three consumers.** The service, the LLM tool and any
   future sensor should read the same view object. Building it once in Phase 3 is what
   makes Phase 4 cheap.
 - **O3 — the consolidation pays for itself four times over.** Collapsing seven
-  coercers, three device-id resolvers, two metric resolvers and four sort keys
-  removes a real class of latent bug, independent of flow reporting. The existing
-  segment report and the `network_usage` / `top_talkers` attributes improve as a side
+  integer coercers, six boolean coercers, two further ad-hoc numeric coercers, five
+  device-id resolvers, two metric resolvers and the duplicate sort keys removes a
+  real class of latent bug, independent of flow reporting. The existing segment
+  report and the `network_usage` / `top_talkers` attributes improve as a side
   effect.
 - **O4 — blocked-by-direction is free.** `ipB:in` vs `ipB:out` come back as separate
   families, so "what did this device try to reach" and "what tried to reach it" are

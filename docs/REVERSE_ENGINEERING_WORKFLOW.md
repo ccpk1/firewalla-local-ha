@@ -1375,13 +1375,62 @@ capturing the app while it displays the report.
 | Query | `item` | Target | Answers | Pagination |
 | --- | --- | --- | --- | --- |
 | **Rollup** | `tag` / `host` | tag id / MAC | top destinations, per-member ranking, byte totals | none (windowed) |
-| **Event log** | `flows` | tag id / MAC | what was blocked, by which rule, for which device | `nextTs` |
-| **Audit log** | `auditLogs` | tag id / MAC | same as `flows`, plus `category` / `ets` filters | `nextTs` |
+| **Flow log** | `flows` | tag id / MAC | regular traffic, and blocked records too when `audit: true` | `nextTs` |
+| **Block log** | `auditLogs` | tag id / MAC | **blocked records only** | `nextTs` |
+
+**The `audit` flag adds records, it does not filter to them.** Measured on the
+same tag with `count: 300`:
+
+| Query | Rows | `ltype` breakdown |
+| --- | --- | --- |
+| `item: "flows"`, `audit: true` | 300 | **26 `audit` + 274 `flow`** |
+| `item: "flows"`, `audit: false` | 300 | **300 `flow`** |
+| `item: "auditLogs"`, `audit: true` | 300 | **300 `audit`** |
+
+So `flows` is the **flow** log and `auditLogs` is the **block** log.
+`audit: true` means "also include blocked records", not "blocked only" — an
+earlier revision of this document read it as a blocked-only filter, which is
+wrong and would have produced a report that was 91% regular traffic while
+claiming to show blocks.
 
 **Drilling down switches the `type`, not just the target.** Selecting a member
 inside a group changes `type` from `tag` to `host` and `target` from the tag id to
 the device MAC. The same three queries serve both levels, so a group report and a
 device report are the same code path with a different target.
+
+### Blocked records and regular flows are different shapes
+
+The two record families share an envelope and almost nothing else. `ltype` is the
+discriminator, and `pid` is present if and only if the record is blocked.
+
+| Field | `ltype: "audit"` (blocked) | `ltype: "flow"` (regular) |
+| --- | --- | --- |
+| `pid` (the blocking rule) | **300/300** | **absent** |
+| `type` (`dns` / `ip`) | **300/300** | **absent** |
+| `domain` | 265/300 | **absent** |
+| `download`, `upload` | **absent** | **300/300** |
+| `duration`, `devicePort` | absent (35/300 when resolved) | **300/300** |
+| `fd`, `host`, `ip`, `country`, `wanIntf` | 35/300 (only when the destination resolved) | 274–300/300 |
+| `oIntf`, `apid` | absent | 299 / 298 of 300 |
+| `tags`, `userTags`, `dTags`, `count`, `ts`, `protocol`, `port`, `intf`, `device`, `deviceIP` | 300/300 | 300/300 |
+
+**Blocked records have no bytes at all.** Firewalla's own API documentation states
+why: a blocked flow is "intercepted before traveling through your network", so
+there is no download or upload to report. A blocked destination's byte count is
+**absent**, never zero.
+
+**`count` means different things per family**, which Firewalla documents as
+"number of TCP connections or UDP sessions for flow, or block count for blocked
+flow". Measured:
+
+| Family | `count` is |
+| --- | --- |
+| `download`, `upload`, `local:download`, `local:upload` | **bytes** |
+| `dnsB`, `ipB:*`, `local:*B:*` | **block count** |
+| `local:in`, `local:out` | connection count |
+| a `ltype: "flow"` record | sessions for that one flow |
+
+A single generic `count` therefore cannot be reported as one kind of measurement.
 
 ### 1. The rollup — `item: "tag"` or `item: "host"`
 
@@ -1416,59 +1465,136 @@ init payload caches. Its response carries:
   same windows the `item=intf` payload uses.
 - **`policy`**, **`name`**, **`uid`**, **`createTs`**.
 
-### 2. The event log — `item: "flows"`
+### 2. The flow log — `item: "flows"`
 
 ```json
 {"item": "flows", "type": "tag", "target": "31", "audit": true,
  "count": 300, "ts": 1791036000, "exclude": []}
 ```
 
-**This is the block log, and it is the most useful of the three.** Response:
-`{count, flows[], nextTs}`. Verified live: **300 records per call**, and `nextTs`
-feeds the next call's `ts` — the app paginates by walking `ts` backwards,
+Response: `{count, flows[], nextTs}`. Verified live: **300 records per call**, and
+`nextTs` feeds the next call's `ts` — the app paginates by walking `ts` backwards,
 observed calling it three times in a row with descending `ts`.
 
-`audit: true` restricts it to audit events, which is the "blocked only" filter in
-the app's UI.
+**This query returns regular traffic.** With `audit: true` it returns blocked
+records *as well* (26 of 300 in one measured page); with `audit: false` it returns
+regular traffic only. It is **not** a blocked-only filter — see *Blocked records
+and regular flows are different shapes* above for the `ltype` breakdown, and
+`item: "auditLogs"` below for the blocked-only query.
 
-Each record names the rule that blocked it. Field coverage measured over a
-300-row response:
+A regular (`ltype: "flow"`) record carries the byte counts and the end-to-end
+session detail:
+
+```json
+{"ltype": "flow", "ts": 1791035180.04, "count": 1, "duration": 54.44,
+ "protocol": "tcp", "port": 443, "devicePort": 54568, "fd": "in",
+ "download": 80, "upload": 86,
+ "device": "CC:28:AA:11:06:B7", "deviceIP": "192.168.200.122",
+ "host": "dealer.spotify.com", "ip": "35.186.224.39", "country": "US",
+ "apid": 40, "category": "social", "app": "spotify",
+ "tags": ["31"], "userTags": ["32"], "dTags": ["1"],
+ "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+ "oIntf": "8d5a7f20-2923-49a3-8e2b-338f9428a632"}
+```
+
+A blocked (`ltype: "audit"`) record in the same page carries no bytes and names
+the rule that blocked it. Field coverage over a 300-row page, blocked records
+only:
 
 | Field | Coverage | Meaning |
 | --- | --- | --- |
 | `device`, `deviceIP`, `tags`, `userTags`, `dTags` | 300/300 | Full attribution |
 | `ts`, `count`, `port`, `protocol`, `intf`, `ltype` | 300/300 | `ltype: "audit"` |
-| **`pid`** | **296/300** | **The blocking rule's id** |
-| `type` | 296/300 | `dns` / `ip` |
-| `domain` | 283/300 | DNS match |
-| `flowTags` | 238/300 | `["noise"]` marks background traffic |
-| `category`, `app` | 91 / 30 | When the box identified them |
-| `host`, `ip`, `fd`, `devicePort` | 15–17/300 | Resolved connection detail |
+| **`pid`** | **300/300** | **The blocking rule's id** |
+| `type` | 300/300 | `dns` / `ip` |
+| `domain` | 265/300 | DNS match |
+| `flowTags` | 144/300 | `["noise"]` marks background traffic |
+| `category`, `app` | 52 / 10 | When the box identified them |
+| `fd`, `host`, `ip`, `devicePort`, `country`, `wanIntf` | 35/300 | Only when the destination resolved |
 
-Example record:
-
-```json
-{"ltype": "audit", "ts": 1791035437.587, "pid": 6, "type": "dns",
- "device": "CC:28:AA:11:06:B7", "deviceIP": "192.168.200.122",
- "domain": "graph.oculus.com", "port": 53, "protocol": "dns",
- "tags": ["31"], "userTags": ["32"], "dTags": ["1"],
- "flowTags": ["noise"], "count": 2,
- "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2"}
-```
-
-**`pid` is the join back to `policyRules`**, so a blocked event can be attributed
+**`pid` is the join back to `policyRules`**, so a blocked record can be attributed
 to **the rule that caused it** — which the rollup cannot do. That makes the
 chain complete: *device → membership → rules → the rule that blocked this flow →
 the destination it blocked*.
 
-### 3. The audit log — `item: "auditLogs"`
+### 3. The block log — `item: "auditLogs"`
 
 ```json
 {"item": "auditLogs", "type": "tag", "target": "31", "count": 300,
  "ts": 1791036000, "exclude": []}
 ```
 
-Response: `{count, logs[], nextTs}`. Same pagination. Accepts two filters the
+**This is the blocked-only query.** Response: `{count, logs[], nextTs}` — note
+`logs`, not `flows`, as the record key. Measured: **300/300 records at
+`ltype: "audit"`**.
+
+It also carries richer destination detail than the same record does inside a
+`flows` page: `wanIntf`, `fd`, `devicePort`, `host`, `ip`, and `country` are
+present on 35/300 there but appear on the same records here, so a blocked
+destination can be resolved to a hostname and interface when the box has them.
+
+Same pagination. Accepts two filters the `flows` query does not: **`category`**
+(e.g. `games`) and **`ets`** (an end bound), so a caller can narrow to one
+category or a sub-window without paging through everything.
+
+### Cross-check against Firewalla's published API
+
+Firewalla documents the flow model for its **MSP** cloud API, which the
+integration does not use — local access has no MSP layer. The published model is
+still the best available statement of **intent**, and it corroborates most of what
+was reverse engineered here while correcting two readings. Sources:
+`docs.firewalla.net/api-reference/flow` and `/data-models/flow`.
+
+**Corroborated — the reverse engineering matched the documented design:**
+
+| Documented | Local wire | Note |
+| --- | --- | --- |
+| `direction`: `inbound` / `outbound` / `local` | the family name: `download` / `upload`, `ipB:in` / `ipB:out`, `local:*` | direction is a first-class concept |
+| `block`: boolean | `ltype`: `"audit"` / `"flow"` | |
+| `blockType`: `ip` / `dns` | `type`: `"ip"` / `"dns"` | |
+| `count`: "connections or sessions, **or block count for blocked flow**" | family-dependent | the overload is **documented**, not an accident |
+| `destination.id`: "device ID if local, otherwise remote host domain or ip" | `host` / `domain` / `ip`, or `dstMac` for `local:` | our host/domain/ip normalization matches the vendor's own |
+| `region`: 2-letter ISO 3166 | `country` | same concept, shorter name |
+| `network`: `{id, name}` | `intf` | resolves via the local network inventory |
+| `device.port` | `devicePort` | |
+| `ts` | `ts` | documented as **the time the flow ended** |
+| `limit` / `cursor` / `next_cursor` | `count` / `ts` / `nextTs` | |
+| `query`: "**defaults to the last 24 hours**" | `start` / `end` | independent confirmation of the measured retention window |
+| blocked flows "don't have upload or download information" | blocked records carry no bytes | confirms absence, not zero |
+| `category` enum: `ad edu games gamble intel p2p porn private social shopping video vpn` | `category` | 12 values, closed set |
+| `total` is a sortable/groupable field (`sortBy=total:asc`) | our `total_bytes` | |
+| summary-first, bounded results (`limit<=500`, default 200) | — | matches the service's planned default |
+
+**Corrected — two readings in this document were wrong:**
+
+1. **`audit: true` is not a blocked-only filter.** MSP's `block` field is the
+   discriminator, and the local equivalent is `ltype`, not the request flag. See
+   *The three queries at a glance*.
+2. **`fd` is not `direction`.** MSP has an explicit per-flow `direction`; local
+   records carry `fd`, which is constant `"in"` on regular flows and both
+   `download` and `upload` families. It is not a usable direction field — see
+   *`fd` is not the traffic direction*.
+
+**Newly informed — fields we had not classified:**
+
+- **`ltype` discriminates blocked from regular**, and `pid` is present if and only
+  if blocked. MSP's `block` boolean maps to this.
+- **Blocked records use `type` (`dns` / `ip`) where regular records use `protocol`
+  (`tcp` / `udp`).** Local `protocol` can also be `"dns"` (1404/1500 event rows),
+  so it must not be validated against MSP's `tcp` / `udp` enum.
+- **`apid` (numeric, e.g. `40`) and `app` (name, e.g. `"spotify"`) are two
+  representations of one concept**; MSP exposes only the name.
+- **`port` and `devicePort` are lists on rollup rows and scalars on event rows.**
+  Measured: `rollup.download.port` is `list` 207/207; `event.port` is `int`
+  1500/1500; and `devicePort` is `["8080"]` on a rollup row but `54568` on an
+  event row. Any reader must accept both.
+- **`local:` families identify the peer by MAC** (`dstMac`) and carry no
+  `host` / `domain` / `country`, because a LAN peer has no hostname. MSP's
+  `destination.id` note covers this ("device ID if local"), so a third
+  destination kind is needed alongside domain and ip.
+- **`dstMac` is the only local-destination identifier**, and it points at another
+  host in the same inventory.
+
 `flows` query does not: **`category`** (e.g. `games`) and **`ets`** (an end
 bound), so a caller can narrow to one category or a sub-window without paging
 through everything.
@@ -1495,11 +1621,58 @@ see *Open questions*.
 Measured against the dev box for one group (`tag: 31`, KADENS_DEVICES):
 
 - the rollup returned **6 blocked families** plus per-member rows
-- one `flows` page returned **300 records**, and the app immediately asked for
-  another
+- one `flows` page returned **300 records** — 274 regular and 26 blocked — and
+  the app immediately asked for another
 
 So a single "what was blocked" question is hundreds of records. Any surface built
 on this must bound the response and lead with the summary, never dump the log.
+
+### `fd` is not the traffic direction — do not use it as one
+
+Measured on a live rollup (`tag: 31`, 24-hour window) and a live `flows` page.
+`fd` looks like a direction field and is not usable as one:
+
+| Family | rows | `fd` |
+| --- | --- | --- |
+| `download` | 199 | `"in"` ×199 |
+| `upload` | 199 | `"in"` ×199 |
+| `ipB:in` | 67 | `"in"` ×67 |
+| `local:ipB:out` | 2 | `"out"` ×2 |
+| `dnsB` | 139 | **absent** |
+| a `ltype: "flow"` record | 300 | `"in"` ×300 |
+
+Three facts settle it:
+
+1. **`download` and `upload` are both `"in"`.** If `fd` were the byte direction
+   that would be a contradiction, not a rounding detail.
+2. **100 endpoints appear in both families with the same `fd` and different
+   totals** — e.g. one endpoint with `download: 142320680` and
+   `upload: 62436`, both `fd: "in"`. One endpoint cannot have two byte
+   directions that both read `"in"`.
+3. **Where `fd` does vary, it only repeats the family name.** `ipB:in` is `"in"`
+   and `local:ipB:out` is `"out"`, so it carries no information the family does
+   not already carry; and `dnsB`, which has only one direction, has no `fd` at
+   all.
+
+**Direction must be taken from the family** — `download` / `upload`,
+`local:download` / `local:upload`, and the `:in` / `:out` suffix on the blocked
+families. What `fd` does mean is unresolved and does not matter for reporting;
+the honest reading is that it duplicates the family name where it is populated
+and is unreliable elsewhere.
+
+### `intf` joins to a network the integration already resolves
+
+`intf` on a flow record is the **local** network's uuid, and `oIntf` / `wanIntf`
+is the **remote-side** interface — the WAN. Both resolve through
+`build_network_inventory` against the init payload, with no extra request:
+
+| Field | uuid | Resolves to |
+| --- | --- | --- |
+| `intf` | `95169e6a-a7c9-4d6a-8e83-6061b4812bf2` | `VLAN10 CORE`, kind `vlan`, interface `bond0.10` |
+| `oIntf` / `wanIntf` | `8d5a7f20-2923-49a3-8e2b-338f9428a632` | `WAN-ONE`, kind `wan`, interface `eth0` |
+
+So a flow can name its local network without a new protocol call, and the rollup
+row's `device` MAC joins to the host inventory the same way.
 
 ### Artifacts
 
@@ -1510,6 +1683,8 @@ on this must bound the response and lead with the summary, never dump the log.
   attempt, which established the request shapes
 - decoded with `.tmp/dump_all.py`, summarised by
   `.tmp/summarise_flow_capture.py`, record shapes via `.tmp/show_flow_records.py`
+- `.tmp/probe_fd_semantics.py` — the `fd` / direction probe, and
+  `.tmp/probe_blocked_query.py` — the `flows` versus `auditLogs` split
 - `.artifacts/flow_reporting/20261003-134922/` and
   `.artifacts/block_reporting/20261003-132758/` — the accompanying pulls
 
@@ -2449,6 +2624,44 @@ These items remain unconfirmed and should stay visible.
   zero
 - whether `exclude` on `flows` / `auditLogs` filters out specific categories or
   devices: it was sent empty in every capture, so its accepted values are unknown
+- what `fd` on a flow row means, given it is constant `"in"` on regular flows and
+  both byte families, and absent on `dnsB`. **Not blocking**: direction is taken
+  from the family name instead, so nothing depends on the answer
+- whether a `host`-level `flows` response is genuinely device-scoped. A rollup
+  checked at both levels returns the same rows and an empty `hosts` block on the
+  `host` request, which suggests a `host` response is filtered by `device` rather
+  than scoped by the query
+
+### Answered: the two boolean encodings, and `useBf`
+
+Boolean-valued fields are not typed consistently on the wire, and this was
+unresolved in `Open questions` for `useBf`. Measured across a live init payload
+(259 rules, the network and host inventories, the WAN event feed):
+
+| Field | Encodings seen |
+| --- | --- |
+| `active`, `ready`, `enabled`, `monitoring`, `pendingTest`, `trust`, `devicePresence`, `deviceOffline`, `stale`, `success`, `manual`, `bootingComplete`, `cloudConnected`, `wanSwitched`, `dnsmasq_only`, `echoRequest` | real JSON `bool` |
+| `state_value`, `ok_value`, `action_value` | `int` (a measurement, not a flag) |
+| **`autoDeleteWhenExpires`** | **`"0"` ×24, `"1"` ×1** — numeric **strings** |
+| **`useBf`** | **`""` ×36, `True` ×24** |
+| `disabled` | `"1"` / `"0"` strings, or a bool |
+| `enabled` on network interfaces | `bool` |
+| `state` | `bool` 1002, `str` 262 |
+| `upnp` | `bool` 259, plus 2 dicts and 1 list (it becomes an object on some networks) |
+
+**`useBf` is present exactly on DNS-only rules, and `""` means the flag is set.**
+Correlated against rule properties: the 36 rules with `[text: ""]` and the 24 with
+`True` are **60/60 `dnsmasq_only: True`**, and all 60 are `block` rules. The 199
+rules where the key is absent are almost all `dnsmasq_only: False`.
+
+So `""` is **not** a false value — reading it as `False` would invert the flag
+when a rule template is created from one of these rules, since the create payload
+sends `useBf` verbatim. The integration already behaves correctly here by mapping
+`""` to `None` and defaulting the template to `True`; the finding pins *why* that
+is required rather than leaving it as an accident.
+
+**The rule:** an empty string is not a boolean. It is an opaque marker whose
+meaning is per-field, so the shared coercion policy declines it.
 
 ## AP7 wireless controller findings
 
@@ -4710,7 +4923,9 @@ field to the alarm model.
   a target (`dnsOnly`, defaulting true for block rules on `category`/`app`/
   `targetlist`/`domain`). Locally, `dns` is a **target *type*** and the payload
   key is `dnsmasq_only`. Structural difference, not just a name: MSP qualifies a
-  target, we select one. Both are valid; do not force alignment.
+  target, we select one. Both are valid; do not force alignment. Note also that
+  the local rule payload pairs this flag with `useBf`, whose `""` value marks a
+  DNS-only rule — see *Answered: the two boolean encodings, and `useBf`*.
 - **Time limits use different models.** MSP has an `action: "timelimit"` with a
   `timeUsage` object (`quota`, `used` in minutes). Locally, time limits are
   expressed through `disturbLevel` / `disturbMethod` / `appTimeUsage` and the

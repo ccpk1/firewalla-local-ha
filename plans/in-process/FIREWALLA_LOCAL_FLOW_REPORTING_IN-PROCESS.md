@@ -11,10 +11,10 @@
 
 The Firewalla app's flow report is served entirely from the local box, and it was
 confirmed by packet capture on **2026-10-03**. It is **three queries over one data
-set**: a windowed **rollup**, an **event log** (`flows`), and an **audit log**
-(`auditLogs`). All three take `type: "tag" | "host"` and a target of the tag id or
-the device MAC, so a group report and a device report are the same code path with a
-different target.
+set**: a windowed **rollup** (`tag` / `host`), the **flow log** (`item: "flows"`),
+and the **block log** (`item: "auditLogs"`). All three take
+`type: "tag" | "host"` and a target of the tag id or the device MAC, so a group
+report and a device report are the same code path with a different target.
 
 Today the integration can surface **none** of it. The closest existing surfaces are
 `get_network_segment_usage` (per-network `item=intf` windows) and
@@ -22,9 +22,9 @@ Today the integration can surface **none** of it. The closest existing surfaces 
 answer *"what did this device or group actually do, and what was blocked?"*.
 
 This initiative adds **one service** — `get_flow_report` — that returns a
-**summarized** view by default and raw rows on request, plus a read-only LLM tool
+**summarized** view by default and raw records on request, plus a read-only LLM tool
 over the same normalized data. It is deliberately **one service, not three**: the
-rollup, the event log and the audit log are filters and resolution levels over the
+rollup, the flow log and the block log are filters and resolution levels over the
 same flow data, and splitting them would duplicate target resolution, window
 handling and serialization three ways.
 
@@ -54,7 +54,7 @@ new consumer exists that could tilt toward a parallel path.
 
 ### In scope
 
-- One `get_flow_report` service with a summary default and an events mode.
+- One `get_flow_report` service with a summary default and a records mode.
 - Target resolution that accepts **a device (MAC or name) or a group/user (name or
   id)** and resolves to `type=host` / `type=tag` internally, reusing the existing
   resolver and its ambiguity handling.
@@ -64,8 +64,11 @@ new consumer exists that could tilt toward a parallel path.
   exposed cursor.
 - `detail: summary` — aggregate totals, top destinations, top flows, blocked
   breakdown, and member ranking.
-- `detail: events` — the block log, with the `pid` → rule join, and the audit log's
-  `category` filter.
+- `detail: records` — the flow log and the block log, with the `pid` → rule join,
+  the `category` filter the block log supports, and byte/duration detail on regular
+  flows.
+- Direction as a typed field derived from the family name, **not** from `fd`
+  (§3, Q4c).
 - A shared flow-processing core so the flow report and the existing usage paths
   (segment report, segment usage, `network_usage` / `top_talkers` attributes) use
   **one** implementation of row extraction, destination ranking, bucket
@@ -138,14 +141,48 @@ error.
 as an open protocol question. A caller filtering by guess is worse than a caller
 filtering client-side.
 
+### Q4b. Which query is the block log?
+
+**Why it matters.** The plan originally called `item: "flows"` *"the block log"* and
+treated `audit: true` as a blocked-only filter. **Both are wrong**, and the error
+was structural rather than cosmetic: a report claiming to show blocks would have
+been ~91% regular traffic.
+
+Measured on the same tag, `count: 300`:
+
+| Query | `ltype` breakdown |
+| --- | --- |
+| `item: "flows"`, `audit: true` | **26 `audit` + 274 `flow`** |
+| `item: "flows"`, `audit: false` | **300 `flow`** |
+| `item: "auditLogs"`, `audit: true` | **300 `audit`** |
+
+**Recommendation.** `auditLogs` is the blocked-only query; `flows` is the flow log;
+`audit: true` *adds* blocked records rather than filtering to them. Discriminate on
+`ltype`, and never on the request flag. Phase 2 gets a client method per query, and
+Phase 3 selects the family per detail level rather than reusing one method with a
+flag. Documentation must call `flows` the **flow log** everywhere.
+
+### Q4c. What determines direction?
+
+**Why it matters.** `fd` looks like the direction field and is not usable as one:
+it is `"in"` on all 199 `download` rows **and** all 199 `upload` rows, and 100
+endpoints appear in both families with the same `fd` and different totals. A report
+built on `fd` would rank one direction as the other.
+
+**Recommendation.** Take direction from the **family name** — `download` / `upload`,
+`local:download` / `local:upload`, and the `:in` / `:out` suffix on blocked
+families. Do not read `fd` for direction at all. Its actual meaning is unresolved
+and deliberately not depended on, so no future clarification can invalidate a
+report.
+
 ### Q5. What happens when a blocked event's `pid` matches no rule?
 
-**Why it matters.** `pid` covers 296/300 rows and joins back to `policyRules`. But a
-rule can be deleted and re-created under a new id (issue #53), and dev-box rules are
-recreated routinely. A naive join drops the row.
+**Why it matters.** `pid` is present on **every** blocked record (300/300 measured)
+and joins back to `policyRules`. But a rule can be deleted and re-created under a new
+id (issue #53), and dev-box rules are recreated routinely. A naive join drops the row.
 
-**Recommendation.** Emit the event with `rule_id` set and `rule_name` null, and
-count it in `summary.unattributed_events`. Never drop the row: the block happened,
+**Recommendation.** Emit the record with `rule_id` set and `rule_name` null, and
+count it in `summary.unattributed_blocks`. Never drop the row: the block happened,
 and an unattributed block is exactly the signal worth surfacing. This is the same
 class of failure the stale-switch repair addresses, and it must not become a second
 silent hole.
@@ -175,7 +212,7 @@ method* so no caller changes.
 
 ### Q8. Default detail, and default volume?
 
-**Recommendation.** `detail: summary` by default, with **no event rows at all**
+**Recommendation.** `detail: summary` by default, with **no records at all**
 unless asked — a block-log dump as a default response would be unusable and would
 put thousands of identity-bearing rows into a service response. Service default
 `count: 300` (one page); the tool always asks for summary.
@@ -183,7 +220,7 @@ put thousands of identity-bearing rows into a service response. Service default
 ### Q9. How much identity does the summary expose by default?
 
 **Why it matters.** Destination rows carry household members' domains and IPs, and
-per-member ranking and event rows carry MACs and internal IPs. The repo already gates
+per-member ranking and records carry MACs and internal IPs. The repo already gates
 identity-bearing host rows in the segment report behind an explicit include.
 
 **Recommendation (owner-confirmed).** Gate identity **the same way the segment
@@ -204,13 +241,17 @@ principle as the retention and page-size answers in the audit note.
 
 ### Q10. How do we know `audit: true` actually filtered?
 
-**Why it matters.** `audit: true` is understood to mean "blocked only". If the box
-ignores it under some condition, a filter that is silently a no-op is worse than no
+**Why it matters.** `audit: true` was understood to mean "blocked only". If the box
+ignored it under some condition, a filter that is silently a no-op is worse than no
 filter, because the caller builds conclusions on it.
 
-**Recommendation.** After a filtered fetch, check the returned rows carry
-`ltype: audit`. If they do not, raise a `filter_not_applied` warning. It is one
-cheap assertion that converts a silent wrong answer into a stated one.
+**Recommendation (revised — the original version of this question was based on a
+wrong premise).** Q4b answers it: `audit: true` does not filter to blocked records,
+it *adds* them, so there is nothing to verify. The correct check is the inverse:
+after a blocked-only read, assert the rows are `ltype: "audit"`, because
+`auditLogs` is what produces them. A second assertion is worth having — that a
+*regular* read (`flows`, `audit: false`) contains no `ltype: "audit"` rows, which
+is what would catch the box changing the flag's meaning in the other direction.
 
 ---
 
@@ -220,7 +261,7 @@ cheap assertion that converts a silent wrong answer into a stated one.
 | --- | --- | --- | --- |
 | **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
 | **2** | Protocol layer | `managers/flow_manager.py` and client methods for all three queries, with window handling, pagination and fail-soft; typed raw-payload models. | Live read-only verification on the dev box; recorded in the RE doc. |
-| **3** | Normalization | One view builder producing summary and events over the Phase 1 core, reusing target resolution; flow models land here with their first caller. | Unit tests against a fixture built from the real 300-record capture. |
+| **3** | Normalization | One view builder producing the summary and both record families over the Phase 1 core, reusing target resolution; flow models land here with their first caller. | Unit tests against a fixture built from the real 300-record capture. |
 | **4** | Surface | Service, translations, LLM tool, docs, quality scale. | Full validation suite green; live end-to-end call. |
 
 Phases are sequential. **Phase 1 is not optional, and it is not busywork.** The flow
@@ -241,29 +282,29 @@ Purpose: the flow report needs the processing the integration **already does** f
 and moves the existing consumers onto it, so Phase 3 can reuse it instead of writing
 a fourth implementation. Nothing here changes what any existing surface returns.
 
-**COMPLETE — executed 2026-10-03 on `feature/flow-reporting`.** Validation: 560
-tests pass (37 new), `ruff check` and `ruff format` clean, `mypy` clean across 43
-files. No existing assertion or snapshot was modified. Three commits:
+**COMPLETE — executed 2026-10-03 on `feature/flow-reporting`.** Validation: 601
+tests pass (76 new), `ruff check` and `ruff format` clean, `mypy` clean across 43
+files. No existing assertion or snapshot was modified.
 
 | Commit | Step | Result |
 | --- | --- | --- |
-| `a468824` | 1.2 | `utils/values.py`; seven coercers → one policy, four identical string coercers → one |
+| `a468824` | 1.2 | `utils/values.py`; seven integer coercers → one policy, four identical string coercers → one |
 | `66d1214` | 1.3–1.5 | `utils/flow.py`; five row-reading duplicates → one reader, single-pass accumulation |
 | `77225a8` | 1.6 | `helpers/usage_report.py`; duplicate usage serializers → one projection |
+| `d8705f9` | 1.7 | boundary tests enforcing `utils/` and `api/` purity |
+| (this commit) | 1.8–1.10 | six boolean coercers → one union policy; `metric_ranking_sort_key`; two further coercers consolidated |
 
 - [x] **1.1 Inventory the existing flow-processing surface and freeze it.** Confirmed
       the five builders and their consumers. Two corrections to the audit note: the
       device-id resolution (`device` / `mac` / `deviceMac`) appears **five** times,
-      not three, and the three integer-helpers claim was **seven across five
-      modules**, not seven integer helpers in one place.
+      not three, and the integer-helper count was understated — it is seven integer
+      helpers plus six boolean helpers plus two ad-hoc numeric coercers.
 - [x] **1.2 Consolidate numeric coercion to one implementation.** Done. Two policies
       in `utils/values.py`: `normalized_int` and `normalized_number`, plus
       `normalized_float` and `normalized_string`. **Approach changed from the plan's
       "strictest behaviour"** to behaviour-preserving, because the phase gate
       requires no behavioural diff and the strictest reading was not
-      behaviour-preserving (see the deviation note below). Each layer keeps one thin
-      adapter (`client._coerce_*`, `_optional_*` in the manager and services), so the
-      policy is single-sourced while call sites stay layer-readable.
+      behaviour-preserving (see the deviation note below).
 - [x] **1.3 Extract the one flow record reader.** Done. `flow_row_host_id`,
       `flow_row_metric_value`, `flow_row_remote_host`, `flow_row_remote_ip`, and
       `iter_flow_rows`. `_resolve_network_ranking_payload` deleted.
@@ -278,12 +319,29 @@ files. No existing assertion or snapshot was modified. Three commits:
 - [x] **1.6 Share the usage-window serializer.** Done. Two exact duplicate
       serializer pairs (entity + services) collapsed into
       `helpers/usage_report.py`.
-- [x] **1.7 (reduced) Constants and boundary tests.** See the deviation note: the
-      unused flow models were **deferred to Phase 3**, and `managers/flow_manager.py`
-      was **deferred to Phase 2**, where each has a real owner and a real caller.
-      Added in their place: architecture boundary tests that `utils/` and `api/`
-      import no Home Assistant, which `ARCHITECTURE.md` calls for and the suite did
-      not previously enforce.
+- [x] **1.7 (reduced) Boundary tests.** `ARCHITECTURE.md` calls for a check that
+      `utils/` imports no Home Assistant; the suite had three boundary tests and
+      none was about imports. Added, and both `utils/` and `api/` pass. The unused
+      flow models were **deferred to Phase 3** and `managers/flow_manager.py` to
+      **Phase 2**, where each has a real owner and caller.
+- [x] **1.8 Consolidate boolean coercion.** Done. **Six** boolean helpers across
+      five modules collapsed onto `normalized_bool`, which accepts all four
+      encodings the box uses (`bool`, `0`/`1`, `"1"`/`"0"`, `"true"`/`"false"`) and
+      **explicitly declines the empty string**. See the deviation note and
+      *Phase 1 findings* below — this closed a real trap on
+      `autoDeleteWhenExpires` and preserved the correct `useBf` behaviour.
+- [x] **1.9 Fix the ranking sort-key casefold.** Done. The top-download and
+      top-upload lists ordered names by codepoint while the other two flow keys
+      folded case, so the same equal-valued destination pair could order
+      differently between two lists. `metric_ranking_sort_key` now matches, and the
+      three distinct keys are documented in `utils/flow.py` with why their primary
+      keys legitimately differ.
+- [x] **1.10 Consolidate the two remaining ad-hoc coercers found in review.**
+      `client._alarm_count` used a bare `isinstance` integer test, which would
+      silently report `0` if the box ever sent a count as a string — as it does for
+      several other counts. `binary_sensor._normalized_port_speed` was a sixth
+      numeric parser. Both now delegate.
+
 
 #### Deviations from the plan as written
 
@@ -302,52 +360,84 @@ files. No existing assertion or snapshot was modified. Three commits:
    additional manager "only when a separate orchestration boundary is justified".
    Phase 1 has no flow orchestration to own; the manager arrives in Phase 2 with the
    three client calls it will actually own.
+4. **The usage-window extractor moved to `utils/flow.py`.** The plan had it staying
+   in the manager. It is pure, and Phase 2's flow manager needs it, so leaving it
+   private in `integration_manager.py` would have forced a cross-module private
+   import. It is now `extract_usage_window`, shared by the manager and available to
+   the flow manager.
+5. **1.8 accepts the empty string as neither true nor false**, where the plan
+   implied one merged convention would win. Neither camp was right: `""` is an
+   opaque marker, and reading it as `False` would invert `useBf` on rule creation.
+   The union policy declines it instead.
 
-#### Phase 1 findings to carry forward
+#### Phase 1 findings — resolved and outstanding
 
-- **Five boolean coercers remain on two incompatible conventions.** Three accept
-  `"true"` / `"false"` strings, two accept `0` / `1` integers. Merging them changes
-  behaviour in both directions, so it was left alone. Needs a decision, not a
-  refactor.
-- **Three of the four flow sort keys disagree on tie-breaks.**
-  `_build_network_flow_rankings` does not casefold the host name while the other
-  paths do. Normalizing it would silently reorder rows in the segment report, so it
-  is reported rather than changed.
+**Resolved in Phase 1 (steps 1.8–1.10):**
+
+- **Six boolean coercers on two incompatible conventions** — both camps read only
+  one of the four encodings the box uses. Collapsed onto `normalized_bool`, which
+  accepts all four and declines the empty string. Two defects closed: a property
+  that read `autoDeleteWhenExpires` (`"0"`/`"1"`) as always-`None`, and a latent
+  `""`-as-`False` inversion on `useBf`.
+- **The flow ranking key did not casefold** while the other two did, so two lists
+  answering "top destinations" could order an equal-valued pair differently.
+  Aligned; measured **zero** ordering changes on 414 real rows.
+- **Two further ad-hoc coercers** consolidated: `_alarm_count` (a bare
+  `isinstance` test that would read a string count as `0`) and
+  `_normalized_port_speed` (a sixth numeric parser).
+
+**Outstanding — recorded, deliberately not changed:**
+
 - **The entity and the service disagree on empty usage.** The entity omits the
   `network_usage` attribute when a network has no usage; the service reports
-  all-`None` windows. Preserved, not resolved.
+  all-`None` windows. Preserved, not resolved: "attribute absent" and "attribute
+  present but empty" are already treated differently elsewhere, so changing either
+  direction is an observable behaviour change.
 - **A zero metric falls through to the next field**, and an all-zero row reports
   `0` rather than absent. Preserved from the `or` chain; a test caught the naive
   "first present value" rewrite changing which rows a report includes.
+- **`useBf` remains `""` on DNS-only rules.** Correct as-is (the template defaults
+  `None` → `True`, which matches the source rule), and now documented in the RE doc
+  with the correlation that proves it. The regression risk is that a future reader
+  "simplifies" it into a boolean test.
 
 ### Phase 2 — Protocol layer
 
 - [ ] **2.1 Add `async_get_flow_rollup_payload`.** `item` = `tag` or `host`,
       `apiVer: 2`, `audit: true`, `start`, `end`, `hourblock`, targeting the tag id
       or MAC. Returns the raw dict.
-- [ ] **2.2 Add `async_get_flow_events_payload`.** `item: "flows"`, `type`, `count`,
-      `ts`, `exclude: []`. Returns `{count, flows, nextTs}`-shaped data plus the
-      reported `count`.
-- [ ] **2.3 Add `async_get_flow_audit_payload`.** `item: "auditLogs"`, same as 2.2
-      plus optional `category` and `ets`. Only add `category` if the service exposes
-      it (Q4 keeps `exclude` internal; `category` is confirmed, so expose it).
+- [ ] **2.2 Add `async_get_flow_log_payload`.** `item: "flows"`, `type`, `count`,
+      `ts`, `exclude: []`, and **`audit` as a caller-supplied flag** — it *adds*
+      blocked records rather than filtering to them (Q4b), so the flag is not a
+      blocked-only switch. Returns `{count, flows, nextTs}`. A docstring must state
+      that `audit: false` yields regular traffic only, because the name invites the
+      opposite reading.
+- [ ] **2.3 Add `async_get_blocked_flow_payload`.** `item: "auditLogs"`, same as
+      2.2 plus optional `category` and `ets`. **This is the blocked-only query**
+      (Q4b) and the response key is `logs`, not `flows`. Keep `exclude` internal
+      (Q4); `category` is confirmed, so expose it.
 - [ ] **2.4 Implement window resolution with no encoded cap.** Default 24h; attempt
       the requested window; on rejection retry once at a known-good window; return
       the window actually served plus a `window_exceeded` indicator. Record the
       observed ~24h limit as a docstring fact, not a constant. **Do not conflate
       `hourblock` (granularity) with retention** — an earlier probe misattributed a
-      failure to `hourblock` when the cause was an out-of-range `start`.
+      failure to `hourblock` when the cause was an out-of-range `start`. Note that
+      Firewalla's published API documents the same 24-hour default for a query with
+      no time qualifier, so this is intended behaviour rather than a local quirk.
 - [ ] **2.5 Implement pagination with a deadline and a loop check.** Walk `nextTs`
       only in all-available mode. Stop on deadline, on a repeated `nextTs`, or on an
       empty page. **Dedupe across the page boundary** on a stable tuple
       (`ts`, `device`, `pid`, `domain` or `ip`, `port`) because `ts` bounds are
       inclusive and adjacent pages overlap. Expose the cursor as **`next_cursor`**,
       carrying `ts` verbatim and documented as **opaque**, so the cursor's meaning can
-      change later without a breaking change.
+      change later without a breaking change. **Record how many rows were dropped as
+      duplicates** (`records_dropped_as_duplicates`): if two genuinely distinct
+      records share all five key parts, the dedupe under-counts, and that must be
+      visible rather than silent.
 - [ ] **2.6 Verify read-only against the dev box** for one tag and one host: window
       default and override, one page, all-available on a small target, a
       deliberately over-wide window (expect the fallback and warning, not a raise),
-      and a `category`-filtered audit read. Record every result in
+      and a `category`-filtered blocked read. Record every result in
       `REVERSE_ENGINEERING_WORKFLOW.md`.
 - [ ] **2.7 Fail soft.** A shape change or a rejected request returns *unavailable*
       rather than raising, matching the existing `item=intf` posture toward
@@ -367,7 +457,8 @@ files. No existing assertion or snapshot was modified. Three commits:
       `time_usage_report_scope_ambiguous`; not found raises the same class as
       `time_usage_report_scope_not_found`. **Do not add a parallel name→id lookup.**
 - [ ] **3.2 Build the summary from the rollup using the Phase 1 core.** Totals from
-      the shared window extractor (1.4); destination rows from the shared
+      the shared window extractor `extract_usage_window` in `utils/flow.py`;
+      destination rows from the shared
       destination ranking (1.4) — grouped by `host`, which is the subdomain-granular
       row and therefore the app's "top flows", with the registrable grouping derived
       from the **same rows** for "top destinations". These are two presentations of
@@ -379,31 +470,77 @@ files. No existing assertion or snapshot was modified. Three commits:
       are different questions.
 - [ ] **3.4 Add member ranking via the shared ranker (1.4)**, mark
       `member_ranking` unavailable on device targets (Q3), and implement Q9's
-      confirmed gate: per-device attribution (`top_members`, event `device` /
+      confirmed gate: per-device attribution (`top_members`, record `device` /
       `deviceIP`) is **absent by default** and returned when
       `include: ["device_detail"]` is set, at both detail levels. A single-device
       target returns its own identity without the flag. Ensure the gated values are
       always reachable — never permanently withheld.
-- [ ] **3.5 Build the events view.** Normalize each record, join `pid` → rule via
-      the existing rule index, and apply Q5's rule: unmatched `pid` keeps the row
-      with `rule_name: null` and increments `unattributed_events`. Apply Q10's
-      `ltype` assertion. Keep the partial coverage visible — `domain` is 283/300, but
-      `category` is 91 and `app` is 30, so the summary must not imply completeness.
-      Report the box's own `count` alongside rows returned (`rows_returned` vs
-      `rows_available`), so a bounded read is never read as a quiet target.
+- [ ] **3.5 Build the blocked and regular views.** Discriminate on **`ltype`**, not
+      on the request flag (Q4b): `"audit"` is a blocked record, `"flow"` is regular
+      traffic. Join `pid` → rule via the existing rule index, and apply Q5's rule:
+      unmatched `pid` keeps the row with `rule_name: null` and increments
+      `unattributed_blocks`. Apply Q10's inverted assertion — a blocked read must be
+      all-`audit`, and a regular read must contain none. Keep the partial coverage
+      visible: on blocked records `domain` is 265/300 but `category` is 52 and `app`
+      is 10; on regular records `host`/`ip` are near-complete but `category` is
+      111/300. The summary must not imply completeness. Report the box's own `count`
+      alongside rows returned (`rows_returned` vs `rows_available`), so a bounded
+      read is never read as a quiet target. **A blocked record has no bytes** — never
+      report its absent `download`/`upload` as `0`. A **regular** record carries
+      `download`, `upload`, `duration`, `devicePort`, and `apid`, so it can answer
+      "how much and for how long" where a blocked record only answers "what was
+      stopped".
+- [ ] **3.5b Model direction explicitly.** Add a typed `direction`
+      (`inbound` / `outbound` / `local`) derived from the **family name**, matching
+      the vendor's documented field (Q4c). Do **not** read `fd`: it is `"in"` on both
+      the `download` and `upload` families and on 300/300 regular records, so it
+      cannot be a byte direction and would invert a report.
+- [ ] **3.5c Derive the unit from the family, and name fields for the unit.** The
+      family a row came from decides what its `count` means: `download` / `upload` /
+      `local:download` / `local:upload` → **bytes**; `dnsB` / `ipB:*` / `local:*B:*`
+      → **block count**; `local:in` / `local:out` → connections. Firewalla's own API
+      documents the overload, so it is intended, not a quirk. **Never name a field
+      `value`**: a generic name is what let a byte total and a block count become
+      interchangeable in the existing ranking builder.
+- [ ] **3.5d Coerce `port` and `devicePort` to tuples.** Measured: `port` is a
+      **list** on every rollup row (207/207 `download`) and an **`int`** on every
+      event row (1500/1500); `devicePort` follows the same split (`["8080"]` on a
+      rollup row, `54568` on a record). A reader that assumes either shape returns
+      nothing or a stray character.
+- [ ] **3.5e Add a third destination kind for local flows.** `local:` families carry
+      **`dstMac`** and no `host` / `domain` / `country`, because a LAN peer has no
+      hostname. The vendor's model covers this — `destination.id` is "device ID if
+      local, otherwise remote host domain or ip" — so `destination_kind` needs `mac`
+      alongside domain and ip, and `dstMac` resolves against the host inventory.
+- [ ] **3.5f Resolve the network and the group joins.** `intf` → local network name
+      and `oIntf` / `wanIntf` → WAN name, both through `build_network_inventory` with
+      no extra request (verified live: `VLAN10 CORE` and `WAN-ONE`). `tags` /
+      `userTags` → group and user names through the existing indexes. This closes the
+      same identity chain the rule and membership surfaces already use.
 - [ ] **3.6 Emit the shared report envelope.** `config_entry_id`, `target`, `query`,
       `time_basis` (`_serialize_report_time_basis`), `summary`, sections,
       `metadata` (`_serialize_report_metadata` with `applied`, `warnings`,
       `unavailable_sections`, `provenance`). State the source (`item=tag|host` and
       `item=flows|auditLogs`) in `provenance` so it cannot be confused with the
       `item=intf` usage service. Never build a bespoke envelope. **The two views
-      have different time semantics** — the rollup is a windowed aggregate, the event
-      log is a reverse walk from a timestamp — so `time_basis.kind` must distinguish
-      them (`window` vs `event_log`), or `is_partial` becomes meaningless.
+      have different time semantics** — the rollup is a windowed aggregate, the log
+      is a reverse walk from a timestamp — so `time_basis.kind` must distinguish
+      them (`window` vs `flow_log`), or `is_partial` becomes meaningless.
+- [ ] **3.6b Adopt the vendor's field names where they are better.** `is_blocked`
+      (v. `ltype`), `block_type` (v. `type`), `region` (wire `country`),
+      `flow_direction`, `bytes_download` / `bytes_upload`. Where a wire name is
+      clearer, keep it and say so in `provenance`. **Validate `category` against the
+      documented closed set** — `ad`, `edu`, `games`, `gamble`, `intel`, `p2p`,
+      `porn`, `private`, `social`, `shopping`, `video`, `vpn` — and pass an
+      unrecognised value through rather than dropping the row.
+- [ ] **3.6c Document `ts` as the flow's *end* instant.** The vendor states it
+      explicitly ("the time the flow ended"), and it is not obvious from the name.
+      It matters for any window that a caller compares against.
 - [ ] **3.7 Tests against the real capture.** Build the fixture from the 300
-      captured records and the live rollup, and cover: summary shape; events with
-      attributed and unattributed rules; member ranking absent on a device target;
-      window fallback + warning; pagination dedupe across a boundary; deadline
+      captured records and the live rollup, and cover: summary shape; blocked and
+      regular records with attributed and unattributed rules; member ranking absent
+      on a device target; window fallback + warning; pagination dedupe across a
+      boundary; deadline
       truncation sets `truncated`; `rows_returned` vs `rows_available`; and **both
       sides of the Q9 gate** — per-device fields absent by default and present with
       `include: ["device_detail"]` — so the gate cannot silently become a wall.
@@ -454,8 +591,15 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
 ## 7. References
 
 - `docs/REVERSE_ENGINEERING_WORKFLOW.md` → *Flow reporting and the local block log*
-  (the three queries, field coverage, the `pid` join) and *Limits: retention, page
-  size, and window validity*.
+  (the three queries, the blocked/regular split, field coverage, the `pid` join),
+  *Limits: retention, page size, and window validity*, *`fd` is not the traffic
+  direction*, and *Cross-check against Firewalla's published API*.
+- Firewalla's published flow model, used as the statement of *intent* while
+  reverse engineering established what the box actually sends:
+  `docs.firewalla.net/data-models/flow/` and `docs.firewalla.net/api-reference/flow/`.
+  Local access has no MSP layer; the model still corroborated the direction, block
+  type, destination-kind, retention and `count`-overload readings, and corrected
+  two assumptions (Q4b, Q4c).
 - `plans/in-process/FIREWALLA_LOCAL_FLOW_REPORTING_SUP_CONSUMER_AUDIT.md` — the
   existing-consumer audit behind Phase 1, including the gaps, traps and opportunities
   review of this plan.
@@ -466,16 +610,17 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
   `_build_network_usage_buckets`, `_build_network_activity_hosts`,
   `_build_network_hosts`, `_build_network_top_talkers`,
   `_resolve_network_ranking_payload`, `_extract_usage_window`, `_TOP_TALKER_LIMIT`.
-- `custom_components/firewalla_local/binary_sensor.py` — `_serialize_usage`,
-  `_serialize_usage_window`, `_serialize_top_talkers`; the entity-attribute
-  consumers Phase 1.6 migrates.
+- `custom_components/firewalla_local/binary_sensor.py` — `_serialize_top_talkers`
+  and the `network_usage` attribute, now rendering through the shared usage
+  projection (Phase 1.6).
 - `custom_components/firewalla_local/services.py` — `_serialize_network_host_ranking`,
   `_serialize_network_usage_bucket`, `_serialize_network_usage_metric`; the report
-  consumers Phase 1.6 migrates.
-- `custom_components/firewalla_local/utils/values.py` — the single numeric and
-  string coercion policy (Phase 1.2).
+  serializers the shared usage projection replaced (Phase 1.6).
+- `custom_components/firewalla_local/utils/values.py` — the single numeric, boolean
+  and string coercion policy (Phase 1.2 and 1.8).
 - `custom_components/firewalla_local/utils/flow.py` — the single flow-row reader,
-  host accumulator and per-host sort key (Phase 1.3–1.5).
+  host accumulator, per-host sort keys, and the usage-window extractor
+  (Phase 1.3–1.5, 1.9).
 - `custom_components/firewalla_local/helpers/usage_report.py` — the single usage
   window/summary projection shared by the entity and the services (Phase 1.6).
 - `custom_components/firewalla_local/services.py` — `_serialize_report_time_basis`,
@@ -491,7 +636,7 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
 ## 8. Phase 1 handoff to `Firewalla Builder`
 
 **Target agent:** `Firewalla Builder`
-**Authorizes:** **Phase 1 only** (steps 1.1–1.7). Phases 2–4 are handed off
+**Authorizes:** **Phase 1 only** (steps 1.1–1.10). Phases 2–4 are handed off
 individually after the previous phase is validated.
 **Blockers:** none. Q9 was confirmed by the owner on 2026-10-03 (gated by default,
 always retrievable) and is folded into Phase 3.4.
