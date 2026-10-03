@@ -1095,13 +1095,21 @@ it directly.
 - assign to a group with `group_name` or `group_id`, **or** to a user with
   `user_name` or `user_id`, **or** pass `clear: true` to remove the current
   assignment — provide exactly one of those
-- **your rules on that device are deleted.** This is the one irreversible part of
-  the call. Assigning a device to a group or a user removes *every* rule the
-  device owns — including **enabled rules you created** — because from then on the
-  device follows only the rules of the group or user it belongs to. This mirrors
-  the Firewalla app, which warns you about it at assignment time. `clear: true`
-  removes them too, leaving the device with no rules until you add some. The
-  response reports what was removed in `device_rules.removed`
+- **this service is destructive: your rules on that device are deleted.** This is
+  the one irreversible part of the call. Assigning a device to a group or a user
+  **permanently deletes the rules attached to that device**, including **enabled
+  rules you created**, because from then on the device follows only the rules of
+  the group or user it belongs to. The rules are removed from the box outright —
+  they are not merely detached — and re-creating them gives them new ids, so there
+  is nothing to re-attach. `clear: true` deletes them too, leaving the device with
+  no rules until you add some. This mirrors the Firewalla app, which warns you at
+  assignment time. The response reports what was removed in
+  `device_rules.removed`
+- **rules attached to groups or users are not affected.** Those rules stay exactly
+  as they were, including the rules of the user this device is leaving, and they
+  still cover that user's other devices. Only rules scoped to **this device** are
+  deleted. A device in a group has no rules of its own, so re-assigning a device
+  that is already in a group normally deletes nothing
 - **a device has exactly one membership.** Assigning a group to a device that is
   already assigned to a user therefore *replaces* the user assignment rather
   than adding alongside it. This mirrors the Firewalla app, which shows groups
@@ -1113,7 +1121,8 @@ it directly.
   matching candidates and you should use the id field instead
 - `refresh` defaults to `true`
 - the response reports the membership `before` and `after` plus a `changed`
-  flag, so an automation can tell whether the call actually altered anything
+  flag, so an automation can tell whether the call actually altered anything, and
+  `device_rules.removed` listing the rule ids that were deleted
 
 #### Delete host
 

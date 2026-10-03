@@ -2922,7 +2922,7 @@ cloud path until the cloud contract is documented.
 - pre/post runtime pulls: `.tmp/capture_chads_before.json`,
   `.tmp/capture_chads_after.json`
 
-### Finding 43: Membership writes may be minimal, and a membership change deletes every rule the device owns
+### Finding 43: Membership writes may be minimal, and any membership change deletes the rules attached to that device
 
 Three questions left open by Findings 41 and 42 were resolved on the dev box on
 2026-10-02 with read-only pulls, reversible writes, and one purpose-built app
@@ -3020,6 +3020,60 @@ already doubtful — 84 of 124 group-assigned hosts still carry a `dap` pair, so
 behind, the exact opposite of what the app does. The owner's model was right from
 the start.
 
+**User and group assignment behave identically.** A second capture
+(2026-10-03) assigned `kadens-phone` (`0C:85:E1:B0:1D:1C`) to the **user**
+`KADENS_PHONE`, from unassigned, carrying two **enabled** rules the owner had
+created minutes earlier:
+
+```
+1. policy:delete  674   <- enabled user rule (TLX-fw-fortnite)
+2. policy:delete  673   <- enabled user rule (TLX-fw-instagram)
+3. policy  target=0C:85:E1:B0:1D:1C  tags=[73]   (16-key object)
+4. host:syncAppTimeUsageToTags
+5. init  (data refresh)
+```
+
+Box-wide the count fell by exactly two. So there is no user-specific exemption:
+assignment deletes the device's own rules whether the target is a group or a
+user, and the batch shape is identical.
+
+**`clear` deletes them too.** Finding 41 is a capture of a *removal*
+(`tags: []`), and its batch carried `policy:delete` for that device's two rules.
+A live check on `kadens-phone` reproduced it: clearing its user assignment removed
+its device-scoped rule. So the deletion is not specific to assignment — **any**
+membership change deletes the device's own rules.
+
+**The blast radius differs by what the device has to lose, not by the verb.**
+Measured on the dev box:
+
+| Membership state | Hosts | Carry their own rules |
+| --- | --- | --- |
+| assigned to a **group** | 123 | 83 — almost always just the disabled `dap` pair |
+| assigned to a **user** | 32 | 1 |
+| unassigned | 61 | 13 |
+
+A device in a group carries no user rules of its own: what it holds is Firewalla's
+own Device Active Protect pair. An unassigned device can hold real rules, which is
+exactly the case both captures deleted. So a `clear` on a group-assigned device
+usually destroys only `dap` bookkeeping, while a `set` from unassigned destroys
+rules the owner wrote.
+
+**What is *not* deleted:**
+
+- rules belonging to **other** devices, even when they are otherwise identical
+- rules attached to a **user or group** (`tag`), including the user the device is
+  leaving. Their 13 rules stayed intact through the user capture above, and still
+  cover that user's other devices
+- rules scoped by network, interface or tag rather than by the device
+- any rule that does not name the device's MAC in `target` or `scope`
+
+Note the two things a membership change does, which are easy to conflate:
+
+- **inheritance changes** — leaving a user means that user's rules stop reaching
+  the device. Nothing is deleted, and re-assigning restores it
+- **the device's own rules are deleted** — irreversible, unrelated to the user's
+  rules
+
 **Implementation.** Select by device membership in the rule, not by `purpose`:
 
 ```python
@@ -3081,12 +3135,21 @@ against a third sample before then.
 - `.tmp/test_own_rules_hypothesis.py` (the group/user/none rule-ownership table)
 - `.tmp/capture_device_rules.py` (the captured device's full rule set)
 - `.tmp/verify_dap_selector.py` (read-only selector check)
+- `.tmp/analyse_what_changed.py` (field-level diff of everything a membership change touched)
+- `.tmp/confirm_deleted_vs_detached.py` (proves deletion vs detach-and-re-home)
+- `.tmp/check_clear_is_safe.py` (own-rule ownership by membership state)
+- `.tmp/explain_kadens_phone.py` (device rules vs user rules for one host)
 - **the group-assignment capture** — the evidence for the rule-deletion rule:
   `.tmp/firewalla_capture_20261002-221733_rustdesk-group-add.pcap`, with pulls
   `.artifacts/rustdesk_group_add/20261002-214538/` (before) and
-  `.../20261002-221837/` (after). Captured with
-  `tools/support/capture_firewalla_packets.py --host <box> --client-ip <phone>
-  --label rustdesk-group-add`, which is the maintained workflow for this
+  `.../20261002-221837/` (after)
+- **the user-assignment capture** — shows user and group behave identically:
+  `.tmp/firewalla_capture_20261003-014641_kadens-phone-reassign.pcap`, with pulls
+  `.artifacts/kadens_phone_reassign/20261003-014439/` (before) and
+  `.../20261003-014807/` (after)
+- both were taken with `tools/support/capture_firewalla_packets.py --host <box>
+  --client-ip <phone> --label <name>`, the maintained workflow for this, and
+  decoded with `.tmp/dump_membership.py <pcap> <out.json> <client-ip>`
 - `.artifacts/membership-capture/20261002-135538/` and `.../20261002-135842/`
   (the pulls the original 575/576 ids were read out of)
 

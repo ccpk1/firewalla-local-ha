@@ -447,13 +447,43 @@ appears on:
   capitals, and each of the four target fields plus `clear` repeats it
 - `docs/USER_GUIDE.md` — a dedicated bullet naming it as the irreversible part,
   noting that `clear: true` deletes them too, and pointing at
-  `device_rules.removed`
+  `device_rules.removed`. A second bullet bounds the blast radius: rules attached
+  to groups or users are unaffected, including the user the device is leaving
 - `llm_tools_common.py` `PROMPT` — a paragraph stating the four membership calls
-  delete the device's rules, that this cannot be undone by the tool, and that a
-  membership change therefore belongs in the confirm-first list. It was also added
-  to that list, or a model scanning it would classify the call as routine
+  delete the device's rules, that this cannot be undone by the tool, that group
+  and user rules are **not** affected, and that a membership change therefore
+  belongs in the confirm-first list. It was also added to that list, or a model
+  scanning it would classify the call as routine. It instructs the model to check
+  the device's own rules first so the confirmation is proportionate rather than
+  blanket
 - guard test `test_membership_change_warns_that_it_deletes_device_rules`, so the
   prompt guidance cannot be dropped without failing
+
+**Second capture: user assignment behaves exactly like group assignment
+(2026-10-03).** `kadens-phone`, unassigned and carrying two **enabled** rules the
+owner had created minutes earlier, was assigned to the **user** `KADENS_PHONE`.
+The app sent `policy:delete` for both rules, then the tags write, then
+`host:syncAppTimeUsageToTags` — the same five-item shape as the group capture.
+Box-wide the count fell by exactly two. There is no user-specific exemption.
+
+**`clear` is destructive too.** Finding 41 is a capture of a removal, and its
+batch carried `policy:delete`. A live check reproduced it on `kadens-phone`. So
+the deletion belongs to *any* membership change, not to assignment. What differs
+is only the blast radius, measured by what the device holds:
+
+| Membership state | Hosts | Carry their own rules |
+| --- | --- | --- |
+| assigned to a group | 123 | 83 — almost always just the disabled `dap` pair |
+| assigned to a user | 32 | 1 |
+| unassigned | 61 | 13 |
+
+An **earlier figure in this plan was wrong** and is corrected here: it claimed
+"0 of 124 group-assigned hosts carry a non-`dap` rule". That was an artifact of
+excluding `dap` from the count while using it to argue that group membership
+removes rules. Without the filter, 83 of 123 group-assigned hosts do carry rules.
+The conclusion that assignment deletes the device's own rules is unaffected — it
+rests on two captures — but the "a device in a group has no rules" claim was
+never true, and `dap` is not what survives assignment after all.
 
 
 ### Phase 4 — Assistant exposure
@@ -462,13 +492,24 @@ Goal: let an assistant change a device's membership, and be honest about the fac
 that the change deletes the device's rules.
 
 **Premise correction (2026-10-03).** This phase was planned around the tools being
-"reversible, so register them as controls, not destructive". Finding 43 disproved
-the premise: a membership change **deletes every rule the device owns**, including
-enabled rules the user created, and no tool can restore them. The membership slot
-is reversible; the rule deletion is not. Their annotations must say
-`destructive=True`, and their descriptions must carry the warning. `undo` must
-**not** claim to restore the rules — set it to the call that puts the membership
-back and say plainly in the description that the rules are gone.
+"reversible, so register them as controls, not destructive". Two captures disproved
+the premise: **any** membership change — set or clear, group or user — deletes the
+rules attached to that device, including enabled rules the user created, and no
+tool can restore them (re-creating a rule assigns a new id, so there is nothing to
+re-attach). The membership slot is reversible; the rule deletion is not.
+
+**All four tools therefore carry `destructive=True`.** Marking only the `set_`
+tools destructive would understate `clear_`, which Finding 41 and a live check both
+show deletes too. What differs is the blast radius, not the mechanism: a device in
+a group usually holds only Firewalla's own disabled `dap` pair, while an unassigned
+device can hold rules the owner wrote. The descriptions and the prompt should say
+that, and the prompt already instructs the model to check the device's rules first
+so its confirmation is proportionate.
+
+**`undo` must not claim to restore the rules.** Point it at the inverse membership
+call (`set_host_group` → `clear_host_group`, and so on) — that is the right next
+step — while the description states plainly that the deleted rules are not
+restored.
 
 - [ ] **4.1 Add the control tools.** In `llm_tools_control.py`, add **four** tools
       — `set_host_group`, `clear_host_group`, `set_host_user`, `clear_host_user` —
@@ -478,16 +519,16 @@ back and say plainly in the description that the rules are gone.
       target because group and user names collide in real data;
       `_SetHostNotifyTool` is the in-repo precedent for several tools over one
       service.
-      **Use `_DESTRUCTIVE_ANNOTATIONS`, not `_CONTROL_ANNOTATIONS`** (see the
-      premise correction above), and put the rule-deletion warning in every one of
-      the four descriptions, with the count reported back from
-      `device_rules.removed`.
-- [ ] **4.2 Update the prompt fragment.** **Partially done (2026-10-03):** the
-      `PROMPT` in `llm_tools_common.py` now states that a membership change deletes
-      the device's rules, that this is irreversible, that it belongs in the
-      confirm-first list, and that `device_rules.removed` reports what went.
-      A guard test asserts all four. Remaining: name the four tools and say groups
-      and users are both valid targets, once the tools exist.
+      Use `_DESTRUCTIVE_ANNOTATIONS`, not `_CONTROL_ANNOTATIONS`, and put the
+      rule-deletion warning in all four descriptions, bounded to the device
+      ("rules attached to groups or users are not affected"), with the deleted count
+      reported back from `device_rules.removed`.
+- [ ] **4.2 Update the prompt fragment.** **Partially done (2026-10-03):** `PROMPT`
+      already states that the four calls delete the device's rules, that the tool
+      cannot undo it, that group and user rules are unaffected, that the model must
+      check the device's rules first and escalate only when something would be lost,
+      and that `device_rules.removed` reports what went. A guard test asserts it.
+      Remaining: name the four tools explicitly once they exist.
 - [ ] **4.3 Document the contract.** Add the four tools to
       `docs/MCP_TOOL_REFERENCE.md` in the existing per-tool format, using the same
       annotation and availability fields as their neighbours, and carrying the

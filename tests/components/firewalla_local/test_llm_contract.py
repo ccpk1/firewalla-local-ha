@@ -335,16 +335,23 @@ async def test_membership_change_warns_that_it_deletes_device_rules(
 
     This is destructive and cannot be undone by the tool, so a model that
     discovers it only from the call result has already done the damage. Verified
-    by capture: assigning an unassigned device to a group deletes every rule it
-    owned, including enabled ones the user created.
+    by capture: assigning an unassigned device to a group deleted every rule it
+    owned — enabled ones included — and the box removed them outright rather than
+    detaching them.
 
     Checked against the prompt, which is served as the API prompt, because the
     four membership tools are added in a later phase and this guidance must exist
     before a model can call one.
     """
-    assert "DELETES ITS RULES" in PROMPT
+    assert "DELETES THE RULES ATTACHED TO THAT DEVICE" in PROMPT
     assert "enabled rules the user created" in PROMPT
     assert "device_rules.removed" in PROMPT
+    # The blast radius must be bounded, or a model will over-warn and a user may
+    # refuse a harmless change: only this device's rules go.
+    assert "are NOT affected" in PROMPT
+    # And it must check first, so the confirmation is proportionate rather than
+    # blanket on a call that often destroys nothing.
+    assert "Check before you ask" in PROMPT
     # It must also be in the confirm-first list, or a model scanning that list
     # would classify a membership change as routine.
     confirm_paragraph = PROMPT.split("Confirm before wide-reaching changes", 1)[1]
