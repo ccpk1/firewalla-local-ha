@@ -269,7 +269,7 @@ from .models import (
 from .utils.duration import parse_duration_to_seconds
 from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
-from .utils.values import normalized_int, normalized_string
+from .utils.values import normalized_bool, normalized_int, normalized_string
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
     "internet",
@@ -1983,11 +1983,7 @@ def _optional_string(value: object) -> str | None:
 
 def _optional_bool(value: object) -> bool | None:
     """Return a normalized boolean when one is present."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return bool(value)
-    return None
+    return normalized_bool(value)
 
 
 def _optional_int(value: object) -> int | None:

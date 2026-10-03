@@ -40,7 +40,7 @@ from ..models import (
     FirewallaUserRuntime,
 )
 from ..utils.network import build_network_inventory
-from ..utils.values import normalized_float, normalized_int
+from ..utils.values import normalized_bool, normalized_float, normalized_int
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
     FirewallaAuthError,
@@ -280,8 +280,10 @@ _RULE_TARGET_TYPE_NETWORK: Final = "network"
 _QOS_PREFIX: Final = "qos_"
 _QOS_LABEL_PREFIX: Final = "QoS "
 _DEFAULT_BOX_NAME: Final = "Firewalla"
-_BOOLISH_TRUE_VALUES: Final = {"1", "true", "yes"}
-_BOOLISH_FALSE_VALUES: Final = {"0", "false", "no", ""}
+# A rule's ``disabled`` flag is its own encoding, not a general boolean: the box
+# sends it as the string "1"/"0" or as a real bool, and ``True == 1`` in Python,
+# so a single membership test covers both without a coercer. Kept separate from
+# the shared boolean policy because this is a rule *state*, read in one place.
 _DISABLED_TRUE_VALUES: Final = {"1", "true", "True", 1}
 _RAW_RULE_DISABLED_FALSE_VALUE: Final = 0
 _RAW_RULE_DISABLED_TRUE_VALUE: Final = 1
@@ -2442,18 +2444,15 @@ class FirewallaApiClient:
         return normalized_int(value)
 
     def _coerce_boolish(self, value: object) -> bool | None:
-        """Coerce Firewalla bool-like values to bool when possible."""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, int):
-            return bool(value)
-        if isinstance(value, str):
-            lowered = value.strip().lower()
-            if lowered in _BOOLISH_TRUE_VALUES:
-                return True
-            if lowered in _BOOLISH_FALSE_VALUES:
-                return False
-        return None
+        """Coerce a Firewalla bool-like value to bool.
+
+        Delegates to the shared boolean policy. That policy rejects the empty
+        string; this method previously read it as ``False``, which is wrong for
+        the one field that actually sends it (``useBf``, see the policy
+        docstring). No field routed through here sends an empty string today, so
+        the change is a latent-trap removal rather than a behaviour change.
+        """
+        return normalized_bool(value)
 
     def _normalize_policy_rules(
         self,
@@ -2771,9 +2770,13 @@ class FirewallaApiClient:
 
     @staticmethod
     def _alarm_count(data: dict[str, object], key: str) -> int:
-        """Return a non-negative integer alarm count from the init payload."""
-        value = data.get(key)
-        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+        """Return a non-negative integer alarm count from the init payload.
+
+        Uses the shared coercion policy rather than a bare ``isinstance`` check:
+        the box sends several other counts as numeric strings, so an inline
+        integer test would silently report zero if these ever followed suit.
+        """
+        return normalized_int(data.get(key)) or 0
 
     def build_runtime_snapshot(
         self, data: dict[str, object]

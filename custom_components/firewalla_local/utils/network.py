@@ -9,7 +9,7 @@ from ..models import (
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkKind,
 )
-from .values import normalized_int, normalized_string
+from .values import normalized_bool, normalized_int, normalized_string
 
 # Raw keys/literals for the unified Firewalla network registry.
 _RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
@@ -82,15 +82,7 @@ _NETWORK_KIND_BY_INTERFACE_CATEGORY: Final = {
 
 def _normalized_bool(value: object) -> bool | None:
     """Return a boolean when one is present."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        stripped_value = value.strip().casefold()
-        if stripped_value == "true":
-            return True
-        if stripped_value == "false":
-            return False
-    return None
+    return normalized_bool(value)
 
 
 def _normalized_string_tuple(value: object) -> tuple[str, ...]:

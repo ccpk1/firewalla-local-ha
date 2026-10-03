@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
+from ..models import FirewallaNetworkUsageWindow
 from .values import normalized_int, normalized_string
 
 # The same identity arrives under three names depending on the family: audit and
@@ -45,6 +46,12 @@ _RAW_FLOW_METRIC_FALLBACK_KEYS: Final = ("bytes", "count")
 # carry the address separately.
 _RAW_FLOW_HOSTNAME_KEYS: Final = ("host", "domain")
 _RAW_FLOW_IP_KEY: Final = "ip"
+
+# The windowed totals the rollup and the ``item=intf`` payload both carry. The
+# two sources use the same keys for the same measurement, which is why the parser
+# lives here rather than in either consumer.
+_RAW_USAGE_DOWNLOAD_KEY: Final = "totalDownload"
+_RAW_USAGE_UPLOAD_KEY: Final = "totalUpload"
 
 # Ranking payloads are wrapped inconsistently across endpoints and firmware.
 _RAW_FLOW_LIST_CONTAINER_KEYS: Final = (
@@ -143,16 +150,69 @@ def host_traffic_sort_key(
     host_name: str | None,
     host_id: str,
 ) -> tuple[int, str, str]:
-    """Return the shared ordering for per-host traffic rows.
+    """Return the ordering for per-host *traffic* rows.
 
     Total bytes descending, then name, then id. The name and id tie-breaks are
     not decoration: two hosts can carry the same total, and without a stable
     order the "top talkers" list would reorder itself between refreshes.
+
+    Three related keys exist and their primary keys genuinely differ, so they are
+    deliberately not merged:
+
+    - this one, for a combined total across both directions
+    - :func:`metric_ranking_sort_key`, for a single direction, used to build the
+      separate top-download and top-upload lists. Ranking those by combined
+      total would be wrong.
+    - the bucket ordering in the usage-bucket builder, which adds a session-count
+      tie-break because buckets carry one and hosts do not.
+
+    All of them share the same name and id tie-breaks *and the same casefold
+    rule*, so a list of destinations orders the same way whether it is ranked by
+    one metric or two.
     """
     return (
         -((download_bytes or 0) + (upload_bytes or 0)),
         host_name.casefold() if host_name else "",
         host_id,
+    )
+
+
+def metric_ranking_sort_key(
+    *,
+    value: int,
+    host_name: str | None,
+    host_id: str,
+) -> tuple[int, str, str]:
+    """Return the ordering for a ranking built on one metric.
+
+    Same tie-breaks as :func:`host_traffic_sort_key`, including the casefold on
+    the name. Without the casefold a destination list ordered by codepoint can
+    place ``"Zebra"`` ahead of ``"apple"``, so the two top-destination lists
+    would order the same equal-valued pair differently.
+    """
+    return (-value, (host_name or "").casefold(), host_id)
+
+
+def extract_usage_window(
+    raw_window: object,
+) -> FirewallaNetworkUsageWindow | None:
+    """Extract download/upload totals from one raw usage window.
+
+    Both the per-network ``item=intf`` payload and the per-target flow rollup
+    carry these windows under the same keys (``newLast24``, ``last60``,
+    ``last30``, ``last12Months``), so one parser serves both. Returning ``None``
+    when neither total is present lets a caller distinguish an absent window from
+    a window that is genuinely all zero.
+    """
+    if not isinstance(raw_window, Mapping):
+        return None
+    download = normalized_int(raw_window.get(_RAW_USAGE_DOWNLOAD_KEY))
+    upload = normalized_int(raw_window.get(_RAW_USAGE_UPLOAD_KEY))
+    if download is None and upload is None:
+        return None
+    return FirewallaNetworkUsageWindow(
+        download_bytes=download,
+        upload_bytes=upload,
     )
 
 

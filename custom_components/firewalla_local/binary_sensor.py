@@ -140,6 +140,7 @@ from .models import (
     FirewallaNetworkKind,
     FirewallaWanUsageSummary,
 )
+from .utils.values import normalized_int
 
 PARALLEL_UPDATES = 0
 
@@ -310,18 +311,14 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
 
     @staticmethod
     def _normalized_port_speed(value: object) -> int | None:
-        """Return a port speed in Mbps, or None when unknown/inactive."""
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, int):
-            return value if value > 0 else None
-        if isinstance(value, str):
-            try:
-                parsed = int(value)
-            except ValueError:
-                return None
-            return parsed if parsed > 0 else None
-        return None
+        """Return a port speed in Mbps, or None when unknown/inactive.
+
+        The box reports this as a numeric string and uses ``-1`` for an
+        inactive port, so a non-positive reading means "no link" rather than
+        "zero speed".
+        """
+        parsed = normalized_int(value)
+        return parsed if parsed is not None and parsed > 0 else None
 
     def _build_bluetooth_mac_attribute(self) -> str | None:
         """Return the box Bluetooth MAC from the init payload."""

@@ -35,6 +35,7 @@ from .const import (
     RULE_TARGET_TYPE_NETWORK,
 )
 from .utils.mac import normalize_mac_address
+from .utils.values import normalized_bool
 
 _RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
 _RAW_UPDATE_NOTES_KEY: Final = "notes"
@@ -177,16 +178,16 @@ def _normalized_optional_string(value: object) -> str | None:
 
 
 def _normalized_optional_bool(value: object) -> bool | None:
-    """Return a normalized boolean when Firewalla exposes one."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        stripped_value = value.strip().casefold()
-        if stripped_value == "true":
-            return True
-        if stripped_value == "false":
-            return False
-    return None
+    """Return a normalized boolean when Firewalla exposes one.
+
+    Delegates to the shared boolean policy, which accepts all four encodings the
+    box uses (``bool``, ``0``/``1``, ``"1"``/``"0"``, ``"true"``/``"false"``).
+    The previous local version accepted only real booleans and
+    ``"true"``/``"false"``, so any field the box sent as ``"0"``/``"1"`` read
+    as absent. ``autoDeleteWhenExpires`` is such a field: it has no caller today,
+    which is why this was a trap rather than a live defect.
+    """
+    return normalized_bool(value)
 
 
 def _normalized_metadata_value(value: object) -> object | None:

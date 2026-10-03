@@ -73,15 +73,18 @@ from ..models import (
 )
 from ..utils.flow import (
     FlowHostActivity,
+    extract_usage_window,
     flow_row_host_id,
     flow_row_metric_value,
     flow_row_remote_host,
     flow_row_remote_ip,
     host_traffic_sort_key,
     iter_flow_rows,
+    metric_ranking_sort_key,
 )
 from ..utils.network import build_network_inventory
 from ..utils.values import (
+    normalized_bool,
     normalized_float,
     normalized_int,
     normalized_number,
@@ -101,8 +104,6 @@ _DEFAULT_BOX_NAME: Final = "Firewalla"
 _RAW_MONTHLY_WAN_USAGE_KEY: Final = "monthlyDataUsageOnWans"
 _RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
 _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
-_RAW_NETWORK_USAGE_DOWNLOAD_KEY: Final = "totalDownload"
-_RAW_NETWORK_USAGE_UPLOAD_KEY: Final = "totalUpload"
 _WEEK_START_MONDAY: Final = 0
 _TOP_TALKER_LIMIT: Final = 5
 _SUPPORTED_WAN_EVENT_STATE_FAMILIES: Final = frozenset(
@@ -140,22 +141,6 @@ _UBUNTU_DIST_RELEASES: Final = {
     "jammy": ("22.04 LTS", "Jammy Jellyfish"),
     "noble": ("24.04 LTS", "Noble Numbat"),
 }
-
-
-def _extract_usage_window(
-    raw_window: object,
-) -> FirewallaNetworkUsageWindow | None:
-    """Extract download/upload totals from one raw usage window when present."""
-    if not isinstance(raw_window, dict):
-        return None
-    download = normalized_int(raw_window.get(_RAW_NETWORK_USAGE_DOWNLOAD_KEY))
-    upload = normalized_int(raw_window.get(_RAW_NETWORK_USAGE_UPLOAD_KEY))
-    if download is None and upload is None:
-        return None
-    return FirewallaNetworkUsageWindow(
-        download_bytes=download,
-        upload_bytes=upload,
-    )
 
 
 def _interface_port_number(interface_name: str | None) -> int:
@@ -651,10 +636,10 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
     ) -> FirewallaNetworkUsageSummary:
         """Build a bounded usage summary from one raw ``item=intf`` payload."""
         return FirewallaNetworkUsageSummary(
-            last_24h=_extract_usage_window(raw_payload.get("newLast24")),
-            last_60m=_extract_usage_window(raw_payload.get("last60")),
-            last_30d=_extract_usage_window(raw_payload.get("last30")),
-            last_12m=_extract_usage_window(raw_payload.get("last12Months")),
+            last_24h=extract_usage_window(raw_payload.get("newLast24")),
+            last_60m=extract_usage_window(raw_payload.get("last60")),
+            last_30d=extract_usage_window(raw_payload.get("last30")),
+            last_12m=extract_usage_window(raw_payload.get("last12Months")),
         )
 
     async def async_refresh_internet_quality(self) -> None:
@@ -1246,10 +1231,10 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         return tuple(
             sorted(
                 rankings,
-                key=lambda ranking: (
-                    -ranking.value,
-                    ranking.host_name or "",
-                    ranking.host_id,
+                key=lambda ranking: metric_ranking_sort_key(
+                    value=ranking.value,
+                    host_name=ranking.host_name,
+                    host_id=ranking.host_id,
                 ),
             )
         )
@@ -1300,11 +1285,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
     def _optional_bool(self, value: object) -> bool | None:
         """Return a normalized boolean when one is present."""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, int):
-            return bool(value)
-        return None
+        return normalized_bool(value)
 
     def _string_tuple(self, value: object) -> tuple[str, ...]:
         """Return a stable tuple of non-empty strings."""
@@ -2307,15 +2288,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
     def _normalized_bool(self, value: object) -> bool | None:
         """Return a normalized boolean from a Firewalla field when possible."""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            stripped_value = value.strip().casefold()
-            if stripped_value == "true":
-                return True
-            if stripped_value == "false":
-                return False
-        return None
+        return normalized_bool(value)
 
     def _optional_string(self, value: object) -> str | None:
         """Return a non-empty stripped string when one is present."""

@@ -37,6 +37,13 @@ raising would turn a cosmetic payload change into an unavailable entity.
 
 from __future__ import annotations
 
+from typing import Final
+
+# Representations of a boolean the box actually puts on the wire. Measured
+# across 259 rules and the network and host inventories.
+_BOOL_TRUE_STRINGS: Final = frozenset({"1", "true", "yes"})
+_BOOL_FALSE_STRINGS: Final = frozenset({"0", "false", "no"})
+
 
 def normalized_int(value: object) -> int | None:
     """Return an integer when one can be honestly derived.
@@ -117,3 +124,41 @@ def normalized_string(value: object) -> str | None:
         return None
     stripped_value = value.strip()
     return stripped_value or None
+
+
+def normalized_bool(value: object) -> bool | None:
+    """Return a boolean when one can be honestly derived.
+
+    The box encodes a boolean four different ways, all observed live:
+
+    - a real JSON ``bool``
+    - an integer ``0`` / ``1``
+    - a string ``"1"`` / ``"0"`` (``autoDeleteWhenExpires``)
+    - a string ``"true"`` / ``"false"``
+
+    so all four are accepted. Six separate helpers previously handled this, and
+    they split into two camps that each read only one of those encodings: three
+    accepted integers and no strings, three accepted ``"true"`` / ``"false"``
+    and no integers. A field was therefore readable by whichever camp happened
+    to be wired to it, not by what the box sent.
+
+    **An empty string is not a representation of a boolean** and returns
+    ``None``. It is an opaque marker whose meaning is per-field: on ``useBf`` it
+    marks a DNS-only rule where the flag is *set*, so reading it as ``False``
+    would invert the flag on rule creation. A caller that needs to know whether
+    a field was present should test for the empty string itself.
+
+    A value that is not one of the four encodings returns ``None`` rather than
+    raising, matching how the rest of the integration represents absent data.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().casefold()
+        if lowered in _BOOL_TRUE_STRINGS:
+            return True
+        if lowered in _BOOL_FALSE_STRINGS:
+            return False
+    return None
