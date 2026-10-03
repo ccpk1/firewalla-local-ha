@@ -974,6 +974,27 @@ class FirewallaUsageHistoryView:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaRuleHit:
+    """The most recent traffic a rule matched.
+
+    Firewalla keeps only the last matched flow per rule, not a log, so this is a
+    point-in-time observation rather than a history. It is what makes a rule
+    answerable as "what did this rule last stop, and for which device?".
+    """
+
+    timestamp: float | None
+    device_mac: str | None
+    device_ip: str | None
+    destination: str | None
+    destination_kind: str | None
+    destination_ip: str | None
+    port: int | None
+    protocol: str | None
+    app: str | None
+    category: str | None
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaPolicyRule:
     """Normalized local policy rule data from the Firewalla init payload."""
 
@@ -997,6 +1018,8 @@ class FirewallaPolicyRule:
     auto_delete_when_expires: bool | None = None
     dnsmasq_only: bool | None = None
     category: str | None = None
+    hit_count: int = 0
+    last_hit: FirewallaRuleHit | None = None
     raw_update_payload: dict[str, object] = field(default_factory=dict, compare=False)
 
     @property
@@ -1410,6 +1433,51 @@ class FirewallaAlarmException:
     target_name: str | None
     expires_at: int | None
     raw_payload: dict[str, object] = field(default_factory=dict)
+
+
+def build_rule_hit_attributes(
+    hit: FirewallaRuleHit | None,
+) -> dict[str, object]:
+    """Build the shared shape for one rule's last matched flow.
+
+    One definition used by both the rule service payload and the rule-backed
+    switch entities, so a hit reads identically wherever it is surfaced. Absent
+    means the rule has never matched, never "unknown", so callers keep the two
+    apart rather than defaulting to a zero count.
+
+    Stdlib only, so the models layer stays free of Home Assistant imports.
+    """
+    if hit is None:
+        return {
+            "timestamp": None,
+            "at": None,
+            "device_mac": None,
+            "device_ip": None,
+            "destination": None,
+            "destination_kind": None,
+            "destination_ip": None,
+            "port": None,
+            "protocol": None,
+            "app": None,
+            "category": None,
+        }
+    return {
+        "timestamp": hit.timestamp,
+        "at": (
+            datetime.fromtimestamp(hit.timestamp, UTC).isoformat()
+            if hit.timestamp is not None
+            else None
+        ),
+        "device_mac": hit.device_mac,
+        "device_ip": hit.device_ip,
+        "destination": hit.destination,
+        "destination_kind": hit.destination_kind,
+        "destination_ip": hit.destination_ip,
+        "port": hit.port,
+        "protocol": hit.protocol,
+        "app": hit.app,
+        "category": hit.category,
+    }
 
 
 def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:

@@ -17,8 +17,10 @@ from custom_components.firewalla_local.const import (
     ATTR_RULE_CATEGORY,
     ATTR_RULE_CURRENT_STATE_REASON,
     ATTR_RULE_CUSTOM_NAME,
+    ATTR_RULE_HIT_COUNT,
     ATTR_RULE_ID,
     ATTR_RULE_IS_PAUSED,
+    ATTR_RULE_LAST_HIT,
     ATTR_RULE_NAME,
     ATTR_RULE_NOTES,
     ATTR_RULE_PAUSE_REMAINING_SECONDS,
@@ -58,6 +60,7 @@ from custom_components.firewalla_local.models import (
     FirewallaApplianceRuntimeInput,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
+    FirewallaRuleHit,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
 )
@@ -98,6 +101,8 @@ def _snapshot_with_rule(
     tag_refs: tuple[str, ...] = ("tag:17",),
     dnsmasq_only: bool | None = True,
     auto_delete_when_expires: bool | None = None,
+    hit_count: int | None = None,
+    last_hit: FirewallaRuleHit | None = None,
     raw_update_overrides: dict[str, object] | None = None,
 ) -> FirewallaRuntimeSnapshot:
     """Return a runtime snapshot with an optional AV_SMART_TV social rule."""
@@ -134,6 +139,8 @@ def _snapshot_with_rule(
                 applies_to_kind=applies_to_kind,
                 auto_delete_when_expires=auto_delete_when_expires,
                 dnsmasq_only=dnsmasq_only,
+                hit_count=hit_count,
+                last_hit=last_hit,
                 raw_update_payload=raw_update_payload,
             ),
         )
@@ -244,10 +251,29 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
             ATTR_RULE_NAME,
             ATTR_RULE_APPLIES_TO,
             ATTR_RULE_APPLIES_TO_KIND,
+            ATTR_RULE_HIT_COUNT,
+            ATTR_RULE_LAST_HIT,
             ATTR_RULE_ACTION,
             ATTR_RULE_IS_PAUSED,
             ATTR_RULE_CURRENT_STATE_REASON,
         ]
+        # This rule has never matched, so both hit attributes are present but
+        # empty. Absent means "never matched", and it must stay distinguishable
+        # from a rule that has fired.
+        assert attributes[ATTR_RULE_HIT_COUNT] is None
+        assert attributes[ATTR_RULE_LAST_HIT] == {
+            "timestamp": None,
+            "at": None,
+            "device_mac": None,
+            "device_ip": None,
+            "destination": None,
+            "destination_kind": None,
+            "destination_ip": None,
+            "port": None,
+            "protocol": None,
+            "app": None,
+            "category": None,
+        }
         assert "source_rule_id" not in attributes
         assert "backing_rule_present" not in attributes
         assert attributes[ATTR_RULE_ACTION] == "block"
@@ -678,6 +704,92 @@ async def test_selected_rule_switch_exposes_pause_and_notes_attributes(
     assert attributes[ATTR_RULE_PAUSE_UNTIL] == "2026-03-25T12:00:00+00:00"
     assert attributes[ATTR_RULE_PAUSE_REMAINING_SECONDS] == 600
     assert attributes[ATTR_RULE_CURRENT_STATE_REASON] == RULE_STATE_REASON_PAUSED
+
+
+async def test_selected_rule_switch_exposes_hit_data(
+    hass: HomeAssistant,
+) -> None:
+    """A rule-backed switch reports the rule's hit count and last match.
+
+    The same shape the rule service payload uses, from the same helper, so a hit
+    reads identically whether it was read from an entity attribute or from
+    `get_rules`. This is the entity-side half of "why is this device blocked?"
+    and of "which of my enabled rules never fire?".
+    """
+    template = FirewallaRuleTemplate(
+        source_rule_id="744",
+        name="block category social for AV_SMART_TV",
+        action="block",
+        target="social",
+        target_type="category",
+        tag_refs=("tag:17",),
+        dnsmasq_only=True,
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={
+            CONF_SELECTED_RULE_IDS: ["744"],
+            CONF_SELECTED_RULE_TEMPLATES: [template.to_dict()],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    timestamp = datetime(2026, 10, 3, 1, 17, 14, 243000, tzinfo=UTC).timestamp()
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_rule(
+                "744",
+                hit_count=26617,
+                last_hit=FirewallaRuleHit(
+                    timestamp=timestamp,
+                    device_mac="74:A7:EA:24:44:44",
+                    device_ip="192.168.202.43",
+                    destination="www.youtube.com",
+                    destination_kind="domain",
+                    destination_ip=None,
+                    port=53,
+                    protocol="dns",
+                    app="youtube",
+                    category="av",
+                ),
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    entity_id = next(iter(hass.states.async_entity_ids("switch")))
+    attributes = hass.states.get(entity_id).attributes
+
+    assert attributes[ATTR_RULE_HIT_COUNT] == 26617
+    assert attributes[ATTR_RULE_LAST_HIT] == {
+        "timestamp": timestamp,
+        "at": "2026-10-03T01:17:14.243000+00:00",
+        "device_mac": "74:A7:EA:24:44:44",
+        "device_ip": "192.168.202.43",
+        "destination": "www.youtube.com",
+        "destination_kind": "domain",
+        "destination_ip": None,
+        "port": 53,
+        "protocol": "dns",
+        "app": "youtube",
+        "category": "av",
+    }
 
 
 async def test_selected_rule_switch_exposes_schedule_and_time_limit_attributes(

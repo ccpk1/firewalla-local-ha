@@ -610,6 +610,158 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw_flow", "expected_destination", "expected_kind"),
+    [
+        pytest.param(
+            {
+                "ts": 1790990234.243,
+                "device": "74:A7:EA:24:44:44",
+                "deviceIP": "192.168.202.43",
+                "domain": "www.youtube.com",
+                "port": 53,
+                "protocol": "dns",
+                "app": "youtube",
+                "category": "av",
+            },
+            "www.youtube.com",
+            "domain",
+            id="dns_match_uses_the_domain",
+        ),
+        pytest.param(
+            {
+                "ts": 1791032490.245,
+                "device": "C0:56:E3:AB:DB:DC",
+                "deviceIP": "192.168.200.213",
+                "host": "dev.us.ezviz7.com",
+                "ip": "32.196.236.79",
+                "port": 8555,
+                "protocol": "tcp",
+            },
+            "dev.us.ezviz7.com",
+            "host",
+            id="host_wins_over_ip",
+        ),
+        pytest.param(
+            {
+                "ts": 1791032458.199,
+                "device": "02:42:0B:3C:52:52",
+                "ip": "148.59.129.29",
+                "port": 48116,
+                "protocol": "tcp",
+            },
+            "148.59.129.29",
+            "ip",
+            id="ip_only_match",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_rule_hits_are_normalized_with_one_destination(
+    raw_flow: dict[str, object],
+    expected_destination: str,
+    expected_kind: str,
+) -> None:
+    """A rule's last matched flow resolves to one destination plus its kind.
+
+    Firewalla reports the destination under `host`, `domain` or `ip` depending on
+    how the rule matched, so the raw fields are collapsed into one destination so
+    a caller does not have to know which family produced it.
+    """
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "model": "gold",
+                    "cpuid": "serial-123",
+                    "longVersion": "1.0.0",
+                    "policyRules": [
+                        {
+                            "pid": "516",
+                            "action": "block",
+                            "target": "TLX-fw-youtube",
+                            "type": "category",
+                            "disabled": "0",
+                            "hitCount": "26617",
+                            "lastHitFlow": raw_flow,
+                        }
+                    ],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    rule = snapshot.policy_rules[0]
+    assert rule.hit_count == 26617
+    assert rule.last_hit is not None
+    assert rule.last_hit.destination == expected_destination
+    assert rule.last_hit.destination_kind == expected_kind
+    assert rule.last_hit.device_mac == raw_flow["device"]
+    assert rule.last_hit.timestamp == raw_flow["ts"]
+
+
+@pytest.mark.asyncio
+async def test_a_rule_without_hits_reports_a_zero_count() -> None:
+    """A rule the box reports no count for reads as 0, not null.
+
+    The box writes an explicit `"0"` for some rules and omits the field for
+    others, so omission is not a distinct "unknown" state as far as a tally is
+    concerned. `hit_count` is therefore always a number, which keeps "never
+    fired" readable as a comparison instead of a null check.
+
+    `last_hit` stays null, because it describes one specific match rather than a
+    count and there is no match to describe.
+    """
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+        with patch.object(
+            client,
+            "_async_send_local_message",
+            AsyncMock(
+                return_value={
+                    "groupName": "Firewalla",
+                    "model": "gold",
+                    "cpuid": "serial-123",
+                    "longVersion": "1.0.0",
+                    "policyRules": [
+                        {
+                            "pid": "672",
+                            "action": "block",
+                            "target": "66.132.172.137",
+                            "type": "ip",
+                            "disabled": "0",
+                        }
+                    ],
+                }
+            ),
+        ):
+            snapshot = await client.async_get_runtime_snapshot()
+
+    rule = snapshot.policy_rules[0]
+    assert rule.hit_count == 0
+    assert rule.last_hit is None
+
+
 async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
     """Test runtime snapshots preserve normalized host inventory.
 

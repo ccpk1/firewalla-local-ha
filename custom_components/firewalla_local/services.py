@@ -264,6 +264,7 @@ from .models import (
     FirewallaWanEventFailure,
     FirewallaWanEventStatus,
     FirewallaWanInterface,
+    build_rule_hit_attributes,
     format_policy_rule_name,
 )
 from .utils.duration import parse_duration_to_seconds
@@ -787,6 +788,12 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
     attachments, which are otherwise invisible: the scope-based `scope` field
     only covers device-scoped rules, so without these an agent cannot tell that
     a rule governs a group or a whole network.
+
+    `hit_count` and `last_hit` report whether a rule ever fires and what it last
+    matched. `hit_count` is always a number: a rule the box reports no count for
+    is 0, which for the visible rule set means no recorded matches. `last_hit`
+    stays null when there is no match to describe, since it is a point-in-time
+    record rather than a tally.
     """
     return {
         "rule_id": rule.rule_id,
@@ -802,6 +809,12 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
         "tag_refs": list(rule.tag_refs),
         "purpose": rule.purpose,
         "alarm_id": rule.alarm_id,
+        "hit_count": rule.hit_count,
+        "last_hit": (
+            cast(JsonObjectType, build_rule_hit_attributes(rule.last_hit))
+            if rule.last_hit is not None
+            else None
+        ),
     }
 
 

@@ -740,10 +740,64 @@ In practice:
 - if a previously selected rule later disappears, Home Assistant can still show
   enough context for you to remove the stale selection cleanly
 
+### When a selected rule is deleted on the box
+
+Firewalla issues a **new rule number** whenever a rule is deleted and created
+again, even if the new rule is identical in every visible way. The integration
+selects a rule **by its number**, so re-creating a rule you had selected does
+**not** reconnect the switch to it.
+
+What that looks like: the switch stays in Home Assistant but becomes
+**unavailable**, and its selected rule keeps its original name so you can tell
+which one went. Deleting and re-adding a rule is a normal thing to do while
+testing, so this is easy to hit.
+
+To recover, re-select the rule in the integration's options — the new rule
+appears in the selection list under its new number.
+
+This also means the switch's `hit_count` and `last_hit` attributes are **absent**
+rather than zero while it is unavailable, because there is no rule to read them
+from. An absent attribute is not the same as a rule that never fired.
+
+> **Planned improvement:** a Home Assistant **repair** notification for this case,
+> so you are told which switch lost its rule instead of only seeing it go
+> unavailable. Tracked as issue #53. Not implemented yet.
+
+### Rule hit data (`hit_count` and `last_hit`)
+
+Every rule-backed switch exposes two extra attributes, and the same values are
+returned by the `firewalla_local.get_rules` service and the AI assistant's
+`list_rules` tool:
+
+- **`hit_count`** — how many times the rule has matched since it was created.
+  Always a number: a rule with no recorded matches reads `0`
+- **`last_hit`** — the **most recent single match**: the device involved, the
+  destination, the port and protocol, and when it happened. `null` when there is
+  no match to describe
+
+They answer two questions the integration could not answer before:
+
+- **"Why can't this device reach something?"** Find the rules governing the
+  device, then read each one's `last_hit` — you can see which rule last matched,
+  which device it was, and what it was reaching for.
+- **"Which of my rules can I clean up?"** An enabled rule with a `hit_count` of
+  `0` has no recorded matches.
+
+Two things worth knowing:
+
+- **This is one observation, not a log.** Firewalla keeps only the last match per
+  rule, so `last_hit` cannot tell you everything a rule has ever blocked, and it
+  may be days or weeks old.
+- **Product-owned Device Active Protect rules report no count at all.** They are
+  hidden from the rule list by default, so within what you see a `0` means no
+  recorded matches.
+
+The hidden attribute `last_hit` is a dictionary; `hit_count` is a number. Both
+update on each refresh.
+
 ### Persistent rules versus temporary rules
 
 Persistent rules:
-
 - stay installed in Firewalla until you explicitly change or delete them
 - can be paused and resumed in place
 - are the rule family that the integration can expose as Home Assistant

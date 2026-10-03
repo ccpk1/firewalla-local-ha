@@ -389,15 +389,37 @@ Reads that tell you what exists — the first step before any control action.
   users first, then the tag name), which is why the value transfers. Two caveats: the
   filter matches **exactly**, and a host may list several groups separated by `", "`,
   so filter one name at a time.
+- **Did this rule ever fire, and at what?** Each rule carries `hit_count` (how
+  many times it has matched) and `last_hit` (the most recent single match). The
+  box keeps only the **last** match per rule, not a log, so this answers "what did
+  this rule stop most recently?" and never "everything it blocked".
+  `hit_count` is **always a number** — a rule with no recorded matches is `0` — so
+  "never fired" is a comparison rather than a null check. `last_hit` is `null`
+  when there is no match to describe, because it records one match rather than a
+  tally. Note the box reports no count at all for product-owned Device Active
+  Protect rules, which are hidden by default; within the visible rule set a `0`
+  means no recorded matches. Two uses: troubleshooting ("why can't this device
+  reach YouTube?" — read the rules governing it, then see which one last matched
+  and for which device), and cleanup (enabled rules with `hit_count: 0` are
+  candidates for removal).
+  `last_hit` carries `device_mac`/`device_ip`, a single resolved `destination`
+  with its `destination_kind` (`domain`/`host`/`ip`), `destination_ip` when known,
+  `port`, `protocol`, and `app`/`category` when the box identified them.
 - **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters;
   `applies_to` takes a host's `group_name`);
   `include_purpose` (`['dap']`, `['family']`) and `include_system_managed` (bool) to
   reveal what the default hides.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
   `action`, `is_paused`/`enabled`, `target`/`target_type`/`target_name`, `scope`,
-  `applies_to`/`tag_refs`, `purpose`, and the `aid` alarm back-reference when the rule
-  was created by an alarm block.
+  `applies_to`/`tag_refs`, `purpose`, `hit_count`/`last_hit`, and the `aid` alarm
+  back-reference when the rule was created by an alarm block.
 - **Availability:** read, default-on (backed by the non-admin `get_rules` service).
+- **A rule id is not durable across a delete and re-create.** Firewalla issues a
+  new `rule_id` when a rule is deleted and created again, even if the new rule is
+  identical. So an id read from one call may belong to nothing on a later call,
+  and re-creating a rule does not restore its id. Re-resolve a target rather than
+  reusing an id from an earlier turn, and never assume two rules with the same
+  name are the same rule.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false` (coordinator-backed) or `true` (live).
 
 ### `firewalla_local__get_network_config`

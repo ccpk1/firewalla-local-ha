@@ -297,6 +297,16 @@ class ListRulesTool(_FirewallaReadTool):
         "rules no longer apply, so check a device's membership before concluding "
         "which rules cover it.\n"
         "\n"
+        "`hit_count` is how many times a rule has matched and `last_hit` is its "
+        "most recent single match, with the device and destination involved. Two "
+        "uses: to troubleshoot connectivity, read the rules governing the device "
+        "and see which one last matched it and what it was reaching for; to find "
+        "cleanup candidates, look for enabled rules with a `hit_count` of 0. "
+        "`hit_count` is always a number; `last_hit` is null when there is no match "
+        "to describe. The box keeps only the last match per rule, not a history, "
+        'so this is one observation and cannot answer "everything this rule '
+        'blocked".\n'
+        "\n"
         "Defaults to user-visible rules. The box also carries large numbers of "
         "product-owned DAP and family rules, plus rules owned by a Firewalla "
         "subsystem (the alarm-intel auto-blocks); those are hidden unless "
