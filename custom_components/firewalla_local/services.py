@@ -270,6 +270,7 @@ from .models import (
 from .utils.duration import parse_duration_to_seconds
 from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
+from .utils.values import normalized_int, normalized_string
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
     "internet",
@@ -1978,10 +1979,7 @@ def _build_network_segment_usage_time_basis(
 
 def _optional_string(value: object) -> str | None:
     """Return a stripped string when one is present."""
-    if not isinstance(value, str):
-        return None
-    stripped_value = value.strip()
-    return stripped_value or None
+    return normalized_string(value)
 
 
 def _optional_bool(value: object) -> bool | None:
@@ -1994,19 +1992,8 @@ def _optional_bool(value: object) -> bool | None:
 
 
 def _optional_int(value: object) -> int | None:
-    """Return one integer when one can be safely derived."""
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str) and value:
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
+    """Return one integer when one can be honestly derived."""
+    return normalized_int(value)
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:

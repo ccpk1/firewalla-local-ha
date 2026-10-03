@@ -72,6 +72,12 @@ from ..models import (
     FirewallaWanUsageSummary,
 )
 from ..utils.network import build_network_inventory
+from ..utils.values import (
+    normalized_float,
+    normalized_int,
+    normalized_number,
+    normalized_string,
+)
 from .base_manager import FirewallaBaseManager
 
 if TYPE_CHECKING:
@@ -133,30 +139,14 @@ def _extract_usage_window(
     """Extract download/upload totals from one raw usage window when present."""
     if not isinstance(raw_window, dict):
         return None
-    download = _normalized_int_value(raw_window.get(_RAW_NETWORK_USAGE_DOWNLOAD_KEY))
-    upload = _normalized_int_value(raw_window.get(_RAW_NETWORK_USAGE_UPLOAD_KEY))
+    download = normalized_int(raw_window.get(_RAW_NETWORK_USAGE_DOWNLOAD_KEY))
+    upload = normalized_int(raw_window.get(_RAW_NETWORK_USAGE_UPLOAD_KEY))
     if download is None and upload is None:
         return None
     return FirewallaNetworkUsageWindow(
         download_bytes=download,
         upload_bytes=upload,
     )
-
-
-def _normalized_int_value(value: object) -> int | None:
-    """Return an integer when one can be safely derived."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
 
 
 def _interface_port_number(interface_name: str | None) -> int:
@@ -744,8 +734,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if not isinstance(raw_period, dict):
             return None
 
-        download_bytes = self._normalized_int(raw_period.get("totalDownload"))
-        upload_bytes = self._normalized_int(raw_period.get("totalUpload"))
+        download_bytes = self._optional_int(raw_period.get("totalDownload"))
+        upload_bytes = self._optional_int(raw_period.get("totalUpload"))
         if download_bytes is None and upload_bytes is None:
             return None
 
@@ -1368,34 +1358,12 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         return tuple(sorted(series_collection, key=lambda series: series.metric))
 
-    def _optional_string(self, value: object) -> str | None:
-        """Return a stripped string when one is present."""
-        if not isinstance(value, str):
-            return None
-        stripped_value = value.strip()
-        return stripped_value or None
-
     def _optional_bool(self, value: object) -> bool | None:
         """Return a normalized boolean when one is present."""
         if isinstance(value, bool):
             return value
         if isinstance(value, int):
             return bool(value)
-        return None
-
-    def _optional_int(self, value: object) -> int | None:
-        """Return an integer when one can be safely derived."""
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        if isinstance(value, str) and value:
-            try:
-                return int(value)
-            except ValueError:
-                return None
         return None
 
     def _string_tuple(self, value: object) -> tuple[str, ...]:
@@ -1514,10 +1482,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 FirewallaWanUsageSummary(
                     wan_uuid=raw_wan_uuid,
                     wan_name=wan_name_by_uuid.get(raw_wan_uuid, raw_wan_uuid),
-                    download_bytes=self._normalized_int(
-                        raw_period.get("totalDownload")
-                    ),
-                    upload_bytes=self._normalized_int(raw_period.get("totalUpload")),
+                    download_bytes=self._optional_int(raw_period.get("totalDownload")),
+                    upload_bytes=self._optional_int(raw_period.get("totalUpload")),
                 )
             )
 
@@ -1644,8 +1610,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if usage is None:
             return None
 
-        month_begin_timestamp = self._normalized_int(raw_stats.get("monthlyBeginTs"))
-        month_end_timestamp = self._normalized_int(raw_stats.get("monthlyEndTs"))
+        month_begin_timestamp = self._optional_int(raw_stats.get("monthlyBeginTs"))
+        month_end_timestamp = self._optional_int(raw_stats.get("monthlyEndTs"))
         all_day_rows = self._build_daily_wan_data_usage_rows(
             raw_stats,
             month_begin_timestamp=month_begin_timestamp,
@@ -1698,7 +1664,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if usage is None:
             return None
 
-        month_anchor_timestamp = self._normalized_int(raw_period.get("ts"))
+        month_anchor_timestamp = self._optional_int(raw_period.get("ts"))
         all_day_rows = self._build_daily_wan_data_usage_rows(
             raw_stats,
             month_begin_timestamp=month_anchor_timestamp,
@@ -1961,8 +1927,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             return None
 
         return FirewallaWanDataUsage(
-            download_bytes=self._normalized_int(raw_stats.get("totalDownload")),
-            upload_bytes=self._normalized_int(raw_stats.get("totalUpload")),
+            download_bytes=self._optional_int(raw_stats.get("totalDownload")),
+            upload_bytes=self._optional_int(raw_stats.get("totalUpload")),
         )
 
     def _build_wan_usage_samples(
@@ -1977,8 +1943,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         for raw_sample in raw_samples:
             if not isinstance(raw_sample, list) or len(raw_sample) < 2:
                 continue
-            timestamp = self._normalized_int(raw_sample[0])
-            value = self._normalized_int(raw_sample[1])
+            timestamp = self._optional_int(raw_sample[0])
+            value = self._optional_int(raw_sample[1])
             if timestamp is None or value is None:
                 continue
             samples.append(
@@ -2024,7 +1990,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if not isinstance(event_type, str) or not event_type:
             return None
 
-        timestamp_ms = self._normalized_int(raw_event.get("ts"))
+        timestamp_ms = self._optional_int(raw_event.get("ts"))
         if timestamp_ms is None:
             return None
         timestamp = timestamp_ms / 1000
@@ -2040,7 +2006,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 return None
 
             wan_statuses = self._build_wan_event_statuses(labels.get("wanStatus"))
-            changed_interface = self._normalized_string(labels.get("changedInterface"))
+            changed_interface = self._optional_string(labels.get("changedInterface"))
             wan_uuid, wan_name = self._resolve_wan_event_identity(
                 labels=labels,
                 wan_statuses=wan_statuses,
@@ -2050,25 +2016,21 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 family=family,
                 event_type=event_type,
                 timestamp=timestamp,
-                value=self._normalized_number(raw_event.get("state_value")),
-                previous_value=self._normalized_number(
-                    raw_event.get("prev_state_value")
-                ),
-                ok_value=self._normalized_number(labels.get("ok_value")),
-                state_key=self._normalized_string(raw_event.get("state_key")),
+                value=self._optional_number(raw_event.get("state_value")),
+                previous_value=self._optional_number(raw_event.get("prev_state_value")),
+                ok_value=self._optional_number(labels.get("ok_value")),
+                state_key=self._optional_string(raw_event.get("state_key")),
                 wan_uuid=wan_uuid,
                 wan_name=wan_name,
                 active=self._normalized_bool(labels.get("active")),
                 ready=self._normalized_bool(labels.get("ready")),
                 changed_interface=changed_interface,
-                primary_interface=self._normalized_string(
-                    labels.get("primaryInterface")
-                ),
-                wan_type=self._normalized_string(labels.get("wanType")),
+                primary_interface=self._optional_string(labels.get("primaryInterface")),
+                wan_type=self._optional_string(labels.get("wanType")),
                 wan_switched=self._normalized_bool(labels.get("wanSwitched")),
-                name_server=self._normalized_string(labels.get("name_server")),
-                dns_test_domain=self._normalized_string(labels.get("dns_test_domain")),
-                wan_interface_address=self._normalized_string(
+                name_server=self._optional_string(labels.get("name_server")),
+                dns_test_domain=self._optional_string(labels.get("dns_test_domain")),
+                wan_interface_address=self._optional_string(
                     labels.get("wan_intf_address")
                 ),
                 failures=self._build_wan_event_failures(labels.get("failures")),
@@ -2087,17 +2049,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 family=family,
                 event_type=event_type,
                 timestamp=timestamp,
-                value=self._normalized_number(raw_event.get("action_value")),
-                wan_uuid=self._normalized_string(
-                    labels.get(_RAW_WAN_INTERFACE_UUID_KEY)
-                ),
-                wan_name=self._normalized_string(
-                    labels.get(_RAW_WAN_INTERFACE_NAME_KEY)
-                ),
-                target=self._normalized_string(labels.get("target")),
+                value=self._optional_number(raw_event.get("action_value")),
+                wan_uuid=self._optional_string(labels.get(_RAW_WAN_INTERFACE_UUID_KEY)),
+                wan_name=self._optional_string(labels.get(_RAW_WAN_INTERFACE_NAME_KEY)),
+                target=self._optional_string(labels.get("target")),
                 measurement_kind=measurement_kind,
-                measurement_value=self._normalized_float(labels.get(measurement_kind)),
-                threshold_value=self._normalized_float(
+                measurement_value=self._optional_float(labels.get(measurement_kind)),
+                threshold_value=self._optional_float(
                     labels.get(f"{measurement_kind}Limit")
                 ),
             )
@@ -2116,13 +2074,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         for raw_failure in raw_failures:
             if not isinstance(raw_failure, dict):
                 continue
-            failure_type = self._normalized_string(raw_failure.get("type"))
+            failure_type = self._optional_string(raw_failure.get("type"))
             if failure_type is None:
                 continue
             failures.append(
                 FirewallaWanEventFailure(
                     type=failure_type,
-                    target=self._normalized_string(raw_failure.get("target")),
+                    target=self._optional_string(raw_failure.get("target")),
                 )
             )
 
@@ -2145,16 +2103,16 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             statuses.append(
                 FirewallaWanEventStatus(
                     interface_key=interface_key,
-                    wan_uuid=self._normalized_string(
+                    wan_uuid=self._optional_string(
                         raw_status.get(_RAW_WAN_INTERFACE_UUID_KEY)
                     ),
-                    wan_name=self._normalized_string(
+                    wan_name=self._optional_string(
                         raw_status.get(_RAW_WAN_INTERFACE_NAME_KEY)
                     ),
                     active=self._normalized_bool(raw_status.get("active")),
                     ready=self._normalized_bool(raw_status.get("ready")),
                     ip4_addresses=self._normalized_string_list(raw_status.get("ip4s")),
-                    seq=self._normalized_int(raw_status.get("seq")),
+                    seq=self._optional_int(raw_status.get("seq")),
                 )
             )
 
@@ -2170,8 +2128,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         interface_key: str | None,
     ) -> tuple[str | None, str | None]:
         """Resolve the primary WAN identity for one event when Firewalla exposes one."""
-        wan_uuid = self._normalized_string(labels.get(_RAW_WAN_INTERFACE_UUID_KEY))
-        wan_name = self._normalized_string(labels.get(_RAW_WAN_INTERFACE_NAME_KEY))
+        wan_uuid = self._optional_string(labels.get(_RAW_WAN_INTERFACE_UUID_KEY))
+        wan_name = self._optional_string(labels.get(_RAW_WAN_INTERFACE_NAME_KEY))
         if wan_uuid is not None or wan_name is not None:
             return wan_uuid, wan_name
 
@@ -2286,8 +2244,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 and category
                 else None
             ),
-            total_minutes=self._normalized_int(raw_metric.get("totalMins")),
-            unique_minutes=self._normalized_int(raw_metric.get("uniqueMins")),
+            total_minutes=self._optional_int(raw_metric.get("totalMins")),
+            unique_minutes=self._optional_int(raw_metric.get("uniqueMins")),
             slots=self._build_usage_history_slots(raw_metric.get("slots")),
             intervals=(
                 self._build_usage_history_intervals(raw_metric.get("intervals"))
@@ -2309,14 +2267,14 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         slots: list[FirewallaUsageHistorySlot] = []
         for raw_timestamp, raw_slot in raw_slots.items():
-            timestamp = self._normalized_int(raw_timestamp)
+            timestamp = self._optional_int(raw_timestamp)
             if timestamp is None or not isinstance(raw_slot, dict):
                 continue
             slots.append(
                 FirewallaUsageHistorySlot(
                     timestamp=timestamp,
-                    total_minutes=self._normalized_int(raw_slot.get("totalMins")),
-                    unique_minutes=self._normalized_int(raw_slot.get("uniqueMins")),
+                    total_minutes=self._optional_int(raw_slot.get("totalMins")),
+                    unique_minutes=self._optional_int(raw_slot.get("uniqueMins")),
                 )
             )
 
@@ -2333,8 +2291,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         for raw_interval in raw_intervals:
             if not isinstance(raw_interval, dict):
                 continue
-            begin_timestamp = self._normalized_int(raw_interval.get("begin"))
-            end_timestamp = self._normalized_int(raw_interval.get("end"))
+            begin_timestamp = self._optional_int(raw_interval.get("begin"))
+            end_timestamp = self._optional_int(raw_interval.get("end"))
             if begin_timestamp is None or end_timestamp is None:
                 continue
             intervals.append(
@@ -2379,8 +2337,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 FirewallaUsageHistoryDeviceUsage(
                     device_id=device_id,
                     device_name=host_name_by_id.get(device_id),
-                    total_minutes=self._normalized_int(raw_device.get("totalMins")),
-                    unique_minutes=self._normalized_int(raw_device.get("uniqueMins")),
+                    total_minutes=self._optional_int(raw_device.get("totalMins")),
+                    unique_minutes=self._optional_int(raw_device.get("uniqueMins")),
                     intervals=(
                         self._build_usage_history_intervals(raw_device.get("intervals"))
                         if include_intervals
@@ -2391,60 +2349,21 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         return tuple(sorted(devices, key=lambda device: device.device_id.casefold()))
 
-    def _normalized_int(self, value: object) -> int | None:
-        """Return an integer from a Firewalla numeric field when possible."""
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        if isinstance(value, str):
-            stripped_value = value.strip()
-            if not stripped_value:
-                return None
-            try:
-                return int(stripped_value)
-            except ValueError:
-                return None
-        return None
+    def _optional_int(self, value: object) -> int | None:
+        """Return an integer when one can be honestly derived.
 
-    def _normalized_float(self, value: object) -> float | None:
-        """Return a floating-point number from a Firewalla numeric field."""
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, str):
-            stripped_value = value.strip()
-            if not stripped_value:
-                return None
-            try:
-                return float(stripped_value)
-            except ValueError:
-                return None
-        return None
+        Delegates to the shared coercion policy so the manager cannot read a
+        field differently from the client or the services layer.
+        """
+        return normalized_int(value)
 
-    def _normalized_number(self, value: object) -> int | float | None:
-        """Return an integer or float from a Firewalla numeric field."""
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return value
-        if isinstance(value, str):
-            stripped_value = value.strip()
-            if not stripped_value:
-                return None
-            try:
-                return int(stripped_value)
-            except ValueError:
-                try:
-                    return float(stripped_value)
-                except ValueError:
-                    return None
-        return None
+    def _optional_float(self, value: object) -> float | None:
+        """Return a float when one can be honestly derived."""
+        return normalized_float(value)
+
+    def _optional_number(self, value: object) -> int | float | None:
+        """Return an int or float when one can be honestly derived."""
+        return normalized_number(value)
 
     def _normalized_bool(self, value: object) -> bool | None:
         """Return a normalized boolean from a Firewalla field when possible."""
@@ -2458,12 +2377,9 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 return False
         return None
 
-    def _normalized_string(self, value: object) -> str | None:
+    def _optional_string(self, value: object) -> str | None:
         """Return a non-empty stripped string when one is present."""
-        if not isinstance(value, str):
-            return None
-        stripped_value = value.strip()
-        return stripped_value or None
+        return normalized_string(value)
 
     def _normalized_string_list(self, value: object) -> tuple[str, ...]:
         """Return a stable tuple of non-empty strings from one raw list."""

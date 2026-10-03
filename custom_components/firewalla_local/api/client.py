@@ -40,6 +40,7 @@ from ..models import (
     FirewallaUserRuntime,
 )
 from ..utils.network import build_network_inventory
+from ..utils.values import normalized_float, normalized_int
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
     FirewallaAuthError,
@@ -2423,30 +2424,22 @@ class FirewallaApiClient:
         return None
 
     def _coerce_float(self, value: object) -> float | None:
-        """Coerce Firewalla numeric-like values to float when possible."""
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, str) and value:
-            try:
-                return float(value)
-            except ValueError:
-                return None
-        return None
+        """Coerce a Firewalla numeric-like value to float.
+
+        Delegates to the shared coercion policy; the API layer owns parsing but
+        not the numeric policy, which every layer now shares.
+        """
+        return normalized_float(value)
 
     def _coerce_int(self, value: object) -> int | None:
-        """Coerce Firewalla numeric-like values to int when possible."""
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        if isinstance(value, str) and value:
-            try:
-                return int(float(value))
-            except ValueError:
-                return None
-        return None
+        """Coerce a Firewalla numeric-like value to int.
+
+        Delegates to the shared coercion policy. Unlike the previous local
+        implementation this no longer reads ``True`` as ``1``: a boolean where a
+        count belongs is a protocol anomaly, and a wrong number is worse than an
+        absent one.
+        """
+        return normalized_int(value)
 
     def _coerce_boolish(self, value: object) -> bool | None:
         """Coerce Firewalla bool-like values to bool when possible."""
