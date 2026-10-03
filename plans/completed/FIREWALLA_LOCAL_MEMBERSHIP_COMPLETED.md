@@ -2,9 +2,17 @@
 
 ## 1. Initiative snapshot
 
+- **Status: COMPLETE (2026-10-03).** All four phases are implemented, tested, and
+  documented. The work adds **one** service (`set_host_membership`, 33 services
+  total) and **four** tools (`set_host_group`, `clear_host_group`, `set_host_user`,
+  `clear_host_user`), taking the tool surface to **38** (13 read — one of which is
+  the anonymous tier's redacted variant — 16 control, 9 destructive). **517 tests**
+  pass; ruff/format/mypy clean. Shipped on `feature/mcp-capabilities` and folded
+  into PR #52.
 - **Trigger:** Reverse engineering on 2026-10-02 confirmed the full device membership
   write contract and disproved the assumptions behind the existing group data model.
-  Findings 41 and 42 in `docs/REVERSE_ENGINEERING_WORKFLOW.md` are the evidence base.
+  Findings 41, 42 and 43 in `docs/REVERSE_ENGINEERING_WORKFLOW.md` are the evidence
+  base.
 - **What was learned, and why it forces a change:**
   1. **Group membership is writable locally.** It is a host-scoped `set` on
      `item: "policy"` writing `value.tags` as an integer tag-id list — the same

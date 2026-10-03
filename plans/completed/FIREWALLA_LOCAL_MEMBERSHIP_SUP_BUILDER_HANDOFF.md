@@ -9,7 +9,7 @@
 > separate user-affiliation count was added**. The next increment is **Phase 2**.
 
 **Target agent:** `Firewalla Builder`
-**Plan:** `plans/in-process/FIREWALLA_LOCAL_MEMBERSHIP_IN-PROCESS.md` (initiative: Membership Foundation and Device Assignment Control)
+**Plan:** `plans/completed/FIREWALLA_LOCAL_MEMBERSHIP_COMPLETED.md` (initiative: Membership Foundation and Device Assignment Control)
 **Evidence:** `docs/REVERSE_ENGINEERING_WORKFLOW.md` Findings 41 and 42
 **Contract:** `docs/ARCHITECTURE.md` → *Group and user collection rule*
 
@@ -92,7 +92,7 @@ Say in the PR that the question is still open and why.
 If this handoff conflicts with these, they win:
 
 1. `docs/ARCHITECTURE.md` → *Group and user collection rule* (the contract)
-2. `plans/in-process/FIREWALLA_LOCAL_MEMBERSHIP_IN-PROCESS.md` §3, §3b and Phase 1
+2. `plans/completed/FIREWALLA_LOCAL_MEMBERSHIP_COMPLETED.md` §3, §3b and Phase 1
 3. `docs/REVERSE_ENGINEERING_WORKFLOW.md` Findings 41 and 42
 4. this handoff
 
