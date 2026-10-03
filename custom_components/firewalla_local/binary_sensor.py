@@ -127,6 +127,7 @@ from .coordinator import (
     get_enabled_ssid_entities,
 )
 from .entity import FirewallaEntity
+from .helpers.usage_report import serialize_usage_summary
 from .managers.wireless_manager import (
     FirewallaAccessPoint,
     FirewallaSsidProfile,
@@ -137,7 +138,6 @@ from .models import (
     FirewallaHostRuntime,
     FirewallaNetwork,
     FirewallaNetworkKind,
-    FirewallaNetworkUsageSummary,
     FirewallaWanUsageSummary,
 )
 
@@ -145,14 +145,6 @@ PARALLEL_UPDATES = 0
 
 _SYSTEM_STATUS_OBJECT_ID = "system_status"
 _SSID_KIND_DISPLAY_NAME = "SSID"
-
-
-def _serialize_usage_window(window: object) -> dict[str, int | None]:
-    """Serialize one usage window into download/upload byte keys."""
-    return {
-        "download_bytes": getattr(window, "download_bytes", None),
-        "upload_bytes": getattr(window, "upload_bytes", None),
-    }
 
 
 async def async_setup_entry(
@@ -544,7 +536,9 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 network.device_host_count if network is not None else None
             ),
             ATTR_NETWORK_USAGE: (
-                self._serialize_usage(network.usage) if network is not None else None
+                serialize_usage_summary(network.usage)
+                if network is not None and network.usage is not None
+                else None
             ),
             ATTR_NETWORK_TOP_TALKERS: self._serialize_top_talkers(),
             ATTR_NETWORK_ENABLED: (network.enabled if network is not None else None),
@@ -568,24 +562,6 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         if network is not None and network.vlan_id is not None:
             attributes[ATTR_NETWORK_VLAN_ID] = network.vlan_id
         return attributes
-
-    @staticmethod
-    def _serialize_usage(
-        usage: FirewallaNetworkUsageSummary | None,
-    ) -> dict[str, dict[str, int | None]] | None:
-        """Serialize one network usage summary into a bounded attribute dict."""
-        if usage is None:
-            return None
-        return {
-            window: _serialize_usage_window(getattr(usage, attr))
-            for attr, window in (
-                ("last_24h", "last_24h"),
-                ("last_60m", "last_60m"),
-                ("last_30d", "last_30d"),
-                ("last_12m", "last_12m"),
-                ("monthly", "monthly"),
-            )
-        }
 
     @staticmethod
     def _serialize_dhcp(dhcp: object) -> dict[str, object] | None:

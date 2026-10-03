@@ -215,6 +215,7 @@ from .const import (
     TRANS_PLACEHOLDER_WAN_UUID,
 )
 from .coordinator import FirewallaConfigEntry, get_llm_tool_mode
+from .helpers.usage_report import serialize_usage_summary
 from .managers.rule_manager import (
     build_switch_rule_evaluations_for_rules,
     is_system_managed_rule,
@@ -240,8 +241,6 @@ from .models import (
     FirewallaNetworkSegment,
     FirewallaNetworkSegmentView,
     FirewallaNetworkUsageBucket,
-    FirewallaNetworkUsageSummary,
-    FirewallaNetworkUsageWindow,
     FirewallaPolicyRule,
     FirewallaReportProvenance,
     FirewallaReportTarget,
@@ -2665,49 +2664,6 @@ def _build_network_dhcp_config(
     )
 
 
-def _serialize_unified_usage_window(
-    window: FirewallaNetworkUsageWindow | None,
-) -> JsonObjectType:
-    """Serialize one unified network usage window."""
-    return {
-        "download_bytes": window.download_bytes if window is not None else None,
-        "upload_bytes": window.upload_bytes if window is not None else None,
-    }
-
-
-def _serialize_unified_usage_summary(
-    usage: FirewallaNetworkUsageSummary | None,
-) -> JsonObjectType:
-    """Serialize one unified network usage summary."""
-    return {
-        "last_24h": (
-            _serialize_unified_usage_window(usage.last_24h)
-            if usage is not None
-            else None
-        ),
-        "last_60m": (
-            _serialize_unified_usage_window(usage.last_60m)
-            if usage is not None
-            else None
-        ),
-        "last_30d": (
-            _serialize_unified_usage_window(usage.last_30d)
-            if usage is not None
-            else None
-        ),
-        "last_12m": (
-            _serialize_unified_usage_window(usage.last_12m)
-            if usage is not None
-            else None
-        ),
-        "monthly": (
-            _serialize_unified_usage_window(usage.monthly)
-            if usage is not None
-            else None
-        ),
-    }
-
-
 def _serialize_network_segment_report(
     entry: FirewallaConfigEntry,
     *,
@@ -2852,7 +2808,7 @@ def _network_segment_report_sections(
             "pending_test": view.pending_test,
             "policy": cast(JsonObjectType | None, view.policy),
         },
-        "usage": _serialize_unified_usage_summary(network.usage),
+        "usage": serialize_usage_summary(network.usage),
         "addressing": {
             "gateway": view.gateway,
             "gateway6": view.gateway6,
