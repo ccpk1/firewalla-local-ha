@@ -438,27 +438,60 @@ Goal: make the reported surface correct without breaking anything downstream.
 - [x] **3.6 Suite green.** 508 tests pass (up from 500), ruff/format/mypy clean, no
       entity or service snapshot drifted for unintended reasons.
 
+**Rule-deletion warning surfaced on every human-facing and model-facing surface
+(2026-10-03).** The write service could delete a user's rules without any surface
+saying so, which is a trap on a destructive, irreversible call. The warning now
+appears on:
+
+- `services.yaml` and `translations/en.json` — the service description states it in
+  capitals, and each of the four target fields plus `clear` repeats it
+- `docs/USER_GUIDE.md` — a dedicated bullet naming it as the irreversible part,
+  noting that `clear: true` deletes them too, and pointing at
+  `device_rules.removed`
+- `llm_tools_common.py` `PROMPT` — a paragraph stating the four membership calls
+  delete the device's rules, that this cannot be undone by the tool, and that a
+  membership change therefore belongs in the confirm-first list. It was also added
+  to that list, or a model scanning it would classify the call as routine
+- guard test `test_membership_change_warns_that_it_deletes_device_rules`, so the
+  prompt guidance cannot be dropped without failing
+
 
 ### Phase 4 — Assistant exposure
 
-Goal: let an assistant change a device's membership as a reversible control.
+Goal: let an assistant change a device's membership, and be honest about the fact
+that the change deletes the device's rules.
 
-- [ ] **4.1 Add the control tools.** In
-      `llm_tools_control.py`, add **four** tools — `set_host_group`,
-      `clear_host_group`, `set_host_user`, `clear_host_user` — each following the
-      `SetHostDhcpReservationTool` pattern: reversible annotations, host selector
-      plus (for the `set_` tools) the kind's name-or-id target, delegating to the
-      one new service with `_returns_response = True`. Register all four in
-      `_CONTROL_TOOL_CLASSES` (not the destructive list) since they are reversible.
-      Four tools rather than one free-text target because group and user names
-      collide in real data; `_SetHostNotifyTool` is the in-repo precedent for
-      several tools over one service.
-- [ ] **4.2 Update the prompt fragment.** In `llm_tools_common.py`, note that a
-      device's membership can be changed, that groups and users are both valid
-      targets, and that the change is reversible.
+**Premise correction (2026-10-03).** This phase was planned around the tools being
+"reversible, so register them as controls, not destructive". Finding 43 disproved
+the premise: a membership change **deletes every rule the device owns**, including
+enabled rules the user created, and no tool can restore them. The membership slot
+is reversible; the rule deletion is not. Their annotations must say
+`destructive=True`, and their descriptions must carry the warning. `undo` must
+**not** claim to restore the rules — set it to the call that puts the membership
+back and say plainly in the description that the rules are gone.
+
+- [ ] **4.1 Add the control tools.** In `llm_tools_control.py`, add **four** tools
+      — `set_host_group`, `clear_host_group`, `set_host_user`, `clear_host_user` —
+      each following the `SetHostDhcpReservationTool` pattern: host selector plus
+      (for the `set_` tools) the kind's name-or-id target, delegating to the one new
+      service with `_returns_response = True`. Four tools rather than one free-text
+      target because group and user names collide in real data;
+      `_SetHostNotifyTool` is the in-repo precedent for several tools over one
+      service.
+      **Use `_DESTRUCTIVE_ANNOTATIONS`, not `_CONTROL_ANNOTATIONS`** (see the
+      premise correction above), and put the rule-deletion warning in every one of
+      the four descriptions, with the count reported back from
+      `device_rules.removed`.
+- [ ] **4.2 Update the prompt fragment.** **Partially done (2026-10-03):** the
+      `PROMPT` in `llm_tools_common.py` now states that a membership change deletes
+      the device's rules, that this is irreversible, that it belongs in the
+      confirm-first list, and that `device_rules.removed` reports what went.
+      A guard test asserts all four. Remaining: name the four tools and say groups
+      and users are both valid targets, once the tools exist.
 - [ ] **4.3 Document the contract.** Add the four tools to
       `docs/MCP_TOOL_REFERENCE.md` in the existing per-tool format, using the same
-      annotation and availability fields as their neighbours.
+      annotation and availability fields as their neighbours, and carrying the
+      rule-deletion warning.
 - [ ] **4.4 Tests.** Cover each tool's schema, its service delegation, its
       response envelope, and its registration tier. Update
       `test_llm_contract.py` if it asserts an exact tool count or list.

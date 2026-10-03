@@ -328,6 +328,29 @@ async def test_rule_scope_precedence_is_stated_consistently(
     assert "no longer apply" in rules_description
 
 
+async def test_membership_change_warns_that_it_deletes_device_rules(
+    hass: HomeAssistant,
+) -> None:
+    """The prompt says a membership change deletes the device's rules.
+
+    This is destructive and cannot be undone by the tool, so a model that
+    discovers it only from the call result has already done the damage. Verified
+    by capture: assigning an unassigned device to a group deletes every rule it
+    owned, including enabled ones the user created.
+
+    Checked against the prompt, which is served as the API prompt, because the
+    four membership tools are added in a later phase and this guidance must exist
+    before a model can call one.
+    """
+    assert "DELETES ITS RULES" in PROMPT
+    assert "enabled rules the user created" in PROMPT
+    assert "device_rules.removed" in PROMPT
+    # It must also be in the confirm-first list, or a model scanning that list
+    # would classify a membership change as routine.
+    confirm_paragraph = PROMPT.split("Confirm before wide-reaching changes", 1)[1]
+    assert "membership" in confirm_paragraph.split(".", 2)[1]
+
+
 async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
     """A host's group_name is named as the input to list_rules' applies_to.
 

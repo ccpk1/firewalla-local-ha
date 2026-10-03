@@ -1095,6 +1095,13 @@ it directly.
 - assign to a group with `group_name` or `group_id`, **or** to a user with
   `user_name` or `user_id`, **or** pass `clear: true` to remove the current
   assignment — provide exactly one of those
+- **your rules on that device are deleted.** This is the one irreversible part of
+  the call. Assigning a device to a group or a user removes *every* rule the
+  device owns — including **enabled rules you created** — because from then on the
+  device follows only the rules of the group or user it belongs to. This mirrors
+  the Firewalla app, which warns you about it at assignment time. `clear: true`
+  removes them too, leaving the device with no rules until you add some. The
+  response reports what was removed in `device_rules.removed`
 - **a device has exactly one membership.** Assigning a group to a device that is
   already assigned to a user therefore *replaces* the user assignment rather
   than adding alongside it. This mirrors the Firewalla app, which shows groups

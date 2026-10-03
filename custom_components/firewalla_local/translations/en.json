@@ -2034,27 +2034,27 @@
     },
     "set_host_membership": {
       "name": "Set host membership",
-      "description": "Set or clear the single group or user a device belongs to on the Firewalla box.",
+      "description": "Set or clear the single group or user a device belongs to on the Firewalla box. Assigning a device to a group or a user DELETES EVERY RULE THAT DEVICE OWNS, including enabled ones you created, because the device follows only the rules of the group or user it now belongs to. This matches the Firewalla app, which warns about it when you assign a device.",
       "fields": {
         "group_name": {
           "name": "Group name (Optional)",
-          "description": "Assign the device to this group. Provide this or Group ID, and nothing else unless you are clearing. Names are matched against groups only, never against users."
+          "description": "Assign the device to this group. Provide this or Group ID, and nothing else unless you are clearing. Names are matched against groups only, never against users. Removes the device's own rules."
         },
         "group_id": {
           "name": "Group ID (Optional)",
-          "description": "Assign the device to the group with this Firewalla tag id. Use this instead of Group name when two groups share a name."
+          "description": "Assign the device to the group with this Firewalla tag id. Use this instead of Group name when two groups share a name. Removes the device's own rules."
         },
         "user_name": {
           "name": "User name (Optional)",
-          "description": "Assign the device to this Firewalla user. Provide this or User ID, and nothing else unless you are clearing. Names are matched against users only, never against groups."
+          "description": "Assign the device to this Firewalla user. Provide this or User ID, and nothing else unless you are clearing. Names are matched against users only, never against groups. Removes the device's own rules."
         },
         "user_id": {
           "name": "User ID (Optional)",
-          "description": "Assign the device to the user with this Firewalla user id. Use this instead of User name when two users share a name."
+          "description": "Assign the device to the user with this Firewalla user id. Use this instead of User name when two users share a name. Removes the device's own rules."
         },
         "clear": {
           "name": "Clear membership (Optional)",
-          "description": "Defaults to false. Set to true to remove the device's current group or user assignment. Cannot be combined with a group or user field."
+          "description": "Defaults to false. Set to true to remove the device's current group or user assignment. Cannot be combined with a group or user field. The device's own rules are removed here too, so it is left with no rules until you add some."
         },
         "host_mac": {
           "name": "Host MAC (Optional)",
