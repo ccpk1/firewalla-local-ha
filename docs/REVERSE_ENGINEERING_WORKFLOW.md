@@ -1273,7 +1273,14 @@ and the selection persists so the user can clean it up.
   dropping the entity.
 
 **Not yet built:** a Home Assistant **repair** for the stale-selection case,
-recorded in the user guide as a planned improvement.
+tracked as **issue #53**, recorded in the user guide as a planned improvement.
+
+One note on the evidence above: this was observed on a **development box**, where
+rules are turned on and off and deleted for testing far more often than on a real
+installation, so stale selections accumulate there more readily. The behaviour is
+still worth handling, because the same sequence — delete a rule, re-create it
+identically, expect the switch to keep working — is a normal thing for any user to
+do.
 
 **This generalizes:** an id read from one call can belong to nothing on a later
 call, and re-creating a rule does not restore its id. Anything that caches a rule

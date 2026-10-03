@@ -417,7 +417,8 @@ class FirewallaRuleManager(FirewallaBaseManager):
         # state rather than a transient one. Firewalla issues a new rule id when
         # a rule is deleted and re-created, so re-adding an identical rule does
         # not restore the match; the switch stays unavailable until the user
-        # re-selects.
+        # re-selects. Surfacing that as a repair rather than silent
+        # unavailability is tracked in issue #53.
         #
         # Several helpers below carry plural names and iterate, which reads as if
         # multiple rules were supported. They are written to tolerate a set that

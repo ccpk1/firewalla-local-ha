@@ -761,7 +761,7 @@ from. An absent attribute is not the same as a rule that never fired.
 
 > **Planned improvement:** a Home Assistant **repair** notification for this case,
 > so you are told which switch lost its rule instead of only seeing it go
-> unavailable. Not implemented yet.
+> unavailable. Tracked as issue #53. Not implemented yet.
 
 ### Rule hit data (`hit_count` and `last_hit`)
 
