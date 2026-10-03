@@ -90,7 +90,14 @@ class FirewallaUserManager(FirewallaBaseManager):
         user: FirewallaUserRuntime,
         snapshot: FirewallaRuntimeSnapshot,
     ) -> list[tuple[str, str, float | None]]:
-        """Return hosts associated to one user by direct or affiliated-group linkage."""
+        """Return hosts associated to one user by direct or affiliated-group linkage.
+
+        The affiliation path is the one that resolves on a real box: a device
+        assigned to a user carries the user's affiliated backing tag in
+        `host.group_ids`, while `host.user_ids` stays empty because the host-level
+        `userTags` array it is built from is never populated. Each user maps 1:1 to
+        exactly one backing tag, so that single tag id is the whole association.
+        """
         associated_hosts: list[tuple[str, str, float | None]] = []
         for host in snapshot.hosts:
             if user.user_id in host.user_ids or (

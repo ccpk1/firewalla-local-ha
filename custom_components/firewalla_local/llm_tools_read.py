@@ -179,7 +179,8 @@ class ListHostsTool(_FirewallaReadTool):
         "`group_name` is the device's group or user membership, and it is the "
         "key for rule lookup: pass it to `list_rules` as `applies_to` to find "
         "the rules that govern this device. It can hold several names separated "
-        'by ", ".\n'
+        'by ", ". A device follows only the group it belongs to, so assigning '
+        "it to a group removes its own rules.\n"
         "\n"
         "Which network: every record carries `network_uuid` and `network_name`, "
         "so a device's segment is stated rather than inferred from its IP. "
@@ -235,7 +236,11 @@ class ListHostsTool(_FirewallaReadTool):
             ): str,
             vol.Optional(
                 SERVICE_FIELD_GROUP_NAME,
-                description="Optional. Exact group name to filter by.",
+                description=(
+                    "Optional. Exact group name to filter by. Groups and users "
+                    "are separate collections, so a user's name does not match "
+                    "here even when a device is assigned to that user."
+                ),
             ): str,
             vol.Optional(
                 SERVICE_FIELD_KIND,
@@ -254,7 +259,11 @@ class ListHostsTool(_FirewallaReadTool):
             ): bool,
             vol.Optional(
                 SERVICE_FIELD_USER,
-                description="Optional. Filter to hosts belonging to one user id.",
+                description=(
+                    "Optional. Filter to the hosts assigned to one user, by user "
+                    "id or user name. Users are distinct from groups, so a user "
+                    "name does not match the `group_name` filter."
+                ),
             ): str,
             vol.Optional(
                 SERVICE_FIELD_REFRESH,
@@ -733,7 +742,9 @@ class GetSystemOverviewTool(_FirewallaReadTool):
                 SERVICE_FIELD_INCLUDE,
                 description=(
                     "Optional. Add the group and user names and ids that "
-                    "get_user_usage and the rule tools accept as selectors. "
+                    "get_user_usage and the rule tools accept as selectors. Each "
+                    "entry carries `kind` of 'group' or 'user', so the two are "
+                    "told apart by that field and never by name. "
                     "Allowed: 'identifiers'."
                 ),
             ): vol.All(cv.ensure_list, [vol.In(("identifiers",))]),

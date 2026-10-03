@@ -164,7 +164,7 @@ the phase steps: no consumer may be left unaccounted for.
 | Consumer | Where | Reads | Covered by |
 | --- | --- | --- | --- |
 | Group accessor | `integration_manager.py:292` `get_groups()` | the whole collection | 1.3 |
-| Usage-history scope | `services.py:3205` `_resolve_usage_history_target` | `group.name` **only** | **3.4 (the defect)** |
+| Usage-history scope | `services.py` `_resolve_usage_history_target` | `group.name` **only** | **3.4 — the defect, fixed** |
 | Overview counts / identifiers | `services.py:3542-3543`, `:3560` | `snapshot.groups`, `snapshot.users` | 3.1 |
 | Inventory counts | `helpers/runtime_inventory.py:605`, `:661` | `group_count` | 1.6 |
 | Group policy controls | `helpers/runtime_inventory.py:400` | policy keys, **skips** `userTags` | 1.4 (now skips `kind == "user"` outright) |
@@ -180,7 +180,7 @@ These do **not** read the collection, so Phase 3.4's grep will not find them:
 | Device-tracker attribute | `device_tracker.py:187` | `host.group_name` | 3.2 |
 | Host record | `services.py:4042` | `host.group_name` | 3.4 (extended) |
 | `get_hosts` group filter | `services.py:4092-4095` | `host.group_name` match | 3.4 (extended) |
-| `get_hosts` user filter | `services.py:4114` | `host.user_ids` | 3.4 (extended) |
+| `get_hosts` user filter | `services.py` `_host_matches_filters` | `host.user_ids` | **3.4 — was dead, fixed** |
 | Rule switch attributes | `switch.py:175-179` | `rule.applies_to(_kind)` | 3.4 (extended) |
 | Rule applicability text | `models.py:1413` | `rule.applies_to` | 3.4 (extended) |
 | Rule filtering | `rule_manager.py:260` | `rule.applies_to` | 3.4 (extended) |
@@ -236,7 +236,7 @@ Two claims in the original §3b review were wrong and are corrected above:
 | --- | --- | --- | --- |
 | 1 | Resolve membership semantics and land the model | Single-membership confirmed; `kind` + `user_id` on the collection; one meaning for `affiliated_group_name`; single-path group count | **Complete 2026-10-02** |
 | 2 | Build the membership service | One admin-gated service (single-slot set/clear, group or user) backed by 4 LLM tools, with validation and tests | **Complete 2026-10-02** |
-| 3 | Make the reported surface accurate | Corrected overview counts, verified entity joins, updated read-tool text | Not started |
+| 3 | Make the reported surface accurate | Corrected overview counts, verified entity joins, updated read-tool text | **Complete 2026-10-02** |
 | 4 | Expose it to assistants | Four reversible LLM control tools, prompt fragment, contracts and docs | Not started |
 
 ## 5. Phase details
@@ -386,52 +386,58 @@ mutually exclusive target fields, backing **four** LLM tools in Phase 4.
       paths; four target-shape cases; and a registration pin for the admin gate and
       `SupportsResponse.ONLY`.
 
-### Phase 3 — Accurate surface and preserved entity behavior
+### Phase 3 — Accurate surface and preserved entity behavior — COMPLETE (2026-10-02)
 
 Goal: make the reported surface correct without breaking anything downstream.
 
-- [ ] **3.1 Fix the overview counts.** In
-      `services.py::_async_handle_get_system_overview`, report the group count from
-      the classified collection. **No user-affiliation count is added** (owner
-      direction, see 1.6); the `users` section already carries that population.
-      Confirm `include: ["identifiers"]` items carry the kind so a consumer can tell
-      them apart. The tests that assert on this are `test_services.py` (the
-      `assert "items" not in overview["groups"]` case and its `identifiers`
-      variant). The count assertions that Phase 1.6 changed were
-      `test_runtime_inventory.py` (`group_count`) and `test_init.py` (`group_count`),
-      both updated in Phase 1.
-- [ ] **3.2 Audit the entity surfaces.** Verify that watched-device
-      (`binary_sensor.py:806`), device-tracker (`device_tracker.py:187`), and
-      watched-user (`sensor.py:536`) attributes are unchanged in meaning and that
-      the user-facing identity rule still holds for a device in a legacy
-      human-named backing tag. Add a regression test using a legacy-shaped fixture.
-- [ ] **3.3 Audit the association joins.** Confirm
-      `managers/user_manager.py::_get_associated_hosts_for_user` still resolves
-      associated devices through the backing tag id in `host.group_ids`, and that
-      the 1:1 user-to-tag invariant is documented where it is relied on.
-- [ ] **3.4 Audit remaining group consumers.** Work from the §3b inventory rather
-      than a fresh grep, because two groups of consumers will not be found by
-      searching for `snapshot.groups`, `get_groups()`, or `groups[]`:
-      the **host-facing** consumers that read `host.group_name`, `host.group_ids`
-      or `host.user_ids` (`binary_sensor.py:806`, `device_tracker.py:187`,
-      `services.py:4042`, the `get_hosts` group filter at `services.py:4092-4095`,
-      the `get_hosts` user filter at `services.py:4114`), and the **rule-facing**
-      consumers that read `applies_to` (`switch.py:175-179`, `models.py:1413`,
-      `rule_manager.py:260`). Confirm each is either unaffected or handled.
-      **One consumer needs a real fix:** `services.py::_resolve_usage_history_target`
-      (line 3112, called from `_async_handle_get_time_usage_report` at line 4767)
-      resolves a `scope_kind="group"` request against `get_groups()` and matches on
-      `group.name`. Once a user-backed entry carries the user's name, a group-scoped
-      request can resolve to a user's backing tag and return that user's usage
-      labelled as a group. The group branch must skip entries whose kind is `user`
-      (and the `user` branch continues to resolve users through the user manager).
-      Add a test that a group-scoped request with a user's name is rejected rather
-      than silently resolved.
-- [ ] **3.5 Update read-tool text.** Adjust `llm_tools_read.py` strings that
-      describe `group_name`/`group` so they state that the collection holds groups
-      and users and that the kind distinguishes them.
-- [ ] **3.6 Re-run the full suite** and confirm no entity or service snapshot drifts
-      for reasons other than the intended count and kind changes.
+- [x] **3.1 Fix the overview counts.** The `groups` section now reports only
+      `kind == "group"` entries, so its count is what a caller means by "groups",
+      and both identifier sections carry `kind` so the two are separable by field
+      rather than by name. No user-affiliation count was added. New test asserts the
+      four plain groups are listed and the user entries (ids `10`, `11`) never
+      appear in the groups section even though they live in the same collection and
+      a name collides with a real group's.
+- [x] **3.2 Audit the entity surfaces.** Watched-device, device-tracker and
+      watched-user attributes all read `host.group_name` / `affiliated_group_name`,
+      both already resolved to the user-facing identity, so meaning is unchanged.
+      Added two regression tests — one for the watched-device sensor and one for the
+      device tracker — using a **legacy human-named backing tag**
+      (`"KADEN's Devices"` behind user `KADENS_DEVICES`). Both leave the real
+      normalization in place so they cover the client through to the entity
+      attribute, and both assert the legacy label specifically does not render.
+- [x] **3.3 Audit the association joins.** `_get_associated_hosts_for_user` still
+      resolves through the backing tag id in `host.group_ids`, and its docstring now
+      records the 1:1 user-to-tag invariant and why the tag path is the one that
+      resolves. `docs/ARCHITECTURE.md` gained the same fact, with the measurement.
+- [x] **3.4 Audit remaining group consumers.** Worked from the §3b inventory.
+      Host-facing consumers (`binary_sensor.py`, `device_tracker.py`, the `get_hosts`
+      record, the group filter) all read the already-resolved `host.group_name` and
+      are unaffected. Rule-facing consumers read `applies_to`, which Phase 1 left
+      untouched. **Two real defects found and fixed:**
+      1. **Usage-history group scope could resolve to a user** —
+         `_resolve_usage_history_target` matched `group.name` across the whole
+         collection, so once a user entry carried the user's name a group-scoped
+         request for that name (or for the user's backing tag id) returned that
+         user's usage labelled as a group. The group branch is now filtered to
+         `kind == "group"`. Tested with both a user's name and a user's backing tag
+         id, asserting rejection and that no usage call is made.
+      2. **The `get_hosts` user filter could never match** — it tested
+         `host.user_ids`, which is built from the host-level `userTags` array that
+         Firewalla never populates. Measured on the dev box: **0 of 211 hosts have
+         any `userTags`, while 32 are assigned to a user** via their tags. The
+         filter returned nothing for every selector. It now resolves the selector
+         (user id or name) to the user's affiliated backing tag and matches that
+         against `group_ids`. Live re-check: every user resolves 1–6 hosts, where
+         the old predicate matched 0 for all of them. Three new tests.
+- [x] **3.5 Update read-tool text.** `list_hosts` now states that a device follows
+      only its group's rules and that assigning it removes its own rules, and its
+      `group_name`/`user` filter descriptions say groups and users are separate
+      collections so a user name does not match the group filter.
+      `get_system_overview`'s `identifiers` description says each entry carries
+      `kind`.
+- [x] **3.6 Suite green.** 508 tests pass (up from 500), ruff/format/mypy clean, no
+      entity or service snapshot drifted for unintended reasons.
+
 
 ### Phase 4 — Assistant exposure
 

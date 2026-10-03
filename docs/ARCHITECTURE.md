@@ -98,6 +98,7 @@ Group and user collection rule:
 - a user entry also carries the affiliated user id, so a consumer can resolve the full user record without a second lookup
 - counts are reported from the same classification that produced the collection: the group count counts `group` entries only, and user affiliations are legible through the user collection and user count rather than a second derived field. A separately computed affiliation count could only ever disagree through a defect, so it is deliberately not reported
 - device-to-user association joins continue to use the backing tag id in `host.group_ids`; the kind discriminator does not change how membership is resolved on a host
+- **`host.user_ids` is always empty on a real box.** It is built from the host-level `userTags` array, which Firewalla never populates: a device assigned to a user carries the user's affiliated backing tag in `host.tags` instead (measured on the dev box: 0 of 211 hosts have any `userTags`, while 32 are assigned to a user). Each user maps 1:1 to exactly one backing tag, so that tag id is the whole association. Any consumer resolving "which devices belong to this user" must go through the tag, never through `host.user_ids` alone
 
 ## Protocol baseline
 

@@ -214,6 +214,72 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
     assert ATTR_WATCHED_DEVICE_WIFI_AP not in watched_state.attributes
 
 
+async def test_watched_device_group_attribute_shows_the_user_for_a_legacy_tag(
+    hass: HomeAssistant,
+) -> None:
+    """A device in a legacy human-named backing tag reports the user's name.
+
+    Before Firewalla's current user model a user *was* a group, so users created
+    then still have a backing tag named with a human-readable label. That label
+    must never render: the device's group attribute shows the user's name,
+    resolved by the tag's `affiliatedTag` linkage rather than by the tag's name.
+
+    This leaves the real normalization in place, so it covers the client through
+    to the entity attribute rather than asserting on an injected snapshot.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+        options={CONF_WATCHED_DEVICES: ["0C:85:E1:B0:1D:1C"]},
+    )
+    entry.add_to_hass(hass)
+
+    raw_payload: dict[str, object] = {
+        "hosts": [
+            {
+                "mac": "0C:85:E1:B0:1D:1C",
+                "name": "Kaden Phone",
+                "ip": "192.168.200.25",
+                "tags": ["31"],
+            }
+        ],
+        "tags": {
+            "31": {"name": "KADEN's Devices", "policy": {"userTags": ["32"]}},
+        },
+        "userTags": {"32": {"name": "KADENS_DEVICES", "affiliatedTag": "31"}},
+        "policyRules": [],
+    }
+
+    with patch(
+        "custom_components.firewalla_local.api.client.FirewallaApiClient."
+        "async_get_runtime_init_payload",
+        new=AsyncMock(return_value=raw_payload),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    watched_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_0C:85:E1:B0:1D:1C_binary_sensor"
+    )
+
+    assert watched_state is not None
+    assert (
+        watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] == "KADENS_DEVICES"
+    )
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] != (
+        "KADEN's Devices"
+    )
+
+
 async def test_watched_device_binary_sensor_exposes_wifi_attributes(
     hass: HomeAssistant,
 ) -> None:

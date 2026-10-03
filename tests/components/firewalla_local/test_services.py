@@ -96,6 +96,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
     SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
+    SERVICE_FIELD_USER,
     SERVICE_FIELD_USER_ID,
     SERVICE_FIELD_USER_NAME,
     SERVICE_FIELD_WAN_NAME,
@@ -129,6 +130,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
@@ -984,6 +986,48 @@ def _membership_patches(
         ),
     ):
         yield
+
+
+def _user_filter_snapshot() -> FirewallaRuntimeSnapshot:
+    """Return a snapshot whose device-to-user link exists only via the tag.
+
+    `user_ids` is empty on both hosts, matching a real box: the host-level
+    `userTags` array that would populate it is always empty, so an assignment is
+    visible only as the user's affiliated backing tag in `group_ids`.
+    """
+    return replace(
+        _membership_snapshot(),
+        hosts=(
+            FirewallaHostRuntime(
+                mac="0C:85:E1:B0:1D:1C",
+                host_name="Kaden Phone",
+                ip_address="192.168.200.25",
+                group_name="KADEN",
+                network_name="VLAN10 CORE",
+                connection_type="phone",
+                last_active=None,
+                download_bytes=200,
+                upload_bytes=20,
+                stale=False,
+                group_ids=("10",),
+                user_ids=(),
+            ),
+            FirewallaHostRuntime(
+                mac="00:AA:BB:CC:DD:26",
+                host_name="Plex Server",
+                ip_address="192.168.10.10",
+                group_name=None,
+                network_name="VLAN10 CORE",
+                connection_type=None,
+                last_active=None,
+                download_bytes=100,
+                upload_bytes=50,
+                stale=False,
+                group_ids=(),
+                user_ids=(),
+            ),
+        ),
+    )
 
 
 def _membership_snapshot_with_rules() -> FirewallaRuntimeSnapshot:
@@ -4084,6 +4128,51 @@ async def test_get_system_overview_includes_identifiers_on_request(
     assert "items" in overview["groups"]
 
 
+async def test_get_system_overview_identifiers_separate_groups_from_users(
+    hass: HomeAssistant,
+) -> None:
+    """The `groups` section reports plain groups and the `users` section users.
+
+    The tag collection holds both together, so a user entry used to be counted
+    and listed as a group. Each identifier now carries `kind` as well, so a
+    consumer separates the two by that field rather than by name.
+    """
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+
+    write = AsyncMock(return_value={"ok": True})
+    with _membership_patches(write):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        overview = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SYSTEM_OVERVIEW,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_INCLUDE: ["identifiers"],
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert overview is not None
+    # The snapshot holds four plain groups and three users.
+    assert overview["groups"]["count"] == 4
+    assert overview["users"]["count"] == 3
+    assert overview["groups"]["items"] == [
+        {"id": "12", "name": "Quarantine", "kind": "group"},
+        {"id": "53", "name": "IOT_LIGHTS", "kind": "group"},
+        {"id": "66", "name": "IOT_LIGHTS", "kind": "group"},
+        {"id": "99", "name": "KADEN", "kind": "group"},
+    ]
+    assert [item["kind"] for item in overview["users"]["items"]] == ["user"] * 3
+    # A user entry never appears in the groups section, even though it lives in
+    # the same collection and its name collides with a real group's.
+    assert "10" not in [item["id"] for item in overview["groups"]["items"]]
+    assert "11" not in [item["id"] for item in overview["groups"]["items"]]
+
+
 async def test_connectivity_is_one_definition_across_every_surface(
     hass: HomeAssistant,
 ) -> None:
@@ -4495,6 +4584,78 @@ async def test_get_hosts_supports_filters(
     assert [host["host_name"] for host in by_name["hosts"]] == ["Plex Server"]
     assert vpn_only is not None
     assert [host["host_name"] for host in vpn_only["hosts"]] == ["WireGuard Kaden"]
+
+
+@pytest.mark.parametrize(
+    "user_selector",
+    [
+        pytest.param("KADEN", id="by_user_name"),
+        pytest.param("21", id="by_user_id"),
+    ],
+)
+async def test_get_hosts_user_filter_matches_through_the_backing_tag(
+    hass: HomeAssistant,
+    user_selector: str,
+) -> None:
+    """The `user` filter finds devices assigned to a user.
+
+    A device assigned to a user carries the user's affiliated backing tag in
+    `group_ids`. The host-level `userTags` array that feeds `host.user_ids` is
+    always empty on a real box (Finding 42 — 0 of 211 hosts on the dev box), so
+    matching on `user_ids` alone could never match anything and the filter
+    returned no hosts for every selector. It now resolves the user to their
+    backing tag and matches that against `group_ids`.
+    """
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+
+    write = AsyncMock(return_value={"ok": True})
+    with _membership_patches(write, snapshot=_user_filter_snapshot()):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOSTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_USER: user_selector,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert [host["host_name"] for host in response["hosts"]] == ["Kaden Phone"]
+
+
+async def test_get_hosts_user_filter_returns_nothing_for_an_unknown_user(
+    hass: HomeAssistant,
+) -> None:
+    """An unknown user selector yields no hosts rather than raising."""
+    entry = _membership_entry()
+    entry.add_to_hass(hass)
+
+    write = AsyncMock(return_value={"ok": True})
+    with _membership_patches(write, snapshot=_user_filter_snapshot()):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOSTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_USER: "NOSUCHUSER",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["hosts"] == []
 
 
 async def _call_set_host_membership(
@@ -5631,6 +5792,86 @@ async def test_get_time_usage_report_service_resolves_user_name_to_tag_scope(
     assert response is not None
     assert response["target"]["id"] == "21"
     assert response["target"]["name"] == "KADEN"
+
+
+@pytest.mark.parametrize(
+    "scope_target",
+    [
+        pytest.param("KADEN", id="user_name"),
+        pytest.param("10", id="user_backing_tag_id"),
+    ],
+)
+async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
+    hass: HomeAssistant,
+    scope_target: str,
+) -> None:
+    """A group-scoped request must not resolve to a user's backing tag.
+
+    The tag collection holds plain groups and user affiliations together, and a
+    user entry carries the user's own name. Without a kind filter, a
+    group-scoped request for that name -- or for the user's backing tag id --
+    resolved to the user's tag and returned that user's usage labelled as a
+    group. Users resolve through the user scope instead.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_usage_history_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_usage_history_payload",
+            new=AsyncMock(return_value=_usage_history_payload()),
+        ) as mock_get_usage_history,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_TIME_USAGE_REPORT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "group",
+                    SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: scope_target,
+                    SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
+                        1_774_065_600,
+                        UTC,
+                    ),
+                    SERVICE_FIELD_USAGE_HISTORY_END: datetime.fromtimestamp(
+                        1_774_670_400,
+                        UTC,
+                    ),
+                    SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "day",
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert (
+        err.value.translation_key
+        == TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND
+    )
+    assert mock_get_usage_history.await_count == 0
 
 
 async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(

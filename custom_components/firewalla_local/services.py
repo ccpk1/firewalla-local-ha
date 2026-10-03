@@ -3347,7 +3347,16 @@ def _resolve_usage_history_target(
             },
         )
 
-    groups = entry.runtime_data.integration_manager.get_groups()
+    # Group scope. The tag collection holds plain groups and user affiliations
+    # together, and a user entry carries the user's own name, so filtering to
+    # plain groups is what keeps a group-scoped request from resolving to a
+    # user's backing tag and returning that user's usage labelled as a group.
+    # Users resolve through the user branch above, not here.
+    groups = [
+        group
+        for group in entry.runtime_data.integration_manager.get_groups()
+        if group.kind == _MEMBERSHIP_KIND_GROUP
+    ]
     exact_match = next(
         (group for group in groups if group.group_id == scope_target),
         None,
@@ -3687,11 +3696,19 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
     groups = snapshot.groups if snapshot is not None else ()
     users = snapshot.users if snapshot is not None else ()
 
-    groups_section: JsonObjectType = {"count": len(groups)}
+    # The tag collection holds plain groups and user affiliations together. The
+    # `groups` section reports only the plain groups, so its count matches what a
+    # caller means by "groups"; the user population has its own section below.
+    group_entries = [group for group in groups if group.kind == _MEMBERSHIP_KIND_GROUP]
+
+    groups_section: JsonObjectType = {"count": len(group_entries)}
     if include_identifiers:
         groups_section["items"] = cast(
             JsonValueType,
-            [{"id": group.group_id, "name": group.name} for group in groups],
+            [
+                {"id": group.group_id, "name": group.name, "kind": group.kind}
+                for group in group_entries
+            ],
         )
 
     users_section: JsonObjectType = {"count": len(users)}
@@ -3702,6 +3719,7 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
                 {
                     "id": user.user_id,
                     "name": user.name,
+                    "kind": _MEMBERSHIP_KIND_USER,
                     "affiliated_group_id": user.affiliated_group_id,
                     "affiliated_group_name": user.affiliated_group_name,
                 }
@@ -4153,6 +4171,12 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
         entry.runtime_data.host_manager.watched_device_online_window_seconds
     )
     reference_activity = reference_last_active(all_hosts)
+    user_filter = cast(str | None, call.data.get(SERVICE_FIELD_USER))
+    user_tag_ids = (
+        _resolve_user_filter_tag_ids(entry, user_filter)
+        if user_filter is not None
+        else frozenset()
+    )
     hosts: list[JsonValueType] = []
     for host in sorted(
         entry.runtime_data.host_manager.get_hosts(),
@@ -4163,7 +4187,12 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
             reference_activity=reference_activity,
             online_window_seconds=online_window_seconds,
         )
-        if not _host_matches_filters(host, call.data, is_online=is_online):
+        if not _host_matches_filters(
+            host,
+            call.data,
+            is_online=is_online,
+            user_tag_ids=user_tag_ids,
+        ):
             continue
         is_mac_host = _supports_wake_on_lan(host.mac)
         raw_host = raw_host_lookup.get(host.mac)
@@ -4216,11 +4245,36 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
     return {"hosts": hosts}
 
 
+def _resolve_user_filter_tag_ids(
+    entry: FirewallaConfigEntry,
+    user_filter: str,
+) -> frozenset[str]:
+    """Resolve a `get_hosts` user filter to that user's backing tag ids.
+
+    Accepts a user id or a user name. Returns the user's affiliated backing tag,
+    which is what a host assigned to that user carries in `group_ids`. An
+    unknown user resolves to nothing, so the call returns no hosts rather than
+    raising, which is how the filter behaved before.
+    """
+    snapshot = entry.runtime_data.coordinator.data
+    if snapshot is None:
+        return frozenset()
+
+    folded = user_filter.casefold()
+    for user in snapshot.users:
+        if (
+            user.user_id == user_filter or user.name.casefold() == folded
+        ) and user.affiliated_group_id is not None:
+            return frozenset({user.affiliated_group_id})
+    return frozenset()
+
+
 def _host_matches_filters(
     host: FirewallaHostRuntime,
     data: Mapping[str, Any],
     *,
     is_online: bool | None,
+    user_tag_ids: frozenset[str] = frozenset(),
 ) -> bool:
     """Return whether one host satisfies every supplied filter."""
     name_filter = cast(str | None, data.get(SERVICE_FIELD_HOST_NAME))
@@ -4256,7 +4310,12 @@ def _host_matches_filters(
         return False
 
     user_filter = cast(str | None, data.get(SERVICE_FIELD_USER))
-    return not (user_filter is not None and user_filter not in host.user_ids)
+    if user_filter is None or user_filter in host.user_ids:
+        return True
+    # A device assigned to a user carries the user's affiliated backing tag in
+    # `group_ids`. The host-level `userTags` array that feeds `user_ids` is always
+    # empty on a real box, so matching on `user_ids` alone never matches anything.
+    return any(tag_id in user_tag_ids for tag_id in host.group_ids)
 
 
 async def _async_handle_run_internet_speed_test(call: ServiceCall) -> JsonObjectType:
