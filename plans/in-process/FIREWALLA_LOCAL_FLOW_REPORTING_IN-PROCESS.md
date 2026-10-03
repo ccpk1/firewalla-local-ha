@@ -267,6 +267,31 @@ for it, not withheld:
 Identity is therefore a **default-shape** decision, not a capability limit — the same
 principle as the retention and page-size answers in the audit note.
 
+### Q13. Phase 2 corrections found while writing the plan into code
+
+Four items the plan had wrong, all verified against the code rather than assumed.
+
+**1. `FlowManager` must subclass `FirewallaBaseManager`.** The plan implied a
+client-only constructor. Every manager takes `(coordinator, entry, client)`, so the
+flow manager matches. Adding it therefore touches four files — `managers/flow_manager.py`,
+`managers/__init__.py`, `coordinator.py` (attribute, `attach_managers` parameter,
+`FirewallaRuntimeData` field) and `__init__.py` (instantiate, pass through).
+
+**2. Fail-soft belongs in the manager, not the client.** The client **raises**
+`FirewallaProtocolError` on a bad shape and every existing method follows that
+pattern. `FlowManager` catches and returns *unavailable*, exactly as
+`async_refresh_network_usage` keeps its previous cache on a per-network failure.
+
+**3. The dedupe key is unsafe on regular records.** `(ts, device, pid, domain, port)`
+was written against blocked records, where `pid` exists. On a regular record `pid` is
+absent, so one device opening many connections to the same host in the same second
+collides and silently under-counts. **Dedupe on the row's own serialized content**,
+which is exact and needs no tuning.
+
+**4. `nextTs` must not be rounded.** It is a float (`1791060537.785`) and passing it
+back is how pagination walks; rounding to an int could skip records. The cursor
+carries it verbatim and is only ever tested for equality or non-advance.
+
 ### Q10. How do we know `audit: true` actually filtered?
 
 **Why it matters.** `audit: true` was understood to mean "blocked only". If the box
@@ -280,6 +305,86 @@ after a blocked-only read, assert the rows are `ltype: "audit"`, because
 `auditLogs` is what produces them. A second assertion is worth having — that a
 *regular* read (`flows`, `audit: false`) contains no `ltype: "audit"` rows, which
 is what would catch the box changing the flag's meaning in the other direction.
+
+### Q11. Is the flow report an admin service?
+
+**Why it matters.** The plan said admin, on the grounds that flow data is
+household-wide. But the **LLM read tools only ever call non-admin services**, so an
+admin registration would put the Phase 4 tool outside the surface it belongs to.
+
+**Measured across all 33 registrations:**
+
+| | Count |
+| --- | --- |
+| Total services | 33 |
+| Admin | 20 |
+| Non-admin | 13 |
+| Admin **and** a read (`SERVICE_GET_*`) | **1** — `get_runtime_inventory` |
+| Non-admin reads | 12 |
+
+Every non-admin service bar one is a read; the exception is `sync_runtime`, a
+refresh trigger. The single admin read is `get_runtime_inventory`, which returns the
+entire unredacted runtime inventory as a bulk diagnostic dump — a different category
+from a scoped, summarized report.
+
+The decisive evidence is the tool surface: **all 13 tools in `llm_tools_read.py`
+call non-admin services, and none calls the one admin read.** All 25 tools in
+`llm_tools_control.py` call admin services. So the flag tracks *mutation and bulk
+export*, and the read-tool surface structurally depends on reads being non-admin.
+
+**Recommendation.** `admin=False`, matching every other query service. The
+sensitivity argument does not distinguish it: per-user app usage is already
+non-admin, and flow destinations are comparable.
+
+### Q12. Should target resolution be shared with the existing services?
+
+**Why it matters.** Resolution for a device or group/user already exists, and the
+flow service needs the same thing.
+
+**Finding — the duplication already exists, and it is three-way.** Independent of
+this initiative there are three resolvers, ~322 lines in total:
+
+| Resolver | Lines | Selectors | Returns |
+| --- | --- | --- | --- |
+| `_resolve_requested_host` | 86 | `host_id` / `host_mac` / `host_name` | `FirewallaHostRuntime` |
+| `_resolve_membership_target` | 94 | group and user name/id | `FirewallaGroupRuntime` |
+| `_resolve_usage_history_target` | 142 | one free-text device/user/group | `FirewallaUsageHistoryTarget` |
+
+All three implement the same algorithm: exact id match, then casefolded name
+match, then exactly-one → return / more-than-one → ambiguous / none → not found.
+
+**But one shared resolver is the wrong shape**, for three reasons:
+
+1. **The name fields matched differ, and the difference looks deliberate.**
+   `_resolve_requested_host` matches five fields (`host_name`, `dns_hostname`,
+   `dhcp_name`, `dns_fqdn`, watched choice); the usage resolver matches two
+   (`host_name`, watched choice). `llm_tools_read.py` documents the intent —
+   *"`host_name` is the primary human-facing label and the one to match a user's
+   words against... `dhcp_name` is device-supplied and unreliable — never use it to
+   identify a device."* So the **narrower** matcher follows the documented rule, and
+   the host resolver's inclusion of `dhcp_name` is the questionable one.
+2. **Error content differs by intent.** The host and membership resolvers name the
+   matches in the ambiguous error so the caller can choose; the usage one does not.
+   That is a UX difference, not an accident to erase.
+3. **The errors are translation-key `ServiceValidationError`s**, which
+   `ARCHITECTURE.md` assigns to the **service layer** ("mapping failures into
+   translation-ready Home Assistant exceptions"). A single resolver would need
+   injected keys, match-list formatting and a per-type projection — a
+   many-parameter function, which is an abstraction over three real differences.
+
+**Recommendation.** Extract the **matching core**, not a unified resolver: one
+helper that takes candidates and a selector and returns `(exact, name_matches)`,
+with no exceptions and no translation keys. Each caller keeps its own error mapping,
+match-list formatting and return type. That removes the repeated algorithm without
+flattening three legitimately different contracts.
+
+**Two findings to report, not fix silently:**
+
+- The same device resolves through `get_hosts` by its **DHCP name** but not through
+  `get_time_usage_report`. Real inconsistency; needs a decision about which matcher
+  is correct, not a refactor.
+- It is **pre-existing** duplication. Worth doing, but it is not flow-reporting
+  work, and it should not be presented as such.
 
 ---
 
@@ -488,6 +593,18 @@ files. No existing assertion or snapshot was modified.
       resolver. Ambiguity raises the same class of error as
       `time_usage_report_scope_ambiguous`; not found raises the same class as
       `time_usage_report_scope_not_found`. **Do not add a parallel name→id lookup.**
+- [ ] **3.1b Extract the shared matching core (Q12).** Three resolvers already
+      implement the same algorithm — `_resolve_requested_host`,
+      `_resolve_membership_target` and `_resolve_usage_history_target`, ~322 lines
+      between them. Extract **only the matching core** (exact id, then casefolded
+      name, then zero/one/many) into one helper returning `(exact, name_matches)`
+      with no exceptions and no translation keys. **Do not build a single unified
+      resolver**: the three differ in the name fields they match, in whether the
+      ambiguous error names the matches, and in their return types, and the errors
+      are translation-key `ServiceValidationError`s which `ARCHITECTURE.md` assigns
+      to the service layer. Each caller keeps its own error mapping and match-list
+      formatting. **Full suite must pass with no changed expectations**, since this
+      touches two shipped services.
 - [ ] **3.2 Build the summary from the rollup using the Phase 1 core.** Totals from
       the shared window extractor `extract_usage_window` in `utils/flow.py`;
       destination rows from the shared
@@ -583,9 +700,9 @@ files. No existing assertion or snapshot was modified.
 ### Phase 4 — Surface
 
 - [ ] **4.1 Service schema and handler** in `services.py`, registered in
-      `_SERVICE_REGISTRATIONS` as a **read-only, admin** service using
-      `async_register_admin_service` — the payload is household-wide traffic and
-      identity data.
+      `_SERVICE_REGISTRATIONS` as **read-only and `admin=False`** — matching every
+      other query service (Q11). It must be non-admin or the Phase 4 tool cannot
+      live in `llm_tools_read.py`, where all 13 read tools call non-admin services.
 - [ ] **4.2 Field descriptions** in `services.yaml`, with the observed retention
       limit stated in prose on the window field.
 - [ ] **4.3 Translations.** `strings.json` + regenerate
@@ -593,8 +710,9 @@ files. No existing assertion or snapshot was modified.
       report failed, following the existing naming.
 - [ ] **4.4 LLM tool** in `llm_tools_read.py` at the read-only tier: summary-first
       with the window and its actual served span stated, and an explicit sentence
-      that the data is a recent window rather than history. Update
-      `llm_tools_common.py` if the target parameter is shared.
+      that the data covers the last ~24 hours rather than being a history. Update
+      `llm_tools_common.py` if the target parameter is shared. This depends on 4.1
+      being non-admin (Q11).
 - [ ] **4.5 Docs.** `USER_GUIDE.md` (how to read the report, what the window really
       means, what is withheld and why), `MCP_TOOL_REFERENCE.md`, and
       `REVERSE_ENGINEERING_WORKFLOW.md` (mark the answered open questions:

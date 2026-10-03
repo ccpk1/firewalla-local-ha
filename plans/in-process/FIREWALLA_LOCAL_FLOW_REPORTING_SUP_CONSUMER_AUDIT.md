@@ -73,6 +73,7 @@ Inside those builders, the same decoding is written out repeatedly:
 | Ranking-payload unwrapping | 1 | `_resolve_network_ranking_payload` |
 | Download/upload window shape | **3 ser/deser** | extractor, service serializer, attribute serializer |
 | Per-host sort key | **2 identical** | `_build_network_top_talkers`, `_build_network_hosts` |
+| **Target resolution** (exact id → casefolded name → 0/1/many) | **3** | `_resolve_requested_host`, `_resolve_membership_target`, `_resolve_usage_history_target` — ~322 lines |
 
 A field-name variation is currently fixed in three places or silently missed in one.
 
@@ -80,6 +81,38 @@ A field-name variation is currently fixed in three places or silently missed in 
 integer-coercer count as seven helpers in one place. Both were understated: the
 count is five for the device id, and there are seven **integer** helpers plus six
 **boolean** helpers plus two further ad-hoc numeric coercers found on review.)
+
+### Target resolution is already triplicated
+
+Found while planning Phase 2, and **pre-existing** — it is not caused by this
+initiative:
+
+| Resolver | Lines | Selectors | Returns |
+| --- | --- | --- | --- |
+| `_resolve_requested_host` | 86 | `host_id` / `host_mac` / `host_name` | `FirewallaHostRuntime` |
+| `_resolve_membership_target` | 94 | group and user name/id | `FirewallaGroupRuntime` |
+| `_resolve_usage_history_target` | 142 | one free-text device/user/group | `FirewallaUsageHistoryTarget` |
+
+All three run the same algorithm. Adding the flow service as a fourth consumer
+would make it four, so the matching core is extracted once (Q12) — but **not** as a
+single unified resolver, because the three differ in ways that matter:
+
+- **They match different name fields.** `_resolve_requested_host` matches five
+  (`host_name`, `dns_hostname`, `dhcp_name`, `dns_fqdn`, watched choice); the usage
+  resolver matches two. `llm_tools_read.py` documents the intent — `host_name` is
+  *"the one to match a user's words against"* and `dhcp_name` is *"device-supplied
+  and unreliable... never use it to identify a device"*. So the **narrower** matcher
+  is the one following the documented rule.
+- **They report ambiguity differently.** The host and membership resolvers name the
+  matches so the caller can choose; the usage resolver does not.
+- **Their errors are translation keys**, which `ARCHITECTURE.md` assigns to the
+  service layer.
+
+**Consequence to decide, not refactor:** the same device resolves through
+`get_hosts` by its DHCP name but not through `get_time_usage_report`. Either the
+host resolver is too permissive (it will accept an unreliable device-supplied name)
+or the usage resolver is too narrow. This needs a decision about intent, and it is
+**not** flow-reporting work.
 
 ### The efficiency problem
 
@@ -217,7 +250,9 @@ inconsistency without altering any output.
   `managers/integration_manager.py` is already the largest module in the repo.
   Recommendation, **agreed and now in the plan**: a new `managers/flow_manager.py`
   in Phase 2 for the flow view building, with the *shared* core in `utils/` as of
-  Phase 1. Do not grow `integration_manager.py` further.
+  Phase 1. Do not grow `integration_manager.py` further. Confirmed in Q13 that it
+  must subclass `FirewallaBaseManager`, so wiring it touches four files rather than
+  one.
 - ~~No confirmed answer on default identity exposure.~~ **Closed 2026-10-03.** The
   owner confirmed: gate by default exactly as the segment report does, but keep it
   retrievable — `include: ["device_detail"]` returns per-device attribution at both
@@ -329,6 +364,10 @@ opposite of "nothing". Two constants now carry this:
 | **T19** | Assuming one shape for `port` | `port` is a list on rollup rows (207/207) and an int on records (1500/1500) | Phase 3.5d coerces both to tuples |
 | **T20** | A local flow with no hostname | `local:` families carry `dstMac` and no `host`/`domain`, so a domain-or-ip destination kind cannot represent them | Phase 3.5e adds a `mac` destination kind |
 | **T21** | Reading a blocked record's absent bytes as zero | Blocked flows are intercepted before travelling, so they have no bytes at all | Phase 3.5: report absent, never `0` |
+| **T22** | Registering a read service as admin | All 13 read tools call non-admin services; the one admin read is a bulk diagnostic dump | Q11: `admin=False`, or the Phase 4 tool cannot be a read tool |
+| **T23** | Deduping regular records on `pid` | `pid` is absent on regular records, so the key collapses to `(ts, device, None, host, port)` and one device's many same-second connections collide | Dedupe on the row's serialized content — Phase 2.5 |
+| **T24** | Rounding the `nextTs` cursor | It is a float and passing it back is how pagination walks | Carry it verbatim; only test equality/non-advance — Phase 2.5 |
+| **T25** | A fourth target resolver | Three already exist (~322 lines) running the same algorithm | Extract the matching core, not a unified resolver — Q12 |
 | **T15** | A default gate becoming a wall | Gating per-device attribution off by default is fine only if it stays reachable | Phase 3.4 plus a test on both sides of the gate |
 | **T16** | Efficiency work trading correctness | Single-pass accumulation can drop the deterministic tie-break | Step 1.5 keeps sort keys identical and measures before/after |
 
