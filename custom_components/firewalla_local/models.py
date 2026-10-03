@@ -1018,7 +1018,7 @@ class FirewallaPolicyRule:
     auto_delete_when_expires: bool | None = None
     dnsmasq_only: bool | None = None
     category: str | None = None
-    hit_count: int | None = None
+    hit_count: int = 0
     last_hit: FirewallaRuleHit | None = None
     raw_update_payload: dict[str, object] = field(default_factory=dict, compare=False)
 

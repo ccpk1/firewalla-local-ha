@@ -1244,19 +1244,30 @@ dev box ranged from **0.0 to 66.5 days** old on rules that were all currently
 enabled. A rule's history is not recoverable locally; only its most recent match
 is.
 
-**Absent means never matched.** A rule with no `hitCount` and no `lastHitFlow`
-has never fired — which is the cleanup signal, and must stay distinguishable
-from a count of zero.
+**Absent is not a distinct state for the count.** Of 321 rules: 54 carried both
+fields, 22 carried `hitCount` only, **0** carried `lastHitFlow` only, and 245
+carried neither — and 6 rules carried an **explicit `"0"`**. So the box both
+omits the field and writes a zero, and the two are not distinguishable as
+"never matched" versus "unknown". Normalized to `hit_count = 0` when absent,
+which is honest for the visible rule set.
 
-**The block case is the useful one.** A `block` rule carrying a `lastHitFlow`
-names the device and the destination that rule stopped, so "why can't this device
-reach X?" is answerable by reading the rules governing the device and inspecting
-their hits. On the dev box 27 `block` rules carried hit data.
+The one place that matters: **the omission correlates with rule family.** All 184
+Device Active Protect rules (`purpose == 'dap'`) fall in the "neither" group and
+none carry a count, so for those the field is untracked rather than zero. DAP
+rules are excluded from `list_rules` by default, so a `0` is reliable within the
+visible set but would be wrong if DAP rules were included.
 
-**What remains offline:** there is no local query for "everything blocked for
-this device over a period". The full history is in the app's cloud. Locally the
-available answers are the per-rule last hit (above) and the aggregate per-host
-block counters on `item=intf` (`dnsB`/`ipB`/`ipD`, see *Data usage*).
+The block case is the useful one. A `block` rule carrying a `lastHitFlow` names
+the device and the destination that rule stopped, so "why can't this device reach
+X?" is answerable by reading the rules governing the device and inspecting their
+hits. On the dev box 27 `block` rules carried hit data.
+
+**What remains offline:** the app's own UI does not offer a window beyond ~24
+hours, and there is no per-rule history — only the most recent match. But a
+**local flow *event* log does exist** and is queryable per tag or per host, up to
+300 records per call with `nextTs` pagination. See *Flow reporting endpoints*
+below. An earlier revision of this document claimed no local blocked-history
+query existed; that was wrong.
 
 Used by: `_normalize_rule_hit` in `api/client.py`, surfaced identically to the
 `get_rules` service payload (`_serialize_rule_summary`) and to rule-backed switch
@@ -1265,6 +1276,95 @@ entities via the shared `build_rule_hit_attributes` in `models.py`.
 Artifacts: `.tmp/survey_flows.py`, `.tmp/probe_flow_containers.py`,
 `.tmp/probe_blocked_flows.py`, `.tmp/probe_hit_freshness.py`,
 `.tmp/verify_rule_hits.py` (all read-only against the live box).
+
+### Flow reporting endpoints: the block event log
+
+**Confirmed by capture on 2026-10-03.** This is the local data behind the
+Firewalla app's flow report, and it is **three distinct queries**, not one. All
+are `mtype: "get"` with a `type` of `tag` or `host` and a `target` of the tag id
+or the device MAC.
+
+**1. The rollup — `item: "tag"` or `item: "host"`**
+
+```json
+{"item": "tag", "apiVer": 2, "audit": true, "target": "31",
+ "start": 1790949600, "end": 1791036000, "hourblock": 24}
+```
+
+This is the same family as the `systemFlows`-shaped data, and it is the one the
+init payload caches. Its response carries:
+
+- **`flows`** — the blocked breakdown, split into `dnsB`, `ipB:in`, `ipB:out`,
+  `local:ipB:in`, `local:ipB:out`, plus `download` and `upload`. Each block holds
+  a `flows[]` of **aggregated top destinations**: `{host, ip, port[], count,
+  country, category?, app?, flowTags?, device, begin, end}`. This is the app's
+  "top destinations" and "top flows" — grouped by `host`, so a subdomain is its
+  own row (`ye2.c.lencr.org` rather than `lencr.org`).
+- **`hosts`** — **per-member attribution**, keyed by device MAC. This is what
+  drives "top download member in KADENS_DEVICES". Only populated on a `tag`
+  request, which is why a group/user report can rank members and a device report
+  cannot.
+- **`newLast24` / `last60` / `last30` / `last12Months`** — windowed totals.
+- **`policy`**, **`name`**, **`uid`**, **`createTs`**.
+
+**2. The event log — `item: "flows"`**
+
+```json
+{"item": "flows", "type": "tag", "target": "31", "audit": true,
+ "count": 300, "ts": 1791036000, "exclude": []}
+```
+
+**This is the block log.** Response: `{count, flows[], nextTs}`. Verified live:
+**300 records per call**, and `nextTs` feeds the next call's `ts` — the app
+paginates by walking `ts` backwards (observed calling it three times with
+descending `ts`).
+
+Each record names the rule that blocked it:
+
+| Field | Coverage over 300 rows | Meaning |
+| --- | --- | --- |
+| `device`, `deviceIP`, `tags`, `userTags`, `dTags` | 300/300 | Full attribution |
+| `ts`, `count`, `port`, `protocol`, `intf`, `ltype` | 300/300 | `ltype: "audit"` |
+| **`pid`** | **296/300** | **The blocking rule's id** |
+| `type` | 296/300 | `dns` / `ip` |
+| `domain` | 283/300 | DNS match |
+| `flowTags` | 238/300 | `["noise"]` marks background traffic |
+| `category`, `app` | 91 / 30 | When identified |
+| `host`, `ip`, `fd`, `devicePort` | 15–17/300 | Resolved connection detail |
+
+`pid` is the join back to `policyRules`, so a blocked event can be attributed to
+**the rule that caused it** — which the rollup cannot do.
+
+**3. The audit log — `item: "auditLogs"`**
+
+```json
+{"item": "auditLogs", "type": "tag", "target": "31", "count": 300,
+ "ts": 1791036000, "exclude": []}
+```
+
+Response: `{count, logs[], nextTs}`. Same pagination. Accepts two extra filters
+the `flows` query does not: **`category`** (e.g. `games`) and **`ets`** (an end
+bound), so a caller can narrow to a category or a sub-window.
+
+**What the time filter does.** The app's window selector is expressed as
+`start`/`end` plus **`hourblock`**: `hourblock: 24` with a 24-hour
+`start`/`end` for the default view, `hourblock: 1` with a one-hour window after
+narrowing. So the granularity and the window are two separate parameters.
+
+**Drilling down switches the `type`, not just the target.** Selecting a member
+inside a group changes `type` from `tag` to `host` and `target` from the tag id
+to the device MAC. The same three queries serve both levels.
+
+Artifacts: `.tmp/firewalla_capture_20261003-135000_flow-reporting.pcap`, decoded
+with `.tmp/dump_all.py` (which handles the zlib-compressed response envelope) and
+summarised by `.tmp/summarise_flow_capture.py`; record shapes via
+`.tmp/show_flow_records.py`. Pulls in `.artifacts/flow_reporting/`.
+
+> **Response decoding note.** Responses are **zlib-compressed and base64-encoded
+> inside the encrypted envelope**: `{"compressed": 1, "payload": "<base64 zlib>"}`,
+> and the decompressed body is `{code, data: [{msg, result}]}`. `analyze_capture.py`
+> truncates bodies to 800 characters, so it is not sufficient for inspecting
+> responses — use `.tmp/dump_all.py`.
 
 ## Findings matrix
 

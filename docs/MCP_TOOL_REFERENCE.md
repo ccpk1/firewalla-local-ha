@@ -392,11 +392,16 @@ Reads that tell you what exists — the first step before any control action.
 - **Did this rule ever fire, and at what?** Each rule carries `hit_count` (how
   many times it has matched) and `last_hit` (the most recent single match). The
   box keeps only the **last** match per rule, not a log, so this answers "what did
-  this rule stop most recently?" and never "everything it blocked". A rule that
-  has never matched carries **neither** field — absent means never matched, not
-  zero. Two uses: troubleshooting ("why can't this device reach YouTube?" — read
-  the rules governing it, then see which one last matched and for which device),
-  and cleanup (enabled rules with no hit data are candidates for removal).
+  this rule stop most recently?" and never "everything it blocked".
+  `hit_count` is **always a number** — a rule with no recorded matches is `0` — so
+  "never fired" is a comparison rather than a null check. `last_hit` is `null`
+  when there is no match to describe, because it records one match rather than a
+  tally. Note the box reports no count at all for product-owned Device Active
+  Protect rules, which are hidden by default; within the visible rule set a `0`
+  means no recorded matches. Two uses: troubleshooting ("why can't this device
+  reach YouTube?" — read the rules governing it, then see which one last matched
+  and for which device), and cleanup (enabled rules with `hit_count: 0` are
+  candidates for removal).
   `last_hit` carries `device_mac`/`device_ip`, a single resolved `destination`
   with its `destination_kind` (`domain`/`host`/`ip`), `destination_ip` when known,
   `port`, `protocol`, and `app`/`category` when the box identified them.

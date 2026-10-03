@@ -713,12 +713,16 @@ async def test_rule_hits_are_normalized_with_one_destination(
 
 
 @pytest.mark.asyncio
-async def test_a_rule_without_hits_reports_no_hit_data() -> None:
-    """A rule the box has never matched carries neither field.
+async def test_a_rule_without_hits_reports_a_zero_count() -> None:
+    """A rule the box reports no count for reads as 0, not null.
 
-    Absent is "never matched", not "unknown", so the two are kept distinct: the
-    fields stay None rather than defaulting to a zero count, which a cleanup
-    report would otherwise read as a rule that fired.
+    The box writes an explicit `"0"` for some rules and omits the field for
+    others, so omission is not a distinct "unknown" state as far as a tally is
+    concerned. `hit_count` is therefore always a number, which keeps "never
+    fired" readable as a comparison instead of a null check.
+
+    `last_hit` stays null, because it describes one specific match rather than a
+    count and there is no match to describe.
     """
     async with ClientSession() as session:
         client = FirewallaApiClient(
@@ -754,7 +758,7 @@ async def test_a_rule_without_hits_reports_no_hit_data() -> None:
             snapshot = await client.async_get_runtime_snapshot()
 
     rule = snapshot.policy_rules[0]
-    assert rule.hit_count is None
+    assert rule.hit_count == 0
     assert rule.last_hit is None
 
 

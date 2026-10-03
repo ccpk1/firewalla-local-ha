@@ -301,11 +301,11 @@ class ListRulesTool(_FirewallaReadTool):
         "most recent single match, with the device and destination involved. Two "
         "uses: to troubleshoot connectivity, read the rules governing the device "
         "and see which one last matched it and what it was reaching for; to find "
-        "cleanup candidates, look for enabled rules carrying neither field. A "
-        "rule the box has never matched has **no** `hit_count` and **no** "
-        "`last_hit` — absent means never matched, not zero. The box keeps only "
-        "the last match per rule, not a history, so this is one observation and "
-        'cannot answer "everything this rule blocked".\n'
+        "cleanup candidates, look for enabled rules with a `hit_count` of 0. "
+        "`hit_count` is always a number; `last_hit` is null when there is no match "
+        "to describe. The box keeps only the last match per rule, not a history, "
+        'so this is one observation and cannot answer "everything this rule '
+        'blocked".\n'
         "\n"
         "Defaults to user-visible rules. The box also carries large numbers of "
         "product-owned DAP and family rules, plus rules owned by a Firewalla "

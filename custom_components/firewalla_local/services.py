@@ -790,8 +790,10 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
     a rule governs a group or a whole network.
 
     `hit_count` and `last_hit` report whether a rule ever fires and what it last
-    matched. A rule that has never matched carries neither, which is the signal
-    for cleanup and for troubleshooting "why is this device blocked?".
+    matched. `hit_count` is always a number: a rule the box reports no count for
+    is 0, which for the visible rule set means no recorded matches. `last_hit`
+    stays null when there is no match to describe, since it is a point-in-time
+    record rather than a tally.
     """
     return {
         "rule_id": rule.rule_id,

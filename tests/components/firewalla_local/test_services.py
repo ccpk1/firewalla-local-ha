@@ -3668,7 +3668,7 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
                     category="av",
                 ),
             ),
-            replace(_snapshot(rule_id="672").policy_rules[0], hit_count=None),
+            replace(_snapshot(rule_id="672").policy_rules[0], hit_count=0),
         ),
     )
 
@@ -3711,9 +3711,10 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
         "app": "youtube",
         "category": "av",
     }
-    # Absent stays absent: a cleanup report must not read "never matched" as a
-    # count of zero and conclude the rule fires.
-    assert never["hit_count"] is None
+    # A rule with no recorded matches reads as 0, not null, so "never fired" is a
+    # comparison rather than a null check. `last_hit` has nothing to describe and
+    # stays null.
+    assert never["hit_count"] == 0
     assert never["last_hit"] is None
 
 

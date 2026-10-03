@@ -2592,7 +2592,8 @@ class FirewallaApiClient:
                     auto_delete_when_expires=auto_delete_when_expires,
                     dnsmasq_only=dnsmasq_only,
                     category=category,
-                    hit_count=self._coerce_int(raw_rule.get(_RAW_RULE_HIT_COUNT_KEY)),
+                    hit_count=self._coerce_int(raw_rule.get(_RAW_RULE_HIT_COUNT_KEY))
+                    or 0,
                     last_hit=self._normalize_rule_hit(raw_rule),
                     raw_update_payload=dict(raw_rule),
                 )
