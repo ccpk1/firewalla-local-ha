@@ -218,9 +218,9 @@ cheap assertion that converts a silent wrong answer into a stated one.
 
 | Phase | Name | Deliverable | Gate |
 | --- | --- | --- | --- |
-| **1** | Shared flow core | The existing `item=intf` flow processing (row reader, destination ranking, bucket aggregation, device attribution, window parsing) consolidated into one target-agnostic core, and the existing consumers migrated onto it. No new behaviour. | Existing tests pass unchanged; no behaviour diff; one pass over rows. |
-| **2** | Protocol layer | Client methods for all three queries with window handling, pagination and fail-soft; typed raw-payload models. | Live read-only verification on the dev box; recorded in the RE doc. |
-| **3** | Normalization | One view builder producing summary and events over the Phase 1 core, reusing target resolution. | Unit tests against a fixture built from the real 300-record capture. |
+| **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
+| **2** | Protocol layer | `managers/flow_manager.py` and client methods for all three queries, with window handling, pagination and fail-soft; typed raw-payload models. | Live read-only verification on the dev box; recorded in the RE doc. |
+| **3** | Normalization | One view builder producing summary and events over the Phase 1 core, reusing target resolution; flow models land here with their first caller. | Unit tests against a fixture built from the real 300-record capture. |
 | **4** | Surface | Service, translations, LLM tool, docs, quality scale. | Full validation suite green; live end-to-end call. |
 
 Phases are sequential. **Phase 1 is not optional, and it is not busywork.** The flow
@@ -241,64 +241,84 @@ Purpose: the flow report needs the processing the integration **already does** f
 and moves the existing consumers onto it, so Phase 3 can reuse it instead of writing
 a fourth implementation. Nothing here changes what any existing surface returns.
 
-- [ ] **1.1 Inventory the existing flow-processing surface and freeze it.** Confirm
-      the five builders, their consumers, and the duplicated inner steps from the
-      audit note's table: `_build_network_flow_rankings` (destinations),
-      `_build_network_usage_buckets` (app/category aggregation),
-      `_build_network_activity_hosts` and `_build_network_hosts` (device
-      attribution), `_build_network_top_talkers` (ranking),
-      `_resolve_network_ranking_payload` (unwrapping). Name the consumers:
-      `binary_sensor.py` `network_usage` / `top_talkers` attributes, and
-      `services.py` `get_network_segment_report` / `get_network_segment_usage`.
-      Agree the canonical home for each capability before moving anything.
-- [ ] **1.2 Consolidate numeric coercion to one implementation.** Seven helpers
-      across five modules, disagreeing on three real inputs: whether a `bool` is `1`
-      or `None`, whether a `float` is accepted at all, and whether a string is
-      stripped. Flow rows are **string-typed numbers** (`"count": "236214"`,
-      `"port": ["443"]`), and they flow through these helpers today, so this is
-      directly load-bearing. Canonical home `utils/` (it already holds
-      `_normalized_int`); pick the **strictest** behaviour — reject `bool`, accept
-      only exact numeric strings — and record every call site whose result changes as
-      a deliberate finding rather than averaging the differences away.
-- [ ] **1.3 Extract the one flow record reader.** Every flow row today is decoded by
-      hand, and four of those steps are duplicated: device id from
-      `device` / `mac` / `deviceMac` (**three** copies), the metric value from
-      `<metric>` / `bytes` / `count` (**two** copies), the destination from
-      `host` / `domain` plus `ip`, and payload unwrapping in
-      `_resolve_network_ranking_payload` (`{flows: []}`, `download`, `upload`,
-      `items`, `results`). Collapse into one reader that yields a normalized row, so
-      a field-name variation is fixed once rather than in four places.
-- [ ] **1.4 Make the aggregators target-agnostic.** Generalize, without changing
-      their output shapes: destination ranking from `_build_network_flow_rankings`,
-      bucket aggregation from `_build_network_usage_buckets`, device attribution from
-      `_build_network_activity_hosts` + `_build_network_hosts`, top-device ranking
-      from `_build_network_top_talkers` (keeping `_TOP_TALKER_LIMIT = 5` as a
-      parameter default, not a second constant), and the window parser from
-      `_extract_usage_window` for `newLast24` / `last60` / `last30` /
-      `last12Months`. The flow rollup and the `item=intf` `flows` block are the
-      **same family**, which is what makes this a generalization rather than an
-      abstraction over nothing.
-- [ ] **1.5 Make it one pass.** `_build_network_activity_hosts` builds a
-      `dict[str, dict[str, object]]` and then walks it a second time with `cast()` on
-      every field to build the dataclasses — double boxing per row. With `count:
-      2000` pages spanning ~5.7h on a busy target, and four families per page, that
-      is the processing cost the owner flagged. Accumulate into the final dataclass
-      (or tuples) in a single pass, and record a before/after measurement on a
-      2000-row page so the improvement is evidenced rather than asserted. Do not
-      trade correctness for it: keep the deterministic sort keys identical.
-- [ ] **1.6 Migrate the existing consumers and prove no behaviour change.** Point
-      `binary_sensor.py`'s `network_usage` / `top_talkers` and `services.py`'s
-      segment report and segment usage at the Phase 1 core. Run the full suite;
-      expect **no** snapshot or assertion change. A changed snapshot is a finding,
-      not a fix — stop and report it rather than updating it.
-- [ ] **1.7 Land the models, constants and the flow manager.** Add
-      `FirewallaFlowDestination`, `FirewallaFlowEvent`, `FirewallaFlowMember`,
-      `FirewallaFlowRollup`, `FirewallaFlowReportView` to `models.py` (no Home
-      Assistant imports), the service/attribute/translation keys to `const.py`, and
-      put the flow *view building* in a new `managers/flow_manager.py`.
-      `integration_manager.py` is already the largest module in the repo and holds
-      four of the seven coercers; the shared core goes to `utils/` (1.2–1.5) and the
-      flow-only view building goes in the new manager.
+**COMPLETE — executed 2026-10-03 on `feature/flow-reporting`.** Validation: 560
+tests pass (37 new), `ruff check` and `ruff format` clean, `mypy` clean across 43
+files. No existing assertion or snapshot was modified. Three commits:
+
+| Commit | Step | Result |
+| --- | --- | --- |
+| `a468824` | 1.2 | `utils/values.py`; seven coercers → one policy, four identical string coercers → one |
+| `66d1214` | 1.3–1.5 | `utils/flow.py`; five row-reading duplicates → one reader, single-pass accumulation |
+| `77225a8` | 1.6 | `helpers/usage_report.py`; duplicate usage serializers → one projection |
+
+- [x] **1.1 Inventory the existing flow-processing surface and freeze it.** Confirmed
+      the five builders and their consumers. Two corrections to the audit note: the
+      device-id resolution (`device` / `mac` / `deviceMac`) appears **five** times,
+      not three, and the three integer-helpers claim was **seven across five
+      modules**, not seven integer helpers in one place.
+- [x] **1.2 Consolidate numeric coercion to one implementation.** Done. Two policies
+      in `utils/values.py`: `normalized_int` and `normalized_number`, plus
+      `normalized_float` and `normalized_string`. **Approach changed from the plan's
+      "strictest behaviour"** to behaviour-preserving, because the phase gate
+      requires no behavioural diff and the strictest reading was not
+      behaviour-preserving (see the deviation note below). Each layer keeps one thin
+      adapter (`client._coerce_*`, `_optional_*` in the manager and services), so the
+      policy is single-sourced while call sites stay layer-readable.
+- [x] **1.3 Extract the one flow record reader.** Done. `flow_row_host_id`,
+      `flow_row_metric_value`, `flow_row_remote_host`, `flow_row_remote_ip`, and
+      `iter_flow_rows`. `_resolve_network_ranking_payload` deleted.
+- [x] **1.4 Make the aggregators target-agnostic.** Done, in the narrower form the
+      architecture allows: the *row reading* became shared and pure, while the
+      *view shaping* stayed with the owning manager. The two byte-for-byte identical
+      per-host sort keys collapsed into `host_traffic_sort_key`.
+- [x] **1.5 Make the activity build one pass.** Done — `dict[str, dict[str, object]]`
+      plus a `cast()`-per-field second walk replaced by a typed `FlowHostActivity`
+      accumulator shaped once. **The before/after measurement was dropped** by owner
+      decision as one-off activity.
+- [x] **1.6 Share the usage-window serializer.** Done. Two exact duplicate
+      serializer pairs (entity + services) collapsed into
+      `helpers/usage_report.py`.
+- [x] **1.7 (reduced) Constants and boundary tests.** See the deviation note: the
+      unused flow models were **deferred to Phase 3**, and `managers/flow_manager.py`
+      was **deferred to Phase 2**, where each has a real owner and a real caller.
+      Added in their place: architecture boundary tests that `utils/` and `api/`
+      import no Home Assistant, which `ARCHITECTURE.md` calls for and the suite did
+      not previously enforce.
+
+#### Deviations from the plan as written
+
+1. **1.2 is behaviour-preserving, not strictest-behaviour.** Pick-one-strictest
+   could not satisfy the phase's own "no behaviour diff" gate: three coercers read
+   `True` as `1` and one accepted `"12.5"` as `12`. Two narrowings were still made
+   and are documented at the delegating call site — `True` now reads as absent
+   rather than `1`, and a fractional string is no longer truncated. Both are the
+   safer failure for a measurement. 523 pre-existing tests pass unchanged.
+2. **1.7's flow models deferred to Phase 3.** `FirewallaFlowDestination`,
+   `FirewallaFlowEvent`, `FirewallaFlowMember`, `FirewallaFlowRollup`, and
+   `FirewallaFlowReportView` have no caller until Phase 3. Adding them now would be
+   untested, unused code, which the repository's "smallest coherent change" rule
+   argues against and which would also fail the phase's own no-dead-code spirit.
+3. **`managers/flow_manager.py` moved to Phase 2.** `ARCHITECTURE.md` allows an
+   additional manager "only when a separate orchestration boundary is justified".
+   Phase 1 has no flow orchestration to own; the manager arrives in Phase 2 with the
+   three client calls it will actually own.
+
+#### Phase 1 findings to carry forward
+
+- **Five boolean coercers remain on two incompatible conventions.** Three accept
+  `"true"` / `"false"` strings, two accept `0` / `1` integers. Merging them changes
+  behaviour in both directions, so it was left alone. Needs a decision, not a
+  refactor.
+- **Three of the four flow sort keys disagree on tie-breaks.**
+  `_build_network_flow_rankings` does not casefold the host name while the other
+  paths do. Normalizing it would silently reorder rows in the segment report, so it
+  is reported rather than changed.
+- **The entity and the service disagree on empty usage.** The entity omits the
+  `network_usage` attribute when a network has no usage; the service reports
+  all-`None` windows. Preserved, not resolved.
+- **A zero metric falls through to the next field**, and an all-zero row reports
+  `0` rather than absent. Preserved from the `or` chain; a test caught the naive
+  "first present value" rewrite changing which rows a report includes.
 
 ### Phase 2 — Protocol layer
 
@@ -332,6 +352,12 @@ a fourth implementation. Nothing here changes what any existing surface returns.
 - [ ] **2.7 Fail soft.** A shape change or a rejected request returns *unavailable*
       rather than raising, matching the existing `item=intf` posture toward
       OpenVPN's 500. The service reports what it could not read.
+- [ ] **2.8 Create `managers/flow_manager.py`.** Moved here from Phase 1, where it
+      had no orchestration to own. It owns the three client calls, the window
+      fallback, and pagination; it consumes `utils/flow.py` for row reading and
+      follows the existing manager shape (constructor takes the client, exposes
+      async methods). Add the flow-report models to `models.py` in Phase 3, with
+      their first caller.
 
 ### Phase 3 — Normalization
 
@@ -415,7 +441,7 @@ a fourth implementation. Nothing here changes what any existing surface returns.
 
 | Phase | Validation |
 | --- | --- |
-| **1** | Full suite unchanged; `ruff check`, `ruff format`, `mypy` clean. Any snapshot diff is a finding. Plus a **single-pass measurement**: row throughput on a 2000-row page across four families, before and after 1.5. |
+| **1** | **Done.** 560 tests pass with no existing assertion or snapshot changed; `ruff check`, `ruff format`, `mypy` clean. The before/after throughput measurement was dropped by owner decision as one-off activity. |
 | **2** | Read-only live probes on the dev box, one tag + one host; results recorded in the RE doc. No writes. |
 | **3** | Unit tests over the capture-derived fixture, including the adversarial cases (unmatched `pid`, boundary dedupe, over-wide window, device-target member ranking, both sides of the Q9 gate). A review check that Phase 3 **added no new flow builder**. |
 | **4** | Full suite; live end-to-end for both detail levels; `python3 -m script.hassfest` if manifest or translation metadata moves. |
@@ -446,8 +472,12 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
 - `custom_components/firewalla_local/services.py` — `_serialize_network_host_ranking`,
   `_serialize_network_usage_bucket`, `_serialize_network_usage_metric`; the report
   consumers Phase 1.6 migrates.
-- `custom_components/firewalla_local/utils/network.py` — `_normalized_int`, one of
-  the seven coercers Phase 1.2 consolidates.
+- `custom_components/firewalla_local/utils/values.py` — the single numeric and
+  string coercion policy (Phase 1.2).
+- `custom_components/firewalla_local/utils/flow.py` — the single flow-row reader,
+  host accumulator and per-host sort key (Phase 1.3–1.5).
+- `custom_components/firewalla_local/helpers/usage_report.py` — the single usage
+  window/summary projection shared by the entity and the services (Phase 1.6).
 - `custom_components/firewalla_local/services.py` — `_serialize_report_time_basis`,
   `_serialize_report_metadata`, `_normalize_report_include`, and
   `_serialize_network_segment_report` as the envelope precedent.

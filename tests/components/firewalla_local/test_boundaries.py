@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 PACKAGE_ROOT = (
@@ -14,6 +15,45 @@ def _python_files() -> list[Path]:
     return [
         path for path in PACKAGE_ROOT.rglob("*.py") if "__pycache__" not in path.parts
     ]
+
+
+def _imported_modules(path: Path) -> set[str]:
+    """Return every module name imported by one file.
+
+    Parsed rather than matched textually so a module mentioned in a docstring or
+    a comment is not mistaken for a real import.
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported.add(node.module)
+    return imported
+
+
+def _offenders_with_homeassistant_import(layer: str) -> list[str]:
+    """Return files in one layer that import Home Assistant."""
+    return [
+        path.relative_to(PACKAGE_ROOT).as_posix()
+        for path in (PACKAGE_ROOT / layer).rglob("*.py")
+        if "__pycache__" not in path.parts
+        and any(
+            module == "homeassistant" or module.startswith("homeassistant.")
+            for module in _imported_modules(path)
+        )
+    ]
+
+
+def test_utils_layer_does_not_import_home_assistant() -> None:
+    """Test utils/ stays pure so it can be reused anywhere."""
+    assert _offenders_with_homeassistant_import("utils") == []
+
+
+def test_api_layer_does_not_import_home_assistant() -> None:
+    """Test the protocol boundary stays independent of Home Assistant."""
+    assert _offenders_with_homeassistant_import("api") == []
 
 
 def test_runtime_inventory_root_module_is_removed() -> None:
