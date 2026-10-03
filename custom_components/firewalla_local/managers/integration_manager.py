@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta, tzinfo
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final
 
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -70,6 +70,15 @@ from ..models import (
     FirewallaWanEventStatus,
     FirewallaWanInterface,
     FirewallaWanUsageSummary,
+)
+from ..utils.flow import (
+    FlowHostActivity,
+    flow_row_host_id,
+    flow_row_metric_value,
+    flow_row_remote_host,
+    flow_row_remote_ip,
+    host_traffic_sort_key,
+    iter_flow_rows,
 )
 from ..utils.network import build_network_inventory
 from ..utils.values import (
@@ -625,13 +634,11 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 )
                 for host in sorted(
                     hosts,
-                    key=lambda candidate: (
-                        -(
-                            (candidate.download_bytes or 0)
-                            + (candidate.upload_bytes or 0)
-                        ),
-                        candidate.host_name.casefold(),
-                        candidate.mac,
+                    key=lambda candidate: host_traffic_sort_key(
+                        download_bytes=candidate.download_bytes,
+                        upload_bytes=candidate.upload_bytes,
+                        host_name=candidate.host_name,
+                        host_id=candidate.mac,
                     ),
                 )[:_TOP_TALKER_LIMIT]
             )
@@ -968,16 +975,12 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             policy=self._normalized_dict(raw_payload.get("policy")),
             hosts=hosts,
             top_download_hosts=self._build_network_flow_rankings(
-                self._resolve_network_ranking_payload(
-                    flows.get("download") or raw_payload.get("download")
-                ),
+                flows.get("download") or raw_payload.get("download"),
                 host_lookup=host_lookup,
                 metric_key="download",
             ),
             top_upload_hosts=self._build_network_flow_rankings(
-                self._resolve_network_ranking_payload(
-                    flows.get("upload") or raw_payload.get("upload")
-                ),
+                flows.get("upload") or raw_payload.get("upload"),
                 host_lookup=host_lookup,
                 metric_key="upload",
             ),
@@ -1031,10 +1034,11 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         return tuple(
             sorted(
                 hosts,
-                key=lambda host: (
-                    -((host.download_bytes or 0) + (host.upload_bytes or 0)),
-                    host.host_name.casefold() if host.host_name else "",
-                    host.host_id,
+                key=lambda host: host_traffic_sort_key(
+                    download_bytes=host.download_bytes,
+                    upload_bytes=host.upload_bytes,
+                    host_name=host.host_name,
+                    host_id=host.host_id,
                 ),
             )
         )
@@ -1045,27 +1049,30 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         *,
         host_lookup: dict[str, FirewallaHostRuntime],
     ) -> tuple[FirewallaNetworkHostTotals, ...]:
-        """Build per-device activity rows from richer flow families."""
-        activity_by_host: dict[str, dict[str, object]] = {}
+        """Build per-host activity rows from the richer flow families.
+
+        Each host is described by three families -- ``appDetails`` for bytes,
+        ``recent`` for connection counts, and the ``download`` / ``upload``
+        rankings for peak bytes -- so it is accumulated once and shaped once,
+        rather than rebuilt as a frozen record on every row.
+        """
+        activity_by_host: dict[str, FlowHostActivity] = {}
 
         def ensure_activity_host(
             host_id: str,
             *,
             ip_address: str | None = None,
-        ) -> dict[str, object]:
-            host = host_lookup.get(host_id)
-            activity = activity_by_host.setdefault(
-                host_id,
-                {
-                    "host_name": host.host_name if host is not None else None,
-                    "ip_address": host.ip_address if host is not None else ip_address,
-                    "conn": 0,
-                    "download_bytes": 0,
-                    "upload_bytes": 0,
-                },
-            )
-            if activity["ip_address"] is None and ip_address is not None:
-                activity["ip_address"] = ip_address
+        ) -> FlowHostActivity:
+            activity = activity_by_host.get(host_id)
+            if activity is None:
+                host = host_lookup.get(host_id)
+                activity = FlowHostActivity(
+                    host_name=host.host_name if host is not None else None,
+                    ip_address=host.ip_address if host is not None else ip_address,
+                )
+                activity_by_host[host_id] = activity
+            elif activity.ip_address is None and ip_address is not None:
+                activity.ip_address = ip_address
             return activity
 
         raw_app_details = raw_flows.get("appDetails")
@@ -1073,87 +1080,58 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             for raw_rows in raw_app_details.values():
                 if not isinstance(raw_rows, list):
                     continue
-                for raw_row in raw_rows:
-                    if not isinstance(raw_row, Mapping):
-                        continue
-                    host_id = (
-                        self._optional_string(raw_row.get("device"))
-                        or self._optional_string(raw_row.get("mac"))
-                        or self._optional_string(raw_row.get("deviceMac"))
-                    )
+                for raw_row in iter_flow_rows(raw_rows):
+                    host_id = flow_row_host_id(raw_row)
                     if host_id is None:
                         continue
                     activity = ensure_activity_host(host_id)
-                    activity["download_bytes"] = cast(
-                        int, activity["download_bytes"]
-                    ) + (self._optional_int(raw_row.get("download")) or 0)
-                    activity["upload_bytes"] = cast(int, activity["upload_bytes"]) + (
+                    activity.download_bytes += (
+                        self._optional_int(raw_row.get("download")) or 0
+                    )
+                    activity.upload_bytes += (
                         self._optional_int(raw_row.get("upload")) or 0
                     )
 
         raw_recent = raw_flows.get("recent")
         if isinstance(raw_recent, list):
-            for raw_row in raw_recent:
-                if not isinstance(raw_row, Mapping):
-                    continue
-                host_id = (
-                    self._optional_string(raw_row.get("device"))
-                    or self._optional_string(raw_row.get("mac"))
-                    or self._optional_string(raw_row.get("deviceMac"))
-                )
+            for raw_row in iter_flow_rows(raw_recent):
+                host_id = flow_row_host_id(raw_row)
                 if host_id is None:
                     continue
                 activity = ensure_activity_host(
                     host_id,
                     ip_address=self._optional_string(raw_row.get("deviceIP")),
                 )
-                activity["conn"] = cast(int, activity["conn"]) + (
-                    self._optional_int(raw_row.get("count")) or 0
-                )
+                activity.conn += self._optional_int(raw_row.get("count")) or 0
 
         for metric_key in ("download", "upload"):
-            raw_rankings = self._resolve_network_ranking_payload(
-                raw_flows.get(metric_key)
-            )
-            if not isinstance(raw_rankings, list):
-                continue
-            for raw_row in raw_rankings:
-                if not isinstance(raw_row, Mapping):
-                    continue
-                host_id = (
-                    self._optional_string(raw_row.get("device"))
-                    or self._optional_string(raw_row.get("mac"))
-                    or self._optional_string(raw_row.get("deviceMac"))
-                )
+            for raw_row in iter_flow_rows(raw_flows.get(metric_key)):
+                host_id = flow_row_host_id(raw_row)
                 if host_id is None:
                     continue
                 activity = ensure_activity_host(
                     host_id,
                     ip_address=self._optional_string(raw_row.get("deviceIP")),
                 )
-                ranking_value = (
-                    self._optional_int(raw_row.get(metric_key))
-                    or self._optional_int(raw_row.get("bytes"))
-                    or self._optional_int(raw_row.get("count"))
-                    or 0
-                )
-                current_value = cast(int, activity[f"{metric_key}_bytes"])
-                if ranking_value > current_value:
-                    activity[f"{metric_key}_bytes"] = ranking_value
+                value = flow_row_metric_value(raw_row, metric_key=metric_key) or 0
+                if metric_key == "download":
+                    activity.download_bytes = max(activity.download_bytes, value)
+                else:
+                    activity.upload_bytes = max(activity.upload_bytes, value)
 
         hosts = [
             FirewallaNetworkHostTotals(
                 host_id=host_id,
-                host_name=cast(str | None, values["host_name"]),
-                ip_address=cast(str | None, values["ip_address"]),
-                conn=cast(int, values["conn"]),
-                download_bytes=cast(int, values["download_bytes"]),
-                upload_bytes=cast(int, values["upload_bytes"]),
+                host_name=activity.host_name,
+                ip_address=activity.ip_address,
+                conn=activity.conn,
+                download_bytes=activity.download_bytes,
+                upload_bytes=activity.upload_bytes,
             )
-            for host_id, values in activity_by_host.items()
-            if cast(int, values["conn"]) > 0
-            or cast(int, values["download_bytes"]) > 0
-            or cast(int, values["upload_bytes"]) > 0
+            for host_id, activity in activity_by_host.items()
+            if activity.conn > 0
+            or activity.download_bytes > 0
+            or activity.upload_bytes > 0
         ]
 
         return tuple(
@@ -1197,11 +1175,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 duration_value = raw_row.get("duration")
                 if isinstance(duration_value, (int, float)):
                     duration_seconds += float(duration_value)
-                if device_id := (
-                    self._optional_string(raw_row.get("device"))
-                    or self._optional_string(raw_row.get("mac"))
-                    or self._optional_string(raw_row.get("deviceMac"))
-                ):
+                if device_id := flow_row_host_id(raw_row):
                     active_devices.add(device_id)
                 timestamp = self._optional_int(raw_row.get("ts"))
                 if timestamp is not None and (
@@ -1243,27 +1217,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         metric_key: str,
     ) -> tuple[FirewallaNetworkHostRanking, ...]:
         """Build ranked traffic summaries from one raw flows ranking list."""
-        if not isinstance(raw_rankings, list):
-            return ()
-
         rankings: list[FirewallaNetworkHostRanking] = []
-        for raw_ranking in raw_rankings:
-            if not isinstance(raw_ranking, Mapping):
-                continue
-
-            host_id = (
-                self._optional_string(raw_ranking.get("device"))
-                or self._optional_string(raw_ranking.get("mac"))
-                or self._optional_string(raw_ranking.get("deviceMac"))
-            )
+        for raw_ranking in iter_flow_rows(raw_rankings):
+            host_id = flow_row_host_id(raw_ranking)
             if host_id is None:
                 continue
 
-            value = (
-                self._optional_int(raw_ranking.get(metric_key))
-                or self._optional_int(raw_ranking.get("bytes"))
-                or self._optional_int(raw_ranking.get("count"))
-            )
+            value = flow_row_metric_value(raw_ranking, metric_key=metric_key)
             if value is None:
                 continue
 
@@ -1277,11 +1237,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                         if host is not None
                         else self._optional_string(raw_ranking.get("deviceIP"))
                     ),
-                    remote_host=(
-                        self._optional_string(raw_ranking.get("host"))
-                        or self._optional_string(raw_ranking.get("domain"))
-                    ),
-                    remote_ip=self._optional_string(raw_ranking.get("ip")),
+                    remote_host=flow_row_remote_host(raw_ranking),
+                    remote_ip=flow_row_remote_ip(raw_ranking),
                     value=value,
                 )
             )
@@ -1296,23 +1253,6 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 ),
             )
         )
-
-    def _resolve_network_ranking_payload(self, value: object) -> object:
-        """Resolve one ranking payload to the list of ranking rows when possible."""
-        if isinstance(value, list):
-            return value
-        if not isinstance(value, Mapping):
-            return value
-
-        if isinstance(nested_flows := value.get("flows"), list):
-            return nested_flows
-
-        for key in ("download", "upload", "items", "results"):
-            nested_value = value.get(key)
-            if isinstance(nested_value, list):
-                return nested_value
-
-        return value
 
     def _build_network_metric_series(
         self,
