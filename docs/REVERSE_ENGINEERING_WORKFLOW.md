@@ -2655,10 +2655,12 @@ These items remain unconfirmed and should stay visible.
   removal the app deletes **every** rule the device owns — not only disabled ones,
   and not only `dap` — ahead of the tags write, in the same batch
 - whether `flows` / `auditLogs` / `tag` accept a `start`/`end` window wider than
-  the ~24 hours the app's UI offers — **answered: they do not. Retention is about
-  24 hours with a hard cutoff at ~26 hours, and asking for a window starting
-  before it returns a protocol error rather than partial data.** See *Limits:
-  retention, page size, and window validity*
+  the ~24 hours the app's UI offers — **answered: a wider window is accepted and
+  then silently served as 24 hours.** No error and no indication: 1h, 24h, 25h,
+  48h and 168h requests all returned identical data spanning exactly 24.00h. An
+  earlier revision of this entry claimed the box returns a protocol error, which
+  could not be reproduced; see *Limits: retention, page size, and window
+  validity*
 - ~~whether the `flows` pagination has a depth limit, or whether `nextTs` will walk
   back through retained history indefinitely~~
   — **answered: there is nothing to walk. `nextTs` only reaches back to the ~24h
