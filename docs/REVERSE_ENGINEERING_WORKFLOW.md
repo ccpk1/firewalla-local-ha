@@ -1683,8 +1683,11 @@ row's `device` MAC joins to the host inventory the same way.
   attempt, which established the request shapes
 - decoded with `.tmp/dump_all.py`, summarised by
   `.tmp/summarise_flow_capture.py`, record shapes via `.tmp/show_flow_records.py`
-- `.tmp/probe_fd_semantics.py` — the `fd` / direction probe, and
-  `.tmp/probe_blocked_query.py` — the `flows` versus `auditLogs` split
+- `.tmp/probe_fd_semantics.py` — the `fd` / direction probe,
+  `.tmp/probe_blocked_query.py` — the `flows` versus `auditLogs` split,
+  `.tmp/probe_window_default.py` — the served-window and default probe, and
+  `.tmp/probe_count_semantics.py` / `.tmp/probe_window_errors.py` — the count
+  ceiling, the negative-count behaviour, and the fact that nothing is rejected
 - `.artifacts/flow_reporting/20261003-134922/` and
   `.artifacts/block_reporting/20261003-132758/` — the accompanying pulls
 
@@ -1709,20 +1712,62 @@ So the event log spans roughly the last day and nothing older. **Do not promise 
 wider window**, and do not treat an empty result as "nothing happened" without
 also reporting the window that was searched.
 
-**`count` is caller-controlled, with no fixed cap observed.** `count: 300`
-returned 300 rows spanning ~0.3h; `count: 2000` returned 2000 rows spanning
-~5.7h. So a busier target fills a page faster — the page is a record count, not a
-time slice. Retrieving a full 24 hours on a busy target therefore needs
-`nextTs` pagination.
+**The box validates almost nothing, and silently clamps or ignores the rest.**
+This is the most important operational finding, and it inverts the earlier reading
+that the endpoints reject a bad window. Every one of these returned **code 200**:
 
-**`hourblock` accepts 1 through at least 168.** Every value tested (1, 2, 3, 6,
-12, 24, 48, 96, 168) succeeded. An earlier `hourblock: 168` failure was **not**
-the hourblock: it was caused by a `start` older than the retention horizon.
+| Request | Result |
+| --- | --- |
+| `start` after `end` | normal response |
+| `end` seven days in the future | normal response |
+| `start` 30 days back, or **1 year** back | normal response, same 24h of data |
+| `hourblock: 168`, `999` | normal response |
+| **`hourblock: 0`** | **200, and zero rows** |
+| `ts: -1` | 200, zero rows |
+| `ts: 0` | 200, treated as absent (falsy) and defaulted to now |
+| `count: -5` | **200, and ~6,950 rows** |
 
-**An out-of-range window returns a protocol error, not an empty result.** A
-`tag` rollup with a `start` 7 days back returned **code 500**. So a caller that
-asks for too much gets a hard failure rather than zero rows, and the client must
-clamp the window rather than forward whatever it is given.
+So there is **no rejection to catch and no fallback to write**. Validation has to
+happen client-side, because the box will accept nonsense and answer it with
+something plausible-looking.
+
+**The rollup serves 24 hours regardless of what is asked for.** A `tag` rollup
+requested with a 1h, 24h, 25h, 48h or 168h window returned an identical response
+covering exactly **24.00h** every time (verified from the row `begin`/`end`). The
+window is therefore **read from the response, never assumed from the request** — a
+caller who asks for 48 hours and reports 48 hours would be describing data they do
+not have.
+
+**`count` has a hard ceiling of 5,000 on a positive value.** Measured:
+
+| `count` | rows |
+| --- | --- |
+| 50 / 100 / 300 / 1000 / 2000 / 4999 / 5000 | exactly that many |
+| **5001 / 6000 / 10000 / 100000** | **5000** (silently capped) |
+
+An earlier revision of this document said "no fixed cap observed", having only
+tested 300 and 2000. The cap is real and it is the reason a full day needs
+pagination: one busy group had **6,956 records** in its 24-hour window, so a
+complete read costs two calls.
+
+**A non-positive `count` bypasses the ceiling and returns the whole retained
+window.** `count: -1` returned 6,956 records — the entire 24 hours — while
+`count: -100000` returned 0 and `count: 0` returned 100. A negative value is
+therefore **not** "no results" but "everything available", which is the reverse of
+the intuitive reading and an easy way to pull far more than intended from a busy
+box. A caller-supplied count must never be forwarded without validation.
+
+**Low `count` values are unreliable.** `count: 1` returned **0** rows while
+`count: 0` returned **100**, so neither means what it says. Treat anything at or
+below the low single digits as undefined rather than as a row limit.
+
+**A page costs little.** 2,000 records took **0.36s**, so a two-page day on a busy
+group is about a second. The ceiling is not a performance problem; it is a
+completeness problem.
+
+**`hourblock` accepts 1 through at least 168**, but **`0` silently returns
+nothing**. Validate it to be at least 1 rather than passing it through.
+
 
 ### The rollup is the app's report, in one response
 

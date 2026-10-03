@@ -255,6 +255,51 @@ A second probe settled direction. `fd` is `"in"` on all 199 `download` **and** a
 and different totals, and it is absent on `dnsB` entirely. **Direction must come
 from the family name** — recorded as Q4c so nothing depends on `fd`.
 
+### Resolved: the window and count contract (2026-10-03)
+
+A third and fourth probe replaced the plan's window design entirely, because the
+original assumed the box rejects a bad window and **it does not**. Every request
+below returned **code 200**:
+
+| Request | Result |
+| --- | --- |
+| `start` after `end` | normal response |
+| `end` seven days in the future | normal response |
+| `start` **1 year** back | normal response, same 24h of data |
+| `hourblock: 168`, `999` | normal response |
+| **`hourblock: 0`** | **200, zero rows** |
+| `ts: 0` | 200, treated as absent (falsy), defaulted to now |
+| `count: -5` | **200, ~6,950 rows** |
+
+Two consequences, both now in the plan:
+
+1. **No rejection path, so no fallback code.** Q2's "retry once at a known-good
+   window" was written for an error that cannot be produced. Removed. The earlier
+   RE doc claim of a code 500 on a 7-day start is **not reproducible** and has been
+   retracted.
+2. **The box clamps silently where it does not ignore.** The rollup served exactly
+   **24.00h** for 1h, 24h, 25h, 48h and 168h requests — identical data, no
+   indication. The served window must therefore be **read from the response**, or a
+   caller asking for 48 hours is told they got 48 hours.
+
+**`count` also turned out to have a hard ceiling and a dangerous floor.** An earlier
+reading of "no fixed cap observed" tested only 300 and 2000:
+
+| `count` | rows |
+| --- | --- |
+| 50 – 5000 | exactly that many |
+| 5001 – 100000 | **5000** (silently capped) |
+| **-1** | **6,956 — the entire retained window** |
+| 0 | 100 |
+| 1 | **0** |
+
+So a positive count is capped at 5,000, a **negative count returns everything**, and
+the low single digits are undefined. Since a busy group held 6,956 records in one
+day, the cap is why pagination is required rather than optional — and a
+caller-supplied count must never be forwarded unvalidated, because `-1` is the
+opposite of "nothing". Two constants now carry this:
+`DEFAULT_FLOW_REPORT_WINDOW_HOURS` and `MAX_FLOW_LOG_PAGE_SIZE`.
+
 ---
 
 ## 5. Traps
@@ -265,10 +310,14 @@ from the family name** — recorded as Q4c so nothing depends on `fd`.
 | **T2** | A second usage-window parser | Rollup reuses `newLast24`/`last60`/`last30`/`last12Months` | Phase 1.4 shares the extractor |
 | **T3** | A second device ranker | Near-identical sort keys already exist; `top_talkers` answers this | Phase 1.4/1.9: two shared keys, `5` as a parameter default, the three legitimate primary-key differences documented |
 | **T4** | Empty reported as "nothing happened" | Retention is a hard ~24h cutoff; an empty page is indistinguishable from a quiet target | Always return the window searched, the served window, and the box's own `count` |
+| **T4b** | A window silently clamped | The rollup served 24.00h for 1h, 24h, 25h, 48h and 168h requests with no error, so the request is not evidence of what was returned | Read the served span from the row `begin`/`end`; warn when it is shorter than requested — Phase 2.4 |
+| **T4c** | A rejection path written for an error that cannot happen | The box rejects nothing: `start` after `end`, a 1-year-old `start`, `hourblock: 999` and a negative `count` all return 200 | No fallback code; validate client-side instead — Q2, Phase 2.4 |
+| **T4d** | A non-positive `count` returning the whole log | `count: -1` returned 6,956 rows (the entire 24h window) and `count: 0` returned 100, so a negative is the opposite of "nothing" | Validate `count` to a positive bounded integer before every call — Phase 2.5 |
+| **T4e** | Assuming the requested count is the returned count | A positive count is silently capped at 5,000, and `count: 1` returned 0 rows | Report rows returned against the box's own `count`; enforce the minimum and the cap — Phase 2.5 |
 | **T5** | Duplicate rows across a page boundary | `ts` bounds are inclusive, so adjacent pages overlap | Dedupe on `(ts, device, pid, domain or ip, port)` — Phase 2.5 |
 | **T6** | A bespoke response envelope | Four report services share an envelope; a fifth shape fragments the surface | Phase 3.6 reuses the existing serializers |
-| **T7** | Conflating `hourblock` with retention | An earlier probe blamed `hourblock: 168` for a failure actually caused by an out-of-range `start` | Documented explicitly in 2.4; every `hourblock` 1–168 works |
-| **T8** | Unbounded service response | 300 rows per 0.3h on a busy group; a full day is thousands of identity-bearing rows | Summary default, bounded page default, explicit opt-in for all-available (Q1) |
+| **T7** | Conflating `hourblock` with retention | `hourblock` is granularity, not the window; every value 1–168 works, and **`0` silently returns nothing** | Documented in 2.4, with a clamp to at least 1 |
+| **T8** | Unbounded service response | 6,956 records in one group's 24h window; a full day is thousands of identity-bearing rows | Summary default, bounded page default, explicit opt-in for all-available (Q1) |
 | **T9** | A silent filter no-op | `audit: true` does not filter to blocks, it adds them | Phase 2 names one method per query; Phase 3 discriminates on `ltype`; `exclude` stays internal (Q4) |
 | **T10** | Implying a record set is complete | Blocked coverage is uneven: `domain` 265/300 but `category` 52 and `app` 10; regular records are near-complete on `host`/`ip` but `category` is 111/300 | Phase 3.5 must not summarize absent fields as zero |
 | **T11** | `pid` → rule join dropping rows | Rule ids are not durable across delete/re-create (issue #53) | Q5: keep the row, null the name, count it |

@@ -28,10 +28,12 @@ rollup, the flow log and the block log are filters and resolution levels over th
 same flow data, and splitting them would duplicate target resolution, window
 handling and serialization three ways.
 
-The single hardest constraint is that **the box's limits are not ours to encode**.
-The measured retention is ~24 hours and an out-of-range window is a protocol error
-(code 500), but Firewalla can change both tomorrow. So retention is **documented and
-reported, never hard-coded** (§3, Q2).
+The single hardest constraint is that **the box validates almost nothing, and
+clamps or ignores what it does not like**. A 168-hour window is served as 24 hours
+with no error; a 1-year-old `start`, a `start` after `end` and a negative `count`
+are all accepted. So the box's limits are **documented and reported, never encoded**,
+and every constraint must be enforced on our side because nothing will be rejected
+for us (§3, Q1 and Q2).
 
 The second, and the one that shapes Phase 1, is that **this data family is not new
 to the integration**. The `item=intf` payload already carries the same `flows`
@@ -58,8 +60,12 @@ new consumer exists that could tilt toward a parallel path.
 - Target resolution that accepts **a device (MAC or name) or a group/user (name or
   id)** and resolves to `type=host` / `type=tag` internally, reusing the existing
   resolver and its ambiguity handling.
-- Window handling: a 24-hour default, caller-overridable, with **no artificial cap**
-  and a graceful, reported fallback when the box rejects a window.
+- Window handling: a `DEFAULT_FLOW_REPORT_WINDOW_HOURS` (24) default, caller
+  overridable, with **no artificial cap** — the window actually served is read back
+  from the response and reported, because the box silently shortens a wider request
+  instead of rejecting it.
+- Validation on our side, since the box performs none: a bounded positive `count`,
+  `hourblock` clamped to at least 1, and no falsy `ts`.
 - Pagination: a bounded default page, an explicit **all-available** mode, and an
   exposed cursor.
 - `detail: summary` — aggregate totals, top destinations, top flows, blocked
@@ -96,30 +102,52 @@ open; if a question is not listed here it is already answered by capture evidenc
 
 ### Q1. Does the response ever auto-paginate to exhaustion?
 
-**Why it matters.** `count` is a record count, not a time slice: 300 rows spanned
-0.3h on a busy group, so a full day is a *lot* of rows and a lot of round trips
-against the box. Auto-paging is the difference between one request and dozens.
+**Why it matters.** One busy group held **6,956 records** in its 24-hour window and
+the box caps a positive `count` at **5,000**, so a complete read is at least two
+calls. Auto-paging is the difference between one request and dozens.
 
 **Recommendation.** Default to **one page**, expose the cursor, promise nothing
 about completeness. Provide an explicit all-available mode that walks `nextTs` to
 exhaustion. The **only** stop conditions are a wall-clock deadline and a
-repeated-cursor loop check — never a row cap. When the deadline stops the walk,
+non-advancing-cursor loop check — never a row cap. When the deadline stops the walk,
 return `truncated: true` plus the cursor, so a partial result is never mistaken for
 a complete one.
 
+Pages are cheap, which makes this easy to justify: 2,000 records took **0.36s**, so
+a two-page day is about a second. The 5,000 cap is a completeness problem, not a
+performance one.
+
 ### Q2. Do we hard-code the ~24-hour retention?
 
-**Why it matters.** The measurement (24h → 175 rows, 26h → 0, out-of-range → code
-500) is a snapshot of box behaviour. Encoding it as a constant means we silently
-truncate user data the day Firewalla raises the limit.
+**Why it matters.** The measurement (24h → 175 rows, 26h → 0) is a snapshot of box
+behaviour. Encoding it as a constant means we silently truncate user data the day
+Firewalla raises the limit.
 
-**Recommendation.** **Do not encode it.** Default the window to 24 hours as a
-*default*, then attempt whatever the caller asked for. On a window rejection, retry
-once at a window known to work, return the window **actually served**, and raise a
-`window_exceeded` warning naming the requested window. Put the observed limit in
-docs, in the service field description, and in the tool description — nowhere in
-logic. This satisfies "no artificial caps" while still never handing a user a bare
-protocol error.
+**Recommendation (revised — the original design assumed a rejection path that does
+not exist).** The default window becomes the constant
+`DEFAULT_FLOW_REPORT_WINDOW_HOURS = 24`, mirroring the box's own default, so it can
+be changed in one place. **Do not encode a maximum, and do not write a fallback
+path**: a probe found the box **rejects nothing** — a 1-year-old `start`, `start`
+after `end`, a future `end`, `hourblock: 999` and a negative `count` all return code
+200. There is no rejection to catch, and a retry would be dead code.
+
+**The real risk is the opposite of truncation-by-error: the box silently clamps.**
+The rollup served exactly **24.00h** for requests of 1h, 24h, 25h, 48h *and* 168h —
+identical responses, no error, no indication. So the window must be **read from the
+response** (row `begin`/`end`) and reported as the window actually served. A caller
+asking for 48 hours and being told 48 hours would be describing data they do not
+have, which is the same class of defect as the `host_count` bug the segment report
+already guards against.
+
+**Because the box validates nothing, we must.** Client-side validation is required
+rather than defensive:
+- a non-positive `count` **returns the whole retained window** (~6,956 rows), the
+  reverse of the intuitive reading, so it is never forwarded unvalidated
+- `hourblock: 0` returns zero rows silently, so it is clamped to at least 1
+- a falsy `ts` is treated as absent by the box, so `0` is never sent
+- `count` at or below the low single digits is undefined (`count: 1` returned 0
+  rows while `count: 0` returned 100), so a sane minimum applies
+
 
 ### Q3. Is `hosts` absent, or an empty list, on a device target?
 
@@ -416,24 +444,28 @@ files. No existing assertion or snapshot was modified.
       2.2 plus optional `category` and `ets`. **This is the blocked-only query**
       (Q4b) and the response key is `logs`, not `flows`. Keep `exclude` internal
       (Q4); `category` is confirmed, so expose it.
-- [ ] **2.4 Implement window resolution with no encoded cap.** Default 24h; attempt
-      the requested window; on rejection retry once at a known-good window; return
-      the window actually served plus a `window_exceeded` indicator. Record the
-      observed ~24h limit as a docstring fact, not a constant. **Do not conflate
-      `hourblock` (granularity) with retention** — an earlier probe misattributed a
-      failure to `hourblock` when the cause was an out-of-range `start`. Note that
-      Firewalla's published API documents the same 24-hour default for a query with
-      no time qualifier, so this is intended behaviour rather than a local quirk.
+- [ ] **2.4 Resolve the window from a constant, and report what was served.** Default
+      `DEFAULT_FLOW_REPORT_WINDOW_HOURS` (24, mirroring the box's own default) so it
+      changes in one place. **Send it and read back what the box actually covered**
+      from the row `begin`/`end`, then report *that* as the served window, with a
+      `window_clamped` warning when the served span is shorter than the requested
+      one. The box rejects nothing and clamps silently — a 168h request was served
+      24.00h with code 200 — so there is **no rejection to catch and no fallback to
+      write**. Do **not** conflate `hourblock` (granularity) with the window, and
+      clamp `hourblock` to at least 1 because `0` silently returns nothing.
 - [ ] **2.5 Implement pagination with a deadline and a loop check.** Walk `nextTs`
-      only in all-available mode. Stop on deadline, on a repeated `nextTs`, or on an
-      empty page. **Dedupe across the page boundary** on a stable tuple
+      only in all-available mode. Stop on deadline, on a **non-advancing** cursor, or
+      on an empty page. **Validate `count` before every call**: it must be a positive
+      integer at or above a sane minimum and at or below `MAX_FLOW_LOG_PAGE_SIZE`
+      (5000). The box caps a positive value silently, **and a non-positive value
+      bypasses the cap and returns the entire retained window** (~6,956 rows
+      measured), so an unvalidated caller value is a way to pull the whole log.
+      **Dedupe across the page boundary** on a stable tuple
       (`ts`, `device`, `pid`, `domain` or `ip`, `port`) because `ts` bounds are
-      inclusive and adjacent pages overlap. Expose the cursor as **`next_cursor`**,
-      carrying `ts` verbatim and documented as **opaque**, so the cursor's meaning can
-      change later without a breaking change. **Record how many rows were dropped as
-      duplicates** (`records_dropped_as_duplicates`): if two genuinely distinct
-      records share all five key parts, the dedupe under-counts, and that must be
-      visible rather than silent.
+      inclusive and adjacent pages overlap, and **record how many rows were dropped
+      as duplicates** (`records_dropped_as_duplicates`) so an under-count is visible.
+      Expose the cursor as **`next_cursor`**, carrying `ts` verbatim and documented
+      as **opaque**, so its meaning can change later without a breaking change.
 - [ ] **2.6 Verify read-only against the dev box** for one tag and one host: window
       default and override, one page, all-available on a small target, a
       deliberately over-wide window (expect the fallback and warning, not a raise),
@@ -616,6 +648,9 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
 - `custom_components/firewalla_local/services.py` — `_serialize_network_host_ranking`,
   `_serialize_network_usage_bucket`, `_serialize_network_usage_metric`; the report
   serializers the shared usage projection replaced (Phase 1.6).
+- `custom_components/firewalla_local/const.py` — `DEFAULT_FLOW_REPORT_WINDOW_HOURS`
+  and `MAX_FLOW_LOG_PAGE_SIZE`, the two constants the window and page design rests
+  on.
 - `custom_components/firewalla_local/utils/values.py` — the single numeric, boolean
   and string coercion policy (Phase 1.2 and 1.8).
 - `custom_components/firewalla_local/utils/flow.py` — the single flow-row reader,
