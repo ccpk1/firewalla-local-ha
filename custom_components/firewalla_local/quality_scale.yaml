@@ -15,7 +15,9 @@ rules:
     comment: Config-flow coverage now includes user cannot-connect handling, reauth failure and wrong-account paths, reconfigure validation, and options-flow drift behavior with all auth tests kept internal-only and fully mocked.
   config-flow: done
   dependency-transparency: done
-  docs-actions: done
+  docs-actions:
+    status: done
+    comment: USER_GUIDE names every service in the catalog and documents the report services, including the flow report's window, detail levels, and what the device_detail include adds and why it is off by default.
   docs-high-level-description: done
   docs-installation-instructions:
     status: done
@@ -42,6 +44,11 @@ rules:
       Runtime inventory, rule deletion, and alarm services validate entry scope,
       alarm/rule selectors, mute scope, and destructive confirmations with
       specific service errors.
+      The report services validate their scope selectors as well. A device, group,
+      or user that matches nothing raises flow_report_scope_not_found, and an
+      ambiguous one raises flow_report_scope_ambiguous, each naming the scope kind
+      and the selector the caller supplied. A report the box would not return
+      raises flow_report_failed rather than returning a partial envelope.
       Mutating services and runtime inventory are administrator-only while
       automation calls without a user context remain supported.
   config-entry-unloading: done

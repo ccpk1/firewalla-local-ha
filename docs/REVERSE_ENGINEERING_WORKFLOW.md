@@ -1462,6 +1462,38 @@ inside a group changes `type` from `tag` to `host` and `target` from the tag id 
 the device MAC. The same three queries serve both levels, so a group report and a
 device report are the same code path with a different target.
 
+### A user scope is its affiliated tag, not the user id
+
+A user carries **two** ids in the init payload: `userTags[].uid` (the user) and
+`userTags[].affiliatedTag` (the plain tag that backs it). The `appTimeUsage` query
+accepts either — measured, **both ids returned byte-identical 19,821-byte
+payloads** for the same user. The flow queries do **not**.
+
+Measured on all 10 users, `type: "tag"`, 24h window:
+
+| User | `uid` rows | `affiliatedTag` rows | |
+| --- | --- | --- | --- |
+| `KADENS_DEVICES` | **0** | 578 | uid returns nothing |
+| `CHADS_DEVICES` | **0** | 461 | uid returns nothing |
+| `CARENS_DEVICES` | **0** | 430 | uid returns nothing |
+| `SHARED` | **0** | 398 | uid returns nothing |
+| `KADENS_PHONE` | **0** | 398 | uid returns nothing |
+| `PAYTONS_PHONE` | **0** | 404 | uid returns nothing |
+| `CHADS_PHONE` | **0** | 398 | uid returns nothing |
+| `CARENS_PHONE` | **0** | 401 | uid returns nothing |
+| `PAYTONS_DEVICES` | 0 | 0 | idle — not a counterexample |
+| `SHARED_GAMING` | 0 | 0 | idle — not a counterexample |
+
+So 8 of 10 users have traffic that the user id cannot reach and the affiliated tag
+can, in the same 24 hours, with **no error** from the box either way. The two
+zero/zero rows are idle targets, which is why the comparison is against a
+non-zero known-good tag rather than against the uid alone.
+
+**A user id is never a valid flow target.** Resolving a user scope to its
+`uid` — which is what the `appTimeUsage` path does and what looks correct from the
+init payload — returns a populated-looking empty report. This is the same failure
+shape as the `audit` reading above: accepted, answered, and wrong.
+
 ### Blocked records and regular flows are different shapes
 
 The two record families share an envelope and almost nothing else. `ltype` is the
@@ -2880,10 +2912,17 @@ These items remain unconfirmed and should stay visible.
 - what `fd` on a flow row means, given it is constant `"in"` on regular flows and
   both byte families, and absent on `dnsB`. **Not blocking**: direction is taken
   from the family name instead, so nothing depends on the answer
-- whether a `host`-level `flows` response is genuinely device-scoped. A rollup
+- ~~whether a `host`-level `flows` response is genuinely device-scoped. A rollup
   checked at both levels returns the same rows and an empty `hosts` block on the
   `host` request, which suggests a `host` response is filtered by `device` rather
-  than scoped by the query
+  than scoped by the query~~
+  — **answered: it is filtered by device.** Measured across five hosts, every
+  rollup row carried the target's own device id and **zero** rows carried any
+  other device — `devices_other_than_target=0` for all five. So a `host` response
+  is genuinely scoped, and the earlier observation that it repeats a tag's rows
+  was the special case of a tag with a single active member rather than a general
+  behaviour. The `hosts` block is empty on a `host` request because a device has
+  no members to rank, not because the scope leaked.
 
 ### Answered: the two boolean encodings, and `useBf`
 

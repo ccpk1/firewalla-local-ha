@@ -979,6 +979,70 @@ one device, group, or user.
 - supports `sections`, `include=intervals`, `detail=summary`, and
   `detail=standard`
 
+#### Get flow report
+
+Use `firewalla_local.get_flow_report` to answer *"what did this device or group
+actually do, and what was blocked?"* — a question neither of the other report
+services can answer, because one is scoped to a network and the other measures
+time rather than traffic.
+
+- set `scope_kind` to `device`, `group`, or `user`, and `scope_target` to a MAC,
+  id, or name for a device, or a name or id for a group or user
+- a **user** scope follows the user's device group, not the user id on its own —
+  the box keys flow data by the affiliated tag, so ask for a user by name and the
+  service resolves it
+- `window_hours` defaults to 24
+
+**What the window really means.** The box keeps roughly **24 hours** of flow data
+and serves that much for a wider request, silently and with no error. So the
+report always says what it actually covered rather than what you asked for:
+
+- `summary.window.requested_hours` is what you asked for
+- `summary.window.served_hours` is what you got
+- `summary.window.is_clamped` is `true` when the two differ
+
+Report the *served* span, not the requested one. This is a recent-activity view,
+**not a history**, and an empty result means "nothing in the window that was
+searched" — which is why the window is always in the response.
+
+**What you get by default.** `detail: summary` (the default) is one request and
+carries:
+
+- `sections.totals` — download, upload, LAN-to-LAN bytes, block counts, and
+  connections, each in its own field because the box overloads `count` per family
+  and the units are not interchangeable
+- `sections.top_download` / `sections.top_upload` — the destinations with the most
+  traffic in each direction, ranked separately
+- `sections.blocked` — blocked destinations, as block **counts** rather than bytes,
+  with the direction only where the family carries one
+- `sections.local_peers` — LAN peers, counted in connections
+- `metadata.applied.device_detail` — whether per-device detail is included
+
+`detail: records` adds the blocked and regular flow records. That is several
+thousand rows on a busy target, so it is opt-in and paginated:
+
+- `record_count` sets the page (default 300, ceiling 5000)
+- `fetch_all_records: true` walks the cursor to the end instead of taking one page;
+  a walk that hits its deadline sets `truncated` and returns a cursor, so a partial
+  answer is never mistaken for a complete one
+- each record names the rule that blocked it; a block whose rule no longer exists
+  keeps its row with no rule name and is counted in `unattributed_blocks` — an
+  unattributable block is the interesting one, not one to drop
+
+**What is withheld, and why.** A group or user report can name every device in the
+group. That is not in an ordinary report by default, so per-device attribution sits
+behind an explicit ask:
+
+- `include: ["device_detail"]` adds the member ranking, each destination's device
+  ids, and each record's device id and address
+- destination hostnames and addresses are always returned — they are the report's
+  subject, not identity
+- a **device** scope needs no flag, because it names nothing beyond the device you
+  asked for; `metadata.applied.device_detail` is `true` either way
+- this is a **default, not a permission**. The service is non-admin, so anything it
+  can return, a caller can ask for in one request; the flag keeps the household's
+  device inventory out of an ordinary report rather than restricting access
+
 #### Get WAN data usage
 
 Use `firewalla_local.get_wan_data_usage` to read one normalized WAN data-usage
