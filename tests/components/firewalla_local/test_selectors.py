@@ -11,6 +11,7 @@ import pytest
 from custom_components.firewalla_local.utils.mac import normalize_mac_address
 from custom_components.firewalla_local.utils.selectors import (
     SelectorMatch,
+    match_names,
     match_selector,
 )
 
@@ -165,3 +166,26 @@ def test_the_outcome_defaults_to_nothing_matched() -> None:
     assert match.resolved is None
     assert match.is_missing is True
     assert match.is_ambiguous is False
+
+
+def test_a_lazy_candidate_sequence_is_still_searched_by_name() -> None:
+    """Test a generator of candidates is not exhausted by the identifier pass.
+
+    The identifier check and the name match are two traversals. A caller passing a
+    generator would otherwise have it consumed by the first, silently matching
+    nothing -- which is exactly what happened when this helper was split, and it
+    took four service tests down with it.
+    """
+    lazy = ((mac, names) for mac, names in _HOSTS)
+
+    match = match_selector("Living Room TV", lazy)
+
+    assert match.resolved == "4C:1D:96:E3:3A:96"
+
+
+def test_match_names_answers_every_match_for_a_lazy_sequence() -> None:
+    """Test the name-only matcher materialises nothing it does not need to."""
+    lazy = ((mac, names) for mac, names in _HOSTS)
+
+    assert match_names("kid-ipad", lazy) == ("00:AA:BB:CC:DD:26",)
+    assert match_names("nothing here", lazy) == ()

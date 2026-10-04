@@ -84,34 +84,54 @@ def match_selector(
 ) -> SelectorMatch:
     """Match one selector against ``(identifier, names)`` pairs.
 
-    The identifier is compared before any name, which is the order the three
-    existing resolvers use: an identifier is assigned by the box and a name is
-    typed by a human, so an identifier hit is decisive and must not be treated as
-    one of several candidates.
+    The identifier is tried before any name, which is the order the three existing
+    resolvers use: an identifier is assigned by the box and a name is typed by a
+    human, so an identifier hit is decisive and must not be treated as one of
+    several candidates.
 
     ``normalize_identifier`` exists because callers do not agree on identifier
     equality. A host is looked up by MAC and the box's MACs are matched
     case-insensitively, while a group id is compared verbatim. Passing the
     caller's own normalizer keeps that behaviour rather than flattening it.
 
-    Blank entries in ``names`` are ignored, so a caller can pass a record's full
-    set of name fields without filtering the unset ones first.
+    A caller that resolves its identifiers separately -- because a selector has a
+    dedicated id parameter and a dedicated name parameter, as the host and
+    membership resolvers do -- should use :func:`match_names` instead, or it would
+    gain an identifier path its contract does not have.
     """
+    # Materialised before the first pass: the identifier check and the name match
+    # are two traversals, and a caller passing a generator would otherwise have it
+    # exhausted by the first, silently matching nothing.
+    materialised = tuple(candidates)
+
     wanted = selector
     if normalize_identifier is not None:
         wanted = normalize_identifier(selector) or selector
 
-    folded = selector.casefold()
-    name_matches: list[str] = []
-
-    for identifier, names in candidates:
+    for identifier, _names in materialised:
         if identifier == wanted:
             return SelectorMatch(exact=identifier)
+
+    return SelectorMatch(name_matches=match_names(selector, materialised))
+
+
+def match_names(
+    selector: str,
+    candidates: Iterable[tuple[str, Sequence[str | None]]],
+) -> tuple[str, ...]:
+    """Return the identifiers whose names match ``selector``, case-insensitively.
+
+    A name is typed by a human, so the comparison is case-folded and a stored name
+    is normalized first. The selector is compared as given, which is what the
+    existing resolvers did.
+    """
+    folded = selector.casefold()
+    return tuple(
+        identifier
+        for identifier, names in candidates
         if any(
             (name := normalized_string(candidate)) is not None
             and name.casefold() == folded
             for candidate in names
-        ):
-            name_matches.append(identifier)
-
-    return SelectorMatch(name_matches=tuple(name_matches))
+        )
+    )

@@ -269,7 +269,7 @@ from .models import (
 from .utils.duration import parse_duration_to_seconds
 from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
-from .utils.selectors import SelectorMatch, match_selector
+from .utils.selectors import SelectorMatch, match_names, match_selector
 from .utils.values import normalized_bool, normalized_int, normalized_string
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
@@ -2074,25 +2074,22 @@ def _resolve_requested_host(
 
     if host_name is not None:
         choices = host_manager.get_watched_device_choices()
-        host_name_folded = host_name.casefold()
-        matches = [
-            host.mac
-            for host in host_manager.get_hosts()
-            if host.host_name.casefold() == host_name_folded
-            or (
-                host.dns_hostname is not None
-                and host.dns_hostname.casefold() == host_name_folded
-            )
-            or (
-                host.dhcp_name is not None
-                and host.dhcp_name.casefold() == host_name_folded
-            )
-            or (
-                host.dns_fqdn is not None
-                and host.dns_fqdn.casefold() == host_name_folded
-            )
-            or choices.get(host.mac, "").casefold() == host_name_folded
-        ]
+        matches = match_names(
+            host_name,
+            (
+                (
+                    host.mac,
+                    (
+                        host.host_name,
+                        host.dns_hostname,
+                        host.dhcp_name,
+                        host.dns_fqdn,
+                        choices.get(host.mac),
+                    ),
+                )
+                for host in host_manager.get_hosts()
+            ),
+        )
         if (
             len(matches) == 1
             and (host := host_manager.get_host(matches[0])) is not None
@@ -2359,12 +2356,14 @@ def _resolve_membership_target(
         if exact is not None:
             return exact
     elif wanted_name is not None:
-        wanted_name_folded = wanted_name.casefold()
-        matches = [
-            group for group in candidates if group.name.casefold() == wanted_name_folded
-        ]
+        matches = list(
+            match_names(
+                wanted_name, ((group.group_id, (group.name,)) for group in candidates)
+            )
+        )
+        by_id = {group.group_id: group for group in candidates}
         if len(matches) == 1:
-            return matches[0]
+            return by_id[matches[0]]
         if len(matches) > 1:
             raise _service_validation_error(
                 translation_key=(
@@ -2374,7 +2373,7 @@ def _resolve_membership_target(
                 ),
                 translation_placeholders={
                     TRANS_PLACEHOLDER_MEMBERSHIP_MATCHES: ", ".join(
-                        f"{group.name} [{group.group_id}]" for group in matches
+                        f"{by_id[group_id].name} [{group_id}]" for group_id in matches
                     ),
                     TRANS_PLACEHOLDER_MEMBERSHIP_TARGET: wanted_name,
                 },
