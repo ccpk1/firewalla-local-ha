@@ -708,7 +708,7 @@ async def test_rule_hits_are_normalized_with_one_destination(
     assert rule.last_hit is not None
     assert rule.last_hit.destination == expected_destination
     assert rule.last_hit.destination_kind == expected_kind
-    assert rule.last_hit.device_mac == raw_flow["device"]
+    assert rule.last_hit.device_id == raw_flow["device"]
     assert rule.last_hit.timestamp == raw_flow["ts"]
 
 

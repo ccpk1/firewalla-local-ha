@@ -402,9 +402,12 @@ Reads that tell you what exists — the first step before any control action.
   reach YouTube?" — read the rules governing it, then see which one last matched
   and for which device), and cleanup (enabled rules with `hit_count: 0` are
   candidates for removal).
-  `last_hit` carries `device_mac`/`device_ip`, a single resolved `destination`
+  `last_hit` carries `device_id`/`device_ip`, a single resolved `destination`
   with its `destination_kind` (`domain`/`host`/`ip`), `destination_ip` when known,
   `port`, `protocol`, and `app`/`category` when the box identified them.
+  `device_id` is a Firewalla device id, which is **not always a MAC**: a VPN peer
+  carries a `wg_peer:`/`awg_peer:` prefix and an interface an `if:` prefix, and an
+  `if:` device may not resolve to any host.
 - **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters;
   `applies_to` takes a host's `group_name`);
   `include_purpose` (`['dap']`, `['family']`) and `include_system_managed` (bool) to

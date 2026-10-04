@@ -443,7 +443,7 @@ flow report first would build on the 10-field subset and require redoing both.
 
 | # | Change | Basis | Cost |
 | --- | --- | --- | --- |
-| R1 | Rename `device_mac` → `device_id` in the hit model and attributes | local (3/48 non-MAC) | small |
+| R1 | ~~Rename `device_mac` → `device_id`~~ **DONE 2026-10-04** | local (3/48 non-MAC) | done |
 | R2 | Replace `FirewallaRuleHit` with the shared flow-record model; keep `build_rule_hit_attributes` as the attribute projector | local (48 records, full shape) | small–medium |
 | R3 | Surface the recovered `download` / `upload` / `duration` / `count` / `ltype` | local | small |
 | R4 | **Do not validate `category`**; keep prefix-based target-list handling and pass unknown values through | local (open set) | small |
@@ -674,10 +674,10 @@ files. No existing assertion or snapshot was modified.
       formatting. **Full suite must pass with no changed expectations**, since this
       touches two shipped services.
 - [ ] **3.1c Fold in the Q14 rework before building on top of it.** In order:
-      **R1** rename `device_mac` → `device_id` in the hit model and attributes (the
-      field holds a device id; 3 of 48 live values are `wg_peer:` / `awg_peer:` /
-      `if:`, and an `if:` device has no host entry, so the join must tolerate an
-      unresolvable id); **R2** replace `FirewallaRuleHit` with the shared flow-record
+      **R1  DONE 2026-10-04** — `device_mac` renamed to `device_id` in the hit model,
+      the attribute keys and the service payload, with the model docstring recording
+      why (3 of 48 live values are prefixed). The remaining items: **R2** replace
+      `FirewallaRuleHit` with the shared flow-record
       model and keep `build_rule_hit_attributes` as its attribute projector, so there
       is **one** reader for a record the box stores in one shape; **R3** surface the
       recovered `download` / `upload` / `duration` / `count` / `ltype`; **R4** do

@@ -3657,7 +3657,7 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
                 hit_count=26617,
                 last_hit=FirewallaRuleHit(
                     timestamp=1790990234.243,
-                    device_mac="74:A7:EA:24:44:44",
+                    device_id="74:A7:EA:24:44:44",
                     device_ip="192.168.202.43",
                     destination="www.youtube.com",
                     destination_kind="domain",
@@ -3701,7 +3701,7 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
     assert fired["last_hit"] == {
         "timestamp": 1790990234.243,
         "at": "2026-10-03T01:17:14.243000+00:00",
-        "device_mac": "74:A7:EA:24:44:44",
+        "device_id": "74:A7:EA:24:44:44",
         "device_ip": "192.168.202.43",
         "destination": "www.youtube.com",
         "destination_kind": "domain",

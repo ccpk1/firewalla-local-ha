@@ -2621,7 +2621,7 @@ class FirewallaApiClient:
 
         return FirewallaRuleHit(
             timestamp=self._coerce_float(raw_flow.get(_RAW_HIT_TS_KEY)),
-            device_mac=self._normalized_optional_string(
+            device_id=self._normalized_optional_string(
                 raw_flow.get(_RAW_HIT_DEVICE_KEY)
             ),
             device_ip=self._normalized_optional_string(

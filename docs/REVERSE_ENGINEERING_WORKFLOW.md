@@ -1399,10 +1399,13 @@ no host-inventory entry at all.
 
 1. **A flow or rule-hit `device` may not resolve to the host inventory.** The join
    must tolerate that and report the id rather than dropping the record.
-2. **`device_mac` is the wrong name for a field that holds a device id.** On the
-   dev box **3 of 48** rule hits (6%) held a prefixed id rather than a MAC, so a
-   surface labelled `device_mac` reports `device_mac: "wg_peer:wWDLO7..."` today.
-   The vendor calls this a **Device ID**, and that is what it should be called.
+2. **The rule-hit field is called `device_id`, not `device_mac`** (renamed
+   2026-10-04). On the dev box **3 of 48** rule hits (6%) held a prefixed id rather
+   than a MAC, so the previous name reported
+   `device_mac: "wg_peer:wWDLO7..."`. The vendor calls this a **Device ID**, and
+   the field and its attribute key now match. **This renames a shipped attribute**
+   (`last_hit.device_mac` → `last_hit.device_id`, and on the rule switch
+   attributes) — a breaking change accepted while the surface is still beta.
 
 `is_vpn_peer` checks for `wg_peer`/`awg_peer` prefixes, which matches how peers
 are actually synthesized locally (from `wgPeers`/`awgPeers`). The published `ovpn:`
@@ -1688,10 +1691,11 @@ the field:**
 
 **Local findings that the published model actively misled on**, now corrected:
 
-1. **`device_mac` was named from an assumption.** Local measurement shows 3 of 48
-   live rule hits carry `wg_peer:` / `awg_peer:` / `if:`. The published term
-   "Device ID" is a better description of the same thing, but the *finding* is
-   local — the published model does not establish it.
+1. **The rule-hit device field was named from an assumption, and is now
+   `device_id`.** Local measurement shows 3 of 48 live rule hits carry `wg_peer:` /
+   `awg_peer:` / `if:`. The published term "Device ID" is a better description of
+   the same thing, but the *finding* is local — the published model does not
+   establish it. Renamed 2026-10-04.
 2. **The published `hit` object is not our `lastHitFlow`.** MSP publishes
    `{count, lastHitTs, statsResetTs}`; the box stores a full 35-field flow record.
    So the published model is not evidence about the local shape, and the

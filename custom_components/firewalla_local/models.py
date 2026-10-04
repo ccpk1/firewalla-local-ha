@@ -981,10 +981,15 @@ class FirewallaRuleHit:
     Firewalla keeps only the last matched flow per rule, not a log, so this is a
     point-in-time observation rather than a history. It is what makes a rule
     answerable as "what did this rule last stop, and for which device?".
+
+    ``device_id`` is a Firewalla **device id**, not necessarily a MAC: measured
+    live, 3 of 48 rule hits carried a ``wg_peer:`` / ``awg_peer:`` / ``if:``
+    prefixed id rather than a MAC address, and an ``if:`` device names an
+    interface that has no host-inventory entry at all.
     """
 
     timestamp: float | None
-    device_mac: str | None
+    device_id: str | None
     device_ip: str | None
     destination: str | None
     destination_kind: str | None
@@ -1446,13 +1451,15 @@ def build_rule_hit_attributes(
     means the rule has never matched, never "unknown", so callers keep the two
     apart rather than defaulting to a zero count.
 
+    ``device_id`` is a device id rather than a MAC; see ``FirewallaRuleHit``.
+
     Stdlib only, so the models layer stays free of Home Assistant imports.
     """
     if hit is None:
         return {
             "timestamp": None,
             "at": None,
-            "device_mac": None,
+            "device_id": None,
             "device_ip": None,
             "destination": None,
             "destination_kind": None,
@@ -1469,7 +1476,7 @@ def build_rule_hit_attributes(
             if hit.timestamp is not None
             else None
         ),
-        "device_mac": hit.device_mac,
+        "device_id": hit.device_id,
         "device_ip": hit.device_ip,
         "destination": hit.destination,
         "destination_kind": hit.destination_kind,
