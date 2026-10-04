@@ -295,7 +295,10 @@ class FirewallaFlowManager(FirewallaBaseManager):
             )
             if record_set is not None:
                 blocked_records = build_record_view(
-                    record_set, rule_names=self._rule_names()
+                    record_set,
+                    rule_names=self._rule_names(),
+                    network_names=self._network_names(),
+                    membership_names=self._membership_names(),
                 )
 
         flow_records = None
@@ -308,7 +311,10 @@ class FirewallaFlowManager(FirewallaBaseManager):
             )
             if record_set is not None:
                 flow_records = build_record_view(
-                    record_set, rule_names=self._rule_names()
+                    record_set,
+                    rule_names=self._rule_names(),
+                    network_names=self._network_names(),
+                    membership_names=self._membership_names(),
                 )
 
         return FirewallaFlowReportView(
@@ -363,6 +369,50 @@ class FirewallaFlowManager(FirewallaBaseManager):
             for rule in rule_manager.get_rules()
             if rule.rule_id.isdigit() and (name := format_policy_rule_name(rule))
         }
+
+    def _network_names(self) -> dict[str, str]:
+        """Return the network uuid to name mapping.
+
+        A flow record's ``intf`` is the local network and ``oIntf`` / ``wanIntf``
+        the remote side, both of which are uuids the network inventory already
+        names -- so this is a lookup rather than a request.
+        """
+        integration_manager = self.coordinator.integration_manager
+        if integration_manager is None:
+            return {}
+        return {
+            network.uuid: network.name
+            for network in integration_manager.get_available_networks()
+        }
+
+    def _membership_names(self) -> dict[str, str]:
+        """Return the tag id to group or user name mapping.
+
+        A record's ``tags`` / ``userTags`` / ``dTags`` / ``dstTags`` carry tag ids,
+        and the tag collection names both plain groups and user affiliations.
+
+        **Both identifiers are mapped**, because a record refers to a user
+        membership through two different fields. Measured on the dev box, a device
+        on KADENS_DEVICES carries ``tags: ["31"]`` and ``userTags: ["32"]``, and the
+        collection models that one membership as ``group_id="31"`` (the affiliation
+        tag, named ``KADENS_DEVICES``) with ``user_id="32"``. A record's ``userTags``
+        holds the user id, so a map keyed only on the group id leaves every user tag
+        unresolved.
+
+        The two id spaces do not overlap -- measured, 18 plain group ids and 10 user
+        entries sharing no value -- so one map is safe rather than ambiguous.
+        """
+        integration_manager = self.coordinator.integration_manager
+        if integration_manager is None:
+            return {}
+        names: dict[str, str] = {}
+        for group in integration_manager.get_groups():
+            names[group.group_id] = group.name
+            if group.user_id is not None:
+                # setdefault: a user id must never overwrite a plain group's name
+                # if the two spaces ever did collide.
+                names.setdefault(group.user_id, group.name)
+        return names
 
 
 def _normalise_flow_families(

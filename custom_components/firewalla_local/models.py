@@ -1326,6 +1326,11 @@ class FirewallaFlowRecordView:
     record can name a rule that no longer exists; those records are kept and
     counted in ``unattributed_blocks`` rather than dropped, because an
     unattributable block is exactly the signal worth surfacing.
+
+    ``network_names`` and ``membership_names`` do the same for the interfaces and
+    tags a record mentions, so a consumer reads "VLAN10 CORE" rather than a uuid.
+    Only the ids these records actually reference are resolved, since a record
+    carries these as lists and resolving the whole inventory would be wasted work.
     """
 
     records: tuple[FirewallaFlowRecord, ...] = ()
@@ -1336,6 +1341,8 @@ class FirewallaFlowRecordView:
     records_dropped_as_duplicates: int = 0
     unattributed_blocks: int = 0
     rule_names: Mapping[int, str] = field(default_factory=dict)
+    network_names: Mapping[str, str] = field(default_factory=dict)
+    membership_names: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def rows_returned(self) -> int:

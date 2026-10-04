@@ -453,3 +453,69 @@ def test_a_summary_does_not_call_a_local_family_inbound_or_outbound() -> None:
     )
 
     assert summary.blocked[0].direction == FLOW_DIRECTION_LOCAL
+
+
+def test_a_record_resolves_the_interfaces_and_tags_it_references() -> None:
+    """Test a record's uuid and tag fields become names.
+
+    A record carries these as ids, so a consumer reading a flow would otherwise
+    report a uuid where the box's own UI shows a network name.
+    """
+    view = build_record_view(
+        FirewallaFlowRecordSet(
+            records=(
+                {
+                    "ltype": "flow",
+                    "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+                    "oIntf": "8d5a7f20-2923-49a3-8e2b-338f9428a632",
+                    "tags": ["31"],
+                    "userTags": ["32"],
+                    "ts": 1.0,
+                },
+            )
+        ),
+        network_names={
+            "95169e6a-a7c9-4d6a-8e83-6061b4812bf2": "VLAN10 CORE",
+            "8d5a7f20-2923-49a3-8e2b-338f9428a632": "WAN-ONE",
+            "unreferenced-network": "NOT WANTED",
+        },
+        membership_names={"31": "KADENS_DEVICES", "32": "KADENS_DEVICES"},
+    )
+
+    assert view.network_names == {
+        "95169e6a-a7c9-4d6a-8e83-6061b4812bf2": "VLAN10 CORE",
+        "8d5a7f20-2923-49a3-8e2b-338f9428a632": "WAN-ONE",
+    }
+    assert view.membership_names == {"31": "KADENS_DEVICES", "32": "KADENS_DEVICES"}
+
+
+def test_only_the_ids_the_records_reference_are_resolved() -> None:
+    """Test the name maps are filtered rather than carrying the whole inventory.
+
+    Resolving every group and network for a handful of records would be wasted
+    work, and would put ids in the response that no record mentions.
+    """
+    view = build_record_view(
+        FirewallaFlowRecordSet(records=({"ltype": "flow", "tags": ["31"], "ts": 1.0},)),
+        network_names={"net-1": "Some Network"},
+        membership_names={"31": "KADENS_DEVICES", "77": "CHADS_DEVICES"},
+    )
+
+    assert view.network_names == {}
+    assert view.membership_names == {"31": "KADENS_DEVICES"}
+
+
+def test_an_id_with_no_name_is_absent_rather_than_null() -> None:
+    """Test an unresolvable id is left out of the map.
+
+    A caller can tell "this id has no name" from "this record mentions no id",
+    and no key with a null value is emitted for a lookup that failed.
+    """
+    view = build_record_view(
+        FirewallaFlowRecordSet(
+            records=({"ltype": "flow", "tags": ["999"], "ts": 1.0},)
+        ),
+        membership_names={"31": "KADENS_DEVICES"},
+    )
+
+    assert view.membership_names == {}

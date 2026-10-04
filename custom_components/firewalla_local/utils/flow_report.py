@@ -160,22 +160,42 @@ def build_record_view(
     record_set: FirewallaFlowRecordSet,
     *,
     rule_names: Mapping[int, str] | None = None,
+    network_names: Mapping[str, str] | None = None,
+    membership_names: Mapping[str, str] | None = None,
 ) -> FirewallaFlowRecordView:
-    """Normalize one record family and join its blocks back to their rules.
+    """Normalize one record family and resolve the names its records reference.
 
     A record whose ``blocked_by_rule_id`` matches no current rule is **kept**, with
     no name and counted in ``unattributed_blocks``. Rule ids are not durable across
     a delete and re-create, so an id that resolves to nothing is expected rather
     than exceptional, and dropping the record would hide the block itself.
+
+    The interface and tag maps are filtered to the ids these records actually
+    reference: a record carries those as lists, and resolving the whole inventory
+    would be wasted work.
     """
     rules = rule_names or {}
+    networks = network_names or {}
+    memberships = membership_names or {}
+
     records: list[FirewallaFlowRecord] = []
-    resolved_names: dict[int, str] = {}
+    resolved_rules: dict[int, str] = {}
+    referenced_networks: set[str] = set()
+    referenced_memberships: set[str] = set()
     unattributed = 0
 
     for raw_record in record_set.records:
         record = build_flow_record(raw_record)
         records.append(record)
+
+        if record.network_id is not None:
+            referenced_networks.add(record.network_id)
+        if record.remote_network_id is not None:
+            referenced_networks.add(record.remote_network_id)
+        referenced_memberships.update(record.tags)
+        referenced_memberships.update(record.user_tags)
+        referenced_memberships.update(record.membership_tags)
+        referenced_memberships.update(record.destination_tags)
 
         rule_id = record.blocked_by_rule_id
         if rule_id is None:
@@ -184,7 +204,7 @@ def build_record_view(
         if name is None:
             unattributed += 1
             continue
-        resolved_names[rule_id] = name
+        resolved_rules[rule_id] = name
 
     return FirewallaFlowRecordView(
         records=tuple(records),
@@ -194,7 +214,17 @@ def build_record_view(
         pages_fetched=record_set.pages_fetched,
         records_dropped_as_duplicates=record_set.records_dropped_as_duplicates,
         unattributed_blocks=unattributed,
-        rule_names=resolved_names,
+        rule_names=resolved_rules,
+        network_names={
+            network_id: networks[network_id]
+            for network_id in referenced_networks
+            if network_id in networks
+        },
+        membership_names={
+            tag_id: memberships[tag_id]
+            for tag_id in referenced_memberships
+            if tag_id in memberships
+        },
     )
 
 
