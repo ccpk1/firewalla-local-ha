@@ -3,7 +3,8 @@
 **Initiative:** Flow Reporting Service (`get_flow_report`)
 **Branch:** `feature/flow-reporting`, off `main` (the rule-hit-data work is already on `main`)
 **Depends on:** `2.5.0-beta.1` (rule hit data), issue #53 (stale rule switches) for one edge case only
-**Status:** planning complete — ready for Phase 1 handoff, no implementation started
+**Status:** Phases 1–3 complete and validated live; **Phase 4 (surface) not started**. Awaiting Q9 alignment before Phase 4 begins.
+**Last updated:** 2026-10-04 — Q9 re-derived from live measurement (see Q9 and 4.1b).
 
 ---
 
@@ -249,24 +250,55 @@ put thousands of identity-bearing rows into a service response. Service default
 ### Q9. How much identity does the summary expose by default?
 
 **Why it matters.** Destination rows carry household members' domains and IPs, and
-per-member ranking and records carry MACs and internal IPs. The repo already gates
-identity-bearing host rows in the segment report behind an explicit include.
+per-member ranking and records carry device ids and internal IPs. The repo already
+gates identity-bearing host rows in the segment report behind an explicit include.
 
-**Recommendation (owner-confirmed).** Gate identity **the same way the segment
-report does — off by default, retrieved on request**. Default output is aggregates
-plus top destinations; per-device attribution is reachable whenever a caller asks
-for it, not withheld:
+**Measured, across every group and five device targets on the dev box:**
 
-- `include: ["device_detail"]` adds `top_members` and the event `device` /
-  `deviceIP` fields, at **both** detail levels.
-- The gate is a **default, never a wall**. Anything identity-bearing must remain
-  obtainable in one call; if a value can never be retrieved, that is a bug, not a
-  privacy control.
-- When the target is itself a single device, that device's own identity is the
-  subject of the question and is returned without the flag.
+| Target kind | Devices named beyond the target |
+| --- | --- |
+| **group / user** (tag) | **up to 21** — `IOT_LIGHTS` has 21 members, 19 of which appear in its rows; `IOT_RELAYS` 19, `IOT_CONTROLLERS` 13, `AV_VIDEO` 11 |
+| **device** (host) | **0 of 5 tested** — `devices_other_than_target=0` for every one |
 
-Identity is therefore a **default-shape** decision, not a capability limit — the same
-principle as the retention and page-size answers in the audit note.
+That single distinction is the whole question. **A device target names nothing the
+caller did not already name**; a group target names the household's device
+inventory. So the gate is about group and user reports, and a host report has
+nothing to gate.
+
+**Recommendation — one flag, one value, no new mechanism.**
+
+1. **`include: ["device_detail"]`** governs exactly three things, which are one
+   concept ("a device the caller did not name"): `top_members`, the per-destination
+   `device_ids`, and a record's `device_id` / `device_ip`.
+2. **Destination hostnames and addresses are never gated.** They are the report's
+   subject — 247 distinct destinations for one group — so gating them would empty
+   the report rather than protect anything.
+3. **Auto-satisfied when the target is a device.** Described as a property of the
+   data rather than a special case: a host report contains no identity beyond the
+   host that was asked for, so the flag has nothing to withhold. This avoids the
+   confusing alternative where asking about one device returns records that decline
+   to say which device.
+4. **Withheld is not the same as unavailable, and needs no new key.** An omitted
+   section is simply absent, and `metadata.applied.include` records that the flag
+   was not set — which is exactly how `_serialize_network_segment_report` already
+   handles `include_hosts`. **Do not add a `withheld_sections` key**, and do not put
+   a withheld section in `unavailable_sections`, which means "we tried and the box
+   would not give it to us".
+5. **This is a default, not a permission.** The service is **non-admin** (Q11), so
+   any caller who can reach it can pass the flag. The gate keeps per-device
+   attribution out of an ordinary report; it does not restrict access, and it must
+   not be described as if it does.
+
+**Why not per-section flags.** They would be four ways to ask one question, and the
+three governed fields are derivable from each other (a member list plus a
+destination list implies the per-destination attribution). One flag keeps the schema
+at eight fields instead of eleven.
+
+**What it costs the caller.** Measured, the gated fields are about 12 KB on a
+500-record page, almost entirely record device ids. So the gate is not about volume
+— 11 KB against a multi-megabyte summary — it is about not putting the household's
+device inventory into every report by default. Stating that honestly matters,
+because a size argument would not justify it.
 
 ### Q10. How do we know `audit: true` actually filtered?
 
@@ -478,7 +510,7 @@ and the `timeUsage` shape divergence. All recorded, none needed for the flow rep
 | --- | --- | --- | --- |
 | **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
 | **2** | Protocol layer | **COMPLETE** — `managers/flow_manager.py` and the three client methods, with served-window read-back, deadline-bounded pagination, content dedupe and fail-soft. | 638 tests pass (37 new); every method verified read-only live. |
-| **3** | Normalization | **COMPLETE** — `FirewallaFlowRecord` and one reader for all three record surfaces, `utils/flow_report.py` aggregation, `async_get_report`, the shared matching core, and the network/tag joins. | 702 tests pass; every section verified read-only live. Target resolution and the envelope moved to Phase 4 as service-layer work. |
+| **3** | Normalization | **COMPLETE** — `FirewallaFlowRecord` and one reader for all three record surfaces, `utils/flow_report.py` aggregation, `async_get_report`, the shared matching core, and the network/tag joins. | 705 tests pass; every section verified read-only live. Target resolution, the envelope and the identity gate moved to Phase 4 as service-layer work. |
 | **4** | Surface | The service with its target resolution and the shared `_serialize_report_*` envelope, translations, LLM tool, docs, quality scale. | Full validation suite green; live end-to-end call. |
 
 Phases are sequential. **Phase 1 is not optional, and it is not busywork.** The flow
@@ -771,13 +803,15 @@ into two closed sets) remain **withdrawn** — see Q14.
 - [ ] **3.3 Add the blocked breakdown.** `dnsB`, `ipB:in`, `ipB:out`,
       `local:ipB:*` from the rollup, reported as separate directions because in/out
       are different questions.
-- [ ] **3.4 Add member ranking via the shared ranker (1.4)**, mark
-      `member_ranking` unavailable on device targets (Q3), and implement Q9's
-      confirmed gate: per-device attribution (`top_members`, record `device` /
-      `deviceIP`) is **absent by default** and returned when
-      `include: ["device_detail"]` is set, at both detail levels. A single-device
-      target returns its own identity without the flag. Ensure the gated values are
-      always reachable — never permanently withheld.
+- [ ] **3.4 Add member ranking via the shared ranker (1.4)**, and mark
+      `member_ranking` unavailable on device targets (Q3). **The model carries
+      every identity-bearing field; the Q9 gate is applied when the report is
+      serialized, so it belongs to the service layer in 4.1b, not here.** Building
+      the gate into the aggregation would make the summary unauditable — one could
+      not tell what was dropped from what was never read. Done as part of
+      `d4044a3`: `top_members` and per-destination `device_ids` are built
+      unconditionally, and `build_record_view` populates `device_id` / `device_ip`
+      on every record.
 - [ ] **3.5 Build the blocked and regular views.** Discriminate on **`ltype`**, not
       on the request flag (Q4b): `"audit"` is a blocked record, `"flow"` is regular
       traffic. Join `pid` → rule via the existing rule index, and apply Q5's rule:
@@ -857,8 +891,28 @@ into two closed sets) remain **withdrawn** — see Q14.
       `_SERVICE_REGISTRATIONS` as **read-only and `admin=False`** — matching every
       other query service (Q11). It must be non-admin or the Phase 4 tool cannot
       live in `llm_tools_read.py`, where all 13 read tools call non-admin services.
+- [ ] **4.1b Apply the Q9 identity gate at serialization.** `include:
+      ["device_detail"]` governs exactly three fields — `top_members`, a
+      destination's `device_ids`, and a record's `device_id` / `device_ip` — because
+      those are the one thing a report names that the caller did not name.
+      **Destination hostnames and addresses are never gated**: they are the report's
+      subject (247 distinct destinations for one group), so gating them would empty
+      the report rather than protect anything. **The gate is auto-satisfied when the
+      target is a device**, because a host report contains no identity beyond the
+      host that was asked for — measured 0 devices other than the target across five
+      hosts. Express that as a property of the data, not as a special case, so that
+      asking about one device does not return records that decline to say which
+      device. **Withheld is not unavailable:** an omitted section is simply absent
+      and `metadata.applied.include` records that the flag was not set, exactly as
+      `_serialize_network_segment_report` handles `include_hosts`. Do **not** add a
+      `withheld_sections` key, and do not put a withheld section in
+      `unavailable_sections`, which means "we tried and the box would not give it to
+      us". This is a **default, not a permission** — the service is non-admin (Q11),
+      so any caller who can reach it can pass the flag — and it must not be
+      described as an access control.
 - [ ] **4.2 Field descriptions** in `services.yaml`, with the observed retention
-      limit stated in prose on the window field.
+      limit stated in prose on the window field, and the `device_detail` include
+      described as widening the report rather than unlocking it.
 - [ ] **4.3 Translations.** `strings.json` + regenerate
       `translations/en.json`; exception keys for scope ambiguous / not found / flow
       report failed, following the existing naming.
