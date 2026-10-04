@@ -24,11 +24,16 @@ from homeassistant.util.json import JsonObjectType, JsonValueType
 from .api import FirewallaApiError
 from .const import (
     ALARM_SERVICE_MAX_LIMIT,
+    DEFAULT_FLOW_REPORT_RECORD_COUNT,
+    DEFAULT_FLOW_REPORT_WINDOW_HOURS,
     DEFAULT_INIT_TARGET,
     DEFAULT_NETWORK_USAGE_WINDOW,
     DEFAULT_WAN_EVENT_WINDOW_DAYS,
     DEFAULT_WAN_USAGE_CURRENT_PERIODS,
     DOMAIN,
+    FLOW_REPORT_DETAIL_RECORDS,
+    FLOW_REPORT_DETAIL_SUMMARY,
+    FLOW_REPORT_INCLUDE_DEVICE_DETAIL,
     HIDDEN_RULE_PURPOSES,
     HOST_DEVICE_TYPE_OPTIONS,
     LLM_TOOL_MODE_OFF,
@@ -36,6 +41,8 @@ from .const import (
     LLM_TOOL_MODE_READ_ONLY,
     LLM_TOOL_MODE_SUMMARY_ONLY,
     LOGGER,
+    MAX_FLOW_LOG_PAGE_SIZE,
+    MIN_FLOW_LOG_PAGE_SIZE,
     RULE_ACTION_BLOCK,
     RULE_PURPOSE_DAP,
     RULE_PURPOSE_FAMILY,
@@ -59,6 +66,7 @@ from .const import (
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_EXCEPTION_ID,
+    SERVICE_FIELD_FETCH_ALL_RECORDS,
     SERVICE_FIELD_GROUP_ID,
     SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HISTORY_COUNT,
@@ -81,6 +89,7 @@ from .const import (
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_ONLINE,
+    SERVICE_FIELD_RECORD_COUNT,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_DURATION,
@@ -107,7 +116,9 @@ from .const import (
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
     SERVICE_FIELD_WINDOW_DAYS,
+    SERVICE_FIELD_WINDOW_HOURS,
     SERVICE_GET_ALARMS,
+    SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -148,6 +159,9 @@ from .const import (
     TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED,
     TRANS_KEY_EXCEPTION_DELETE_RULE_CONFIRM_REQUIRED,
     TRANS_KEY_EXCEPTION_DELETE_RULE_FAILED,
+    TRANS_KEY_EXCEPTION_FLOW_REPORT_FAILED,
+    TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_HOST_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_HOST_NOT_FOUND,
     TRANS_KEY_EXCEPTION_HOST_REQUIRED,
@@ -224,9 +238,18 @@ from .managers.rule_manager import (
 from .models import (
     FirewallaAlarm,
     FirewallaAlarmException,
+    FirewallaBlockedDestination,
+    FirewallaFlowDestination,
+    FirewallaFlowMember,
+    FirewallaFlowRecord,
+    FirewallaFlowRecordView,
+    FirewallaFlowReportView,
+    FirewallaFlowTotals,
+    FirewallaFlowWindow,
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaInternetQualitySample,
+    FirewallaLocalPeer,
     FirewallaNetwork,
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkHostActions,
@@ -321,6 +344,46 @@ GET_SYSTEM_OVERVIEW_SCHEMA = vol.Schema(
             cv.ensure_list_csv,
             [vol.In(("identifiers",))],
         ),
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+# The caller-facing scope vocabulary, shared by the report services and distinct
+# from the protocol's own ``host`` / ``tag``, which is what a resolved scope
+# becomes and what the caller should never have to know.
+_REPORT_SCOPE_DEVICE = "device"
+_REPORT_SCOPE_GROUP = "group"
+_REPORT_SCOPE_USER = "user"
+
+GET_FLOW_REPORT_SCHEMA = vol.Schema(
+    {
+        vol.Required(SERVICE_FIELD_SCOPE_KIND): vol.In(
+            (
+                _REPORT_SCOPE_DEVICE,
+                _REPORT_SCOPE_GROUP,
+                _REPORT_SCOPE_USER,
+            )
+        ),
+        vol.Required(SERVICE_FIELD_SCOPE_TARGET): cv.string,
+        vol.Optional(
+            SERVICE_FIELD_WINDOW_HOURS, default=DEFAULT_FLOW_REPORT_WINDOW_HOURS
+        ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Optional(SERVICE_FIELD_DETAIL, default=FLOW_REPORT_DETAIL_SUMMARY): vol.In(
+            (FLOW_REPORT_DETAIL_SUMMARY, FLOW_REPORT_DETAIL_RECORDS)
+        ),
+        vol.Optional(
+            SERVICE_FIELD_RECORD_COUNT, default=DEFAULT_FLOW_REPORT_RECORD_COUNT
+        ): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_FLOW_LOG_PAGE_SIZE, max=MAX_FLOW_LOG_PAGE_SIZE),
+        ),
+        vol.Optional(SERVICE_FIELD_FETCH_ALL_RECORDS, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_INCLUDE): vol.All(
+            cv.ensure_list_csv,
+            [vol.In((FLOW_REPORT_INCLUDE_DEVICE_DETAIL,))],
+        ),
+        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -2660,6 +2723,434 @@ def _build_network_dhcp_config(
     )
 
 
+def _serialize_flow_window(window: FirewallaFlowWindow) -> JsonObjectType:
+    """Serialize the window a flow response actually covered.
+
+    The requested window is deliberately not repeated here: it is already in
+    ``query``, and putting the two side by side in one object invites reading the
+    served value as the requested one.
+    """
+    return {
+        "requested_hours": window.requested_hours,
+        "begin_timestamp": window.begin_timestamp,
+        "end_timestamp": window.end_timestamp,
+        "served_hours": window.served_hours,
+        "is_clamped": window.is_clamped,
+    }
+
+
+def _serialize_flow_totals(totals: FirewallaFlowTotals) -> JsonObjectType:
+    """Serialize whole-window totals, with each unit kept apart."""
+    return {
+        "download_bytes": totals.download_bytes,
+        "upload_bytes": totals.upload_bytes,
+        "total_bytes": totals.total_bytes,
+        "local_download_bytes": totals.local_download_bytes,
+        "local_upload_bytes": totals.local_upload_bytes,
+        "blocked_dns_count": totals.blocked_dns_count,
+        "blocked_ip_count": totals.blocked_ip_count,
+        "denied_ip_count": totals.denied_ip_count,
+        "blocked_total": totals.blocked_total,
+        "connection_count": totals.connection_count,
+    }
+
+
+def _serialize_flow_destination(
+    destination: FirewallaFlowDestination,
+    *,
+    include_device_detail: bool,
+) -> JsonObjectType:
+    """Serialize one ranked destination.
+
+    The hostname and its addresses are the report's subject and are never gated.
+    ``device_ids`` names the devices that reached it, which is a device the caller
+    may not have named, so it follows the ``device_detail`` include.
+    """
+    payload: JsonObjectType = {
+        "destination": destination.destination,
+        "destination_kind": destination.destination_kind,
+        "destination_ips": list(destination.destination_ips),
+        "download_bytes": destination.download_bytes,
+        "upload_bytes": destination.upload_bytes,
+        "total_bytes": destination.total_bytes,
+        "rollup_rows": destination.rollup_rows,
+    }
+    if include_device_detail:
+        payload["device_ids"] = list(destination.device_ids)
+    return payload
+
+
+def _serialize_blocked_destination(
+    destination: FirewallaBlockedDestination,
+    *,
+    include_device_detail: bool,
+) -> JsonObjectType:
+    """Serialize one blocked destination, counted in blocks rather than bytes."""
+    payload: JsonObjectType = {
+        "destination": destination.destination,
+        "destination_kind": destination.destination_kind,
+        "destination_ips": list(destination.destination_ips),
+        "block_type": destination.block_type,
+        "direction": destination.direction,
+        "block_count": destination.block_count,
+        "rollup_rows": destination.rollup_rows,
+    }
+    if include_device_detail:
+        payload["device_ids"] = list(destination.device_ids)
+    return payload
+
+
+def _serialize_local_peer(peer: FirewallaLocalPeer) -> JsonObjectType:
+    """Serialize one LAN peer, which is counted in connections."""
+    return {
+        "peer_id": peer.peer_id,
+        "connection_count": peer.connection_count,
+        "rollup_rows": peer.rollup_rows,
+    }
+
+
+def _serialize_flow_member(member: FirewallaFlowMember) -> JsonObjectType:
+    """Serialize one ranked member of a group or user report."""
+    return {
+        "device_id": member.device_id,
+        "device_name": member.device_name,
+        "device_ip": member.device_ip,
+        "download_bytes": member.download_bytes,
+        "upload_bytes": member.upload_bytes,
+        "total_bytes": member.total_bytes,
+        "connection_count": member.connection_count,
+        "dns_count": member.dns_count,
+        "blocked_dns_count": member.blocked_dns_count,
+        "blocked_ip_count": member.blocked_ip_count,
+        "denied_ip_count": member.denied_ip_count,
+        "blocked_total": member.blocked_total,
+        "ntp_count": member.ntp_count,
+        "local_download_bytes": member.local_download_bytes,
+        "local_upload_bytes": member.local_upload_bytes,
+    }
+
+
+def _resolved_names(
+    ids: tuple[str, ...], names: Mapping[str, str]
+) -> list[JsonValueType]:
+    """Return the display names for a record's id list, omitting unknown ids."""
+    return [names[value] for value in ids if value in names]
+
+
+def _serialize_flow_record(
+    record: FirewallaFlowRecord,
+    *,
+    rule_names: Mapping[int, str],
+    network_names: Mapping[str, str],
+    membership_names: Mapping[str, str],
+    include_device_detail: bool,
+) -> JsonObjectType:
+    """Serialize one flow record, resolving the ids it references to names.
+
+    ``device_id`` and ``device_ip`` identify the device a flow belongs to and
+    follow the ``device_detail`` include. Everything the *destination* is --
+    hostname, address, port -- is the record's subject and is not gated.
+    """
+    payload: JsonObjectType = {
+        "timestamp": record.timestamp,
+        "is_blocked": record.is_blocked,
+        "block_type": record.block_type,
+        "blocked_by_rule_id": record.blocked_by_rule_id,
+        "rule_name": (
+            rule_names.get(record.blocked_by_rule_id)
+            if record.blocked_by_rule_id is not None
+            else None
+        ),
+        "destination": record.destination,
+        "destination_kind": record.destination_kind,
+        "destination_ip": record.destination_ip,
+        "destination_mac": record.destination_mac,
+        "port": record.port,
+        "device_port": record.device_port,
+        "protocol": record.protocol,
+        "download_bytes": record.download_bytes,
+        "upload_bytes": record.upload_bytes,
+        "duration_seconds": record.duration_seconds,
+        "event_count": record.event_count,
+        "app": record.app,
+        "category": record.category,
+        "region": record.region,
+        "apid": record.apid,
+        "network_name": (
+            network_names.get(record.network_id)
+            if record.network_id is not None
+            else None
+        ),
+        "remote_network_name": (
+            network_names.get(record.remote_network_id)
+            if record.remote_network_id is not None
+            else None
+        ),
+        "group_names": _resolved_names(record.tags, membership_names),
+        "user_names": _resolved_names(record.user_tags, membership_names),
+    }
+    if include_device_detail:
+        payload["device_id"] = record.device_id
+        payload["device_ip"] = record.device_ip
+    return payload
+
+
+def _serialize_flow_record_view(
+    record_view: FirewallaFlowRecordView,
+    *,
+    detail: str,
+    time_basis: FirewallaReportTimeBasis,
+    include_device_detail: bool,
+) -> JsonObjectType:
+    """Serialize one record family, with its own reverse-walk time basis.
+
+    Each family carries its own ``time_basis`` because a record read is a reverse
+    walk from an instant rather than a windowed aggregate, so the report's
+    top-level window would describe it wrongly. ``truncated`` is repeated here as
+    well as in the basis ``is_partial`` so a consumer reading either sees it.
+    """
+    return {
+        "detail": detail,
+        "time_basis": _serialize_report_time_basis(time_basis),
+        "rows_returned": record_view.rows_returned,
+        "rows_available": record_view.rows_available,
+        "blocked_count": record_view.blocked_count,
+        "unattributed_blocks": record_view.unattributed_blocks,
+        "pages_fetched": record_view.pages_fetched,
+        "records_dropped_as_duplicates": record_view.records_dropped_as_duplicates,
+        "truncated": record_view.truncated,
+        "next_cursor": record_view.next_cursor,
+        "records": [
+            _serialize_flow_record(
+                record,
+                rule_names=record_view.rule_names,
+                network_names=record_view.network_names,
+                membership_names=record_view.membership_names,
+                include_device_detail=include_device_detail,
+            )
+            for record in record_view.records
+        ],
+    }
+
+
+def _serialize_flow_report(
+    entry: FirewallaConfigEntry,
+    *,
+    view: FirewallaFlowReportView,
+    target_name: str | None,
+    scope_kind: str,
+    scope_target: str,
+    detail: str,
+    window_hours: int,
+    record_count: int,
+    fetch_all_records: bool,
+    requested_include: tuple[str, ...],
+    refresh_requested: bool,
+    requested_at: int,
+    time_zone: tzinfo,
+    time_zone_name: str,
+) -> JsonObjectType:
+    """Serialize one flow report in the shared report envelope.
+
+    The identity gate lives here rather than in the aggregation: the summary model
+    carries every field unconditionally, so what a response omits is exactly what
+    this function chose to omit. Building the gate into the aggregation would make
+    a report unauditable -- there would be no way to tell a withheld value from one
+    the box never returned.
+    """
+    summary = view.summary
+    # A device target names nothing the caller did not itself name, so it needs no
+    # flag: this is a property of the data, not a special case for one scope.
+    include_device_detail = (
+        FLOW_REPORT_INCLUDE_DEVICE_DETAIL in requested_include
+        or view.target_type == _USAGE_HISTORY_REQUEST_SCOPE_HOST
+    )
+
+    warnings: list[FirewallaReportWarning] = []
+    unavailable_sections: list[str] = []
+    sections: dict[str, JsonValueType] = {}
+
+    if summary is None:
+        unavailable_sections.append("summary")
+        warnings.append(
+            FirewallaReportWarning(
+                code="flow_summary_unavailable",
+                message=(
+                    "The box did not return a flow rollup for this target, so the "
+                    "report carries no totals or destinations."
+                ),
+            )
+        )
+    else:
+        sections["totals"] = _serialize_flow_totals(summary.totals)
+        sections["top_download"] = [
+            _serialize_flow_destination(
+                destination, include_device_detail=include_device_detail
+            )
+            for destination in summary.top_download
+        ]
+        sections["top_upload"] = [
+            _serialize_flow_destination(
+                destination, include_device_detail=include_device_detail
+            )
+            for destination in summary.top_upload
+        ]
+        sections["blocked"] = [
+            _serialize_blocked_destination(
+                destination, include_device_detail=include_device_detail
+            )
+            for destination in summary.blocked
+        ]
+        sections["local_peers"] = [
+            _serialize_local_peer(peer) for peer in summary.local_peers
+        ]
+        sections["rollup_families"] = dict(summary.family_row_counts)
+        if summary.top_members and include_device_detail:
+            sections["member_ranking"] = [
+                _serialize_flow_member(member) for member in summary.top_members
+            ]
+        elif not summary.top_members:
+            # An empty member list on a tag request cannot be told apart from a
+            # device request, where member ranking does not apply at all. Reporting
+            # the section as empty would state "this group has no members", so it
+            # is reported as unavailable instead -- and it is not a withheld
+            # section, because when there are members to rank they are returned.
+            unavailable_sections.append("member_ranking")
+
+    if detail == FLOW_REPORT_DETAIL_RECORDS:
+        for section, record_view in (
+            ("blocked_records", view.blocked_records),
+            ("flow_records", view.flow_records),
+        ):
+            if record_view is None:
+                unavailable_sections.append(section)
+                warnings.append(
+                    FirewallaReportWarning(
+                        code="flow_records_unavailable",
+                        message=(
+                            f"The box did not return {section.replace('_', ' ')} "
+                            "for this target."
+                        ),
+                    )
+                )
+                continue
+            sections[section] = _serialize_flow_record_view(
+                record_view,
+                detail=detail,
+                time_basis=FirewallaReportTimeBasis(
+                    kind="flow_log",
+                    label="Reverse walk of the record log from the request instant",
+                    anchor_timestamp=requested_at,
+                    is_partial=record_view.truncated,
+                    boundary_source="request",
+                    time_zone=time_zone_name,
+                ),
+                include_device_detail=include_device_detail,
+            )
+
+    time_basis = (
+        FirewallaReportTimeBasis(
+            kind="window",
+            label="Windowed flow rollup, as served by the box",
+            begin_timestamp=summary.window.begin_timestamp,
+            end_timestamp=summary.window.end_timestamp,
+            is_partial=summary.window.is_clamped,
+            boundary_source="flow_rollup",
+            time_zone=time_zone_name,
+        )
+        if summary is not None
+        else FirewallaReportTimeBasis(
+            kind="flow_log",
+            label="Reverse walk of the record log from the request instant",
+            anchor_timestamp=requested_at,
+            boundary_source="request",
+            time_zone=time_zone_name,
+        )
+    )
+
+    summary_payload: JsonObjectType = {
+        "window": (
+            _serialize_flow_window(summary.window) if summary is not None else None
+        ),
+        "totals": (
+            _serialize_flow_totals(summary.totals) if summary is not None else None
+        ),
+        "rollup_rows": summary.rollup_rows if summary is not None else None,
+        "top_download_count": len(summary.top_download) if summary is not None else 0,
+        "top_upload_count": len(summary.top_upload) if summary is not None else 0,
+        "blocked_destination_count": len(summary.blocked) if summary is not None else 0,
+        "local_peer_count": len(summary.local_peers) if summary is not None else 0,
+        # None rather than 0 when the ranking was not returned, so a withheld
+        # count is not read as a target with no members.
+        "member_count": (
+            len(summary.top_members)
+            if summary is not None and include_device_detail
+            else None
+        ),
+        "includes_records": detail == FLOW_REPORT_DETAIL_RECORDS,
+    }
+
+    return {
+        "config_entry_id": entry.entry_id,
+        "target": _serialize_report_target(
+            FirewallaReportTarget(
+                kind=view.target_type,
+                id=view.target,
+                name=target_name,
+            )
+        ),
+        "query": {
+            "scope_kind": scope_kind,
+            "scope_target": scope_target,
+            "detail": detail,
+            "include": list(requested_include),
+            "window_hours": window_hours,
+            "record_count": record_count,
+            "fetch_all_records": fetch_all_records,
+            "time_zone": time_zone_name,
+            "refresh": refresh_requested,
+        },
+        "time_basis": _serialize_report_time_basis(time_basis, time_zone=time_zone),
+        "summary": summary_payload,
+        "sections": sections,
+        "metadata": _serialize_report_metadata(
+            applied={
+                "detail": detail,
+                "include": list(requested_include),
+                # Reported separately from `include` because it is true for a
+                # device target whether or not the flag was passed. A caller who
+                # sees no member ranking on a group report can read this to learn
+                # that the include is what widens it -- the gate is a default, not
+                # a limit on what can be retrieved, and not an access control: the
+                # service is non-admin, so any caller who can reach it can ask.
+                "device_detail": include_device_detail,
+            },
+            warnings=tuple(warnings),
+            unavailable_sections=tuple(unavailable_sections),
+            provenance=(
+                FirewallaReportProvenance(
+                    section="summary",
+                    source="direct",
+                    source_field=f"item={view.target_type}",
+                    note=(
+                        "Totals, ranked destinations, the blocked breakdown and the "
+                        "member ranking all come from one windowed rollup request"
+                    ),
+                ),
+                FirewallaReportProvenance(
+                    section="records",
+                    source="direct",
+                    source_field="item=flows, item=auditLogs",
+                    note=(
+                        "Blocked records come from item=auditLogs and regular records "
+                        "from item=flows, discriminated on the record's own ltype"
+                    ),
+                ),
+            ),
+        ),
+    }
+
+
 def _serialize_network_segment_report(
     entry: FirewallaConfigEntry,
     *,
@@ -3315,6 +3806,118 @@ def _usage_history_scope_error(
             TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS
             if match.is_ambiguous
             else TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND
+        ),
+        translation_placeholders={
+            TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
+            TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+        },
+    )
+
+
+def _resolve_flow_report_target(
+    entry: FirewallaConfigEntry,
+    *,
+    scope_kind: str,
+    scope_target: str,
+) -> tuple[str, str, str | None]:
+    """Resolve one flow-report scope to the protocol target it becomes.
+
+    Returns ``(target_type, target_id, target_name)`` where ``target_type`` is what
+    the flow queries take -- ``host`` for a device, ``tag`` for a group or user.
+
+    The matching is shared (``utils/selectors.py``); this keeps the parts that
+    genuinely differ, which is why it is not ``_resolve_usage_history_target`` with
+    a flag. **A user resolves to its affiliated tag, not to its user id, and that
+    is a measured difference between the two endpoints**: of 10 users on the dev
+    box, 8 returned 398-578 rollup rows for the affiliated tag and **zero** for the
+    user id, while ``item=appTimeUsage`` returned byte-identical payloads for both.
+    Reusing the usage resolver's ``user_id`` here would have shipped a selector
+    that silently returns an empty report.
+    """
+    if scope_kind == _REPORT_SCOPE_DEVICE:
+        host_manager = entry.runtime_data.host_manager
+        choices = host_manager.get_watched_device_choices()
+        match = match_selector(
+            scope_target,
+            (
+                (host.mac, (host.host_name, choices.get(host.mac)))
+                for host in host_manager.get_hosts()
+            ),
+            normalize_identifier=normalize_mac_address,
+        )
+        if (mac := match.resolved) is not None and (
+            host := host_manager.get_host(mac)
+        ) is not None:
+            return _USAGE_HISTORY_REQUEST_SCOPE_HOST, host.mac, host.host_name
+        raise _flow_report_scope_error(
+            match,
+            scope_kind=scope_kind,
+            scope_target=scope_target,
+        )
+
+    if scope_kind == _REPORT_SCOPE_USER:
+        user_manager = entry.runtime_data.user_manager
+        choices = user_manager.get_watched_user_choices()
+        match = match_selector(
+            scope_target,
+            (
+                (user.user_id, (user.name, choices.get(user.user_id)))
+                for user in user_manager.get_users()
+            ),
+        )
+        user_id = match.resolved
+        if user_id is None:
+            raise _flow_report_scope_error(
+                match,
+                scope_kind=scope_kind,
+                scope_target=scope_target,
+            )
+        # The affiliation tag is the tag the flow queries accept; a user carries
+        # both ids and only this one addresses their traffic.
+        for group in entry.runtime_data.integration_manager.get_groups():
+            if group.kind == _MEMBERSHIP_KIND_USER and group.user_id == user_id:
+                return _USAGE_HISTORY_REQUEST_SCOPE_TAG, group.group_id, group.name
+        raise _flow_report_scope_error(
+            match,
+            scope_kind=scope_kind,
+            scope_target=scope_target,
+        )
+
+    # Group scope. Filtered to plain groups for the same reason the usage resolver
+    # is: the tag collection holds user affiliations too, and a user entry carries
+    # the user's own name, so resolving a group request to a user's backing tag
+    # would return that user's traffic labelled as a group.
+    match = match_selector(
+        scope_target,
+        (
+            (group.group_id, (group.name,))
+            for group in entry.runtime_data.integration_manager.get_groups()
+            if group.kind == _MEMBERSHIP_KIND_GROUP
+        ),
+    )
+    if (group_id := match.resolved) is not None:
+        for group in entry.runtime_data.integration_manager.get_groups():
+            if group.group_id == group_id:
+                return _USAGE_HISTORY_REQUEST_SCOPE_TAG, group.group_id, group.name
+    raise _flow_report_scope_error(
+        match,
+        scope_kind=scope_kind,
+        scope_target=scope_target,
+    )
+
+
+def _flow_report_scope_error(
+    match: SelectorMatch,
+    *,
+    scope_kind: str,
+    scope_target: str,
+) -> ServiceValidationError:
+    """Build the flow-report error for a selector that did not resolve."""
+    return _service_validation_error(
+        translation_key=(
+            TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_AMBIGUOUS
+            if match.is_ambiguous
+            else TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_NOT_FOUND
         ),
         translation_placeholders={
             TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
@@ -5350,6 +5953,69 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
     }
 
 
+async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
+    """Return one flow report for the requested device, group, or user."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
+    scope_kind = cast(str, call.data[SERVICE_FIELD_SCOPE_KIND])
+    scope_target = cast(str, call.data[SERVICE_FIELD_SCOPE_TARGET])
+    target_type, target_id, target_name = _resolve_flow_report_target(
+        entry,
+        scope_kind=scope_kind,
+        scope_target=scope_target,
+    )
+
+    detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
+    include_records = detail == FLOW_REPORT_DETAIL_RECORDS
+    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+
+    try:
+        view = await entry.runtime_data.flow_manager.async_get_report(
+            target_type=target_type,
+            target=target_id,
+            window_hours=cast(int, call.data[SERVICE_FIELD_WINDOW_HOURS]),
+            include_summary=True,
+            include_blocked_records=include_records,
+            include_flow_records=include_records,
+            fetch_all_records=cast(bool, call.data[SERVICE_FIELD_FETCH_ALL_RECORDS]),
+            page_size=cast(int, call.data[SERVICE_FIELD_RECORD_COUNT]),
+        )
+    except FirewallaApiError as err:
+        _raise_runtime_service_error(
+            err,
+            log_message="Failed to read flow report",
+            translation_key=TRANS_KEY_EXCEPTION_FLOW_REPORT_FAILED,
+        )
+
+    return _serialize_flow_report(
+        entry,
+        view=view,
+        target_name=target_name,
+        scope_kind=scope_kind,
+        scope_target=scope_target,
+        detail=detail,
+        window_hours=cast(int, call.data[SERVICE_FIELD_WINDOW_HOURS]),
+        record_count=cast(int, call.data[SERVICE_FIELD_RECORD_COUNT]),
+        fetch_all_records=cast(bool, call.data[SERVICE_FIELD_FETCH_ALL_RECORDS]),
+        requested_include=_normalize_report_include(
+            call.data.get(SERVICE_FIELD_INCLUDE),
+            allowed=(FLOW_REPORT_INCLUDE_DEVICE_DETAIL,),
+        ),
+        refresh_requested=refresh_requested,
+        requested_at=int(dt_util.utcnow().timestamp()),
+        time_zone=time_zone,
+        time_zone_name=time_zone_name,
+    )
+
+
 async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObjectType:
     """Return one configuration-oriented report for the requested segment."""
     entry = _get_loaded_entry(
@@ -5835,6 +6501,13 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_GET_SYSTEM_OVERVIEW,
         _async_handle_get_system_overview,
         GET_SYSTEM_OVERVIEW_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_GET_FLOW_REPORT,
+        _async_handle_get_flow_report,
+        GET_FLOW_REPORT_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),

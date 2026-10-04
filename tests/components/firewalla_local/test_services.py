@@ -26,6 +26,8 @@ from homeassistant.exceptions import (
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.firewalla_local.api import FirewallaApiClient, FirewallaApiError
+from custom_components.firewalla_local.api.exceptions import FirewallaProtocolError
+from custom_components.firewalla_local.api.models import FlowLogPage
 from custom_components.firewalla_local.const import (
     CONF_AID,
     CONF_EID,
@@ -58,6 +60,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
     SERVICE_FIELD_EXCEPTION_ID,
+    SERVICE_FIELD_FETCH_ALL_RECORDS,
     SERVICE_FIELD_GROUP_ID,
     SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HISTORY_COUNT,
@@ -78,6 +81,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_OFFSET,
+    SERVICE_FIELD_RECORD_COUNT,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_DURATION,
@@ -85,6 +89,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SCOPE_KIND,
+    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
@@ -102,7 +107,9 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
+    SERVICE_FIELD_WINDOW_HOURS,
     SERVICE_GET_ALARMS,
+    SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -8425,3 +8432,490 @@ async def test_destructive_delete_services_require_confirmation(
         await hass.services.async_call(DOMAIN, service, service_data, blocking=True)
 
     assert err.value.translation_key == translation_key
+
+
+_FLOW_WINDOW_BEGIN = 1_790_948_400
+_FLOW_WINDOW_END = 1_791_034_800
+_FLOW_HOST_MAC = "EC:0D:51:CC:BA:BC"
+_FLOW_GROUP_ID = "12"
+_FLOW_AFFILIATED_TAG_ID = "10"
+
+
+def _flow_report_rollup_payload() -> dict[str, object]:
+    """Return a rollup shaped like the box's, with every section populated.
+
+    The blocks mirror the live measurements: `count` is bytes on the byte
+    families and a block count on the blocked ones, a `local:` family carries
+    `dstMac` instead of a hostname, and the per-member block is only populated on
+    a tag request.
+    """
+
+    def _row(**fields: object) -> dict[str, object]:
+        return {"begin": _FLOW_WINDOW_BEGIN, "end": _FLOW_WINDOW_END, **fields}
+
+    return {
+        "flows": {
+            "download": [
+                _row(host="a.example", count="1000", device=_FLOW_HOST_MAC),
+                _row(host="b.example", count="250"),
+            ],
+            "upload": [_row(host="a.example", count="400", device=_FLOW_HOST_MAC)],
+            "dnsB": [_row(host="ads.example", count="7")],
+            "local:in": [_row(dstMac="AA:BB:CC:DD:EE:FF", count="5")],
+        },
+        "hosts": {
+            _FLOW_HOST_MAC: {"download": 1000, "upload": 400, "conn": 5},
+            "AA:BB:CC:DD:EE:99": {"download": 10, "upload": 1},
+        },
+    }
+
+
+def _flow_report_block_page() -> FlowLogPage:
+    """Return one blocked page naming a rule the box still has."""
+    return FlowLogPage(
+        records=(
+            {
+                "ts": 1_791_000_000.5,
+                "ltype": "audit",
+                "device": _FLOW_HOST_MAC,
+                "deviceIP": "192.168.200.25",
+                "domain": "ads.example",
+                "pid": 7,
+                "type": "dns",
+                "tags": [_FLOW_GROUP_ID],
+            },
+        ),
+        reported_count=1,
+        next_cursor=None,
+    )
+
+
+def _flow_report_regular_page() -> FlowLogPage:
+    """Return one regular page carrying byte and duration detail."""
+    return FlowLogPage(
+        records=(
+            {
+                "ts": 1_791_000_100.25,
+                "ltype": "flow",
+                "device": _FLOW_HOST_MAC,
+                "deviceIP": "192.168.200.25",
+                "host": "a.example",
+                "ip": "203.0.113.9",
+                "download": 2048,
+                "upload": 512,
+                "duration": 12.5,
+            },
+        ),
+        reported_count=1,
+        next_cursor=None,
+    )
+
+
+_FLOW_REPORT_CLIENT_PREFIX = (
+    "custom_components.firewalla_local.api.client.FirewallaApiClient."
+)
+
+
+@contextmanager
+def _flow_report_client(
+    *,
+    rollup: dict[str, object] | None = None,
+) -> Iterator[dict[str, AsyncMock]]:
+    """Patch the client calls one flow-report service test needs.
+
+    Yields the three flow mocks so a test can assert which were called and can
+    make one fail.
+    """
+    with (
+        patch(
+            f"{_FLOW_REPORT_CLIENT_PREFIX}async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            f"{_FLOW_REPORT_CLIENT_PREFIX}build_runtime_snapshot",
+            return_value=_usage_history_snapshot(),
+        ),
+        patch(
+            f"{_FLOW_REPORT_CLIENT_PREFIX}async_get_flow_rollup_payload",
+            new=AsyncMock(
+                return_value=_flow_report_rollup_payload() if rollup is None else rollup
+            ),
+        ) as mock_rollup,
+        patch(
+            f"{_FLOW_REPORT_CLIENT_PREFIX}async_get_block_log_payload",
+            new=AsyncMock(return_value=_flow_report_block_page()),
+        ) as mock_block_log,
+        patch(
+            f"{_FLOW_REPORT_CLIENT_PREFIX}async_get_flow_log_payload",
+            new=AsyncMock(return_value=_flow_report_regular_page()),
+        ) as mock_flow_log,
+    ):
+        yield {
+            "rollup": mock_rollup,
+            "block_log": mock_block_log,
+            "flow_log": mock_flow_log,
+        }
+
+
+def _flow_report_entry() -> MockConfigEntry:
+    """Return one Firewalla config entry for flow-report service tests."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+
+
+async def _flow_report_response(
+    hass: HomeAssistant,
+    *,
+    extra: dict[str, object] | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, AsyncMock], MockConfigEntry]:
+    """Set up an entry and call the flow-report service once."""
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    with _flow_report_client() as client:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_FLOW_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_SCOPE_KIND: "group",
+                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
+                SERVICE_FIELD_REFRESH: False,
+                **(extra or {}),
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    return cast("dict[str, Any] | None", response), client, entry
+
+
+@pytest.mark.asyncio
+async def test_flow_report_summarises_a_group_without_reading_records(
+    hass: HomeAssistant,
+) -> None:
+    """Test a summary is one rollup and makes no record read at all."""
+    response, client, _entry = await _flow_report_response(hass)
+
+    assert client["block_log"].await_count == 0
+    assert client["flow_log"].await_count == 0
+    assert response is not None
+    assert response["target"] == {
+        "kind": "tag",
+        "id": _FLOW_GROUP_ID,
+        "name": "Quarantine",
+    }
+    assert response["summary"]["totals"]["download_bytes"] == 1250
+    assert response["summary"]["totals"]["upload_bytes"] == 400
+    assert response["summary"]["totals"]["blocked_total"] == 7
+    assert response["summary"]["includes_records"] is False
+    assert response["summary"]["window"] == {
+        "requested_hours": 24,
+        "begin_timestamp": _FLOW_WINDOW_BEGIN,
+        "end_timestamp": _FLOW_WINDOW_END,
+        "served_hours": 24.0,
+        "is_clamped": False,
+    }
+    assert "blocked_records" not in response["sections"]
+    assert "flow_records" not in response["sections"]
+    assert response["time_basis"]["kind"] == "window"
+    assert response["time_basis"]["is_partial"] is False
+    assert response["sections"]["blocked"][0]["block_count"] == 7
+    assert response["sections"]["local_peers"][0]["peer_id"] == "AA:BB:CC:DD:EE:FF"
+
+
+@pytest.mark.asyncio
+async def test_flow_report_records_detail_reads_both_record_families(
+    hass: HomeAssistant,
+) -> None:
+    """Test records detail reads the block log and the flow log separately.
+
+    Both families carry their own time basis, because a record read is a reverse
+    walk from an instant rather than the windowed aggregate the rollup is.
+    """
+    response, client, _entry = await _flow_report_response(
+        hass, extra={SERVICE_FIELD_DETAIL: "records"}
+    )
+
+    assert client["block_log"].await_count == 1
+    assert client["flow_log"].await_count == 1
+    assert response is not None
+    blocked = response["sections"]["blocked_records"]
+    regular = response["sections"]["flow_records"]
+    assert blocked["time_basis"]["kind"] == "flow_log"
+    assert regular["time_basis"]["kind"] == "flow_log"
+    assert blocked["rows_returned"] == 1
+    assert blocked["blocked_count"] == 1
+    # The block names a rule the live registry no longer has. It is kept rather
+    # than dropped, and counted, because an unattributable block is exactly the
+    # signal worth surfacing.
+    assert blocked["records"][0]["blocked_by_rule_id"] == 7
+    assert blocked["records"][0]["rule_name"] is None
+    assert blocked["unattributed_blocks"] == 1
+    assert regular["records"][0]["download_bytes"] == 2048
+    assert regular["records"][0]["duration_seconds"] == 12.5
+    assert regular["blocked_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_flow_report_withholds_device_detail_by_default_on_a_group(
+    hass: HomeAssistant,
+) -> None:
+    """Test a group report names no device the caller did not itself name.
+
+    The member ranking, each destination's device ids, and each record's device
+    id and address are absent, and the withheld ranking is **not** reported as
+    unavailable -- it can still be retrieved, so calling it unavailable would be a
+    false statement about the box.
+    """
+    response, _client, _entry = await _flow_report_response(
+        hass, extra={SERVICE_FIELD_DETAIL: "records"}
+    )
+
+    assert response is not None
+    assert "member_ranking" not in response["sections"]
+    assert response["summary"]["member_count"] is None
+    assert "device_ids" not in response["sections"]["top_download"][0]
+    assert "device_ids" not in response["sections"]["blocked"][0]
+    record = response["sections"]["blocked_records"]["records"][0]
+    assert "device_id" not in record
+    assert "device_ip" not in record
+    assert response["metadata"]["applied"]["device_detail"] is False
+    assert "member_ranking" not in response["metadata"]["unavailable_sections"]
+
+
+@pytest.mark.asyncio
+async def test_flow_report_returns_device_detail_when_it_is_asked_for(
+    hass: HomeAssistant,
+) -> None:
+    """Test the include widens the same report rather than unlocking it."""
+    response, _client, _entry = await _flow_report_response(
+        hass,
+        extra={
+            SERVICE_FIELD_DETAIL: "records",
+            SERVICE_FIELD_INCLUDE: ["device_detail"],
+        },
+    )
+
+    assert response is not None
+    assert response["metadata"]["applied"]["device_detail"] is True
+    assert response["summary"]["member_count"] == 2
+    assert response["sections"]["member_ranking"][0]["device_id"] == _FLOW_HOST_MAC
+    assert response["sections"]["top_download"][0]["device_ids"] == [_FLOW_HOST_MAC]
+    record = response["sections"]["blocked_records"]["records"][0]
+    assert record["device_id"] == _FLOW_HOST_MAC
+    assert record["device_ip"] == "192.168.200.25"
+
+
+@pytest.mark.asyncio
+async def test_flow_report_needs_no_flag_to_name_the_device_it_was_asked_about(
+    hass: HomeAssistant,
+) -> None:
+    """Test a device target is never returned stripped of its own identity.
+
+    A device report names nothing beyond the device that was asked for, so the
+    include has nothing to withhold. Gating it anyway would answer "what did this
+    device do" with records that decline to say which device.
+    """
+    response, _client, _entry = await _flow_report_response(
+        hass,
+        extra={
+            SERVICE_FIELD_SCOPE_KIND: "device",
+            SERVICE_FIELD_SCOPE_TARGET: "Kaden Phone",
+            SERVICE_FIELD_DETAIL: "records",
+        },
+    )
+
+    assert response is not None
+    assert response["target"]["kind"] == "host"
+    assert response["target"]["id"] == _FLOW_HOST_MAC
+    assert response["metadata"]["applied"]["device_detail"] is True
+    assert (
+        response["sections"]["blocked_records"]["records"][0]["device_id"]
+        == _FLOW_HOST_MAC
+    )
+
+
+@pytest.mark.asyncio
+async def test_flow_report_resolves_a_user_to_its_affiliated_tag(
+    hass: HomeAssistant,
+) -> None:
+    """Test a user scopes to the tag the flow queries accept, not to the user id.
+
+    Measured on the dev box: the flow queries returned hundreds of rows for a
+    user's affiliated tag and **zero** for the user id, while the app-time-usage
+    query returned byte-identical payloads for both. Scoping to the user id would
+    therefore return an empty report for most users while claiming success.
+    """
+    response, _client, _entry = await _flow_report_response(
+        hass,
+        extra={
+            SERVICE_FIELD_SCOPE_KIND: "user",
+            SERVICE_FIELD_SCOPE_TARGET: "KADEN",
+        },
+    )
+
+    assert response is not None
+    assert response["target"]["kind"] == "tag"
+    assert response["target"]["id"] == _FLOW_AFFILIATED_TAG_ID
+    assert response["query"]["scope_kind"] == "user"
+    assert response["query"]["scope_target"] == "KADEN"
+
+
+@pytest.mark.asyncio
+async def test_flow_report_stops_a_record_walk_that_cannot_advance(
+    hass: HomeAssistant,
+) -> None:
+    """Test an all-records walk halts on a cursor that does not move.
+
+    The walk's stop conditions are the deadline and a non-advancing cursor, never
+    a row count, so a cursor that repeats itself must end the walk and say so
+    rather than looping. The page size the caller asked for is what reaches the
+    client, because the schema admits exactly the range the transport supports.
+    """
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    repeating = FlowLogPage(
+        records=_flow_report_block_page().records,
+        reported_count=1,
+        next_cursor=1_791_000_000.5,
+    )
+
+    with _flow_report_client() as client:
+        client["block_log"].return_value = repeating
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_FLOW_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_SCOPE_KIND: "group",
+                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
+                SERVICE_FIELD_DETAIL: "records",
+                SERVICE_FIELD_RECORD_COUNT: 500,
+                SERVICE_FIELD_FETCH_ALL_RECORDS: True,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert client["block_log"].await_args is not None
+    assert client["block_log"].await_args.kwargs["count"] == 500
+    assert client["block_log"].await_count == 2
+    assert response is not None
+    blocked = response["sections"]["blocked_records"]
+    assert blocked["truncated"] is True
+    assert blocked["time_basis"]["is_partial"] is True
+    assert blocked["pages_fetched"] == 2
+    assert blocked["records_dropped_as_duplicates"] == 1
+
+
+@pytest.mark.asyncio
+async def test_flow_report_rejects_a_group_that_does_not_exist(
+    hass: HomeAssistant,
+) -> None:
+    """Test an unmatched selector fails with its own translation key."""
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    with _flow_report_client():
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_FLOW_REPORT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_SCOPE_KIND: "group",
+                    SERVICE_FIELD_SCOPE_TARGET: "no-such-group",
+                    SERVICE_FIELD_REFRESH: False,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert err.value.translation_key == "flow_report_scope_not_found"
+
+
+@pytest.mark.asyncio
+async def test_flow_report_marks_a_section_the_box_did_not_return(
+    hass: HomeAssistant,
+) -> None:
+    """Test an unreadable rollup is reported rather than failing the whole call.
+
+    A section that could not be read is unavailable. That is a different statement
+    from a section withheld by the identity gate, and the two must not be
+    conflated -- so this also pins that the withheld ranking is not listed here.
+    """
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    with _flow_report_client() as client:
+        client["rollup"].side_effect = FirewallaProtocolError("unexpected shape")
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_FLOW_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_SCOPE_KIND: "group",
+                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["summary"]["totals"] is None
+    assert response["sections"] == {}
+    # The whole summary is missing, so naming the member ranking separately would
+    # only repeat that. `unavailable_sections` answers "what could not be read",
+    # and a section inside an unreadable summary was not read either.
+    assert response["metadata"]["unavailable_sections"] == ["summary"]
+    assert [warning["code"] for warning in response["metadata"]["warnings"]] == [
+        "flow_summary_unavailable"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_flow_report_reports_a_clamped_window_it_was_not_asked_for(
+    hass: HomeAssistant,
+) -> None:
+    """Test a window the box quietly shortened is reported as served, not asked.
+
+    The box serves 24 hours for anything wider and says nothing, so reporting the
+    requested window would describe data the caller does not have.
+    """
+    response, _client, _entry = await _flow_report_response(
+        hass, extra={SERVICE_FIELD_WINDOW_HOURS: 168}
+    )
+
+    assert response is not None
+    assert response["query"]["window_hours"] == 168
+    assert response["summary"]["window"]["requested_hours"] == 168
+    assert response["summary"]["window"]["served_hours"] == 24.0
+    assert response["summary"]["window"]["is_clamped"] is True
+    assert response["time_basis"]["is_partial"] is True

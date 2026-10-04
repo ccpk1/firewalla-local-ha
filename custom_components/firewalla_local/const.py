@@ -230,6 +230,9 @@ SERVICE_FIELD_TOP_N: Final = "top_n"
 SERVICE_FIELD_WAN_NAME: Final = "wan_name"
 SERVICE_FIELD_WAN_UUID: Final = "wan_uuid"
 SERVICE_FIELD_WINDOW: Final = "window"
+SERVICE_FIELD_WINDOW_HOURS: Final = "window_hours"
+SERVICE_FIELD_RECORD_COUNT: Final = "record_count"
+SERVICE_FIELD_FETCH_ALL_RECORDS: Final = "fetch_all_records"
 SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
 
 # Default query windows. The network usage default is the smallest supported
@@ -252,6 +255,14 @@ DEFAULT_FLOW_REPORT_WINDOW_HOURS: Final = 24
 # retained window, so a caller-supplied count is never forwarded unvalidated.
 MAX_FLOW_LOG_PAGE_SIZE: Final = 5000
 
+# The smallest page worth asking for. Below this the box's behaviour is undefined
+# rather than merely small -- measured: `count: 1` returned zero rows while
+# `count: 0` returned 100 -- so a caller-supplied count is clamped to at least
+# this rather than forwarded. It is a constant because the service schema and the
+# client must agree on it: a schema that admitted a smaller value would have the
+# client silently adjust it.
+MIN_FLOW_LOG_PAGE_SIZE: Final = 50
+
 # The all-available walk stops on a wall-clock deadline rather than a row cap, so
 # a slow box cannot stall a report indefinitely. It is deliberately not a service
 # field: a caller able to raise it without limit would defeat its purpose.
@@ -273,6 +284,24 @@ FLOW_UNIT_CONNECTIONS: Final = "connections"
 FLOW_DIRECTION_INBOUND: Final = "inbound"
 FLOW_DIRECTION_OUTBOUND: Final = "outbound"
 FLOW_DIRECTION_LOCAL: Final = "local"
+
+# The flow report's two depth levels. A summary is one rollup request and carries
+# no records; records adds the flow log and the block log, which are separate
+# reads and are only made when asked for.
+FLOW_REPORT_DETAIL_SUMMARY: Final = "summary"
+FLOW_REPORT_DETAIL_RECORDS: Final = "records"
+
+# The one include that widens a report: it adds the device identifiers the caller
+# did not itself name (member ranking, a destination's device ids, a record's
+# device id and address). Destination hostnames and addresses are never gated --
+# they are the report's subject -- and a device target needs no flag at all,
+# because it contains no identity beyond the device that was asked for.
+FLOW_REPORT_INCLUDE_DEVICE_DETAIL: Final = "device_detail"
+
+# The page a records read asks for when the caller does not say. One page is the
+# default because a full day on a busy target is thousands of records; asking for
+# everything is an explicit choice, not a side effect of reading records.
+DEFAULT_FLOW_REPORT_RECORD_COUNT: Final = 300
 
 # Config entry data and options keys
 CONF_AID: Final = "aid"
@@ -423,6 +452,7 @@ SERVICE_GET_ALARMS: Final = "get_alarms"
 SERVICE_GET_RULES: Final = "get_rules"
 SERVICE_SYNC_RUNTIME: Final = "sync_runtime"
 SERVICE_GET_SYSTEM_OVERVIEW: Final = "get_system_overview"
+SERVICE_GET_FLOW_REPORT: Final = "get_flow_report"
 SERVICE_CREATE_RULE: Final = "create_rule"
 SERVICE_ARCHIVE_ALARMS: Final = "archive_alarms"
 SERVICE_DELETE_ALARMS: Final = "delete_alarms"
@@ -551,6 +581,9 @@ TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND: Final = (
     "time_usage_report_scope_not_found"
 )
 TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED: Final = "time_usage_report_failed"
+TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_AMBIGUOUS: Final = "flow_report_scope_ambiguous"
+TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_NOT_FOUND: Final = "flow_report_scope_not_found"
+TRANS_KEY_EXCEPTION_FLOW_REPORT_FAILED: Final = "flow_report_failed"
 TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED: Final = "wake_host_failed"
 TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED: Final = "delete_host_failed"
 TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED: Final = "delete_host_confirm_required"

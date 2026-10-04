@@ -1184,6 +1184,15 @@
     "network_segment_usage_failed": {
       "message": "The integration could not read the network segment usage report. Check the Firewalla connection and try again."
     },
+    "flow_report_failed": {
+      "message": "The integration could not read the flow report. Check the Firewalla connection and try again."
+    },
+    "flow_report_scope_ambiguous": {
+      "message": "More than one {scope_kind} matched \"{scope_target}\". Use a stable ID for that scope instead."
+    },
+    "flow_report_scope_not_found": {
+      "message": "No {scope_kind} matched \"{scope_target}\". Check the selector and try again."
+    },
     "network_name_ambiguous": {
       "message": "More than one Firewalla network matches the name \"{network_name}\". Use the network UUID instead."
     },
@@ -1659,6 +1668,52 @@
         "include": {
           "name": "Include",
           "description": "Optional. 'hosts' adds the network's device list, which is absent by default because those rows carry MAC addresses, hostnames, IPs, and reservations. The summary host_count is the device count and does not change with this option."
+        }
+      }
+    },
+    "get_flow_report": {
+      "name": "Get flow report",
+      "description": "Return one flow report for a device, group, or user in the shared report envelope from the Firewalla local API.",
+      "fields": {
+        "scope_kind": {
+          "name": "Scope kind",
+          "description": "Required. Choose whether the target is a device, group, or user."
+        },
+        "scope_target": {
+          "name": "Scope target",
+          "description": "Required. Use a stable ID or the current display label for the selected scope. A device accepts a MAC, ID, or name; a group or user accepts a name or ID."
+        },
+        "window_hours": {
+          "name": "Window hours (Optional)",
+          "description": "Optional. Defaults to 24, which is the window Firewalla itself serves. There is no maximum, but the box retains about 24 hours of flow data, so a wider request is silently served as 24 hours: read window_is_clamped and window_hours_served in the response rather than assuming the requested window."
+        },
+        "detail": {
+          "name": "Detail (Optional)",
+          "description": "Optional. Defaults to summary. Summary returns totals, ranked destinations, the blocked breakdown, LAN peers, and the member ranking. Records adds the blocked and regular flow records, which are separate reads."
+        },
+        "record_count": {
+          "name": "Record count (Optional)",
+          "description": "Optional. Defaults to 300. The page size for a records read. Firewalla caps a single response at 5000 records and needs pagination beyond that, so ask for everything with fetch_all_records rather than a larger count."
+        },
+        "fetch_all_records": {
+          "name": "Fetch all records (Optional)",
+          "description": "Optional. Defaults to false. Walk the record cursor until the box stops returning more, instead of fetching one page. A walk that hits its deadline returns truncated true with a cursor, so a partial result is never mistaken for a complete one."
+        },
+        "include": {
+          "name": "Include",
+          "description": "Optional. 'device_detail' adds the device identifiers the caller did not itself name: the member ranking, each destination's device IDs, and each record's device ID and address. It is absent by default because a group report would otherwise carry the household's device inventory. Destination hostnames and addresses are always returned, and a device scope needs no flag, since it names nothing beyond the device asked for."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the scope and building the report. Flow data itself is always read live."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
         }
       }
     },

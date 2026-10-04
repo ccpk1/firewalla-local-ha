@@ -263,6 +263,7 @@ Services added after 1.0.0:
 - `firewalla_local.delete_rule`
 - `firewalla_local.sync_runtime`
 - `firewalla_local.get_system_overview`
+- `firewalla_local.get_flow_report`
 
 ## Installation
 

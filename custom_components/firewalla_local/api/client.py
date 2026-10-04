@@ -21,6 +21,7 @@ from ..const import (
     FIREWALLA_PROTOCOL_CLIENT_VERSION,
     LOGGER,
     MAX_FLOW_LOG_PAGE_SIZE,
+    MIN_FLOW_LOG_PAGE_SIZE,
 )
 from ..models import (
     FirewallaAlarm,
@@ -121,12 +122,10 @@ _RAW_FLOW_NEXT_CURSOR_KEY: Final = "nextTs"
 
 # The box honours a positive `count` up to MAX_FLOW_LOG_PAGE_SIZE and silently
 # caps anything larger, so a bigger request buys no more rows. Below
-# _MIN_FLOW_LOG_PAGE_SIZE its behaviour is undefined rather than merely small --
+# MIN_FLOW_LOG_PAGE_SIZE its behaviour is undefined rather than merely small --
 # measured: `count: 1` returned zero rows while `count: 0` returned 100 -- and a
 # non-positive value returns the ENTIRE retained window (~6,956 rows), so a
 # caller-supplied count is clamped rather than forwarded.
-_MIN_FLOW_LOG_PAGE_SIZE: Final = 50
-
 # `hourblock` is a gate, not the granularity the name implies. Measured across a
 # fixed 24h window: 0 and 1 both return an **empty** response, while 2 and every
 # value above it return identical data -- 592 rows over 11 families, span 24.00h,
@@ -1333,7 +1332,7 @@ class FirewallaApiClient:
     @staticmethod
     def _resolve_flow_log_page_size(count: int) -> int:
         """Clamp a requested page size into the range the box answers predictably."""
-        return max(_MIN_FLOW_LOG_PAGE_SIZE, min(count, MAX_FLOW_LOG_PAGE_SIZE))
+        return max(MIN_FLOW_LOG_PAGE_SIZE, min(count, MAX_FLOW_LOG_PAGE_SIZE))
 
     @staticmethod
     def _validate_flow_target_type(target_type: str) -> None:

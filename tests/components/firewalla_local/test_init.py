@@ -52,6 +52,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_GET_ALARMS,
+    SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -1268,6 +1269,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         [
             (DOMAIN, SERVICE_ARCHIVE_ALARMS),
             (DOMAIN, SERVICE_DELETE_ALARMS),
+            (DOMAIN, SERVICE_GET_FLOW_REPORT),
             (DOMAIN, SERVICE_GET_HOSTS),
             (DOMAIN, SERVICE_GET_ALARMS),
             (DOMAIN, SERVICE_GET_INTERNET_QUALITY_REPORT),
@@ -1305,6 +1307,7 @@ async def test_setup_multiple_entries_registers_domain_services_once(
     assert set(hass.services.async_services()[DOMAIN]) == {
         SERVICE_ARCHIVE_ALARMS,
         SERVICE_DELETE_ALARMS,
+        SERVICE_GET_FLOW_REPORT,
         SERVICE_GET_HOSTS,
         SERVICE_GET_ALARMS,
         SERVICE_GET_INTERNET_QUALITY_REPORT,
