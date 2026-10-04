@@ -370,8 +370,9 @@ opposite of "nothing". Two constants now carry this:
 | **T25** | A fourth target resolver | Three already exist (~322 lines) running the same algorithm | Extract the matching core, not a unified resolver — Q12 |
 | **T26** | Calling a device id a MAC | `device_mac` holds a device id; 3 of 48 live rule hits are `wg_peer:` / `awg_peer:` / `if:` | Rename to `device_id` — Q14 R1 |
 | **T27** | Treating `lastHitFlow` as a reduced summary | It is a **full flow record**; we read 10 of 35 fields and drop bytes, duration, `ltype`, `dstMac` | One flow-record model and reader for both surfaces — Q14 R2/R3 |
-| **T28** | Validating one `category` set against the other | Flow `category` is 12 values, rule-target `category` is 11, and neither contains the other | Two constants, validated separately — Q14 R5 |
+| **T28** | Validating `category` against an enum | Locally `category` is an **open set**: a rule's `category` target holds real categories, `TL-`/`TLX-` target-list ids **and** `dap_*` rule ids; a flow record's can be `''` or `'none'` | Pass unknown values through; keep the existing prefix-based target-list handling — Q14 R4 |
 | **T29** | Assuming a flow record's `device` resolves to a host | `if:<uuid>` is an interface device with no host-inventory entry | Tolerate an unresolvable device id; report it rather than dropping the record |
+| **T30** | Treating the published MSP model as a wire reference | MSP **remaps**: its `hit` is a summary struct where the box stores a full flow record; its target vocabulary (`app`/`internet`/`domain`/`region`/`targetlist`) does not appear locally, and local `mac`/`network` targets have no MSP equivalent | Ground every claim in a local measurement; use MSP for intent only — Q14 |
 | **T15** | A default gate becoming a wall | Gating per-device attribution off by default is fine only if it stays reachable | Phase 3.4 plus a test on both sides of the gate |
 | **T16** | Efficiency work trading correctness | Single-pass accumulation can drop the deterministic tie-break | Step 1.5 keeps sort keys identical and measures before/after |
 
@@ -409,12 +410,13 @@ opposite of "nothing". Two constants now carry this:
 - **O7 — the un-consumed `systemFlows` windows become reachable.** The RE doc notes
   that the box-wide 24h `upload` / `download` / `dnsB` windows have no consumer
   today. The same generalisation makes them a small addition later, at no extra cost.
-- **O8 — `lastHitFlow` and the flow log are one record type.** The published Rule
-  model documents `hit` as a first-class field, and measurement confirms the local
-  `lastHitFlow` is a full flow record rather than a summary. So the flow report does
-  not need a new model: it needs the **existing** record read in full. That converts
-  a would-be new subsystem into a unification, and it recovers the bytes, duration and
-  attribution fields the current hit model drops.
+- **O8 — `lastHitFlow` and the flow log are one record type.** Measured: the local
+  `lastHitFlow` is a full flow record (35 fields, core fields on all 48), not a
+  summary. So the flow report does not need a new model: it needs the **existing**
+  record read in full. That converts a would-be new subsystem into a unification,
+  and it recovers the bytes, duration and attribution fields the current hit model
+  drops. **Note:** the published `hit` struct is a *different* shape, so this rests
+  on local measurement rather than on the documentation.
 
 ---
 

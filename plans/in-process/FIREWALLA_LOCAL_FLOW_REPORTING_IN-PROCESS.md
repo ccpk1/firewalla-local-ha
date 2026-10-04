@@ -388,75 +388,70 @@ carries it verbatim and is only ever tested for equality or non-advance.
 
 ### Q14. What would this look like if we built it today, with the published models?
 
-**Why it matters.** Much of the host/rule model was derived by reverse engineering
-before Firewalla's published Device and Rule models were found. Those models
-corroborate most of it but correct a few readings, and correcting them now is
-cheaper than after the flow report is built on top.
+**Why it matters.** Much of the host/rule model was derived by reverse engineering.
+It is worth asking what would change with current knowledge — but only for findings
+that rest on **local measurement**, because the published MSP models are a
+**remapping layer**, not a wire reference.
 
-**The published model in one line:** a **Device** is the atomic unit (id prefixed by
-type, defaulting to MAC), and it is targeted through a **Scope** of
-`{type, value}` where `type` ∈ `device` / `group` / `user` / `network`.
+**MSP is not a mirror. Evidence:** for the same feature MSP publishes
+`hit: {count, lastHitTs, statsResetTs}` while the box stores a **35-field flow
+record**; MSP splits blocked-ness into `block` + `blockType` while the box uses
+`ltype` + `type`; MSP nests `destination: {id, ip, name}` while the box is flat;
+MSP says `region` where the box says `country`; and the rule **target vocabularies
+differ outright** — the box uses `mac` and `network` (no MSP equivalent) while MSP
+uses `app`, `internet`, `domain`, `region` and `targetlist` (none of which appear
+locally). So a documented field name is not evidence of a local field.
 
-**Where we already match:**
-
-| Published | Ours |
-| --- | --- |
-| `scope.type` ∈ device/group/user/network | `scope_kind` — **we support three of four** |
-| Device `group` is singular | confirmed one-membership-per-device |
-| Device ID is prefixed by type | we handle `wg_peer:` / `awg_peer:`; `if:` exists but is unmatched |
-| Rule `direction` | our `traffic_direction` |
-| Rule `hit: {count, lastHitTs}` | our `hit_count` / `last_hit` |
-| `dnsOnly` defaults true on block rules for category/app/targetlist/domain | explains `dnsmasq_only` + `useBf` |
-| `protocol` ∈ tcp/udp | our rule `protocol` |
-
-**Three readings to correct, all cheap now and expensive later:**
+**Corrections that rest on local measurement — do these:**
 
 1. **`device_mac` is a misnomer.** It holds a device id, and **3 of 48 live rule
-   hits (6%)** are `wg_peer:` / `awg_peer:` / `if:`. The vendor calls it a **Device
-   ID**. Rename to `device_id` in the model and the attributes.
-2. **`network` scope is missing** from `scope_kind`, which accepts
-   `device` / `group` / `user`. Add it, and **document the limitation honestly**:
-   the local flow queries take `type: tag|host` only, so a network-scoped *flow*
-   report is not expressible even though a network-scoped *rule* is.
-3. **`category` is two different closed sets.** Flow/device `category` is
-   12 values; rule **target** `category` is 11, and neither contains the other
-   (`edu` / `ad` / `intel` / `private` are flow-only, `drugs` / `violence` are
-   rule-only). Validating one against the other would reject valid data.
+   hits (6%)** are `wg_peer:` / `awg_peer:` / `if:`. Rename to `device_id`.
+   *(Local measurement. The published term "Device ID" describes the same thing but
+   does not establish the finding.)*
+2. **`lastHitFlow` is a full flow record, not a summary.** `ltype`, `type`, `count`,
+   `intf`, `protocol`, `port`, `device`, `deviceIP` and `ts` are present on **all
+   48** records, and the optional fields appear in the same proportions as on a flow
+   page. `FirewallaRuleHit` reads **10 of 35** fields and drops `download` /
+   `upload` / `duration` (21/48), `count` (48/48), `ltype` (48/48), `dstMac`
+   (21/48), `country` (19/48) and `pid` (27/48). *(Local measurement. MSP's `hit` is
+   a different shape entirely, so the published model is not evidence here.)*
+3. **A flow record's `device` may not resolve to a host.** `if:<uuid>` is an
+   interface device with no host-inventory entry. *(Local measurement.)*
+4. **`category` is an open set locally, not a closed enum.** A rule's `category`
+   target field holds real categories, **`TL-` / `TLX-` target-list ids**, and
+   **`dap_*` rule ids** — plus `''` and the literal `'none'` on flow records. The
+   codebase already handles the target-list case by prefix, which is the right
+   approach. **Do not validate `category` against any enum**; the published 12- and
+   11-value lists are MSP's own and match neither local field. *(Local measurement.)*
 
-**The one structural rework worth doing in this initiative: unify the flow record.**
+**Claimed corrections now withdrawn, because they rested on the published model:**
 
-`lastHitFlow` is **not** a reduced summary — it is a **full flow record**, the same
-shape a flow-log page returns. Evidence: `ltype`, `type`, `count`, `intf`,
-`protocol`, `port`, `device`, `deviceIP` and `ts` are present on **all 48** records,
-and the optional fields appear in the same proportions as on a flow page.
+- ~~Add `network` to `scope_kind`.~~ **Withdrawn.** This compared MSP's *rule*
+  `scope` to our *flow* `scope_kind` — different axes. `network` is a local **rule
+  target type** (we already have `RULE_TARGET_TYPE_NETWORK`), and local flow queries
+  take `type: tag|host`. There is no missing scope.
+- ~~Split the `category` sets into flow (12) and rule-target (11).~~ **Withdrawn.**
+  Those are MSP's two lists and neither matches the local field, which is open and
+  carries identifiers. Replaced by item 4 above.
 
-`FirewallaRuleHit` was hand-built before that was known and reads **10 of the record's
-35 fields**, dropping among others `download` / `upload` / `duration` (21/48),
-`count` (48/48), `ltype` (48/48), `dstMac` (21/48), `country` (19/48), `pid`
-(27/48) and the interface joins.
-
-So there should be **one flow-record model and one reader**, consumed by both the
-rule-hit surface and the flow report. Doing this now:
-- removes a second hand-built subset instead of adding a third,
-- recovers the byte, duration and attribution fields a rule report wants,
-- and makes the `device_id` rename a single change.
-
-Doing the flow report first would mean building on the subset and redoing both.
+**The structural rework still stands, on local evidence:** unify the flow record.
+There should be **one flow-record model and one reader**, consumed by both the
+rule-hit surface and the flow report, because the box stores one shape. Doing the
+flow report first would build on the 10-field subset and require redoing both.
 
 **Recommended, bounded rework (folded into Phase 3, not a new initiative):**
 
-| # | Change | Cost |
-| --- | --- | --- |
-| R1 | Rename `device_mac` → `device_id` in the hit model and attributes | small |
-| R2 | Replace `FirewallaRuleHit` with the shared flow-record model; keep `build_rule_hit_attributes` as the attribute projector | small–medium |
-| R3 | Surface the recovered `download` / `upload` / `duration` / `count` / `ltype` on rule hits | small |
-| R4 | Add `network` to `scope_kind`; document that flows cannot be network-scoped | small |
-| R5 | Split the `category` sets — flow (12) and rule-target (11) — in constants | small |
-| R6 | Extract the shared matching core (Q12) | medium |
+| # | Change | Basis | Cost |
+| --- | --- | --- | --- |
+| R1 | Rename `device_mac` → `device_id` in the hit model and attributes | local (3/48 non-MAC) | small |
+| R2 | Replace `FirewallaRuleHit` with the shared flow-record model; keep `build_rule_hit_attributes` as the attribute projector | local (48 records, full shape) | small–medium |
+| R3 | Surface the recovered `download` / `upload` / `duration` / `count` / `ltype` | local | small |
+| R4 | **Do not validate `category`**; keep prefix-based target-list handling and pass unknown values through | local (open set) | small |
+| R5 | Extract the shared matching core (Q12) | local (three resolvers, ~322 lines) | medium |
 
-**Explicitly out of scope:** the `dhcp_name` matcher inconsistency, the
-`statsResetTs` field, `targetlist` / `remotePort` as distinct rule target types, and
-the `timeUsage` shape divergence. All recorded, none needed for the flow report.
+**Explicitly out of scope:** the `dhcp_name` matcher inconsistency, `statsResetTs`,
+and the `timeUsage` shape divergence. All recorded, none needed for the flow report.
+
 
 
 ---
@@ -681,13 +676,18 @@ files. No existing assertion or snapshot was modified.
 - [ ] **3.1c Fold in the Q14 rework before building on top of it.** In order:
       **R1** rename `device_mac` → `device_id` in the hit model and attributes (the
       field holds a device id; 3 of 48 live values are `wg_peer:` / `awg_peer:` /
-      `if:`); **R2** replace `FirewallaRuleHit` with the shared flow-record model and
-      keep `build_rule_hit_attributes` as its attribute projector, so there is **one**
-      reader for a record the box stores in one shape; **R3** surface the recovered
-      `download` / `upload` / `duration` / `count` / `ltype`; **R4** add `network` to
-      `scope_kind` and document that flows cannot be network-scoped (`type: tag|host`
-      only); **R5** split the two `category` sets in constants — flow/device 12,
-      rule-target 11, and neither contains the other. This must land **before** the
+      `if:`, and an `if:` device has no host entry, so the join must tolerate an
+      unresolvable id); **R2** replace `FirewallaRuleHit` with the shared flow-record
+      model and keep `build_rule_hit_attributes` as its attribute projector, so there
+      is **one** reader for a record the box stores in one shape; **R3** surface the
+      recovered `download` / `upload` / `duration` / `count` / `ltype`; **R4** do
+      **not** validate `category` — it is an open set locally carrying real
+      categories, `TL-` / `TLX-` target-list ids and `dap_*` ids, and the existing
+      prefix-based target-list handling is correct, so unknown values pass through.
+      All four rest on local measurement. **Two changes previously listed here are
+      withdrawn** (adding `network` to `scope_kind`, and splitting `category` into
+      two closed sets) because they rested on the published MSP model, which is a
+      remapping rather than a wire reference — see Q14. This must land **before** the
       flow view is built, so the view consumes the shared record rather than the
       subset.
 - [ ] **3.2 Build the summary from the rollup using the Phase 1 core.** Totals from

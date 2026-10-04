@@ -1601,35 +1601,47 @@ category or a sub-window without paging through everything.
 ### Cross-check against Firewalla's published API
 
 Firewalla documents the flow model for its **MSP** cloud API, which the
-integration does not use — local access has no MSP layer. The published model is
-still the best available statement of **intent**, and it corroborates most of what
-was reverse engineered here while correcting two readings. Sources:
+integration does not use — local access has no MSP layer. Sources:
 `docs.firewalla.net/api-reference/flow` and `/data-models/flow`.
 
-**Corroborated — the reverse engineering matched the documented design:**
+**Read the published model as *intent*, never as a wire reference.** MSP is a
+**remapping layer**, not a mirror of the box, and the evidence for that is direct:
 
-| Documented | Local wire | Note |
-| --- | --- | --- |
-| `direction`: `inbound` / `outbound` / `local` | the family name: `download` / `upload`, `ipB:in` / `ipB:out`, `local:*` | direction is a first-class concept |
-| `block`: boolean | `ltype`: `"audit"` / `"flow"` | |
-| `blockType`: `ip` / `dns` | `type`: `"ip"` / `"dns"` | |
-| `count`: "connections or sessions, **or block count for blocked flow**" | family-dependent | the overload is **documented**, not an accident |
-| `destination.id`: "device ID if local, otherwise remote host domain or ip" | `host` / `domain` / `ip`, or `dstMac` for `local:` | our host/domain/ip normalization matches the vendor's own |
-| `region`: 2-letter ISO 3166 | `country` | same concept, shorter name |
-| `network`: `{id, name}` | `intf` | resolves via the local network inventory |
-| `device.port` | `devicePort` | |
-| `ts` | `ts` | documented as **the time the flow ended** |
-| `limit` / `cursor` / `next_cursor` | `count` / `ts` / `nextTs` | |
-| `query`: "**defaults to the last 24 hours**" | `start` / `end` | independent confirmation of the measured retention window |
-| blocked flows "don't have upload or download information" | blocked records carry no bytes | confirms absence, not zero |
-| `category` enum: `ad edu games gamble intel p2p porn private social shopping video vpn` | `category` | 12 values, closed set |
-| `total` is a sortable/groupable field (`sortBy=total:asc`) | our `total_bytes` | |
-| summary-first, bounded results (`limit<=500`, default 200) | — | matches the service's planned default |
+| Feature | Published (MSP) | Local wire | Same? |
+| --- | --- | --- | --- |
+| Hit data | `hit: {count, lastHitTs, statsResetTs}` — a **summary struct** | `hitCount` + `lastHitFlow`, a **full flow record** (35 fields) | **No — reshaped** |
+| Blocked-ness | `block: boolean` **+** `blockType: ip\|dns` | `ltype: audit\|flow` **+** `type: ip\|dns` | **No — decomposed differently** |
+| Destination | nested `destination: {id, ip, name}` | flat `host` / `domain` / `ip`, or `dstMac` | **No — restructured** |
+| Region | `region` | `country` | **No — renamed** |
+| Rule target vocabulary | `app category domain internet intranet ip net region remotePort targetlist` | `category country dns intranet ip mac net network remotePort` | **No — different set** |
+| Target lists | `targetlist` as a **distinct type** | typed `category`, value prefixed `TL-` / `TLX-` | **No — different modelling** |
+| Flow direction | `direction: inbound\|outbound\|local` | **no flow direction field at all** | **No — absent locally** |
+| Rule direction | `direction: bidirection\|inbound\|outbound` | local `direction`, same values | **Yes** |
+| Scope | `scope.type ∈ device\|group\|user\|network` | flow queries take `type: tag\|host`; rule targeting uses a different axis | **Not comparable** |
+
+Two local-only target types (`mac`, `network`) and two MSP-only ones (`app`,
+`internet`) exist in the same place, and **the same `category` field carries real
+categories *and* `TL-`/`TLX-` target-list ids *and* `dap_*` rule ids locally** —
+which the codebase already handles by prefix rather than by closed set.
+
+**So a documented field name is not evidence of a local field, and the reverse is
+the common case here.** Everything below is classified by where the evidence
+actually comes from.
+
+**Genuinely confirmed by local measurement, with MSP agreeing on the concept:**
+
+| Finding | Local evidence |
+| --- | --- |
+| Hit data exists per rule | measured: 48 rules carry `lastHitFlow`, 76 carry `hitCount` |
+| `count` is overloaded | measured across families; MSP documents the same overload |
+| Blocked records carry no bytes | measured absent, not zero; MSP states the reason |
+| The window defaults to ~24h | measured: 26h back returns 0; MSP documents the same default |
+| `dnsOnly` defaults true on block rules | measured: `useBf: ""` ⇔ `dnsmasq_only: True` on 60/60 rules; MSP documents the default |
 
 **Corrected — two readings in this document were wrong:**
 
-1. **`audit: true` is not a blocked-only filter.** MSP's `block` field is the
-   discriminator, and the local equivalent is `ltype`, not the request flag. See
+1. **`audit: true` is not a blocked-only filter.** MSP's `block` field corresponds
+   to the local `ltype`, and *neither* is the request flag. See
    *The three queries at a glance*.
 2. **`fd` is not `direction`.** MSP has an explicit per-flow `direction`; local
    records carry `fd`, which is constant `"in"` on regular flows and both
@@ -1659,60 +1671,44 @@ was reverse engineered here while correcting two readings. Sources:
 ### Cross-check against the published Device and Rule models
 
 Same sources, other models: `docs.firewalla.net/data-models/device`,
-`/api-reference/device`, `/data-models/rule`, `/api-reference/rule`. These
-corroborate the membership and rule-hit work and correct three of our own
-readings.
+`/api-reference/device`, `/data-models/rule`, `/api-reference/rule`. **Same
+caveat as above: MSP remaps, so a documented name is not a local name.** What
+follows is only what local measurement supports.
 
-**Corroborated:**
+**Confirmed locally, where the published model supplied the *concept* rather than
+the field:**
 
-| Documented | Local correspondence |
+| Finding | Evidence |
 | --- | --- |
-| Rule `hit` object: `{count, lastHitTs, statsResetTs}`, described as *"Rule hit stats"* (marked "Upcoming" in the docs) | our `hitCount` / `lastHitFlow`. **Hit data is a first-class documented concept**, not something inferred. `statsResetTs` is documented and we do not surface it |
-| Device ID: *"an ID string prefixed by device type"* — `ovpn:`, `wg_peer:`, else MAC | our prefixed peer ids; see *Device IDs are not always MAC addresses* |
-| A device *"represents either a physical device, a network interface, or a VPN client"* | explains the `if:` prefix |
-| Device `group` is **singular** — *"Group that this device belongs to"* | matches the confirmed one-membership-per-device rule |
-| Scope `type` ∈ `device` \| `group` \| `user` \| `network`, with `value` = that kind's id | our `scope_kind`; **we support three of the four** |
-| Rule `direction` ∈ `bidirection` \| `inbound` \| `outbound` (default bidirection) | our `traffic_direction` rule field |
-| Target `type` ∈ `app category domain internet intranet ip net region remotePort targetlist` | our rule target types, including `region` |
-| `dnsOnly`: *"Defaults to true when creating block rules"* for `category` / `app` / `targetlist` / `domain` | **answers the `useBf` question** — see *Answered: the two boolean encodings, and `useBf`* |
-| `protocol` ∈ `tcp` \| `udp`, unset for both | our rule `protocol` |
-| `status` ∈ `active` \| `paused`; `resumeTs` when paused | our rule state reasons |
-| `schedule: {duration, cronTime}` | our `cronTime` / `duration` |
-| `timeUsage: {quota, used}` in minutes | our `appTimeUsage` (a different shape — see below) |
-| Device `name` — **one display name**, max 32 chars | our `host_name` is the app-facing name; the DNS/DHCP names are local-only extras |
+| A device **id** is prefixed by device type, defaulting to a MAC | measured: `wg_peer:` ×1, `awg_peer:` ×2 in the host inventory; `if:` ×1 in a rule hit |
+| A device id may name something that is **not a host** | `if:913620a3-…` has no host-inventory entry |
+| A device belongs to **one** group | confirmed by the owner; MSP also documents `group` as singular |
+| `category` on a rule target is **not reliably a category** | measured: the local `category` target field holds `TL-` / `TLX-` target-list ids and `dap_*` rule ids alongside real categories, plus `''` and the literal `'none'` |
+| The local target vocabulary is its own | measured: `category country dns intranet ip mac net network remotePort` — `mac` and `network` have **no MSP equivalent**, and MSP's `app` / `internet` / `domain` / `region` / `targetlist` **do not appear locally** |
 
-**Corrected — three of our readings:**
+**Local findings that the published model actively misled on**, now corrected:
 
-1. **A device id is not a MAC.** Our `device_mac` field holds a device id that can
-   be `wg_peer:` / `awg_peer:` / `if:`. 6% of live rule hits are affected.
-2. **`category` has two different closed sets.** Flow/device `category` is 12
-   values (`ad edu games gamble intel p2p porn private social shopping video vpn`);
-   **rule target** `category` is 11 (`drugs games gamble p2p porn social shopping
-   video violence vpn`). They overlap but are not the same list, and neither
-   contains the other — `edu`/`ad`/`intel` are flow-only, `drugs`/`violence` are
-   rule-only. Each must be validated against its own set.
-3. **`scope` is optional and means "all devices" when unset** — *"The local aspect
-   this rule applies to, unset for all devices"*. So an unscoped rule is not
-   "scoped to nothing"; it is global. Our `applies_to` empty case should be read
-   that way.
+1. **`device_mac` was named from an assumption.** Local measurement shows 3 of 48
+   live rule hits carry `wg_peer:` / `awg_peer:` / `if:`. The published term
+   "Device ID" is a better description of the same thing, but the *finding* is
+   local — the published model does not establish it.
+2. **The published `hit` object is not our `lastHitFlow`.** MSP publishes
+   `{count, lastHitTs, statsResetTs}`; the box stores a full 35-field flow record.
+   So the published model is not evidence about the local shape, and the
+   full-record finding rests entirely on the 48 measured records.
+3. **The published `category` enums describe MSP's own two lists** (12 for flow,
+   11 for rule target). Neither matches the local field, which is an open set
+   carrying identifiers. **Validating a local `category` against either list would
+   drop valid rows.**
+4. **MSP's `scope.type ∈ device|group|user|network` is not comparable to our
+   `scope_kind`** (device/group/user). MSP's scope targets *rules*; local flow and
+   usage queries take `type: tag|host`, a different axis. `network` is a local
+   **rule target type**, not a missing flow scope.
 
-**Newly informed:**
+**One genuine divergence, left alone:** `timeUsage` is `{quota, used}` in minutes
+in the published model, while locally time limits use `disturbLevel` /
+`disturbMethod` / `appTimeUsage`. The local shape is what the box accepts.
 
-- **Rule `group` is a distinct field from `scope`.** `group` is *"ID of the
-  Firewalla box group that this rule applies to, defaults to `global`"* — a
-  box-level grouping — while `scope` selects devices. MSP also notes that omitting
-  both `gid` and `group` makes a rule apply to **all boxes**, including future
-  ones.
-- **`targetlist` is a first-class target type**, not just `category`/`app`. Our
-  rule model treats target lists as a category-style target; the vendor distinguishes
-  them.
-- **`remotePort` is a target type** in its own right, and `port` also appears as an
-  optional qualifier on both `Target` and `Scope`. Two places, not one.
-
-**One divergence to leave alone:** `timeUsage` is `{quota, used}` in minutes, while
-locally time limits are expressed through `disturbLevel` / `disturbMethod` /
-`appTimeUsage`. Different models for the same feature; the local one is what the
-box actually accepts, so it stays.
 
 
 ### What the time filter actually is
