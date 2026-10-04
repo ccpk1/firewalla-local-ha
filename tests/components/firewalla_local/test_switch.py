@@ -58,9 +58,9 @@ from custom_components.firewalla_local.const import (
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
+    FirewallaFlowRecord,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
-    FirewallaRuleHit,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
 )
@@ -102,7 +102,7 @@ def _snapshot_with_rule(
     dnsmasq_only: bool | None = True,
     auto_delete_when_expires: bool | None = None,
     hit_count: int | None = None,
-    last_hit: FirewallaRuleHit | None = None,
+    last_hit: FirewallaFlowRecord | None = None,
     raw_update_overrides: dict[str, object] | None = None,
 ) -> FirewallaRuntimeSnapshot:
     """Return a runtime snapshot with an optional AV_SMART_TV social rule."""
@@ -264,15 +264,26 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
         assert attributes[ATTR_RULE_LAST_HIT] == {
             "timestamp": None,
             "at": None,
+            "is_blocked": None,
+            "block_type": None,
+            "blocked_by_rule_id": None,
             "device_id": None,
             "device_ip": None,
             "destination": None,
             "destination_kind": None,
             "destination_ip": None,
+            "destination_mac": None,
             "port": None,
+            "device_port": None,
             "protocol": None,
+            "download_bytes": None,
+            "upload_bytes": None,
+            "duration_seconds": None,
+            "event_count": None,
+            "network_id": None,
             "app": None,
             "category": None,
+            "region": None,
         }
         assert "source_rule_id" not in attributes
         assert "backing_rule_present" not in attributes
@@ -755,7 +766,7 @@ async def test_selected_rule_switch_exposes_hit_data(
             return_value=_snapshot_with_rule(
                 "744",
                 hit_count=26617,
-                last_hit=FirewallaRuleHit(
+                last_hit=FirewallaFlowRecord(
                     timestamp=timestamp,
                     device_id="74:A7:EA:24:44:44",
                     device_ip="192.168.202.43",
@@ -780,15 +791,26 @@ async def test_selected_rule_switch_exposes_hit_data(
     assert attributes[ATTR_RULE_LAST_HIT] == {
         "timestamp": timestamp,
         "at": "2026-10-03T01:17:14.243000+00:00",
+        "is_blocked": None,
+        "block_type": None,
+        "blocked_by_rule_id": None,
         "device_id": "74:A7:EA:24:44:44",
         "device_ip": "192.168.202.43",
         "destination": "www.youtube.com",
         "destination_kind": "domain",
         "destination_ip": None,
+        "destination_mac": None,
         "port": 53,
+        "device_port": None,
         "protocol": "dns",
+        "download_bytes": None,
+        "upload_bytes": None,
+        "duration_seconds": None,
+        "event_count": None,
+        "network_id": None,
         "app": "youtube",
         "category": "av",
+        "region": None,
     }
 
 

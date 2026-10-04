@@ -30,8 +30,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from ..models import FirewallaNetworkUsageWindow
-from .values import normalized_int, normalized_string
+from ..models import FirewallaFlowRecord, FirewallaNetworkUsageWindow
+from .values import normalized_float, normalized_int, normalized_string
 
 # The same identity arrives under three names depending on the family: audit and
 # activity rows say ``device``, ranking rows say ``mac``, and an older variant
@@ -61,6 +61,69 @@ _RAW_FLOW_LIST_CONTAINER_KEYS: Final = (
     "items",
     "results",
 )
+
+# Wire keys for the event-level record the flow log, the block log and a rule's
+# ``lastHitFlow`` all carry. Verified identical: every one of the 32 fields a live
+# flow-log record had appears in ``lastHitFlow`` too.
+_RAW_RECORD_TS_KEY: Final = "ts"
+_RAW_RECORD_LTYPE_KEY: Final = "ltype"
+_RAW_RECORD_DEVICE_IP_KEY: Final = "deviceIP"
+_RAW_RECORD_PORT_KEY: Final = "port"
+_RAW_RECORD_DEVICE_PORT_KEY: Final = "devicePort"
+_RAW_RECORD_PROTOCOL_KEY: Final = "protocol"
+_RAW_RECORD_PID_KEY: Final = "pid"
+_RAW_RECORD_TYPE_KEY: Final = "type"
+_RAW_RECORD_DOWNLOAD_KEY: Final = "download"
+_RAW_RECORD_UPLOAD_KEY: Final = "upload"
+_RAW_RECORD_DURATION_KEY: Final = "duration"
+_RAW_RECORD_COUNT_KEY: Final = "count"
+_RAW_RECORD_INTF_KEY: Final = "intf"
+_RAW_RECORD_OINTF_KEY: Final = "oIntf"
+_RAW_RECORD_DINTF_KEY: Final = "dIntf"
+_RAW_RECORD_WANINTF_KEY: Final = "wanIntf"
+_RAW_RECORD_APID_KEY: Final = "apid"
+_RAW_RECORD_CATEGORY_KEY: Final = "category"
+_RAW_RECORD_APP_KEY: Final = "app"
+_RAW_RECORD_COUNTRY_KEY: Final = "country"
+_RAW_RECORD_DSTMAC_KEY: Final = "dstMac"
+_RAW_RECORD_TAGS_KEY: Final = "tags"
+_RAW_RECORD_USER_TAGS_KEY: Final = "userTags"
+_RAW_RECORD_DTAGS_KEY: Final = "dTags"
+_RAW_RECORD_DST_TAGS_KEY: Final = "dstTags"
+_RAW_RECORD_FLOW_TAGS_KEY: Final = "flowTags"
+
+# `local: true` on the rollup adds family names carrying this segment, which marks
+# a flow between two LAN hosts rather than one leaving the network.
+_LOCAL_FAMILY_SEGMENT: Final = "local"
+
+# Which unit a rollup family's `count` is in. The box overloads it, and it
+# documents doing so: connections or sessions for a flow, block count for a
+# blocked one. Measured, the byte families are orders of magnitude larger than
+# the blocked ones (min 49,148 bytes versus max 5,410 blocks), so reading a
+# blocked family as bytes would understate it by thousands of times.
+_FLOW_UNIT_BYTES: Final = "bytes"
+_FLOW_UNIT_BLOCKED: Final = "blocked"
+_FLOW_UNIT_CONNECTIONS: Final = "connections"
+_FLOW_UNIT_BY_FAMILY: Final = {
+    "download": _FLOW_UNIT_BYTES,
+    "upload": _FLOW_UNIT_BYTES,
+    "local:download": _FLOW_UNIT_BYTES,
+    "local:upload": _FLOW_UNIT_BYTES,
+    "dnsB": _FLOW_UNIT_BLOCKED,
+    "ipB:in": _FLOW_UNIT_BLOCKED,
+    "ipB:out": _FLOW_UNIT_BLOCKED,
+    "local:ipB:in": _FLOW_UNIT_BLOCKED,
+    "local:ipB:out": _FLOW_UNIT_BLOCKED,
+    "local:in": _FLOW_UNIT_CONNECTIONS,
+    "local:out": _FLOW_UNIT_CONNECTIONS,
+}
+
+# Direction comes from the family name, never from `fd`. Measured: `fd` is "in"
+# on all 199 `download` *and* all 199 `upload` rows, so it cannot be a byte
+# direction, and it is absent on `dnsB` entirely.
+_FLOW_DIRECTION_INBOUND: Final = "inbound"
+_FLOW_DIRECTION_OUTBOUND: Final = "outbound"
+_FLOW_DIRECTION_LOCAL: Final = "local"
 
 
 def flow_row_host_id(raw_row: Mapping[str, object]) -> str | None:
@@ -193,6 +256,130 @@ def metric_ranking_sort_key(
     return (-value, (host_name or "").casefold(), host_id)
 
 
+def build_flow_record(raw_row: Mapping[str, object]) -> FirewallaFlowRecord:
+    """Build one normalized flow record from a raw wire row.
+
+    The flow log, the block log and a rule's ``lastHitFlow`` are the same shape,
+    so they are read here rather than each keeping its own subset. Measured: all
+    32 fields a live flow-log record carried appear in ``lastHitFlow`` too.
+
+    The destination arrives under ``host`` for a resolved connection, ``domain``
+    for a DNS match, ``ip`` when neither resolved, and ``dstMac`` for a peer
+    inside the LAN (which has no hostname to resolve to). They collapse into one
+    destination plus its kind so a caller does not have to know which family
+    produced the row.
+
+    Nothing is defaulted to a measurement. A blocked record has no bytes, so the
+    byte fields stay ``None`` -- ``0`` would read as a measured empty transfer
+    rather than as an intercepted one.
+    """
+    return FirewallaFlowRecord(
+        timestamp=normalized_float(raw_row.get(_RAW_RECORD_TS_KEY)),
+        ltype=normalized_string(raw_row.get(_RAW_RECORD_LTYPE_KEY)),
+        device_id=flow_row_host_id(raw_row),
+        device_ip=normalized_string(raw_row.get(_RAW_RECORD_DEVICE_IP_KEY)),
+        destination=_flow_record_destination(raw_row)[0],
+        destination_kind=_flow_record_destination(raw_row)[1],
+        destination_ip=normalized_string(raw_row.get(_RAW_FLOW_IP_KEY)),
+        destination_mac=normalized_string(raw_row.get(_RAW_RECORD_DSTMAC_KEY)),
+        port=normalized_int(raw_row.get(_RAW_RECORD_PORT_KEY)),
+        device_port=normalized_int(raw_row.get(_RAW_RECORD_DEVICE_PORT_KEY)),
+        protocol=normalized_string(raw_row.get(_RAW_RECORD_PROTOCOL_KEY)),
+        blocked_by_rule_id=normalized_int(raw_row.get(_RAW_RECORD_PID_KEY)),
+        block_type=normalized_string(raw_row.get(_RAW_RECORD_TYPE_KEY)),
+        download_bytes=normalized_int(raw_row.get(_RAW_RECORD_DOWNLOAD_KEY)),
+        upload_bytes=normalized_int(raw_row.get(_RAW_RECORD_UPLOAD_KEY)),
+        duration_seconds=normalized_float(raw_row.get(_RAW_RECORD_DURATION_KEY)),
+        event_count=normalized_int(raw_row.get(_RAW_RECORD_COUNT_KEY)),
+        network_id=normalized_string(raw_row.get(_RAW_RECORD_INTF_KEY)),
+        remote_network_id=(
+            normalized_string(raw_row.get(_RAW_RECORD_OINTF_KEY))
+            or normalized_string(raw_row.get(_RAW_RECORD_DINTF_KEY))
+            or normalized_string(raw_row.get(_RAW_RECORD_WANINTF_KEY))
+        ),
+        apid=normalized_int(raw_row.get(_RAW_RECORD_APID_KEY)),
+        category=normalized_string(raw_row.get(_RAW_RECORD_CATEGORY_KEY)),
+        app=normalized_string(raw_row.get(_RAW_RECORD_APP_KEY)),
+        region=normalized_string(raw_row.get(_RAW_RECORD_COUNTRY_KEY)),
+        tags=flow_record_tags(raw_row, _RAW_RECORD_TAGS_KEY),
+        user_tags=flow_record_tags(raw_row, _RAW_RECORD_USER_TAGS_KEY),
+        membership_tags=flow_record_tags(raw_row, _RAW_RECORD_DTAGS_KEY),
+        destination_tags=flow_record_tags(raw_row, _RAW_RECORD_DST_TAGS_KEY),
+        flow_tags=flow_record_tags(raw_row, _RAW_RECORD_FLOW_TAGS_KEY),
+    )
+
+
+def flow_record_tags(
+    raw_row: Mapping[str, object],
+    key: str,
+) -> tuple[str, ...]:
+    """Return one tag list from a record, dropping anything that is not a tag.
+
+    Tag fields are absent on most records, so an empty tuple means "the box did
+    not say" rather than "no tags".
+    """
+    raw_tags = raw_row.get(key)
+    if not isinstance(raw_tags, list):
+        return ()
+    return tuple(
+        tag for tag in (normalized_string(item) for item in raw_tags) if tag is not None
+    )
+
+
+def flow_family_unit(family: str) -> str | None:
+    """Return the unit one rollup family's ``count`` is expressed in.
+
+    ``count`` is overloaded across families and Firewalla documents the overload,
+    so this is a lookup rather than a guess. ``None`` for an unrecognised family
+    is deliberate: treating an unknown family as bytes would be the exact
+    misreading this exists to prevent.
+    """
+    return _FLOW_UNIT_BY_FAMILY.get(family)
+
+
+def flow_family_direction(family: str) -> str | None:
+    """Return the direction of one rollup family, from its name.
+
+    ``fd`` is **not** used, and must not be: it reads ``"in"`` on both byte
+    families and on every regular record measured, so it cannot be a direction.
+    The family name is the only carrier, and ``local:`` families are neither
+    inbound nor outbound -- they never leave the network.
+    """
+    if family.startswith(f"{_LOCAL_FAMILY_SEGMENT}:"):
+        return _FLOW_DIRECTION_LOCAL
+    if family.endswith(":in") or family == "download":
+        return _FLOW_DIRECTION_INBOUND
+    if family.endswith(":out") or family == "upload":
+        return _FLOW_DIRECTION_OUTBOUND
+    if family.endswith("B"):
+        return _FLOW_DIRECTION_INBOUND
+    return None
+
+
+def _flow_record_destination(
+    raw_row: Mapping[str, object],
+) -> tuple[str | None, str | None]:
+    """Return the record's destination and the kind of name it is.
+
+    ``host`` and ``domain`` describe the same thing at different resolutions and
+    ``ip`` is the fallback, so the pair is resolved together. A ``local:`` peer
+    carries only its MAC, which is a third kind rather than a missing name.
+    """
+    host = normalized_string(raw_row.get(_RAW_FLOW_HOSTNAME_KEYS[0]))
+    if host is not None:
+        return host, "host"
+    domain = normalized_string(raw_row.get(_RAW_FLOW_HOSTNAME_KEYS[1]))
+    if domain is not None:
+        return domain, "domain"
+    ip_address = normalized_string(raw_row.get(_RAW_FLOW_IP_KEY))
+    if ip_address is not None:
+        return ip_address, "ip"
+    peer_mac = normalized_string(raw_row.get(_RAW_RECORD_DSTMAC_KEY))
+    if peer_mac is not None:
+        return peer_mac, "mac"
+    return None, None
+
+
 def extract_usage_window(
     raw_window: object,
 ) -> FirewallaNetworkUsageWindow | None:
@@ -219,6 +406,7 @@ def extract_usage_window(
 @dataclass(slots=True)
 class FlowHostActivity:
     """Mutable per-host accumulator for one flow aggregation pass.
+
 
     Mutable deliberately. The same host is described by three different
     families -- ``appDetails`` for bytes, ``recent`` for connection counts, and

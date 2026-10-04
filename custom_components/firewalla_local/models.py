@@ -62,6 +62,9 @@ _RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
 _RAW_UPDATE_ALARM_ID_KEY: Final = "aid"
 _STATUS_DISABLED: Final = "disabled"
 _STATUS_ENABLED: Final = "enabled"
+# `ltype` is the box's own discriminator between a record it stopped and one it
+# let through: "audit" is blocked, "flow" is regular.
+_FLOW_LTYPE_BLOCKED: Final = "audit"
 _TEMPLATE_DATA_ACTION_KEY: Final = "action"
 _TEMPLATE_DATA_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
 _TEMPLATE_DATA_NAME_KEY: Final = "name"
@@ -976,29 +979,88 @@ class FirewallaUsageHistoryView:
 
 
 @dataclass(slots=True, frozen=True)
-class FirewallaRuleHit:
-    """The most recent traffic a rule matched.
+class FirewallaFlowRecord:
+    """One flow record, exactly as the box stores it.
 
-    Firewalla keeps only the last matched flow per rule, not a log, so this is a
-    point-in-time observation rather than a history. It is what makes a rule
-    answerable as "what did this rule last stop, and for which device?".
+    The same shape is returned by the flow log, the block log, and a rule's
+    ``lastHitFlow``. Measured live: of the 32 fields a flow-log record carried,
+    **all 32** appear identically in ``lastHitFlow``, and the per-``ltype`` field
+    sets match too. So one model and one reader serve all three surfaces rather
+    than each keeping its own hand-picked subset.
 
-    ``device_id`` is a Firewalla **device id**, not necessarily a MAC: measured
-    live, 3 of 48 rule hits carried a ``wg_peer:`` / ``awg_peer:`` / ``if:``
-    prefixed id rather than a MAC address, and an ``if:`` device names an
-    interface that has no host-inventory entry at all.
+    Blocked and regular records differ in which fields are populated, not in
+    structure:
+
+    - **blocked** (``ltype == "audit"``) names the rule that stopped it
+      (``blocked_by_rule_id``) and the match kind (``block_type``), and carries
+      **no bytes at all** -- Firewalla intercepts it before it travels, so an
+      absent byte total is not a zero.
+    - **regular** (``ltype == "flow"``) carries ``download_bytes``,
+      ``upload_bytes``, ``duration_seconds`` and the resolved destination.
+
+    Three rare fields the box sometimes puts on a rule hit -- ``appHosts``,
+    ``rl`` and ``drl`` -- are deliberately not modelled: they appeared on at most
+    5 of 48 records, their meaning is not established, and a modelled field we
+    cannot interpret is worse than an absent one.
+
+    ``device_id`` is a Firewalla device id, not necessarily a MAC: measured, 3 of
+    48 hits carried a ``wg_peer:`` / ``awg_peer:`` / ``if:`` prefixed id, and an
+    ``if:`` device names an interface with no host-inventory entry at all.
     """
 
-    timestamp: float | None
-    device_id: str | None
-    device_ip: str | None
-    destination: str | None
-    destination_kind: str | None
-    destination_ip: str | None
-    port: int | None
-    protocol: str | None
-    app: str | None
-    category: str | None
+    timestamp: float | None = None
+    ltype: str | None = None
+    device_id: str | None = None
+    device_ip: str | None = None
+    destination: str | None = None
+    destination_kind: str | None = None
+    destination_ip: str | None = None
+    destination_mac: str | None = None
+    port: int | None = None
+    device_port: int | None = None
+    protocol: str | None = None
+    blocked_by_rule_id: int | None = None
+    block_type: str | None = None
+    download_bytes: int | None = None
+    upload_bytes: int | None = None
+    duration_seconds: float | None = None
+    event_count: int | None = None
+    network_id: str | None = None
+    remote_network_id: str | None = None
+    apid: int | None = None
+    category: str | None = None
+    app: str | None = None
+    region: str | None = None
+    tags: tuple[str, ...] = ()
+    user_tags: tuple[str, ...] = ()
+    membership_tags: tuple[str, ...] = ()
+    destination_tags: tuple[str, ...] = ()
+    flow_tags: tuple[str, ...] = ()
+
+    @property
+    def is_blocked(self) -> bool | None:
+        """Return whether the box stopped this flow before it travelled.
+
+        ``None`` when the record carries no ``ltype``, rather than ``False``. The
+        box reported ``ltype`` on every record measured, so the unknown case is
+        not expected -- but ``False`` would be a positive claim that a record we
+        could not classify was allowed through, and a wrong answer is worse than
+        an absent one.
+        """
+        if self.ltype is None:
+            return None
+        return self.ltype == _FLOW_LTYPE_BLOCKED
+
+    @property
+    def total_bytes(self) -> int | None:
+        """Return the combined transfer total, or ``None`` when there is none.
+
+        Absent rather than zero for a blocked record: an intercepted flow has no
+        bytes to report, and ``0`` would read as a measured empty transfer.
+        """
+        if self.download_bytes is None and self.upload_bytes is None:
+            return None
+        return (self.download_bytes or 0) + (self.upload_bytes or 0)
 
 
 @dataclass(slots=True, frozen=True)
@@ -1110,7 +1172,7 @@ class FirewallaPolicyRule:
     dnsmasq_only: bool | None = None
     category: str | None = None
     hit_count: int = 0
-    last_hit: FirewallaRuleHit | None = None
+    last_hit: FirewallaFlowRecord | None = None
     raw_update_payload: dict[str, object] = field(default_factory=dict, compare=False)
 
     @property
@@ -1527,7 +1589,7 @@ class FirewallaAlarmException:
 
 
 def build_rule_hit_attributes(
-    hit: FirewallaRuleHit | None,
+    hit: FirewallaFlowRecord | None,
 ) -> dict[str, object]:
     """Build the shared shape for one rule's last matched flow.
 
@@ -1536,7 +1598,15 @@ def build_rule_hit_attributes(
     means the rule has never matched, never "unknown", so callers keep the two
     apart rather than defaulting to a zero count.
 
-    ``device_id`` is a device id rather than a MAC; see ``FirewallaRuleHit``.
+    This projects the shared record down to what a rule surface needs. It is a
+    deliberate subset rather than the whole record: these keys land on an entity
+    attribute, and a record carries 35 fields whose meaning depends on whether it
+    was blocked or regular.
+
+    ``device_id`` is a device id, not necessarily a MAC. For a blocked record
+    ``block_type`` and ``blocked_by_rule_id`` are populated and the byte keys are
+    **absent, not zero**: a blocked flow never travelled. For a regular record the
+    reverse holds, so ``block_type`` is ``None`` rather than a default.
 
     Stdlib only, so the models layer stays free of Home Assistant imports.
     """
@@ -1544,15 +1614,26 @@ def build_rule_hit_attributes(
         return {
             "timestamp": None,
             "at": None,
+            "is_blocked": None,
+            "block_type": None,
+            "blocked_by_rule_id": None,
             "device_id": None,
             "device_ip": None,
             "destination": None,
             "destination_kind": None,
             "destination_ip": None,
+            "destination_mac": None,
             "port": None,
+            "device_port": None,
             "protocol": None,
+            "download_bytes": None,
+            "upload_bytes": None,
+            "duration_seconds": None,
+            "event_count": None,
+            "network_id": None,
             "app": None,
             "category": None,
+            "region": None,
         }
     return {
         "timestamp": hit.timestamp,
@@ -1561,15 +1642,26 @@ def build_rule_hit_attributes(
             if hit.timestamp is not None
             else None
         ),
+        "is_blocked": hit.is_blocked,
+        "block_type": hit.block_type,
+        "blocked_by_rule_id": hit.blocked_by_rule_id,
         "device_id": hit.device_id,
         "device_ip": hit.device_ip,
         "destination": hit.destination,
         "destination_kind": hit.destination_kind,
         "destination_ip": hit.destination_ip,
+        "destination_mac": hit.destination_mac,
         "port": hit.port,
+        "device_port": hit.device_port,
         "protocol": hit.protocol,
+        "download_bytes": hit.download_bytes,
+        "upload_bytes": hit.upload_bytes,
+        "duration_seconds": hit.duration_seconds,
+        "event_count": hit.event_count,
+        "network_id": hit.network_id,
         "app": hit.app,
         "category": hit.category,
+        "region": hit.region,
     }
 
 

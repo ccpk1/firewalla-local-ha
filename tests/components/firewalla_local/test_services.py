@@ -137,10 +137,10 @@ from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
+    FirewallaFlowRecord,
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
-    FirewallaRuleHit,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
     FirewallaUserRuntime,
@@ -3655,7 +3655,7 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
             replace(
                 _snapshot().policy_rules[0],
                 hit_count=26617,
-                last_hit=FirewallaRuleHit(
+                last_hit=FirewallaFlowRecord(
                     timestamp=1790990234.243,
                     device_id="74:A7:EA:24:44:44",
                     device_ip="192.168.202.43",
@@ -3698,18 +3698,32 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
     fired, never = by_id["744"], by_id["672"]
 
     assert fired["hit_count"] == 26617
+    # `last_hit` projects the shared flow record. `download_bytes` /
+    # `upload_bytes` are present here because this fixture models a *regular*
+    # flow: a blocked one has no bytes at all and would read None rather than 0.
     assert fired["last_hit"] == {
         "timestamp": 1790990234.243,
         "at": "2026-10-03T01:17:14.243000+00:00",
+        "is_blocked": None,
+        "block_type": None,
+        "blocked_by_rule_id": None,
         "device_id": "74:A7:EA:24:44:44",
         "device_ip": "192.168.202.43",
         "destination": "www.youtube.com",
         "destination_kind": "domain",
         "destination_ip": None,
+        "destination_mac": None,
         "port": 53,
+        "device_port": None,
         "protocol": "dns",
+        "download_bytes": None,
+        "upload_bytes": None,
+        "duration_seconds": None,
+        "event_count": None,
+        "network_id": None,
         "app": "youtube",
         "category": "av",
+        "region": None,
     }
     # A rule with no recorded matches reads as 0, not null, so "never fired" is a
     # comparison rather than a null check. `last_hit` has nothing to describe and

@@ -28,18 +28,19 @@ from ..models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
+    FirewallaFlowRecord,
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaHostVpnClient,
     FirewallaInternetQualitySample,
     FirewallaPolicyRule,
-    FirewallaRuleHit,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
     FirewallaUserAppUsage,
     FirewallaUserRuntime,
 )
+from ..utils.flow import build_flow_record
 from ..utils.network import build_network_inventory
 from ..utils.values import normalized_bool, normalized_float, normalized_int
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
@@ -175,16 +176,6 @@ _RAW_RULE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
 _RAW_RULE_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
 _RAW_RULE_HIT_COUNT_KEY: Final = "hitCount"
 _RAW_RULE_LAST_HIT_FLOW_KEY: Final = "lastHitFlow"
-_RAW_HIT_DEVICE_KEY: Final = "device"
-_RAW_HIT_DEVICE_IP_KEY: Final = "deviceIP"
-_RAW_HIT_TS_KEY: Final = "ts"
-_RAW_HIT_HOST_KEY: Final = "host"
-_RAW_HIT_DOMAIN_KEY: Final = "domain"
-_RAW_HIT_IP_KEY: Final = "ip"
-_RAW_HIT_PORT_KEY: Final = "port"
-_RAW_HIT_PROTOCOL_KEY: Final = "protocol"
-_RAW_HIT_APP_KEY: Final = "app"
-_RAW_HIT_CATEGORY_KEY: Final = "category"
 
 _RAW_SYSTEM_MODEL_KEY: Final = "model"
 _RAW_SYSTEM_CPU_ID_KEY: Final = "cpuid"
@@ -2808,50 +2799,22 @@ class FirewallaApiClient:
 
     def _normalize_rule_hit(
         self, raw_rule: dict[str, object]
-    ) -> FirewallaRuleHit | None:
+    ) -> FirewallaFlowRecord | None:
         """Normalize the last flow a rule matched, when the box reports one.
 
         Firewalla keeps only the most recent match per rule, so an absent value
-        means "never matched", not "no data available". The destination arrives
-        under `host` or `domain` for DNS matches and `ip` otherwise, so the pair
-        is resolved into one destination plus its kind.
+        means "never matched", not "no data available".
+
+        Read with the shared flow-record reader rather than locally: measured,
+        ``lastHitFlow`` is the *same shape* a flow-log record is -- all 32 fields
+        a live flow-log record carried appear here too -- so a local reader would
+        be a second subset that silently drops whatever it did not list.
         """
         raw_flow = raw_rule.get(_RAW_RULE_LAST_HIT_FLOW_KEY)
         if not isinstance(raw_flow, dict):
             return None
 
-        host = self._normalized_optional_string(raw_flow.get(_RAW_HIT_HOST_KEY))
-        domain = self._normalized_optional_string(raw_flow.get(_RAW_HIT_DOMAIN_KEY))
-        ip_address = self._normalized_optional_string(raw_flow.get(_RAW_HIT_IP_KEY))
-        if host is not None:
-            destination, destination_kind = host, "host"
-        elif domain is not None:
-            destination, destination_kind = domain, "domain"
-        elif ip_address is not None:
-            destination, destination_kind = ip_address, "ip"
-        else:
-            destination, destination_kind = None, None
-
-        return FirewallaRuleHit(
-            timestamp=self._coerce_float(raw_flow.get(_RAW_HIT_TS_KEY)),
-            device_id=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_DEVICE_KEY)
-            ),
-            device_ip=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_DEVICE_IP_KEY)
-            ),
-            destination=destination,
-            destination_kind=destination_kind,
-            destination_ip=ip_address,
-            port=self._coerce_int(raw_flow.get(_RAW_HIT_PORT_KEY)),
-            protocol=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_PROTOCOL_KEY)
-            ),
-            app=self._normalized_optional_string(raw_flow.get(_RAW_HIT_APP_KEY)),
-            category=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_CATEGORY_KEY)
-            ),
-        )
+        return build_flow_record(raw_flow)
 
     def _count_exception_rules(self, data: dict[str, object]) -> int:
         """Return the number of exception rules exposed by the init payload."""
