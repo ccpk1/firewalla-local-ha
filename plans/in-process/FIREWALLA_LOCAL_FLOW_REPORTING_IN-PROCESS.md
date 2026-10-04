@@ -3,8 +3,8 @@
 **Initiative:** Flow Reporting Service (`get_flow_report`)
 **Branch:** `feature/flow-reporting`, off `main` (the rule-hit-data work is already on `main`)
 **Depends on:** `2.5.0-beta.1` (rule hit data), issue #53 (stale rule switches) for one edge case only
-**Status:** Phases 1–3 complete; **Phase 4 in progress** — the service, its identity gate, `services.yaml`, translations and the read-tier LLM tool are done (`d4cb98d`, `f905d12`); the remaining docs, quality scale and the live end-to-end run remain.
-**Last updated:** 2026-10-04 — Phase 4.4 landed; the tool is lean by default with `device_detail` behind an explicit include.
+**Status:** **COMPLETE** — all four phases delivered and validated. Phases 1–3 land the shared core, the protocol layer and the normalization; Phase 4 lands the non-admin `get_flow_report` service, its default-off identity gate, the read-tier LLM tool, docs and quality scale.
+**Last updated:** 2026-10-04 — 4.7 verified end-to-end against the live box; nothing outstanding.
 
 ---
 
@@ -511,7 +511,7 @@ and the `timeUsage` shape divergence. All recorded, none needed for the flow rep
 | **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
 | **2** | Protocol layer | **COMPLETE** — `managers/flow_manager.py` and the three client methods, with served-window read-back, deadline-bounded pagination, content dedupe and fail-soft. | 638 tests pass (37 new); every method verified read-only live. |
 | **3** | Normalization | **COMPLETE** — `FirewallaFlowRecord` and one reader for all three record surfaces, `utils/flow_report.py` aggregation, `async_get_report`, the shared matching core, and the network/tag joins. | 705 tests pass; every section verified read-only live. Target resolution, the envelope and the identity gate moved to Phase 4 as service-layer work. |
-| **4** | Surface | **IN PROGRESS** — the non-admin `get_flow_report` service with its scope resolution, the shared `_serialize_report_*` envelope and the default-off identity gate, plus `services.yaml`, translations and the read-tier LLM tool. Docs, quality scale and the live end-to-end run remain. | 718 tests pass (13 new); serializer run against the live box at both detail levels; the gate verified open and closed on real data. |
+| **4** | Surface | **COMPLETE** — the non-admin `get_flow_report` service with its scope resolution, the shared `_serialize_report_*` envelope and the default-off identity gate, plus `services.yaml`, translations, the read-tier LLM tool, docs and quality scale. | 718 tests pass (13 new); serializer run against the live box at both detail levels; the gate verified open and closed on real data; **the whole service path verified end-to-end live**. |
 
 Phases are sequential. **Phase 1 is not optional, and it is not busywork.** The flow
 report needs the *same* processing the integration already does for `item=intf` at a
@@ -919,11 +919,46 @@ two earlier-proposed changes (adding `network` to `scope_kind`, splitting
 
 ### Phase 4 — Surface
 
-**4.1, 4.1b, 4.2, 4.3 and 4.4 COMPLETE — executed 2026-10-04 on `feature/flow-reporting`.**
-`d4cb98d` (service) and `f905d12` (tool). Validation: 718 tests pass (13 new),
-`ruff check` and `format` clean, `mypy` clean across 46 files. The serializer was
-also run **against the live box** for a group and a device at both detail levels,
-and the gate was verified open and closed on real data. Remaining: **4.5–4.7**.
+**4.1–4.7 COMPLETE — executed 2026-10-04 on `feature/flow-reporting`.** `d4cb98d`
+(service), `f905d12` (tool), `a168214` (docs and quality scale). Validation: 718
+tests pass (13 new), `ruff check` and `format` clean, `mypy` clean across 46 files.
+The serializer was also run **against the live box** for a group and a device at
+both detail levels, and the gate was verified open and closed on real data.
+
+#### 4.7 completion transcript
+
+The whole service path — schema validation, the registered handler, scope
+resolution against the live inventory, the manager's reads and the envelope — run
+against the dev box. This is the only run that exercises links the mocked unit
+tests and the serializer probe each covered separately.
+
+| Call | Resolved to | `device_detail` | Window | Result |
+| --- | --- | --- | --- | --- |
+| group `AV_AUDIO`, summary | `tag` / `27` | `false` | 24h served, not clamped | 11,576 B, no `member_ranking` |
+| group `AV_AUDIO`, `+device_detail` | `tag` / `27` | `true` | 24h served | 14,216 B, 3 members |
+| user `CARENS_DEVICES` by name | `tag` / `62` (the **affiliated tag**) | `false` | 24h served | 1.65 GB down, 2,408 conns |
+| device by name, `detail: records` | `host` / the tablet | `true` (auto) | 24h served | 209,569 B, 300/300 flow records |
+| group, `window_hours: 168` | `tag` / `27` | `false` | **168h requested, 24h served, `is_clamped: true`** | 11,576 B |
+| group, unknown name | — | — | — | `ServiceValidationError` / `flow_report_scope_not_found` |
+
+Four things this run proved that nothing before it had:
+
+- **A device scope resolves by name**, not only by MAC, and gets
+  `device_detail: true` without the flag — the auto-satisfied case working on real
+  data.
+- **A user scope resolves to the affiliated tag** through the whole path, returning
+  real traffic (1.65 GB) where the user id would have returned an empty report.
+- **A device report marks `member_ranking` unavailable and a group report does
+  not** — the Q3 distinction holding end to end, and the withheld ranking staying
+  out of `unavailable_sections` in the group case.
+- **A clamped window is reported as served** rather than as requested, with
+  `is_partial` set on the time basis.
+
+**One defect found, in the probe rather than the code:** `host_manager.get_host()`
+was not stubbed, so the resolver returned `Mock` attributes for the device scope and
+the client failed serializing them. The earlier probes never caught it because they
+passed a target straight to the manager and bypassed the resolver entirely — which is
+precisely the gap 4.7 exists to close.
 
 - [x] **4.1 Service schema and handler** in `services.py`, registered in
       `_SERVICE_REGISTRATIONS` as **read-only and `admin=False`** — matching every
@@ -1019,14 +1054,29 @@ and the gate was verified open and closed on real data. Remaining: **4.5–4.7**
       an omission is only safe if the schema default fills it in; and the tool's
       declared *values* were verified to be a subset of the service's, since the
       field-name contract would pass a tool and service that disagreed on values.
-- [ ] **4.5 Docs.** `USER_GUIDE.md` (how to read the report, what the window really
-      means, what is withheld and why), `MCP_TOOL_REFERENCE.md`, and
-      `REVERSE_ENGINEERING_WORKFLOW.md` (mark the answered open questions:
-      retention, page size, window validity).
-- [ ] **4.6 Quality scale.** Add `docs-actions` coverage and confirm no rule
-      regresses; `action-exceptions` must cover the new exception keys.
-- [ ] **4.7 Live end-to-end** run against the dev box for one group and one device,
+- [x] **4.5 Docs.** Done (`a168214`). `USER_GUIDE.md` gains the service — what it
+      answers, what the window really means, what each detail level returns, and
+      what the gate withholds and why, including that it is a **default and not a
+      permission**. `REVERSE_ENGINEERING_WORKFLOW.md` gains the user-scope finding
+      (below) and closes the `host`-scoping question. `MCP_TOOL_REFERENCE.md` was
+      done with 4.4, since a contract test requires every registered tool to be
+      named there.
+
+      **The new finding is that a user scope is its affiliated tag, not the user
+      id.** Measured on all 10 users: 8 returned 398–578 rollup rows for the
+      affiliated tag and **zero** for the uid, with no error either way. The other
+      two were 0/0, so the table compares against a known-good tag rather than
+      against the uid alone — an idle target would otherwise read as agreement.
+      `item=appTimeUsage` accepts both ids, which is what makes the mistake easy to
+      make and why it is now written down rather than left in a commit message.
+- [x] **4.6 Quality scale.** Done (`a168214`). `docs-actions` and
+      `action-exceptions` were **already `done`** — this step is a confirmation, not
+      a change. Neither regresses: every service is in the guide's catalog (a test
+      enforces it) and `action-exceptions` now records the three flow-report keys
+      against the rule it exists to satisfy.
+- [x] **4.7 Live end-to-end** run against the dev box for one group and one device,
       both detail levels, and record the transcript in the plan's completion notes.
+      **Done — transcript below.**
 
 ---
 
@@ -1037,7 +1087,7 @@ and the gate was verified open and closed on real data. Remaining: **4.5–4.7**
 | **1** | **Done.** 560 tests pass with no existing assertion or snapshot changed; `ruff check`, `ruff format`, `mypy` clean. The before/after throughput measurement was dropped by owner decision as one-off activity. |
 | **2** | **Done.** Read-only live probes on the dev box: all three methods, window clamping (24h vs 168h), count clamping, single-page and all-available modes, and a `category`-filtered blocked read. A 24h flow-log walk took 3 pages / 7,545 rows; a block-log walk 2 pages / 1,154 rows, all `audit`. |
 | **3** | **Done.** Pure-aggregation unit tests (21) plus live read-only verification of every section on the dev box: window clamping, totals per unit, destination merging across addresses, the blocked breakdown, LAN peers, member ranking, the block-to-rule join, and the network/tag name joins. A post-phase re-measurement over four pages and the 2026-10-03 capture (12,315 records) corrected three claims a single-page sample could not support — see the Phase 3 findings. |
-| **4** | **Partly done.** The serializer ran against the dev box for a group and a device at both detail levels, and the gate was measured open (21 members, 2 of 2 destinations with ids, 14,419 B) and closed (withheld, 5,322 B) on real data. Still to run: the full suite with `prek`, and the 4.7 end-to-end call **through the service** rather than through the serializer directly. |
+| **4** | **Done.** The full service path — schema, handler, live scope resolution, manager reads, envelope — run against the dev box for a group, a user and a device, at both detail levels, including the clamped-window and unknown-scope paths. Transcript in 4.7. (`prek` does not apply here: this standalone repo has no `.pre-commit-config.yaml`, so the ruff/format/mypy/pytest chain above is the whole gate.) |
 
 Commands: `python -m ruff check .` · `python -m ruff format .` ·
 `python -m mypy custom_components/firewalla_local` · `python -m pytest tests/ -v`
@@ -1092,34 +1142,43 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
 
 ---
 
-## 8. Phase 4 handoff to `Firewalla Builder`
+## 8. Delivery note
 
-**Target agent:** `Firewalla Builder`
-**Authorizes:** **Phase 4 only** (4.1, 4.1b, 4.2–4.7). Phases 1–3 are complete and
-validated.
-**Blockers:** none. Q9 is settled from live measurement (see Q9 and 4.1b) and is
-applied when the report is **serialized**, not in the aggregation.
+**Status: delivered.** All four phases are complete and validated, and every step
+in this plan is closed. Commits on `feature/flow-reporting`, 30 ahead of `main`:
 
-**Branch.** Continue on `feature/flow-reporting`. Nothing is pushed; the branch is
-26 commits ahead of `main`.
+| Phase | Commits | Tests |
+| --- | --- | --- |
+| 1 — Shared flow core | `a468824` … `d8705f9` | 601 |
+| 2 — Protocol layer | `a94dc29`, `9826868` | 638 |
+| 3 — Normalization | `ea8bd85` … `938700a`, `78abe40` | 705 |
+| 4 — Surface | `d4cb98d`, `f905d12`, `a168214` | 718 |
 
-Prerequisite reading, in order: **Q9** and **4.1b** (the gate and why it lives in
-the serializer), then Phase 3's *Moved to Phase 4* note, then `services.py` →
-`_serialize_network_segment_report` as the envelope precedent — it is also the
-`include_hosts` precedent the gate should copy rather than reinvent.
+**What ships.** `firewalla_local.get_flow_report` (non-admin, response-only) and
+the `firewalla_local__get_flow_report` read tool: one windowed rollup summarized
+into totals, ranked destinations, a blocked breakdown and LAN peers, with the
+record families read only on request, all inside the shared report envelope.
 
-**The one rule for this phase:** Phase 3 already built every field, including the
-identity-bearing ones. Phase 4 **serializes** that and adds no aggregation. If a
-step appears to need a new summary field, that is a signal the serializer is
-reaching past its boundary — stop and report it, do not add the builder.
+**The three design commitments worth keeping in mind if this is ever revised:**
 
-**One open item is carried in:** 3.6c, a one-line docstring on
-`FirewallaFlowRecord.timestamp`. Fold it into 4.1 or land it standalone.
+1. **The box's limits are documented and reported, never encoded.** It validates
+   nothing and silently clamps, so the served window is read back from the response
+   rather than assumed, and every constraint is enforced on our side.
+2. **The identity gate is applied at serialization, not in the aggregation.** The
+   summary model carries every field, so what a response omits is exactly what the
+   serializer chose to omit — a withheld value can always be told apart from one
+   the box never returned.
+3. **A user scope is the affiliated tag, not the user id.** Measured, and the only
+   way this works; the two ids are interchangeable on `appTimeUsage` and are not on
+   the flow queries.
 
-Do not begin 4.4 until 4.1 is registered, and registered **non-admin** — an admin
-registration puts the tool outside the only tier `llm_tools_read.py` can use.
+**One open item, deliberately not actioned:** `_resolve_flow_report_target` and
+`_resolve_usage_history_target` share a matching core but not a policy, and the
+usage path still sends a user's `user_id` — which is **correct for that endpoint**
+(measured byte-identical to the affiliated tag) but reads as inconsistent next to
+the flow resolver. Worth a comment or a decision, not a change made in this
+initiative.
 
 ```bash
-git checkout feature/flow-reporting
-git log --oneline main..HEAD
+git log --oneline main..feature/flow-reporting
 ```
