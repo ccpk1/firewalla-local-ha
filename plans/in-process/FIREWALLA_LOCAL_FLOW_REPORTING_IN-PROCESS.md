@@ -3,8 +3,8 @@
 **Initiative:** Flow Reporting Service (`get_flow_report`)
 **Branch:** `feature/flow-reporting`, off `main` (the rule-hit-data work is already on `main`)
 **Depends on:** `2.5.0-beta.1` (rule hit data), issue #53 (stale rule switches) for one edge case only
-**Status:** Phases 1–3 complete; **Phase 4 in progress** — the service, its identity gate, `services.yaml` and translations are done (`d4cb98d`); the LLM tool, docs, quality scale and the live end-to-end run remain.
-**Last updated:** 2026-10-04 — Phase 4.1–4.3 landed; a user scope was found to need the affiliated tag rather than the user id.
+**Status:** Phases 1–3 complete; **Phase 4 in progress** — the service, its identity gate, `services.yaml`, translations and the read-tier LLM tool are done (`d4cb98d`, `f905d12`); the remaining docs, quality scale and the live end-to-end run remain.
+**Last updated:** 2026-10-04 — Phase 4.4 landed; the tool is lean by default with `device_detail` behind an explicit include.
 
 ---
 
@@ -511,7 +511,7 @@ and the `timeUsage` shape divergence. All recorded, none needed for the flow rep
 | **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
 | **2** | Protocol layer | **COMPLETE** — `managers/flow_manager.py` and the three client methods, with served-window read-back, deadline-bounded pagination, content dedupe and fail-soft. | 638 tests pass (37 new); every method verified read-only live. |
 | **3** | Normalization | **COMPLETE** — `FirewallaFlowRecord` and one reader for all three record surfaces, `utils/flow_report.py` aggregation, `async_get_report`, the shared matching core, and the network/tag joins. | 705 tests pass; every section verified read-only live. Target resolution, the envelope and the identity gate moved to Phase 4 as service-layer work. |
-| **4** | Surface | **IN PROGRESS** — the non-admin `get_flow_report` service with its scope resolution, the shared `_serialize_report_*` envelope and the default-off identity gate, plus `services.yaml` and translations. LLM tool, docs, quality scale and the live end-to-end run remain. | 715 tests pass (10 new); serializer run against the live box at both detail levels; the gate verified open and closed on real data. |
+| **4** | Surface | **IN PROGRESS** — the non-admin `get_flow_report` service with its scope resolution, the shared `_serialize_report_*` envelope and the default-off identity gate, plus `services.yaml`, translations and the read-tier LLM tool. Docs, quality scale and the live end-to-end run remain. | 718 tests pass (13 new); serializer run against the live box at both detail levels; the gate verified open and closed on real data. |
 
 Phases are sequential. **Phase 1 is not optional, and it is not busywork.** The flow
 report needs the *same* processing the integration already does for `item=intf` at a
@@ -919,11 +919,11 @@ two earlier-proposed changes (adding `network` to `scope_kind`, splitting
 
 ### Phase 4 — Surface
 
-**4.1, 4.1b, 4.2 and 4.3 COMPLETE — executed 2026-10-04 on `feature/flow-reporting`.**
-`d4cb98d`. Validation: 715 tests pass (10 new), `ruff check` and `format` clean,
-`mypy` clean across 46 files. The serializer was also run **against the live box**
-for a group and a device at both detail levels, and the gate was verified open and
-closed on real data. Remaining: **4.4–4.7**.
+**4.1, 4.1b, 4.2, 4.3 and 4.4 COMPLETE — executed 2026-10-04 on `feature/flow-reporting`.**
+`d4cb98d` (service) and `f905d12` (tool). Validation: 718 tests pass (13 new),
+`ruff check` and `format` clean, `mypy` clean across 46 files. The serializer was
+also run **against the live box** for a group and a device at both detail levels,
+and the gate was verified open and closed on real data. Remaining: **4.5–4.7**.
 
 - [x] **4.1 Service schema and handler** in `services.py`, registered in
       `_SERVICE_REGISTRATIONS` as **read-only and `admin=False`** — matching every
@@ -981,11 +981,44 @@ closed on real data. Remaining: **4.4–4.7**.
       parity in both directions: every `TRANS_KEY_EXCEPTION_*` constant has a
       message, every service in `services.yaml` has a translation entry, and the
       two field sets match exactly.
-- [ ] **4.4 LLM tool** in `llm_tools_read.py` at the read-only tier: summary-first
+- [x] **4.4 LLM tool** in `llm_tools_read.py` at the read-only tier: summary-first
       with the window and its actual served span stated, and an explicit sentence
       that the data covers the last ~24 hours rather than being a history. Update
       `llm_tools_common.py` if the target parameter is shared. This depends on 4.1
-      being non-admin (Q11).
+      being non-admin (Q11). **Done (`f905d12`), in the read tier** — `_READ_TOOL_CLASSES`,
+      so it is available from `read_only` up, not in the anonymous summary tier
+      (owner-confirmed). The target parameter is **not** shared with
+      `llm_tools_common.py`; it is the service's own `scope_kind` / `scope_target`
+      pair.
+
+      Four parameters — `scope_kind`, `scope_target`, `window_hours`, `include` —
+      and four deliberate omissions, each now recorded in the contract test's
+      `_INTENTIONAL_OMISSIONS` allowlist rather than left implicit:
+      - **`detail`** — records mode is thousands of rows: measured, one group at
+        records detail serialized to **181 KB** against **11 KB** for the same
+        group's summary. That is a payload for an automation, not a conversation,
+        so the tool always asks for the summary and leaves records to the service.
+      - **`record_count`** and **`fetch_all_records`** — both only shape that record
+        read, so neither has a meaning without it.
+      - **`refresh`** — the flow data is read live every call, so this only
+        refreshes the runtime snapshot the report's *names* are resolved from. The
+        service already defaults it to `True`, which is what the tool wants.
+
+      **The report is lean by default and the flag is available** (owner-confirmed):
+      no per-device detail unless `include: ["device_detail"]` is set, and the
+      description says what the flag adds and why it is off. **The served window is
+      stated plainly** (owner-confirmed) rather than the tool inferring or omitting
+      it: the description says the box retains roughly `DEFAULT_FLOW_REPORT_WINDOW_HOURS`
+      and serves that much for a wider request, points at
+      `summary.window.served_hours` / `is_clamped`, and carries the required
+      sentence — state the served span, do not present this as history. The number
+      is interpolated from the constant so it cannot drift from the schema default.
+
+      Two cross-checks the existing contract tests did **not** cover, both now
+      pinned: a test calls the service with **exactly** the tool's parameter set, so
+      an omission is only safe if the schema default fills it in; and the tool's
+      declared *values* were verified to be a subset of the service's, since the
+      field-name contract would pass a tool and service that disagreed on values.
 - [ ] **4.5 Docs.** `USER_GUIDE.md` (how to read the report, what the window really
       means, what is withheld and why), `MCP_TOOL_REFERENCE.md`, and
       `REVERSE_ENGINEERING_WORKFLOW.md` (mark the answered open questions:
