@@ -448,6 +448,41 @@ class FirewallaReportWarning:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaFlowReportTarget:
+    """One resolved flow-report scope, carrying **two** identities on purpose.
+
+    ``scope_kind`` / ``identity_id`` / ``identity_name`` are the caller-facing
+    identity, and they follow the integration's identity contract: a device is
+    keyed by MAC, a group by its group id, and a **user by its user id** -- the
+    same key the watched-user entities use in their unique ids and the same value
+    ``get_time_usage_report`` reports as ``target_id``.
+
+    ``request_type`` / ``request_target`` are what the flow queries are actually
+    asked, which is not always the identity. The box keys flow data by the
+    protocol pair ``host`` / ``tag``, and for a user that means the **affiliated
+    tag**, not the user id: measured on all 10 users, the affiliated tag returned
+    398-578 rollup rows where the user id returned **zero**, and
+    ``item=appTimeUsage`` accepts both, so the two endpoints disagree.
+
+    Keeping them apart is what stops a protocol implementation detail from
+    becoming the published identity. The affiliated tag is still reported, as a
+    *resolution* rather than as the target, so the report remains explicable
+    without anyone having to treat it as the answer to "who is this?".
+    """
+
+    scope_kind: str
+    identity_id: str
+    identity_name: str | None
+    request_type: str
+    request_target: str
+
+    @property
+    def is_identity_remapped(self) -> bool:
+        """Return whether the protocol target differs from the published identity."""
+        return self.request_target != self.identity_id
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaWanDataUsageSample:
     """One normalized WAN data-usage sample point."""
 

@@ -1494,6 +1494,45 @@ non-zero known-good tag rather than against the uid alone.
 init payload — returns a populated-looking empty report. This is the same failure
 shape as the `audit` reading above: accepted, answered, and wrong.
 
+### A block names its rule only in the block log
+
+The app shows which rule matched a block, but that reference is **not** in the
+rollup. Verified by dumping every key of a live `tag` rollup: the top-level keys are
+`uid`, `name`, `createTs`, `policy`, `flows`, `hosts`, `last60`, `last30`,
+`newLast24`, `last12Months`, and the union of keys across every blocked row
+(`dnsB`, `ipB:in`, `ipB:out`, `local:ipB:*`) is exactly:
+
+```
+begin, count, country, device, end, fd, host, ip, port
+```
+
+No `pid`, no `ruleId`, no policy reference. The single `policy` key in the payload
+is the target's **own** policy block (adblock and friends), not an attribution. So a
+rollup row answers "what was blocked and how much" and cannot answer "by which rule".
+
+**Attribution lives on the flow record.** A blocked record from `item: "auditLogs"`
+carries `pid`, which joins to `policyRules`:
+
+```json
+{"ts": 1791142981.754, "ltype": "audit", "type": "ip", "pid": 371,
+ "device": "CC:28:AA:11:06:B7", "deviceIP": "192.168.200.122",
+ "dstMac": "EC:0D:51:CC:BA:BC", "fd": "out", "protocol": "tcp",
+ "port": 57022, "devicePort": 54620, "local": true,
+ "intf": "95169e6a-...", "ip": "192.168.202.101",
+ "tags": ["31"], "userTags": ["32"],
+ "dstTags": {"tags": ["79"], "userTags": ["80"], "dTags": ["2"]}}
+```
+
+So the two levels answer different questions and neither is redundant: the rollup
+gives the shape of the window cheaply, and the record log gives attribution. A
+diagnosis surface must read records; a summary cannot be made to carry rules without
+reading them anyway.
+
+**How many rules are actually involved is small.** Measured across every group in one
+24-hour window, the distinct blocking rules per group were **1, 1, 1, 1, 1, 2, and
+4** — the worst case being `KADENS_DEVICES` at 4 rules over 744 blocked records. So
+attribution is a bounded question even though the record count is not.
+
 ### Blocked records and regular flows are different shapes
 
 The two record families share an envelope and almost nothing else. `ltype` is the

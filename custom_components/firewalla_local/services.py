@@ -243,6 +243,7 @@ from .models import (
     FirewallaFlowMember,
     FirewallaFlowRecord,
     FirewallaFlowRecordView,
+    FirewallaFlowReportTarget,
     FirewallaFlowReportView,
     FirewallaFlowTotals,
     FirewallaFlowWindow,
@@ -2937,8 +2938,7 @@ def _serialize_flow_report(
     entry: FirewallaConfigEntry,
     *,
     view: FirewallaFlowReportView,
-    target_name: str | None,
-    scope_kind: str,
+    target: FirewallaFlowReportTarget,
     scope_target: str,
     detail: str,
     window_hours: int,
@@ -3094,14 +3094,23 @@ def _serialize_flow_report(
         "config_entry_id": entry.entry_id,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind=view.target_type,
-                id=view.target,
-                name=target_name,
+                # The caller-facing identity, in the caller's own vocabulary, so a
+                # user is named by its user id exactly as the watched-user
+                # entities and `get_time_usage_report` do.
+                kind=target.scope_kind,
+                id=target.identity_id,
+                name=target.identity_name,
             )
         ),
         "query": {
-            "scope_kind": scope_kind,
+            "scope_kind": target.scope_kind,
             "scope_target": scope_target,
+            # What the flow queries were actually asked. Present always, including
+            # when it matches the identity, so the shape does not change with the
+            # scope kind and a caller can rely on reading it.
+            "resolved_type": target.request_type,
+            "resolved_target": target.request_target,
+            "identity_remapped": target.is_identity_remapped,
             "detail": detail,
             "include": list(requested_include),
             "window_hours": window_hours,
@@ -3819,20 +3828,27 @@ def _resolve_flow_report_target(
     *,
     scope_kind: str,
     scope_target: str,
-) -> tuple[str, str, str | None]:
-    """Resolve one flow-report scope to the protocol target it becomes.
+) -> FirewallaFlowReportTarget:
+    """Resolve one flow-report scope to its identity **and** its protocol target.
 
-    Returns ``(target_type, target_id, target_name)`` where ``target_type`` is what
-    the flow queries take -- ``host`` for a device, ``tag`` for a group or user.
+    The two are not always the same, and conflating them is what made this service
+    the only surface in the integration to publish a user by anything other than
+    its user id. The contract every other surface follows -- the watched-user
+    entities, and ``get_time_usage_report``'s ``target_id`` -- is that a user is
+    identified by its user id, with the affiliated backing tag treated as an
+    association. So the identity returned here is the caller's, and the protocol
+    target is carried separately.
 
-    The matching is shared (``utils/selectors.py``); this keeps the parts that
-    genuinely differ, which is why it is not ``_resolve_usage_history_target`` with
-    a flag. **A user resolves to its affiliated tag, not to its user id, and that
-    is a measured difference between the two endpoints**: of 10 users on the dev
-    box, 8 returned 398-578 rollup rows for the affiliated tag and **zero** for the
-    user id, while ``item=appTimeUsage`` returned byte-identical payloads for both.
-    Reusing the usage resolver's ``user_id`` here would have shipped a selector
-    that silently returns an empty report.
+    **A user's protocol target is its affiliated tag, and that is measured**: of 10
+    users on the dev box, 8 returned 398-578 rollup rows for the affiliated tag
+    and **zero** for the user id, while ``item=appTimeUsage`` returned
+    byte-identical payloads for both. Sending the user id here would have shipped a
+    selector that silently returns an empty report.
+
+    A user is therefore matched on its user id, its name, **and** its affiliated
+    tag. Accepting the tag is not a convenience: it is what the response reports as
+    the resolved target, so without it a caller echoing an id this service handed
+    out would get a not-found error.
     """
     if scope_kind == _REPORT_SCOPE_DEVICE:
         host_manager = entry.runtime_data.host_manager
@@ -3848,7 +3864,15 @@ def _resolve_flow_report_target(
         if (mac := match.resolved) is not None and (
             host := host_manager.get_host(mac)
         ) is not None:
-            return _USAGE_HISTORY_REQUEST_SCOPE_HOST, host.mac, host.host_name
+            # A device's identity and its protocol target are the same MAC; only a
+            # user is remapped, so the asymmetry stays visible here.
+            return FirewallaFlowReportTarget(
+                scope_kind=scope_kind,
+                identity_id=host.mac,
+                identity_name=host.host_name,
+                request_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
+                request_target=host.mac,
+            )
         raise _flow_report_scope_error(
             match,
             scope_kind=scope_kind,
@@ -3856,27 +3880,40 @@ def _resolve_flow_report_target(
         )
 
     if scope_kind == _REPORT_SCOPE_USER:
-        user_manager = entry.runtime_data.user_manager
-        choices = user_manager.get_watched_user_choices()
-        match = match_selector(
-            scope_target,
+        # Read from the tag collection rather than the user manager: a user entry
+        # carries both ids, and the affiliation is the whole reason a user needs a
+        # remapped protocol target. `FirewallaWatchedUser` exposes only the
+        # affiliated *name*, so it cannot answer what tag to send.
+        choices = entry.runtime_data.user_manager.get_watched_user_choices()
+        user_candidates: list[tuple[str, tuple[str | None, ...]]] = [
             (
-                (user.user_id, (user.name, choices.get(user.user_id)))
-                for user in user_manager.get_users()
-            ),
-        )
-        user_id = match.resolved
-        if user_id is None:
+                user_id,
+                # The affiliated tag rides along in the name list because a caller
+                # may echo the resolved target this service reported. It is an
+                # identifier, not a label, and the collection keeps tag ids and
+                # user ids in separate fields, so matching it stays exact.
+                (group.name, choices.get(user_id), group.group_id),
+            )
+            for group in entry.runtime_data.integration_manager.get_groups()
+            if group.kind == _MEMBERSHIP_KIND_USER
+            and (user_id := group.user_id) is not None
+        ]
+        match = match_selector(scope_target, user_candidates)
+        if (user_id := match.resolved) is None:
             raise _flow_report_scope_error(
                 match,
                 scope_kind=scope_kind,
                 scope_target=scope_target,
             )
-        # The affiliation tag is the tag the flow queries accept; a user carries
-        # both ids and only this one addresses their traffic.
         for group in entry.runtime_data.integration_manager.get_groups():
             if group.kind == _MEMBERSHIP_KIND_USER and group.user_id == user_id:
-                return _USAGE_HISTORY_REQUEST_SCOPE_TAG, group.group_id, group.name
+                return FirewallaFlowReportTarget(
+                    scope_kind=scope_kind,
+                    identity_id=user_id,
+                    identity_name=group.name,
+                    request_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
+                    request_target=group.group_id,
+                )
         raise _flow_report_scope_error(
             match,
             scope_kind=scope_kind,
@@ -3898,7 +3935,13 @@ def _resolve_flow_report_target(
     if (group_id := match.resolved) is not None:
         for group in entry.runtime_data.integration_manager.get_groups():
             if group.group_id == group_id:
-                return _USAGE_HISTORY_REQUEST_SCOPE_TAG, group.group_id, group.name
+                return FirewallaFlowReportTarget(
+                    scope_kind=scope_kind,
+                    identity_id=group.group_id,
+                    identity_name=group.name,
+                    request_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
+                    request_target=group.group_id,
+                )
     raise _flow_report_scope_error(
         match,
         scope_kind=scope_kind,
@@ -5967,7 +6010,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
 
     scope_kind = cast(str, call.data[SERVICE_FIELD_SCOPE_KIND])
     scope_target = cast(str, call.data[SERVICE_FIELD_SCOPE_TARGET])
-    target_type, target_id, target_name = _resolve_flow_report_target(
+    target = _resolve_flow_report_target(
         entry,
         scope_kind=scope_kind,
         scope_target=scope_target,
@@ -5979,8 +6022,9 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
 
     try:
         view = await entry.runtime_data.flow_manager.async_get_report(
-            target_type=target_type,
-            target=target_id,
+            # The protocol pair, which is the affiliated tag for a user.
+            target_type=target.request_type,
+            target=target.request_target,
             window_hours=cast(int, call.data[SERVICE_FIELD_WINDOW_HOURS]),
             include_summary=True,
             include_blocked_records=include_records,
@@ -5998,8 +6042,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
     return _serialize_flow_report(
         entry,
         view=view,
-        target_name=target_name,
-        scope_kind=scope_kind,
+        target=target,
         scope_target=scope_target,
         detail=detail,
         window_hours=cast(int, call.data[SERVICE_FIELD_WINDOW_HOURS]),

@@ -442,3 +442,48 @@ def _api_id(hass: HomeAssistant) -> str:
     return next(
         api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
     )
+
+
+async def test_flow_report_tool_can_reach_the_records_it_needs_to_diagnose(
+    hass: HomeAssistant,
+) -> None:
+    """The flow report tool must be able to ask for the individual records.
+
+    A record names the rule that blocked it; the rollup's blocked families carry no
+    rule reference at all -- verified by dumping every key of a live rollup, where
+    the only `policy` key is the target's own policy block. So "which rule stopped
+    this" is answerable *only* at records detail, and a tool that could ask for the
+    summary alone could not diagnose anything. The description has to say so, or
+    the model will not know the level exists.
+    """
+    await _setup_hass(hass)
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
+    tool = next(
+        tool for tool in api_instance.tools if tool.name.endswith("get_flow_report")
+    )
+
+    declared = {marker.schema for marker in tool.parameters.schema}
+    assert "detail" in declared
+    assert "record_count" in declared
+
+    # Both levels validate, so the model can actually select the diagnostic one.
+    validated = tool.parameters(
+        {
+            "scope_kind": "group",
+            "scope_target": "KIDS",
+            "detail": "records",
+            "record_count": 50,
+        }
+    )
+    assert validated["detail"] == "records"
+    assert validated["record_count"] == 50
+    # Summary stays the default, so an ordinary question does not pay for records.
+    assert (
+        tool.parameters({"scope_kind": "group", "scope_target": "KIDS"})["detail"]
+        == "summary"
+    )
+
+    # The description is the model's only cue that records carry the rule.
+    description = tool.description.lower()
+    assert "rule" in description
+    assert "diagnos" in description

@@ -8439,6 +8439,7 @@ _FLOW_WINDOW_END = 1_791_034_800
 _FLOW_HOST_MAC = "EC:0D:51:CC:BA:BC"
 _FLOW_GROUP_ID = "12"
 _FLOW_AFFILIATED_TAG_ID = "10"
+_FLOW_USER_ID = "21"
 
 
 def _flow_report_rollup_payload() -> dict[str, object]:
@@ -8615,10 +8616,15 @@ async def test_flow_report_summarises_a_group_without_reading_records(
     assert client["flow_log"].await_count == 0
     assert response is not None
     assert response["target"] == {
-        "kind": "tag",
+        "kind": "group",
         "id": _FLOW_GROUP_ID,
         "name": "Quarantine",
     }
+    # A group's identity and its protocol target are the same id, so the resolution
+    # is reported but does not remap anything.
+    assert response["query"]["resolved_type"] == "tag"
+    assert response["query"]["resolved_target"] == _FLOW_GROUP_ID
+    assert response["query"]["identity_remapped"] is False
     assert response["summary"]["totals"]["download_bytes"] == 1250
     assert response["summary"]["totals"]["upload_bytes"] == 400
     assert response["summary"]["totals"]["blocked_total"] == 7
@@ -8741,8 +8747,9 @@ async def test_flow_report_needs_no_flag_to_name_the_device_it_was_asked_about(
     )
 
     assert response is not None
-    assert response["target"]["kind"] == "host"
+    assert response["target"]["kind"] == "device"
     assert response["target"]["id"] == _FLOW_HOST_MAC
+    assert response["query"]["resolved_target"] == _FLOW_HOST_MAC
     assert response["metadata"]["applied"]["device_detail"] is True
     assert (
         response["sections"]["blocked_records"]["records"][0]["device_id"]
@@ -8770,8 +8777,14 @@ async def test_flow_report_resolves_a_user_to_its_affiliated_tag(
     )
 
     assert response is not None
-    assert response["target"]["kind"] == "tag"
-    assert response["target"]["id"] == _FLOW_AFFILIATED_TAG_ID
+    # The published identity is the user id, matching the watched-user entities and
+    # `get_time_usage_report`. The affiliated tag is the *protocol* target, so it is
+    # reported as the resolution rather than as the target.
+    assert response["target"]["kind"] == "user"
+    assert response["target"]["id"] == _FLOW_USER_ID
+    assert response["query"]["resolved_type"] == "tag"
+    assert response["query"]["resolved_target"] == _FLOW_AFFILIATED_TAG_ID
+    assert response["query"]["identity_remapped"] is True
     assert response["query"]["scope_kind"] == "user"
     assert response["query"]["scope_target"] == "KADEN"
 
@@ -8960,3 +8973,79 @@ async def test_flow_report_accepts_exactly_the_fields_the_llm_tool_passes(
     assert response["query"]["fetch_all_records"] is False
     assert response["summary"]["totals"] is not None
     assert response["metadata"]["applied"]["device_detail"] is False
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        pytest.param("KADEN", id="by-name"),
+        pytest.param(_FLOW_USER_ID, id="by-user-id"),
+        pytest.param(_FLOW_AFFILIATED_TAG_ID, id="by-affiliated-tag"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_flow_report_accepts_every_user_selector_it_can_report(
+    hass: HomeAssistant,
+    selector: str,
+) -> None:
+    """Test a user resolves the same way by name, user id, or affiliated tag.
+
+    All three forms matter. The name is what a person types; the user id is what
+    this service publishes as the identity and what `get_time_usage_report`
+    accepts; and the affiliated tag is what the response reports as the resolved
+    protocol target. Before this, echoing the resolved target back produced
+    `flow_report_scope_not_found` -- the report handed out an id it would not
+    accept, which no other service in this integration does.
+    """
+    response, _client, _entry = await _flow_report_response(
+        hass,
+        extra={
+            SERVICE_FIELD_SCOPE_KIND: "user",
+            SERVICE_FIELD_SCOPE_TARGET: selector,
+        },
+    )
+
+    assert response is not None
+    assert response["target"] == {
+        "kind": "user",
+        "id": _FLOW_USER_ID,
+        "name": "KADEN",
+    }
+    assert response["query"]["resolved_target"] == _FLOW_AFFILIATED_TAG_ID
+
+
+@pytest.mark.asyncio
+async def test_flow_report_publishes_the_same_user_id_as_the_usage_service(
+    hass: HomeAssistant,
+) -> None:
+    """Test both report services name the same user by the same id.
+
+    They reach the box differently -- `item=appTimeUsage` accepts a user id or the
+    affiliated tag interchangeably, while the flow queries accept only the tag --
+    but a consumer correlating the two reports for one person must not have to know
+    that. Both publish the user id.
+    """
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    with _flow_report_client():
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        flow_response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_FLOW_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_SCOPE_KIND: "user",
+                SERVICE_FIELD_SCOPE_TARGET: "KADEN",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert flow_response is not None
+    # The usage service reports `target_id` = the user id for the same user; see
+    # `_usage_history_snapshot`, where the user is user_id "21" in tag "10".
+    assert flow_response["target"]["id"] == _FLOW_USER_ID

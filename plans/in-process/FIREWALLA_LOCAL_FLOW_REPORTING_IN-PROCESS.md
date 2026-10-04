@@ -1168,16 +1168,41 @@ record families read only on request, all inside the shared report envelope.
    summary model carries every field, so what a response omits is exactly what the
    serializer chose to omit — a withheld value can always be told apart from one
    the box never returned.
-3. **A user scope is the affiliated tag, not the user id.** Measured, and the only
-   way this works; the two ids are interchangeable on `appTimeUsage` and are not on
-   the flow queries.
+3. **A user is published by its user id; only the *protocol target* is the
+   affiliated tag.** The box keys flow data by the tag, so the tag is what gets
+   sent — but the identity a caller sees is the user id, matching the watched-user
+   entities and `get_time_usage_report`. The tag is reported separately as a
+   resolution. Conflating the two was a defect; see below.
 
-**One open item, deliberately not actioned:** `_resolve_flow_report_target` and
-`_resolve_usage_history_target` share a matching core but not a policy, and the
-usage path still sends a user's `user_id` — which is **correct for that endpoint**
-(measured byte-identical to the affiliated tag) but reads as inconsistent next to
-the flow resolver. Worth a comment or a decision, not a change made in this
-initiative.
+**One item was open here and turned out to be a defect, now fixed.** This note
+previously said the flow service's user target "reads as inconsistent next to the
+flow resolver" but was correct for its own endpoint. That was too generous. Two
+real problems, both verified live:
+
+- **The service published an id it would not accept.** `target.id` was the
+  affiliated tag, and feeding that value back produced
+  `flow_report_scope_not_found`. Every other resolver in this integration
+  round-trips the id it reports; this one did not.
+- **`target.kind` leaked the protocol vocabulary.** It was `host` / `tag` where
+  every sibling service and every entity uses `device` / `group` / `user`, so the
+  same user appeared under two different ids and two different vocabularies across
+  services. Measured on all 10 users: the affiliated tag and the user id differ
+  **every single time** (a tag is allocated as `uid - 1`, which is allocation order
+  and not a rule anyone should rely on).
+
+Fixed by separating identity from protocol target: `target` carries the caller's
+identity in the caller's vocabulary, `query.resolved_type` / `query.resolved_target`
+carry what the box was asked, `query.identity_remapped` says whether they differ,
+and the resolver accepts all three user selectors so anything it reports is
+something it accepts. The convention is now written down in `ARCHITECTURE.md` so
+the next surface cannot drift a third way.
+
+**One genuine open item remains:** `_resolve_usage_history_target` still sends a
+user's `user_id` where the flow resolver sends the affiliated tag, and that
+**remains correct for its own endpoint** — measured, `item=appTimeUsage` returned
+byte-identical payloads for both ids. The two services now agree on what they
+*publish*, which is what a consumer depends on; they legitimately differ in what
+they *send*, and that difference is now explicit rather than an accident.
 
 ```bash
 git log --oneline main..feature/flow-reporting

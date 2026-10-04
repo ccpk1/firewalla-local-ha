@@ -441,15 +441,16 @@ _INTENTIONAL_OMISSIONS: Final = frozenset(
         # The destructive gate is set internally; asking the model to confirm
         # itself would prove nothing.
         ("unblock_alarm_target", "confirm"),
-        # The flow report's record families are thousands of rows: measured, a
-        # single group at records detail serialized to 181 KB against 11 KB for
-        # the same group's summary, because the page alone is 300 records and the
-        # all-available walk is larger again. That is a payload for an automation
-        # to consume, not for a conversation, so the tool exposes the summary and
-        # leaves `detail` to the service. `record_count` and `fetch_all_records`
-        # only shape that record read, so neither has a meaning without it.
-        ("get_flow_report", "detail"),
-        ("get_flow_report", "record_count"),
+        # The flow report's `detail` and `record_count` ARE exposed, because
+        # diagnosis needs the individual records: a record names the rule that
+        # blocked it, and the rollup's blocked families carry no rule reference at
+        # all -- verified by dumping every key of a live rollup, where the only
+        # `policy` key is the target's own policy block, not a rule id. So
+        # "which rule stopped this" is answerable only at records detail.
+        #
+        # `fetch_all_records` stays internal: it walks the cursor to exhaustion
+        # with only a wall-clock deadline as a stop, so a single call could return
+        # an unbounded number of rows into a model's context.
         ("get_flow_report", "fetch_all_records"),
         # Flow data is read live on every call, so this only refreshes the
         # runtime snapshot the report's names are resolved from. The service

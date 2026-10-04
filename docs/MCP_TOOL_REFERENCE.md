@@ -515,16 +515,25 @@ Reads that explain what the network is doing and how it is performing.
   hours. A wider `window_hours` is accepted and quietly served as that much, so read
   `summary.window.served_hours` and `summary.window.is_clamped` and state the span
   actually covered. This is a recent-activity view, not a history.
-- **Narrow it:** the report is lean by default and needs no narrowing. Add
-  `include: ['device_detail']` only when the question is *which* device — the
-  per-device member ranking, the devices behind a destination, and each record's
-  device — because that adds the household's device inventory to the answer.
+- **Levels:** `detail: records` is the one to reach for when diagnosing, because a
+  record names the rule that blocked it — the rollup's blocked families carry no
+  rule reference at all, so *which rule stopped this* is answerable only there.
+- **Narrow it:** the summary is lean by default. Records are large (one page is
+  hundreds of rows), so keep `record_count` small and only raise it if the answer
+  is not there. Add `include: ['device_detail']` only when the question is *which*
+  device — the per-device member ranking, the devices behind a destination, and
+  each record's device — because that adds the household's device inventory.
 - **Inputs:** `scope_kind` (`device` | `group` | `user`), `scope_target` (a MAC, id,
-  or name for a device; a name or id for a group or user), `window_hours` (default
-  24), `include` (`['device_detail']`).
+  or name for a device; a name, user id, or affiliated tag for a user; a name or id
+  for a group), `window_hours` (default 24), `detail` (`summary` | `records`),
+  `record_count`, `include` (`['device_detail']`).
 - **Returns:** read envelope — `result` with `summary` (window, totals, counts),
   `sections` (`top_download`, `top_upload`, `blocked`, `local_peers`,
-  `rollup_families`), and `metadata` (`applied.device_detail`).
+  `rollup_families`, plus `blocked_records` / `flow_records` at records detail), and
+  `metadata` (`applied.device_detail`). `target` names the scope in the caller's own
+  vocabulary, and `query.resolved_type` / `query.resolved_target` report what the
+  box was actually asked — for a user those differ, because the flow queries key a
+  user by the affiliated tag while the identity stays the user id.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 

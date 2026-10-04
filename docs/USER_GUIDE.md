@@ -987,11 +987,30 @@ services can answer, because one is scoped to a network and the other measures
 time rather than traffic.
 
 - set `scope_kind` to `device`, `group`, or `user`, and `scope_target` to a MAC,
-  id, or name for a device, or a name or id for a group or user
-- a **user** scope follows the user's device group, not the user id on its own —
-  the box keys flow data by the affiliated tag, so ask for a user by name and the
-  service resolves it
+  id, or name for a device, a name or id for a group, or a name, user id, or
+  affiliated device-group tag for a user
 - `window_hours` defaults to 24
+
+**How the target is named.** The response reports the scope in the same terms the
+rest of the integration uses, so a user appears by its **user id** — matching the
+watched-user entities and `get_time_usage_report` — and not by the internal tag the
+box happens to key its flow data with:
+
+- `target.kind` is `device`, `group`, or `user`
+- `target.id` is the MAC, the group id, or the user id
+
+A user is the one scope where the box needs something other than the identity: the
+flow queries key a user by the **affiliated device-group tag**, not the user id.
+That is reported honestly rather than hidden, as a resolution rather than as the
+target:
+
+- `query.resolved_type` and `query.resolved_target` are what the box was actually
+  asked (`tag` and the tag id, for a user)
+- `query.identity_remapped` is `true` only when the two differ
+
+So a user can be selected by name, by user id, or by that reported tag — all three
+resolve to the same thing — and `target.id` is always safe to feed back in or to
+correlate against another report.
 
 **What the window really means.** The box keeps roughly **24 hours** of flow data
 and serves that much for a wider request, silently and with no error. So the
@@ -1018,7 +1037,10 @@ carries:
 - `sections.local_peers` — LAN peers, counted in connections
 - `metadata.applied.device_detail` — whether per-device detail is included
 
-`detail: records` adds the blocked and regular flow records. That is several
+`detail: records` adds the blocked and regular flow records. **This is the level to
+use when diagnosing**, because it is the only one that names the rule responsible:
+the summary's blocked breakdown is keyed by destination and carries no rule
+reference, so *which rule stopped this* is answerable only here. That is several
 thousand rows on a busy target, so it is opt-in and paginated:
 
 - `record_count` sets the page (default 300, ceiling 5000)

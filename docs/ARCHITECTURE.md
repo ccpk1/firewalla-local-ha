@@ -134,6 +134,46 @@ Rules:
 
 This rule keeps registry identity independent from mutable connection details.
 
+### Scoped identity
+
+A scope is a device, a group, or a user. Each has exactly one caller-facing
+identity, and every surface must use it.
+
+| Scope | Published identity |
+| --- | --- |
+| device | the MAC |
+| group | the group id |
+| user | **the user id** |
+
+Rules:
+
+- **The caller-facing identity is not the protocol target.** The box keys flow data
+  by a protocol pair (`host` / `tag`), and for a user that pair means the
+  **affiliated backing tag**, not the user id. The affiliated tag is an
+  implementation detail of how the box addresses a user; it is not who the user is.
+- **A service reports the scope's identity as the target.** `target.id` is the
+  device MAC, the group id, or the user id. A protocol target that differs from the
+  identity is reported **separately and explicitly** as a resolution, never as the
+  target.
+- **`target.kind` uses the caller's vocabulary** — `device`, `group`, `user`. The
+  protocol's own words (`host`, `tag`) must not appear as a target kind; they are
+  an internal detail a caller should never need to know.
+- **Anything a service reports as an id, it must also accept as a selector.** A
+  report that hands out an id its own resolver rejects is a defect, not a
+  limitation. Where a protocol target is remapped (a user), the resolver accepts the
+  identity, the human label, **and** the reported resolution, so a caller echoing
+  a value from a previous response keeps working.
+- **An association is not an identity.** Where the box models something as a
+  backing object plus metadata (a user's affiliated tag, a host's watched state),
+  the association is surfaced as an attribute describing a relationship, never
+  promoted to the identity.
+
+These rules exist because they were broken once: a new service published a user by
+its affiliated tag and used the protocol vocabulary for its target kind, which made
+it the only surface in the integration to disagree with the watched-user entities
+and `get_time_usage_report` about how a user is named. Consistency here is a
+correctness property, not a style preference.
+
 ## Layered architecture
 
 The integration is built as a small layered system with explicit ownership and concrete module homes.
@@ -600,6 +640,45 @@ Rules:
 - normalized host identity must keep human-facing naming separate from DNS-facing naming
 - the normalized host contract is `host_name`, `dns_hostname`, `dns_domain`, `dns_fqdn`, `dhcp_name`, and `host_device_type`
 - compatibility aliases such as duplicate `display_name` or `fallback_name` fields must not be reintroduced once a normalized host contract exists
+
+### Reuse before invention
+
+New work must follow the field names, identity vocabulary, and result shapes that
+already exist for the same concept. Introducing a second name for one thing, or one
+name for two things, is a defect even when the new code is internally consistent.
+
+Before adding a field, an identity, or a service parameter, find the existing
+pattern and match it:
+
+- **A name is a contract.** Reuse the established term. `user_id` is a user id
+  everywhere; it must not become `uid`, `target_id`, or an affiliated tag in one
+  surface.
+- **Units live in the name.** A field carrying bytes is not `count`; a field
+  carrying a block count is not `bytes`. The box overloads `count` per family, so a
+  generic name is how two incompatible measurements become interchangeable.
+- **One concept, one shape.** If two services answer a related question, their
+  envelopes, target blocks, and vocabulary must agree. The shared `_serialize_report_*`
+  helpers exist so this is the path of least resistance.
+- **Identity is cross-service.** A consumer must be able to correlate two reports
+  about the same device, group, or user without a mapping table.
+
+### Deviations must be justified
+
+A deviation from an existing name, identity, or shape is allowed only when it is
+**necessary**, and it must be recorded in three places:
+
+1. **The plan** — what is different, and the measurement or wire evidence that
+   forces it.
+2. **The code** — a comment at the point of deviation stating why the established
+   pattern could not be used, so the next reader does not "fix" it back.
+3. **The user-facing docs** — if a caller can observe the difference.
+
+A deviation with no backing detail is not a design decision; it is drift. "It
+seemed clearer" is not a justification. "The endpoint rejects the user id and
+returns zero rows while the affiliated tag returns 578, measured on 10 users" is.
+
+Where a name is genuinely new because the concept is new, say so explicitly rather
+than leaving a reader to infer whether it is a mistake.
 
 ## Translation and error contract
 

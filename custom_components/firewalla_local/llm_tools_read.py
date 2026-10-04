@@ -19,10 +19,15 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
 
 from .const import (
+    DEFAULT_FLOW_REPORT_RECORD_COUNT,
     DEFAULT_FLOW_REPORT_WINDOW_HOURS,
     DEFAULT_NETWORK_USAGE_WINDOW,
     DOMAIN,
+    FLOW_REPORT_DETAIL_RECORDS,
+    FLOW_REPORT_DETAIL_SUMMARY,
     FLOW_REPORT_INCLUDE_DEVICE_DETAIL,
+    MAX_FLOW_LOG_PAGE_SIZE,
+    MIN_FLOW_LOG_PAGE_SIZE,
     SERVICE_FIELD_ACTION,
     SERVICE_FIELD_ALARM_TYPE,
     SERVICE_FIELD_APPLIES_TO,
@@ -47,6 +52,7 @@ from .const import (
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_ONLINE,
+    SERVICE_FIELD_RECORD_COUNT,
     SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SCOPE_TARGET,
@@ -666,10 +672,18 @@ class GetFlowReportTool(_FirewallaReadTool):
         "when it was shortened). State the served span rather than the requested "
         "one, and do not present this as history.\n"
         "\n"
-        "The report is deliberately lean: no per-device detail is included. Add "
-        '`include: ["device_detail"]` only when the question needs to know which '
-        "device was behind a member row, a destination, or a record. A device scope "
-        "always names its own device whether or not the flag is set."
+        "Two levels. `detail: summary` (the default) is one request and answers "
+        "*how much* and *to where*. `detail: records` adds the individual blocked "
+        "and regular flow records, and it is the level to use when diagnosing — a "
+        "record names the rule that blocked it, so 'which rule stopped this' is "
+        "only answerable there. Records are large (one page is hundreds of rows), "
+        "so keep `record_count` small and raise it only if the answer is not "
+        "there.\n"
+        "\n"
+        "Device detail is not included by default. Add "
+        '`include: ["device_detail"]` when the question needs to know which device '
+        "was behind a member row, a destination, or a record. A device scope always "
+        "names its own device whether or not the flag is set."
     )
     parameters = vol.Schema(
         {
@@ -694,6 +708,28 @@ class GetFlowReportTool(_FirewallaReadTool):
                     "response reports the span it actually covered."
                 ),
             ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+            vol.Optional(
+                SERVICE_FIELD_DETAIL,
+                default=FLOW_REPORT_DETAIL_SUMMARY,
+                description=(
+                    "Optional. 'summary' (default) is totals and rankings. "
+                    "'records' adds the individual flow records, which carry the "
+                    "blocking rule — use it to diagnose why traffic was stopped."
+                ),
+            ): vol.In((FLOW_REPORT_DETAIL_SUMMARY, FLOW_REPORT_DETAIL_RECORDS)),
+            vol.Optional(
+                SERVICE_FIELD_RECORD_COUNT,
+                default=DEFAULT_FLOW_REPORT_RECORD_COUNT,
+                description=(
+                    "Optional. How many records 'records' detail returns. Defaults "
+                    f"to {DEFAULT_FLOW_REPORT_RECORD_COUNT}. Records are large, so "
+                    "ask for a small page first and only widen if the answer is "
+                    "not there."
+                ),
+            ): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=MIN_FLOW_LOG_PAGE_SIZE, max=MAX_FLOW_LOG_PAGE_SIZE),
+            ),
             vol.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
