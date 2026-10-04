@@ -34,6 +34,7 @@ from .coordinator import (
 from .helpers.llm_support import llm_tools_supported
 from .managers import (
     FirewallaAlarmManager,
+    FirewallaFlowManager,
     FirewallaHostManager,
     FirewallaIntegrationManager,
     FirewallaRuleManager,
@@ -120,6 +121,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
     alarm_manager = FirewallaAlarmManager(coordinator, entry, client)
     user_manager = FirewallaUserManager(coordinator, entry, client)
     wireless_manager = FirewallaWirelessManager(coordinator, entry, client)
+    flow_manager = FirewallaFlowManager(coordinator, entry, client)
     coordinator.attach_managers(
         host_manager=host_manager,
         integration_manager=integration_manager,
@@ -127,6 +129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         user_manager=user_manager,
         wireless_manager=wireless_manager,
         alarm_manager=alarm_manager,
+        flow_manager=flow_manager,
     )
 
     await coordinator.async_config_entry_first_refresh()
@@ -171,6 +174,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FirewallaConfigEntry) ->
         user_manager=user_manager,
         wireless_manager=wireless_manager,
         alarm_manager=alarm_manager,
+        flow_manager=flow_manager,
     )
     entry.async_on_unload(
         entry.add_update_listener(coordinator.async_handle_entry_reload_requested)

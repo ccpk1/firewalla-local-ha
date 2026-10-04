@@ -45,6 +45,7 @@ _PENDING_PAIRING_INIT_PAYLOADS: str = "pending_pairing_init_payloads"
 if TYPE_CHECKING:
     from .managers import (
         FirewallaAlarmManager,
+        FirewallaFlowManager,
         FirewallaHostManager,
         FirewallaIntegrationManager,
         FirewallaRuleManager,
@@ -205,6 +206,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self.user_manager: FirewallaUserManager | None = None
         self.wireless_manager: FirewallaWirelessManager | None = None
         self.alarm_manager: FirewallaAlarmManager | None = None
+        self.flow_manager: FirewallaFlowManager | None = None
         self._enable_network_entities = get_enabled_network_entities(
             config_entry.options
         )
@@ -228,6 +230,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         user_manager: FirewallaUserManager,
         wireless_manager: FirewallaWirelessManager,
         alarm_manager: FirewallaAlarmManager,
+        flow_manager: FirewallaFlowManager,
     ) -> None:
         """Attach the entry-scoped manager objects to refresh routing."""
         self.host_manager = host_manager
@@ -236,6 +239,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator[FirewallaRuntimeSnaps
         self.user_manager = user_manager
         self.wireless_manager = wireless_manager
         self.alarm_manager = alarm_manager
+        self.flow_manager = flow_manager
 
     async def _async_update_data(self) -> FirewallaRuntimeSnapshot:
         """Fetch data from Firewalla Local."""
@@ -365,6 +369,7 @@ class FirewallaRuntimeData:
     user_manager: FirewallaUserManager
     wireless_manager: FirewallaWirelessManager
     alarm_manager: FirewallaAlarmManager
+    flow_manager: FirewallaFlowManager
 
 
 type FirewallaConfigEntry = ConfigEntry[FirewallaRuntimeData]

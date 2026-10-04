@@ -252,6 +252,11 @@ DEFAULT_FLOW_REPORT_WINDOW_HOURS: Final = 24
 # retained window, so a caller-supplied count is never forwarded unvalidated.
 MAX_FLOW_LOG_PAGE_SIZE: Final = 5000
 
+# The all-available walk stops on a wall-clock deadline rather than a row cap, so
+# a slow box cannot stall a report indefinitely. It is deliberately not a service
+# field: a caller able to raise it without limit would defeat its purpose.
+FLOW_LOG_PAGE_DEADLINE_SECONDS: Final = 30
+
 # Config entry data and options keys
 CONF_AID: Final = "aid"
 CONF_EID: Final = "eid"

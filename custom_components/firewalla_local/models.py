@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 from enum import StrEnum
@@ -998,6 +999,90 @@ class FirewallaRuleHit:
     protocol: str | None
     app: str | None
     category: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowWindow:
+    """The time window a flow response **actually** covered.
+
+    Separate from the window that was requested, because the box silently clamps
+    rather than rejecting: measured, requests for 1h, 24h, 25h, 48h and 168h
+    windows all returned identical data spanning 24.00h. Reporting the requested
+    window would describe data the caller does not have.
+    """
+
+    requested_hours: int
+    begin_timestamp: int | None = None
+    end_timestamp: int | None = None
+
+    @property
+    def served_hours(self) -> float | None:
+        """Return how many hours the response actually covered."""
+        if self.begin_timestamp is None or self.end_timestamp is None:
+            return None
+        return (self.end_timestamp - self.begin_timestamp) / 3600
+
+    @property
+    def is_clamped(self) -> bool:
+        """Return whether the box served a shorter window than was asked for.
+
+        A small tolerance absorbs the second-level rounding in the row bounds, so
+        an exactly-24h answer to a 24h request is not reported as clamped.
+        """
+        served = self.served_hours
+        if served is None:
+            return False
+        return served < self.requested_hours - 0.05
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowRollup:
+    """One windowed flow rollup, with the window it really covered.
+
+    ``families`` maps a family name (``download``, ``dnsB``, ``local:upload``,
+    ...) to its rows. Rows stay raw mappings: their fields vary by family, and the
+    ``count`` field means **bytes** on the byte families but a **block count** on
+    the blocked ones, so a single typed row would misreport one of them.
+    """
+
+    target_type: str
+    target: str
+    window: FirewallaFlowWindow
+    families: Mapping[str, tuple[Mapping[str, object], ...]] = field(
+        default_factory=dict
+    )
+    hosts: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+
+    @property
+    def total_rows(self) -> int:
+        """Return how many destination rows the rollup carried."""
+        return sum(len(rows) for rows in self.families.values())
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowRecordSet:
+    """One collected set of flow-log or block-log records.
+
+    ``rows_returned`` and ``rows_available`` are kept apart deliberately: the box
+    caps a requested page silently and reports a count that can exceed the rows it
+    sent, so a caller needs both to tell a truncated result from a quiet target.
+
+    ``records_dropped_as_duplicates`` makes the page-boundary dedupe visible. If
+    two genuinely distinct records ever serialise identically they would be
+    merged, and that has to be observable rather than silent.
+    """
+
+    records: tuple[Mapping[str, object], ...]
+    rows_available: int | None = None
+    next_cursor: float | None = None
+    truncated: bool = False
+    pages_fetched: int = 1
+    records_dropped_as_duplicates: int = 0
+
+    @property
+    def rows_returned(self) -> int:
+        """Return how many records this set actually carries."""
+        return len(self.records)
 
 
 @dataclass(slots=True, frozen=True)
