@@ -362,9 +362,10 @@ flattening three legitimately different contracts.
 - It is **pre-existing** duplication. Worth doing, but it is not flow-reporting
   work, and it should not be presented as such.
 
-### Q13. Phase 2 corrections found while writing the plan into code
+### Q13. Corrections the plan had wrong, found by writing it into code
 
-Four items the plan had wrong, all verified against the code rather than assumed.
+Four items, verified against the code or the wire rather than assumed. All four
+were folded into Phase 2 as executed.
 
 **1. `FlowManager` must subclass `FirewallaBaseManager`.** The plan implied a
 client-only constructor. Every manager takes `(coordinator, entry, client)`, so the
@@ -374,8 +375,9 @@ flow manager matches. Adding it therefore touches four files — `managers/flow_
 
 **2. Fail-soft belongs in the manager, not the client.** The client **raises**
 `FirewallaProtocolError` on a bad shape and every existing method follows that
-pattern. `FlowManager` catches and returns *unavailable*, exactly as
-`async_refresh_network_usage` keeps its previous cache on a per-network failure.
+pattern. `FlowManager` catches and returns *unavailable*. Connectivity and auth
+failures are **not** caught — they are not "data unavailable", and the coordinator
+owns how they surface.
 
 **3. The dedupe key is unsafe on regular records.** `(ts, device, pid, domain, port)`
 was written against blocked records, where `pid` exists. On a regular record `pid` is
@@ -386,6 +388,19 @@ which is exact and needs no tuning.
 **4. `nextTs` must not be rounded.** It is a float (`1791060537.785`) and passing it
 back is how pagination walks; rounding to an int could skip records. The cursor
 carries it verbatim and is only ever tested for equality or non-advance.
+
+**And two the plan could not have known, found by decoding the app's own requests:**
+
+**5. The rollup sends `local: true` and no `audit`.** `local: true` is what enables
+the four LAN-to-LAN families (11 families with it, 7 without, measured). `audit` on
+the rollup does **nothing at all** — `{local: true}` and `{local: true, audit: true}`
+returned byte-identical responses. The plan had it sending `audit: true`.
+
+**6. `hourblock` is a gate, not the granularity the plan described.** Measured over a
+fixed 24h window: `0` and `1` both return an **empty** response with no error, while
+`2` through `168` return identical full data. The plan's `max(1, ...)` clamp would
+have produced exactly the silent-empty case; it is `max(2, ...)`.
+
 
 ### Q14. What would this look like if we built it today, with the published models?
 
@@ -462,7 +477,7 @@ and the `timeUsage` shape divergence. All recorded, none needed for the flow rep
 | Phase | Name | Deliverable | Gate |
 | --- | --- | --- | --- |
 | **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
-| **2** | Protocol layer | `managers/flow_manager.py` and client methods for all three queries, with window handling, pagination and fail-soft; typed raw-payload models. | Live read-only verification on the dev box; recorded in the RE doc. |
+| **2** | Protocol layer | **COMPLETE** — `managers/flow_manager.py` and the three client methods, with served-window read-back, deadline-bounded pagination, content dedupe and fail-soft. | 638 tests pass (37 new); every method verified read-only live. |
 | **3** | Normalization | One view builder producing the summary and both record families over the Phase 1 core, reusing target resolution; flow models land here with their first caller. | Unit tests against a fixture built from the real 300-record capture. |
 | **4** | Surface | Service, translations, LLM tool, docs, quality scale. | Full validation suite green; live end-to-end call. |
 
@@ -605,59 +620,79 @@ files. No existing assertion or snapshot was modified.
 
 ### Phase 2 — Protocol layer
 
-- [ ] **2.1 Add `async_get_flow_rollup_payload`.** `item` = `tag` or `host`,
-      `apiVer: 2`, `local: true`, `start`, `end`, `hourblock`, targeting the tag id
-      or MAC. Returns the raw dict.
-- [ ] **2.2 Add `async_get_flow_log_payload`.** `item: "flows"`, `type`, `count`,
-      `ts`, `exclude: []`, and **`audit` as a caller-supplied flag** — it *adds*
-      blocked records rather than filtering to them (Q4b), so the flag is not a
-      blocked-only switch. Returns `{count, flows, nextTs}`. A docstring must state
-      that `audit: false` yields regular traffic only, because the name invites the
-      opposite reading.
-- [ ] **2.3 Add `async_get_blocked_flow_payload`.** `item: "auditLogs"`, same as
-      2.2 plus optional `category` and `ets`. **This is the blocked-only query**
-      (Q4b) and the response key is `logs`, not `flows`. Keep `exclude` internal
-      (Q4); `category` is confirmed, so expose it.
-- [ ] **2.4 Resolve the window from a constant, and report what was served.** Default
-      `DEFAULT_FLOW_REPORT_WINDOW_HOURS` (24, mirroring the box's own default) so it
-      changes in one place. **Send it and read back what the box actually covered**
-      from the row `begin`/`end`, then report *that* as the served window, with a
-      `window_clamped` warning when the served span is shorter than the requested
-      one. The box rejects nothing and clamps silently — a 168h request was served
-      24.00h with code 200 — so there is **no rejection to catch and no fallback to
-      write**. `hourblock` is **not** the granularity its name implies: measured, `0`
-      and `1` return an empty response while `2` through `168` return identical full
-      data (592 rows, 11 families, span 24.00h), so it is clamped to at least 2 and
-      otherwise has no effect. Also send **`local: true`**, which is what the app
-      sends and which is what enables the four LAN-to-LAN families (11 families with
-      it, 7 without). Do **not** send `audit` on the rollup: it has no effect there.
-- [ ] **2.5 Implement pagination with a deadline and a loop check.** Walk `nextTs`
-      only in all-available mode. Stop on deadline, on a **non-advancing** cursor, or
-      on an empty page. **Validate `count` before every call**: it must be a positive
-      integer at or above a sane minimum and at or below `MAX_FLOW_LOG_PAGE_SIZE`
-      (5000). The box caps a positive value silently, **and a non-positive value
-      bypasses the cap and returns the entire retained window** (~6,956 rows
-      measured), so an unvalidated caller value is a way to pull the whole log.
-      **Dedupe across the page boundary** on a stable tuple
-      (`ts`, `device`, `pid`, `domain` or `ip`, `port`) because `ts` bounds are
-      inclusive and adjacent pages overlap, and **record how many rows were dropped
-      as duplicates** (`records_dropped_as_duplicates`) so an under-count is visible.
-      Expose the cursor as **`next_cursor`**, carrying `ts` verbatim and documented
-      as **opaque**, so its meaning can change later without a breaking change.
-- [ ] **2.6 Verify read-only against the dev box** for one tag and one host: window
-      default and override, one page, all-available on a small target, a
-      deliberately over-wide window (expect the fallback and warning, not a raise),
-      and a `category`-filtered blocked read. Record every result in
-      `REVERSE_ENGINEERING_WORKFLOW.md`.
-- [ ] **2.7 Fail soft.** A shape change or a rejected request returns *unavailable*
-      rather than raising, matching the existing `item=intf` posture toward
-      OpenVPN's 500. The service reports what it could not read.
-- [ ] **2.8 Create `managers/flow_manager.py`.** Moved here from Phase 1, where it
-      had no orchestration to own. It owns the three client calls, the window
-      fallback, and pagination; it consumes `utils/flow.py` for row reading and
-      follows the existing manager shape (constructor takes the client, exposes
-      async methods). Add the flow-report models to `models.py` in Phase 3, with
-      their first caller.
+**COMPLETE — executed 2026-10-04 on `feature/flow-reporting`.** Validation: 638
+tests pass (37 new), `ruff check` and `ruff format` clean, `mypy` clean across 44
+files. Every method also exercised **read-only against the dev box**.
+
+| Commit | Steps | Result |
+| --- | --- | --- |
+| `a94dc29` | 2.1–2.3, 2.6 | three client methods + `FlowLogPage`; 20 tests; live-verified |
+| `9826868` | 2.4–2.8 | `managers/flow_manager.py`, window read-back, pagination, fail-soft, four-file wiring; 17 tests |
+
+- [x] **2.1–2.3 Three client methods.** `async_get_flow_rollup_payload`,
+      `async_get_flow_log_payload`, `async_get_block_log_payload`, with `FlowLogPage`
+      in `api/models.py`. Request shapes were taken from the app's **own decoded
+      requests**, not from the plan, which corrected two things:
+      - the rollup sends **`local: true`** and **no `audit`**. `local: true` adds the
+        four LAN-to-LAN families (11 families with it, 7 without, measured); `audit`
+        on the rollup does **nothing** — `{local: true}` and
+        `{local: true, audit: true}` were byte-identical.
+      - `auditLogs` takes **no `audit`** at all, and its records come back under
+        `logs` rather than `flows`.
+- [x] **2.4 Window from a constant, reporting what was served.** Done.
+      `DEFAULT_FLOW_REPORT_WINDOW_HOURS = 24`. The served window is read from the row
+      `begin`/`end` and returned as `FirewallaFlowWindow` with an `is_clamped` flag;
+      an empty rollup reports **no** window rather than attributing the request.
+      Verified live: 24h → `clamped=False`, 168h → **`clamped=True`**, both served
+      24.00h. **`hourblock` is a gate, not granularity** — `0` and `1` return an
+      *empty* response while `2`–`168` are byte-identical, so it is clamped to at
+      least 2. The plan's `max(1, ...)` would have produced the silent-empty case.
+- [x] **2.5 Pagination with a deadline and a loop check.** Done. One page by default;
+      `fetch_all` walks the cursor, stopping only on the deadline or a
+      **non-advancing** cursor — never a row cap. `count` is clamped to
+      `[50, MAX_FLOW_LOG_PAGE_SIZE]` because a **non-positive value returns the
+      whole retained window** (~6,956 rows). Verified live: a 24h flow-log walk took
+      **3 pages / 7,545 rows**, a block-log walk **2 pages / 1,154 rows, all
+      `audit`**.
+- [x] **2.5b Dedupe changed to the record's own content.** The plan's tuple key
+      (`ts`, `device`, `pid`, `domain`, `port`) is **unsafe on regular records**:
+      `pid` is absent there, so one device's many same-second connections to one host
+      collide and silently under-count. Records are now deduplicated on their
+      serialised content, and `records_dropped_as_duplicates` makes an under-count
+      visible. Measured boundary overlap: **0**, so this is a guard rather than a
+      fix for today's data.
+- [x] **2.6 Verified read-only against the dev box.** All three methods, plus window
+      clamping, count clamping, one-page and all-available modes, and a
+      `category`-filtered blocked read. Results are in the commit messages and the RE
+      doc's *Limits* section.
+- [x] **2.7 Fail soft — in the manager, not the client.** The client **raises** on an
+      unexpected shape, which is the established pattern and right for a protocol
+      boundary. `FlowManager` catches `FirewallaProtocolError` and returns `None`.
+      **Connectivity and auth failures deliberately propagate**: those are not "data
+      unavailable", and the coordinator owns how they surface. A test pins both
+      directions.
+- [x] **2.8 `managers/flow_manager.py` created.** Subclasses `FirewallaBaseManager`
+      (confirmed in Q13), so wiring touched the four places a manager belongs —
+      `managers/__init__.py`, `coordinator.py` (attribute, `attach_managers`,
+      `FirewallaRuntimeData`) and `__init__.py`. Models were added here rather than
+      in Phase 3 because they now have a caller: `FirewallaFlowWindow`,
+      `FirewallaFlowRollup`, `FirewallaFlowRecordSet`.
+
+#### Phase 2 findings
+
+- **`hourblock`'s purpose is unresolved but not needed.** It behaves as an on/off
+  gate rather than a bucket size, and nothing in the response changes above 2.
+  Whether it sizes a chart axis the local API does not expose is unknown; no report
+  depends on the answer.
+- **Live families came back as 9, not the 11 the raw probe counted.** The probe
+  counted family keys including empty ones; the manager omits empties, which is the
+  intended behaviour.
+- **A rejected target type raises `FirewallaValidationError`, not
+  `FirewallaProtocolError`.** They are siblings under `FirewallaApiError`, so a
+  caller catching only the protocol error will not catch a bad target type. That is
+  correct — one is a caller mistake, the other a wire problem — but it is easy to
+  get wrong when writing a catch, and a probe of mine did.
+
 
 ### Phase 3 — Normalization
 
@@ -819,7 +854,7 @@ files. No existing assertion or snapshot was modified.
 | Phase | Validation |
 | --- | --- |
 | **1** | **Done.** 560 tests pass with no existing assertion or snapshot changed; `ruff check`, `ruff format`, `mypy` clean. The before/after throughput measurement was dropped by owner decision as one-off activity. |
-| **2** | Read-only live probes on the dev box, one tag + one host; results recorded in the RE doc. No writes. |
+| **2** | **Done.** Read-only live probes on the dev box: all three methods, window clamping (24h vs 168h), count clamping, single-page and all-available modes, and a `category`-filtered blocked read. A 24h flow-log walk took 3 pages / 7,545 rows; a block-log walk 2 pages / 1,154 rows, all `audit`. |
 | **3** | Unit tests over the capture-derived fixture, including the adversarial cases (unmatched `pid`, boundary dedupe, over-wide window, device-target member ranking, both sides of the Q9 gate). A review check that Phase 3 **added no new flow builder**. |
 | **4** | Full suite; live end-to-end for both detail levels; `python3 -m script.hassfest` if manifest or translation metadata moves. |
 
