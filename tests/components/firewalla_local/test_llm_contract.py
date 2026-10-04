@@ -441,6 +441,21 @@ _INTENTIONAL_OMISSIONS: Final = frozenset(
         # The destructive gate is set internally; asking the model to confirm
         # itself would prove nothing.
         ("unblock_alarm_target", "confirm"),
+        # The flow report's record families are thousands of rows: measured, a
+        # single group at records detail serialized to 181 KB against 11 KB for
+        # the same group's summary, because the page alone is 300 records and the
+        # all-available walk is larger again. That is a payload for an automation
+        # to consume, not for a conversation, so the tool exposes the summary and
+        # leaves `detail` to the service. `record_count` and `fetch_all_records`
+        # only shape that record read, so neither has a meaning without it.
+        ("get_flow_report", "detail"),
+        ("get_flow_report", "record_count"),
+        ("get_flow_report", "fetch_all_records"),
+        # Flow data is read live on every call, so this only refreshes the
+        # runtime snapshot the report's names are resolved from. The service
+        # defaults it to true, which is what the tool wants, so omitting it
+        # avoids a lever the model would have no reason to move.
+        ("get_flow_report", "refresh"),
         # Bulk tools act on a fixed mode; single-alarm tools act on an alarm id.
         # Splitting them means neither tool exposes the other's selector, and
         # `mode` is never taken from the model because "all_active" is the bulk

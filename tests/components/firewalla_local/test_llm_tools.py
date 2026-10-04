@@ -41,6 +41,7 @@ _READ_TOOLS: tuple[tuple[str, str], ...] = (
     ("firewalla_local__get_wan_usage", "wan_usage"),
     ("firewalla_local__get_wan_events", "wan_events"),
     ("firewalla_local__get_user_usage", "user_usage"),
+    ("firewalla_local__get_flow_report", "flow_report"),
     ("firewalla_local__get_internet_quality", "internet_quality"),
     ("firewalla_local__get_speed_tests", "speed_tests"),
     ("firewalla_local__get_wireless_status", "wireless_status"),

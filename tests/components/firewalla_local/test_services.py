@@ -8919,3 +8919,44 @@ async def test_flow_report_reports_a_clamped_window_it_was_not_asked_for(
     assert response["summary"]["window"]["served_hours"] == 24.0
     assert response["summary"]["window"]["is_clamped"] is True
     assert response["time_basis"]["is_partial"] is True
+
+
+@pytest.mark.asyncio
+async def test_flow_report_accepts_exactly_the_fields_the_llm_tool_passes(
+    hass: HomeAssistant,
+) -> None:
+    """Test a call carrying only the tool's parameters produces a full report.
+
+    The tool deliberately omits `refresh`, `detail`, `record_count` and
+    `fetch_all_records`, so this is what proves those omissions are safe: the
+    schema defaults have to fill them in. A tool that omitted a field the service
+    left unset would pass its unit tests and fail in a session.
+    """
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    with _flow_report_client() as client:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_FLOW_REPORT,
+            {
+                SERVICE_FIELD_SCOPE_KIND: "group",
+                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    # The omitted `refresh` defaulted to true, so the runtime was refreshed.
+    assert client["rollup"].await_count == 1
+    assert response is not None
+    assert response["query"]["refresh"] is True
+    # The omitted `detail` defaulted to summary, so no records were read.
+    assert response["query"]["detail"] == "summary"
+    assert response["query"]["record_count"] == 300
+    assert response["query"]["fetch_all_records"] is False
+    assert response["summary"]["totals"] is not None
+    assert response["metadata"]["applied"]["device_detail"] is False

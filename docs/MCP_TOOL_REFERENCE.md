@@ -217,6 +217,7 @@ to one host.
 | Usage & health | `get_wan_usage` | read | read+ |
 | Usage & health | `get_wan_events` | read | read+ |
 | Usage & health | `get_user_usage` | read | read+ |
+| Usage & health | `get_flow_report` | read | read+ |
 | Usage & health | `get_internet_quality` | read | read+ |
 | Usage & health | `get_speed_tests` | read | read+ |
 | Usage & health | `get_wireless_status` | read | read+ |
@@ -499,6 +500,31 @@ Reads that explain what the network is doing and how it is performing.
   `categories`), `app_ids`, `include` (`['intervals']`), `detail` (`summary` |
   `standard`).
 - **Returns:** read envelope — `result` with internet/app/category time summaries and periods.
+- **Availability:** read, default-on.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+
+### `firewalla_local__get_flow_report`
+
+- **Answers:** "What did this device do?" / "What did the kids' group reach?" / "What
+  was blocked for this device?" / "Is something talking to a host it shouldn't?"
+- **When to use / not:** a device's or group's own traffic — totals, destinations,
+  blocked breakdown, LAN peers. Use it after `list_hosts` or `get_system_overview`
+  has resolved who you are asking about. Not bandwidth over a whole network
+  (`get_network_usage`), and not time spent online (`get_user_usage`).
+- **Coverage:** the box's own flow data, of which it retains roughly the last 24
+  hours. A wider `window_hours` is accepted and quietly served as that much, so read
+  `summary.window.served_hours` and `summary.window.is_clamped` and state the span
+  actually covered. This is a recent-activity view, not a history.
+- **Narrow it:** the report is lean by default and needs no narrowing. Add
+  `include: ['device_detail']` only when the question is *which* device — the
+  per-device member ranking, the devices behind a destination, and each record's
+  device — because that adds the household's device inventory to the answer.
+- **Inputs:** `scope_kind` (`device` | `group` | `user`), `scope_target` (a MAC, id,
+  or name for a device; a name or id for a group or user), `window_hours` (default
+  24), `include` (`['device_detail']`).
+- **Returns:** read envelope — `result` with `summary` (window, totals, counts),
+  `sections` (`top_download`, `top_upload`, `blocked`, `local_peers`,
+  `rollup_families`), and `metadata` (`applied.device_detail`).
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
 

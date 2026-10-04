@@ -19,8 +19,10 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
 
 from .const import (
+    DEFAULT_FLOW_REPORT_WINDOW_HOURS,
     DEFAULT_NETWORK_USAGE_WINDOW,
     DOMAIN,
+    FLOW_REPORT_INCLUDE_DEVICE_DETAIL,
     SERVICE_FIELD_ACTION,
     SERVICE_FIELD_ALARM_TYPE,
     SERVICE_FIELD_APPLIES_TO,
@@ -46,6 +48,8 @@ from .const import (
     SERVICE_FIELD_OFFSET,
     SERVICE_FIELD_ONLINE,
     SERVICE_FIELD_REFRESH,
+    SERVICE_FIELD_SCOPE_KIND,
+    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TOP_N,
@@ -60,7 +64,9 @@ from .const import (
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
     SERVICE_FIELD_WINDOW_DAYS,
+    SERVICE_FIELD_WINDOW_HOURS,
     SERVICE_GET_ALARMS,
+    SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY_REPORT,
     SERVICE_GET_NETWORK_SEGMENT_REPORT,
@@ -642,6 +648,68 @@ class GetUserUsageTool(_FirewallaReadTool):
     _response_type = "user_usage"
 
 
+class GetFlowReportTool(_FirewallaReadTool):
+    """Return what one device, group, or user did, and what was blocked."""
+
+    name = format_tool_name("get_flow_report")
+    title = "Get flow report"
+    description = (
+        "Answer 'what did this device or group do, and what was blocked?' with "
+        "traffic totals, the destinations it reached, the blocked breakdown, and "
+        "its LAN peers. Resolve scope from list_hosts (for a device) or the "
+        "watched-user surfaces.\n"
+        "\n"
+        "Coverage: this is the box's own flow data, and the box retains roughly "
+        f"{DEFAULT_FLOW_REPORT_WINDOW_HOURS} hours of it. A wider `window_hours` is "
+        "accepted but quietly served as that much, so the response reports the span "
+        "it actually covered in `summary.window` (`served_hours`, and `is_clamped` "
+        "when it was shortened). State the served span rather than the requested "
+        "one, and do not present this as history.\n"
+        "\n"
+        "The report is deliberately lean: no per-device detail is included. Add "
+        '`include: ["device_detail"]` only when the question needs to know which '
+        "device was behind a member row, a destination, or a record. A device scope "
+        "always names its own device whether or not the flag is set."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required(
+                SERVICE_FIELD_SCOPE_KIND,
+                description=(
+                    "Required. What the scope target identifies: 'device', "
+                    "'group', or 'user'."
+                ),
+            ): vol.In(("device", "group", "user")),
+            vol.Required(
+                SERVICE_FIELD_SCOPE_TARGET,
+                description=(
+                    "Required. The scope identifier for the chosen kind: a MAC, "
+                    "id, or name for a device; a name or id for a group or user."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_WINDOW_HOURS,
+                description=(
+                    "Optional. Defaults to 24, which is what the box serves. The "
+                    "response reports the span it actually covered."
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+            vol.Optional(
+                SERVICE_FIELD_INCLUDE,
+                description=(
+                    "Optional. Add per-device detail, which is absent by default. "
+                    "Allowed: 'device_detail'."
+                ),
+            ): vol.All(
+                cv.ensure_list,
+                [vol.In((FLOW_REPORT_INCLUDE_DEVICE_DETAIL,))],
+            ),
+        }
+    )
+    _service = SERVICE_GET_FLOW_REPORT
+    _response_type = "flow_report"
+
+
 class GetInternetQualityTool(_FirewallaReadTool):
     """Return internet-quality measurements (latency, loss, jitter)."""
 
@@ -877,6 +945,7 @@ _READ_TOOL_CLASSES: Final = (
     GetWanUsageTool,
     GetWanEventsTool,
     GetUserUsageTool,
+    GetFlowReportTool,
     GetInternetQualityTool,
     GetSpeedTestsTool,
     GetWirelessStatusTool,
