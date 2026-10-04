@@ -1349,6 +1349,67 @@ hours, and there is no per-rule history — only the most recent match. But a
 below. An earlier revision of this document claimed no local blocked-history
 query existed; that was wrong.
 
+**`lastHitFlow` is a full flow record, not a reduced summary.** This was not
+apparent at first and it matters: the table above lists 35 possible keys, and the
+integration currently reads **10** of them. The fields it drops include the ones a
+rule report most wants:
+
+| Dropped field | Coverage | Why it matters |
+| --- | --- | --- |
+| **`count`** | 48/48 | how many sessions matched |
+| **`ltype`**, **`type`** | 48/48 | blocked vs regular, and `dns` vs `ip` |
+| **`intf`** | 48/48 | the local network |
+| `devicePort` | 40/48 | the client's source port |
+| **`download`**, **`upload`**, `duration` | 21/48 | **the bytes and time the rule matched** |
+| `dstMac`, `dstTags` | 21/48 | local-destination attribution |
+| `dIntf`, `oIntf`, `wanIntf` | 6–21/48 | interface joins |
+| `pid` | 27/48 | the originating rule id |
+| `country`, `category`, `app`, `apid` | 9–21/48 | intel enrichment |
+| `local`, `fd`, `aid`-like `rl`/`drl` | 1–21/48 | routing detail |
+
+The field coverage pattern settles it: `ltype`, `type`, `count`, `intf`,
+`protocol`, `port`, `device`, `deviceIP` and `ts` are on **all** 48, exactly as
+they are on every flow-log record, and the remaining fields appear together in the
+same proportions as they do on a flow-log page. So the box is storing a **flow-log
+record** on the rule, and `lastHitFlow` should be read with the *same reader* the
+flow report uses rather than a second hand-built subset.
+
+**Consequence:** `FirewallaRuleHit` was built before this was known and parses a
+subset. It should be superseded by the shared flow-record model, which both fixes
+the dropped fields and removes the second reader.
+
+### Device IDs are not always MAC addresses
+
+Firewalla's own model defines a device id as **an id string prefixed by device
+type**, defaulting to the MAC:
+
+| Prefix | Meaning |
+| --- | --- |
+| `wg_peer:` | WireGuard client, followed by its profile id |
+| `awg_peer:` | AmneziaWG client (local only; not in the published list) |
+| `ovpn:` | OpenVPN client (published; **not observed locally**) |
+| `if:` | **a network interface** (observed locally; not in the published list) |
+| *(none)* | a MAC address |
+
+Measured on the dev box: `awg_peer:` ×2 and `wg_peer:` ×1 in the host inventory,
+and **`if:` ×1** appearing in a rule's `lastHitFlow.device` — an interface that has
+no host-inventory entry at all.
+
+**So a device id can name something that is not a host.** Two consequences:
+
+1. **A flow or rule-hit `device` may not resolve to the host inventory.** The join
+   must tolerate that and report the id rather than dropping the record.
+2. **`device_mac` is the wrong name for a field that holds a device id.** On the
+   dev box **3 of 48** rule hits (6%) held a prefixed id rather than a MAC, so a
+   surface labelled `device_mac` reports `device_mac: "wg_peer:wWDLO7..."` today.
+   The vendor calls this a **Device ID**, and that is what it should be called.
+
+`is_vpn_peer` checks for `wg_peer`/`awg_peer` prefixes, which matches how peers
+are actually synthesized locally (from `wgPeers`/`awgPeers`). The published `ovpn:`
+prefix is not a local risk because OpenVPN appears locally as a **network**
+(`networkConfig.interface.openvpn`), not as a device.
+
+
 Used by: `_normalize_rule_hit` in `api/client.py`, surfaced identically to the
 `get_rules` service payload (`_serialize_rule_summary`) and to rule-backed switch
 entities via the shared `build_rule_hit_attributes` in `models.py`.
@@ -1595,9 +1656,64 @@ was reverse engineered here while correcting two readings. Sources:
 - **`dstMac` is the only local-destination identifier**, and it points at another
   host in the same inventory.
 
-`flows` query does not: **`category`** (e.g. `games`) and **`ets`** (an end
-bound), so a caller can narrow to one category or a sub-window without paging
-through everything.
+### Cross-check against the published Device and Rule models
+
+Same sources, other models: `docs.firewalla.net/data-models/device`,
+`/api-reference/device`, `/data-models/rule`, `/api-reference/rule`. These
+corroborate the membership and rule-hit work and correct three of our own
+readings.
+
+**Corroborated:**
+
+| Documented | Local correspondence |
+| --- | --- |
+| Rule `hit` object: `{count, lastHitTs, statsResetTs}`, described as *"Rule hit stats"* (marked "Upcoming" in the docs) | our `hitCount` / `lastHitFlow`. **Hit data is a first-class documented concept**, not something inferred. `statsResetTs` is documented and we do not surface it |
+| Device ID: *"an ID string prefixed by device type"* — `ovpn:`, `wg_peer:`, else MAC | our prefixed peer ids; see *Device IDs are not always MAC addresses* |
+| A device *"represents either a physical device, a network interface, or a VPN client"* | explains the `if:` prefix |
+| Device `group` is **singular** — *"Group that this device belongs to"* | matches the confirmed one-membership-per-device rule |
+| Scope `type` ∈ `device` \| `group` \| `user` \| `network`, with `value` = that kind's id | our `scope_kind`; **we support three of the four** |
+| Rule `direction` ∈ `bidirection` \| `inbound` \| `outbound` (default bidirection) | our `traffic_direction` rule field |
+| Target `type` ∈ `app category domain internet intranet ip net region remotePort targetlist` | our rule target types, including `region` |
+| `dnsOnly`: *"Defaults to true when creating block rules"* for `category` / `app` / `targetlist` / `domain` | **answers the `useBf` question** — see *Answered: the two boolean encodings, and `useBf`* |
+| `protocol` ∈ `tcp` \| `udp`, unset for both | our rule `protocol` |
+| `status` ∈ `active` \| `paused`; `resumeTs` when paused | our rule state reasons |
+| `schedule: {duration, cronTime}` | our `cronTime` / `duration` |
+| `timeUsage: {quota, used}` in minutes | our `appTimeUsage` (a different shape — see below) |
+| Device `name` — **one display name**, max 32 chars | our `host_name` is the app-facing name; the DNS/DHCP names are local-only extras |
+
+**Corrected — three of our readings:**
+
+1. **A device id is not a MAC.** Our `device_mac` field holds a device id that can
+   be `wg_peer:` / `awg_peer:` / `if:`. 6% of live rule hits are affected.
+2. **`category` has two different closed sets.** Flow/device `category` is 12
+   values (`ad edu games gamble intel p2p porn private social shopping video vpn`);
+   **rule target** `category` is 11 (`drugs games gamble p2p porn social shopping
+   video violence vpn`). They overlap but are not the same list, and neither
+   contains the other — `edu`/`ad`/`intel` are flow-only, `drugs`/`violence` are
+   rule-only. Each must be validated against its own set.
+3. **`scope` is optional and means "all devices" when unset** — *"The local aspect
+   this rule applies to, unset for all devices"*. So an unscoped rule is not
+   "scoped to nothing"; it is global. Our `applies_to` empty case should be read
+   that way.
+
+**Newly informed:**
+
+- **Rule `group` is a distinct field from `scope`.** `group` is *"ID of the
+  Firewalla box group that this rule applies to, defaults to `global`"* — a
+  box-level grouping — while `scope` selects devices. MSP also notes that omitting
+  both `gid` and `group` makes a rule apply to **all boxes**, including future
+  ones.
+- **`targetlist` is a first-class target type**, not just `category`/`app`. Our
+  rule model treats target lists as a category-style target; the vendor distinguishes
+  them.
+- **`remotePort` is a target type** in its own right, and `port` also appears as an
+  optional qualifier on both `Target` and `Scope`. Two places, not one.
+
+**One divergence to leave alone:** `timeUsage` is `{quota, used}` in minutes, while
+locally time limits are expressed through `disturbLevel` / `disturbMethod` /
+`appTimeUsage`. Different models for the same feature; the local one is what the
+box actually accepts, so it stays.
+
 
 ### What the time filter actually is
 

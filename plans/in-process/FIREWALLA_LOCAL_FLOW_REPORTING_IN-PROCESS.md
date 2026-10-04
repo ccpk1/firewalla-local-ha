@@ -267,31 +267,6 @@ for it, not withheld:
 Identity is therefore a **default-shape** decision, not a capability limit — the same
 principle as the retention and page-size answers in the audit note.
 
-### Q13. Phase 2 corrections found while writing the plan into code
-
-Four items the plan had wrong, all verified against the code rather than assumed.
-
-**1. `FlowManager` must subclass `FirewallaBaseManager`.** The plan implied a
-client-only constructor. Every manager takes `(coordinator, entry, client)`, so the
-flow manager matches. Adding it therefore touches four files — `managers/flow_manager.py`,
-`managers/__init__.py`, `coordinator.py` (attribute, `attach_managers` parameter,
-`FirewallaRuntimeData` field) and `__init__.py` (instantiate, pass through).
-
-**2. Fail-soft belongs in the manager, not the client.** The client **raises**
-`FirewallaProtocolError` on a bad shape and every existing method follows that
-pattern. `FlowManager` catches and returns *unavailable*, exactly as
-`async_refresh_network_usage` keeps its previous cache on a per-network failure.
-
-**3. The dedupe key is unsafe on regular records.** `(ts, device, pid, domain, port)`
-was written against blocked records, where `pid` exists. On a regular record `pid` is
-absent, so one device opening many connections to the same host in the same second
-collides and silently under-counts. **Dedupe on the row's own serialized content**,
-which is exact and needs no tuning.
-
-**4. `nextTs` must not be rounded.** It is a float (`1791060537.785`) and passing it
-back is how pagination walks; rounding to an int could skip records. The cursor
-carries it verbatim and is only ever tested for equality or non-advance.
-
 ### Q10. How do we know `audit: true` actually filtered?
 
 **Why it matters.** `audit: true` was understood to mean "blocked only". If the box
@@ -385,6 +360,104 @@ flattening three legitimately different contracts.
   is correct, not a refactor.
 - It is **pre-existing** duplication. Worth doing, but it is not flow-reporting
   work, and it should not be presented as such.
+
+### Q13. Phase 2 corrections found while writing the plan into code
+
+Four items the plan had wrong, all verified against the code rather than assumed.
+
+**1. `FlowManager` must subclass `FirewallaBaseManager`.** The plan implied a
+client-only constructor. Every manager takes `(coordinator, entry, client)`, so the
+flow manager matches. Adding it therefore touches four files — `managers/flow_manager.py`,
+`managers/__init__.py`, `coordinator.py` (attribute, `attach_managers` parameter,
+`FirewallaRuntimeData` field) and `__init__.py` (instantiate, pass through).
+
+**2. Fail-soft belongs in the manager, not the client.** The client **raises**
+`FirewallaProtocolError` on a bad shape and every existing method follows that
+pattern. `FlowManager` catches and returns *unavailable*, exactly as
+`async_refresh_network_usage` keeps its previous cache on a per-network failure.
+
+**3. The dedupe key is unsafe on regular records.** `(ts, device, pid, domain, port)`
+was written against blocked records, where `pid` exists. On a regular record `pid` is
+absent, so one device opening many connections to the same host in the same second
+collides and silently under-counts. **Dedupe on the row's own serialized content**,
+which is exact and needs no tuning.
+
+**4. `nextTs` must not be rounded.** It is a float (`1791060537.785`) and passing it
+back is how pagination walks; rounding to an int could skip records. The cursor
+carries it verbatim and is only ever tested for equality or non-advance.
+
+### Q14. What would this look like if we built it today, with the published models?
+
+**Why it matters.** Much of the host/rule model was derived by reverse engineering
+before Firewalla's published Device and Rule models were found. Those models
+corroborate most of it but correct a few readings, and correcting them now is
+cheaper than after the flow report is built on top.
+
+**The published model in one line:** a **Device** is the atomic unit (id prefixed by
+type, defaulting to MAC), and it is targeted through a **Scope** of
+`{type, value}` where `type` ∈ `device` / `group` / `user` / `network`.
+
+**Where we already match:**
+
+| Published | Ours |
+| --- | --- |
+| `scope.type` ∈ device/group/user/network | `scope_kind` — **we support three of four** |
+| Device `group` is singular | confirmed one-membership-per-device |
+| Device ID is prefixed by type | we handle `wg_peer:` / `awg_peer:`; `if:` exists but is unmatched |
+| Rule `direction` | our `traffic_direction` |
+| Rule `hit: {count, lastHitTs}` | our `hit_count` / `last_hit` |
+| `dnsOnly` defaults true on block rules for category/app/targetlist/domain | explains `dnsmasq_only` + `useBf` |
+| `protocol` ∈ tcp/udp | our rule `protocol` |
+
+**Three readings to correct, all cheap now and expensive later:**
+
+1. **`device_mac` is a misnomer.** It holds a device id, and **3 of 48 live rule
+   hits (6%)** are `wg_peer:` / `awg_peer:` / `if:`. The vendor calls it a **Device
+   ID**. Rename to `device_id` in the model and the attributes.
+2. **`network` scope is missing** from `scope_kind`, which accepts
+   `device` / `group` / `user`. Add it, and **document the limitation honestly**:
+   the local flow queries take `type: tag|host` only, so a network-scoped *flow*
+   report is not expressible even though a network-scoped *rule* is.
+3. **`category` is two different closed sets.** Flow/device `category` is
+   12 values; rule **target** `category` is 11, and neither contains the other
+   (`edu` / `ad` / `intel` / `private` are flow-only, `drugs` / `violence` are
+   rule-only). Validating one against the other would reject valid data.
+
+**The one structural rework worth doing in this initiative: unify the flow record.**
+
+`lastHitFlow` is **not** a reduced summary — it is a **full flow record**, the same
+shape a flow-log page returns. Evidence: `ltype`, `type`, `count`, `intf`,
+`protocol`, `port`, `device`, `deviceIP` and `ts` are present on **all 48** records,
+and the optional fields appear in the same proportions as on a flow page.
+
+`FirewallaRuleHit` was hand-built before that was known and reads **10 of the record's
+35 fields**, dropping among others `download` / `upload` / `duration` (21/48),
+`count` (48/48), `ltype` (48/48), `dstMac` (21/48), `country` (19/48), `pid`
+(27/48) and the interface joins.
+
+So there should be **one flow-record model and one reader**, consumed by both the
+rule-hit surface and the flow report. Doing this now:
+- removes a second hand-built subset instead of adding a third,
+- recovers the byte, duration and attribution fields a rule report wants,
+- and makes the `device_id` rename a single change.
+
+Doing the flow report first would mean building on the subset and redoing both.
+
+**Recommended, bounded rework (folded into Phase 3, not a new initiative):**
+
+| # | Change | Cost |
+| --- | --- | --- |
+| R1 | Rename `device_mac` → `device_id` in the hit model and attributes | small |
+| R2 | Replace `FirewallaRuleHit` with the shared flow-record model; keep `build_rule_hit_attributes` as the attribute projector | small–medium |
+| R3 | Surface the recovered `download` / `upload` / `duration` / `count` / `ltype` on rule hits | small |
+| R4 | Add `network` to `scope_kind`; document that flows cannot be network-scoped | small |
+| R5 | Split the `category` sets — flow (12) and rule-target (11) — in constants | small |
+| R6 | Extract the shared matching core (Q12) | medium |
+
+**Explicitly out of scope:** the `dhcp_name` matcher inconsistency, the
+`statsResetTs` field, `targetlist` / `remotePort` as distinct rule target types, and
+the `timeUsage` shape divergence. All recorded, none needed for the flow report.
+
 
 ---
 
@@ -605,6 +678,18 @@ files. No existing assertion or snapshot was modified.
       to the service layer. Each caller keeps its own error mapping and match-list
       formatting. **Full suite must pass with no changed expectations**, since this
       touches two shipped services.
+- [ ] **3.1c Fold in the Q14 rework before building on top of it.** In order:
+      **R1** rename `device_mac` → `device_id` in the hit model and attributes (the
+      field holds a device id; 3 of 48 live values are `wg_peer:` / `awg_peer:` /
+      `if:`); **R2** replace `FirewallaRuleHit` with the shared flow-record model and
+      keep `build_rule_hit_attributes` as its attribute projector, so there is **one**
+      reader for a record the box stores in one shape; **R3** surface the recovered
+      `download` / `upload` / `duration` / `count` / `ltype`; **R4** add `network` to
+      `scope_kind` and document that flows cannot be network-scoped (`type: tag|host`
+      only); **R5** split the two `category` sets in constants — flow/device 12,
+      rule-target 11, and neither contains the other. This must land **before** the
+      flow view is built, so the view consumes the shared record rather than the
+      subset.
 - [ ] **3.2 Build the summary from the rollup using the Phase 1 core.** Totals from
       the shared window extractor `extract_usage_window` in `utils/flow.py`;
       destination rows from the shared

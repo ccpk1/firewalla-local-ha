@@ -368,6 +368,10 @@ opposite of "nothing". Two constants now carry this:
 | **T23** | Deduping regular records on `pid` | `pid` is absent on regular records, so the key collapses to `(ts, device, None, host, port)` and one device's many same-second connections collide | Dedupe on the row's serialized content — Phase 2.5 |
 | **T24** | Rounding the `nextTs` cursor | It is a float and passing it back is how pagination walks | Carry it verbatim; only test equality/non-advance — Phase 2.5 |
 | **T25** | A fourth target resolver | Three already exist (~322 lines) running the same algorithm | Extract the matching core, not a unified resolver — Q12 |
+| **T26** | Calling a device id a MAC | `device_mac` holds a device id; 3 of 48 live rule hits are `wg_peer:` / `awg_peer:` / `if:` | Rename to `device_id` — Q14 R1 |
+| **T27** | Treating `lastHitFlow` as a reduced summary | It is a **full flow record**; we read 10 of 35 fields and drop bytes, duration, `ltype`, `dstMac` | One flow-record model and reader for both surfaces — Q14 R2/R3 |
+| **T28** | Validating one `category` set against the other | Flow `category` is 12 values, rule-target `category` is 11, and neither contains the other | Two constants, validated separately — Q14 R5 |
+| **T29** | Assuming a flow record's `device` resolves to a host | `if:<uuid>` is an interface device with no host-inventory entry | Tolerate an unresolvable device id; report it rather than dropping the record |
 | **T15** | A default gate becoming a wall | Gating per-device attribution off by default is fine only if it stays reachable | Phase 3.4 plus a test on both sides of the gate |
 | **T16** | Efficiency work trading correctness | Single-pass accumulation can drop the deterministic tie-break | Step 1.5 keeps sort keys identical and measures before/after |
 
@@ -405,6 +409,12 @@ opposite of "nothing". Two constants now carry this:
 - **O7 — the un-consumed `systemFlows` windows become reachable.** The RE doc notes
   that the box-wide 24h `upload` / `download` / `dnsB` windows have no consumer
   today. The same generalisation makes them a small addition later, at no extra cost.
+- **O8 — `lastHitFlow` and the flow log are one record type.** The published Rule
+  model documents `hit` as a first-class field, and measurement confirms the local
+  `lastHitFlow` is a full flow record rather than a summary. So the flow report does
+  not need a new model: it needs the **existing** record read in full. That converts
+  a would-be new subsystem into a unification, and it recovers the bytes, duration and
+  attribution fields the current hit model drops.
 
 ---
 
