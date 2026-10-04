@@ -366,8 +366,15 @@ def _flow_record_destination(
     """Return the record's destination and the kind of name it is.
 
     ``host`` and ``domain`` describe the same thing at different resolutions and
-    ``ip`` is the fallback, so the pair is resolved together. A ``local:`` peer
-    carries only its MAC, which is a third kind rather than a missing name.
+    ``ip`` is the fallback, so the pair is resolved together. A LAN peer carries
+    only an identifier and no address, which is a fourth kind rather than a
+    missing name.
+
+    The kind is ``device`` and not ``mac`` because that identifier is a Firewalla
+    **device id**, and measured it is not always a MAC: of 21 live local records,
+    20 held a MAC and 1 held an ``awg_peer:`` id. ``device`` and ``dstMac`` are
+    both device ids and either can be the peer, so the field position says nothing
+    about which side is the peer.
     """
     host = normalized_string(raw_row.get(_RAW_FLOW_HOSTNAME_KEYS[0]))
     if host is not None:
@@ -378,9 +385,9 @@ def _flow_record_destination(
     ip_address = normalized_string(raw_row.get(_RAW_FLOW_IP_KEY))
     if ip_address is not None:
         return ip_address, "ip"
-    peer_mac = normalized_string(raw_row.get(_RAW_RECORD_DSTMAC_KEY))
-    if peer_mac is not None:
-        return peer_mac, "mac"
+    peer_id = normalized_string(raw_row.get(_RAW_RECORD_DSTMAC_KEY))
+    if peer_id is not None:
+        return peer_id, "device"
     return None, None
 
 

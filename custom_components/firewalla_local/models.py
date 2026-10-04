@@ -993,10 +993,28 @@ class FirewallaFlowRecord:
 
     - **blocked** (``ltype == "audit"``) names the rule that stopped it
       (``blocked_by_rule_id``) and the match kind (``block_type``), and carries
-      **no bytes at all** -- Firewalla intercepts it before it travels, so an
-      absent byte total is not a zero.
+      **no byte fields at all** -- Firewalla intercepts it before it travels.
     - **regular** (``ltype == "flow"``) carries ``download_bytes``,
       ``upload_bytes``, ``duration_seconds`` and the resolved destination.
+
+    Three states for a byte total, and all three occur:
+
+    - a **number** -- measured up to 488 MB on one destination
+    - an **explicit ``0``** -- the box sends it: 188 of one 5,000-record page
+      carried ``download: 0``. A measured empty transfer, not an absence.
+    - **absent** -- a blocked record, which never transferred anything.
+      ``None`` is kept rather than defaulting to ``0`` so those two are not
+      conflated.
+
+    ``ltype`` was ``"audit"`` or ``"flow"`` on all 12,315 records measured, so
+    ``is_blocked``'s third state is a guard rather than a live case.
+
+    **A rule hit can describe traffic the record logs never return.** Measured,
+    21 of 48 hits carried ``dstMac`` and ``local: true`` -- LAN-to-LAN traffic --
+    while **0 of 20,000** live flow-log or block-log records carried either. So
+    this model serves both sources, and a consumer must not assume the population
+    is the same: a rule can last have matched a LAN flow that the flow report's
+    record families will never show.
 
     Three rare fields the box sometimes puts on a rule hit -- ``appHosts``,
     ``rl`` and ``drl`` -- are deliberately not modelled: they appeared on at most
@@ -1006,6 +1024,8 @@ class FirewallaFlowRecord:
     ``device_id`` is a Firewalla device id, not necessarily a MAC: measured, 3 of
     48 hits carried a ``wg_peer:`` / ``awg_peer:`` / ``if:`` prefixed id, and an
     ``if:`` device names an interface with no host-inventory entry at all.
+    ``device_id`` and ``destination_mac`` are **both device ids** and either can
+    hold the peer, so the field a MAC appears in does not identify the side.
     """
 
     timestamp: float | None = None

@@ -1478,10 +1478,63 @@ discriminator, and `pid` is present if and only if the record is blocked.
 | `oIntf`, `apid` | absent | 299 / 298 of 300 |
 | `tags`, `userTags`, `dTags`, `count`, `ts`, `protocol`, `port`, `intf`, `device`, `deviceIP` | 300/300 | 300/300 |
 
-**Blocked records have no bytes at all.** Firewalla's own API documentation states
-why: a blocked flow is "intercepted before traveling through your network", so
-there is no download or upload to report. A blocked destination's byte count is
-**absent**, never zero.
+**A byte total has three states, and all three occur.** Measured across 12,315
+records from four live pages and the init payload:
+
+| State | Wire | Meaning |
+| --- | --- | --- |
+| a number | `"download": "488722371"` | the measured transfer |
+| **explicit zero** | **`"download": 0`** | **a measured empty transfer** |
+| absent | the key is missing | the record never transferred |
+
+Firewalla's documentation explains the third: a blocked flow is "intercepted
+before traveling through your network", so there is no download or upload to
+report.
+
+**The middle state is the one worth stating**, because it is easy to assume it
+cannot happen and then treat `0` as a sentinel. It does happen: **188 of one
+5,000-record page** carried `download: 0` and 17 carried `upload: 0`; a second
+page carried 129 and 11; and even the small init-payload set of 48 hits had one of
+each. So `0` is a real measurement, and a consumer that renders it as "no data"
+is wrong in the same way that rendering an absent field as `0` would be.
+
+The three are therefore kept distinct: a number reads as itself, `0` reads as `0`,
+and an absent field reads as absent.
+
+**`ltype` takes exactly two values.** Across all 12,315 records measured it was
+`"flow"` (8,501) or `"audit"` (3,814) and nothing else, so `ltype` is a reliable
+discriminator and a third state has never been observed. Anything built on it
+should still decline to classify an unreadable record rather than calling it
+"allowed", but that is a guard against a shape change, not a live case.
+
+### LAN-to-LAN traffic is in a rule's hit, but not in the record logs
+
+This is a **population** difference between two sources that share a field set, and
+it is easy to assume away because the fields line up.
+
+| Source | Records with `dstMac` / `local: true` |
+| --- | --- |
+| `lastHitFlow` (init payload) | **21 of 48** |
+| live flow log, tag target, 4 pages × 5,000 | **0** |
+| live block log, tag target, 2 pages | **0** |
+| the 2,100 records in the 2026-10-03 capture | **0** |
+
+So a **rule** can have last matched a purely LAN flow, while `item=flows` and
+`item=auditLogs` never return one. Two consequences:
+
+- A consumer must not assume the two sources describe the same population. Quoting
+  a rule hit and a flow-log page side by side compares a LAN-capable set with a
+  WAN-only one.
+- The rollup's `local:` families are the **only** place LAN traffic is aggregated
+  for a target, which is why those families are separate rather than merged into
+  the destination lists: they are the only view of it a report can offer.
+
+**A `dstMac` is a device id, not necessarily a MAC.** Of the 21 local records, 20
+held a MAC and **1 held an `awg_peer:` id**. In that record the *MAC was in
+`device` and the peer id in `dstMac`*, and the mirror case also appears — so
+`device` and `dstMac` are both device ids and **the field a MAC appears in says
+nothing about which side of the flow is the peer**. Reporting a `mac` destination
+kind from `dstMac` is therefore wrong twice over.
 
 **`count` means different things per family**, which Firewalla documents as
 "number of TCP connections or UDP sessions for flow, or block count for blocked

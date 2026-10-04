@@ -330,10 +330,12 @@ def _aggregate_blocked(
             remote_ip = flow_row_remote_ip(row)
             kind = _destination_kind(destination, remote_ip)
             if destination is None and remote_ip is None:
-                destination_mac = normalized_string(row.get(_RAW_ROW_DST_MAC_KEY))
-                if destination_mac is None:
+                # A LAN peer is identified by a device id, which is not always a
+                # MAC -- see `_flow_record_destination` in `utils/flow.py`.
+                peer_id = normalized_string(row.get(_RAW_ROW_DST_MAC_KEY))
+                if peer_id is None:
                     continue
-                destination, kind = destination_mac, "mac"
+                destination, kind = peer_id, "device"
 
             key = (destination, kind, block_type, direction)
             entry = merged.setdefault(key, _BlockedAccumulator())

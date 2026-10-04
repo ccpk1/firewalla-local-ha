@@ -324,7 +324,7 @@ def test_blockedness_is_tri_state_when_ltype_is_absent(
         ),
         pytest.param({"domain": "b.example"}, "domain", id="dns_match"),
         pytest.param({"ip": "1.2.3.4"}, "ip", id="ip_only"),
-        pytest.param({"dstMac": "F8:0F:F9:3B:22:2E"}, "mac", id="lan_peer_has_no_name"),
+        pytest.param({"dstMac": "F8:0F:F9:3B:22:2E"}, "device", id="lan_peer"),
         pytest.param({}, None, id="no_destination_at_all"),
     ],
 )
@@ -332,10 +332,12 @@ def test_a_destination_is_classified_by_the_name_it_resolved_to(
     raw_row: dict[str, object],
     expected_kind: str | None,
 ) -> None:
-    """Test host, domain, ip and MAC are told apart.
+    """Test host, domain, ip and a LAN peer's device id are told apart.
 
-    A `local:` peer carries only a MAC because it has no hostname, which is a
-    third kind rather than a missing name.
+    A LAN peer is a **device id** rather than a MAC: measured, 20 of 21 live local
+    records held a MAC and 1 held an `awg_peer:` id, and that id can appear in
+    either `device` or `dstMac`, so the field says nothing about which side is the
+    peer.
     """
     assert build_flow_record(raw_row).destination_kind == expected_kind
 
@@ -410,3 +412,59 @@ def test_the_reader_does_not_read_fd_as_a_direction() -> None:
     record = build_flow_record({"ltype": "flow", "fd": "in", "download": 1})
 
     assert not hasattr(record, "direction")
+
+
+def test_an_explicit_zero_byte_total_is_kept_as_zero_not_absent() -> None:
+    """Test a measured empty transfer is distinguishable from no transfer at all.
+
+    The box sends `download: 0` on real regular records -- 188 of one 5,000-record
+    page -- while a blocked record omits the field entirely. Both must survive as
+    themselves, so `0` means "transferred nothing" and `None` means "never
+    travelled".
+    """
+    measured_zero = build_flow_record({"ltype": "flow", "download": 0, "upload": 0})
+    absent = build_flow_record({"ltype": "audit", "count": 3})
+
+    assert measured_zero.download_bytes == 0
+    assert measured_zero.upload_bytes == 0
+    assert measured_zero.total_bytes == 0
+
+    assert absent.download_bytes is None
+    assert absent.upload_bytes is None
+    assert absent.total_bytes is None
+
+
+def test_a_peer_id_in_dst_mac_is_still_a_device_not_a_mac() -> None:
+    """Test an `awg_peer:` value in `dstMac` is read as a device id.
+
+    Measured: 1 of 21 live local records held a peer id there while the other 20
+    held a MAC, and that record carried the MAC in `device` instead. So neither
+    field is 'the MAC field'.
+    """
+    record = build_flow_record(
+        {
+            "ltype": "flow",
+            "device": "02:42:0B:C8:00:28",
+            "dstMac": "awg_peer:NyiNpEGJhGMdfgALgzbyuXPf346uXZA2JNNuQABwzUM=",
+            "local": True,
+            "download": 64,
+        }
+    )
+
+    assert record.destination_kind == "device"
+    assert record.destination is not None
+    assert record.destination.startswith("awg_peer:")
+    assert record.device_id == "02:42:0B:C8:00:28"
+
+
+def test_a_record_without_ltype_is_not_classified_either_way() -> None:
+    """Test an unclassifiable record is not silently called regular.
+
+    `ltype` was `audit` or `flow` on all 12,315 records measured, so this is a
+    guard rather than a live case -- but answering `False` would be a positive
+    claim that a record we could not read was allowed through.
+    """
+    record = build_flow_record({"download": 10, "upload": 20})
+
+    assert record.is_blocked is None
+    assert record.total_bytes == 30
