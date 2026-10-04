@@ -30,6 +30,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
+from ..const import (
+    FLOW_DIRECTION_INBOUND,
+    FLOW_DIRECTION_LOCAL,
+    FLOW_DIRECTION_OUTBOUND,
+    FLOW_UNIT_BLOCKED,
+    FLOW_UNIT_BYTES,
+    FLOW_UNIT_CONNECTIONS,
+)
 from ..models import FirewallaFlowRecord, FirewallaNetworkUsageWindow
 from .values import normalized_float, normalized_int, normalized_string
 
@@ -101,29 +109,19 @@ _LOCAL_FAMILY_SEGMENT: Final = "local"
 # blocked one. Measured, the byte families are orders of magnitude larger than
 # the blocked ones (min 49,148 bytes versus max 5,410 blocks), so reading a
 # blocked family as bytes would understate it by thousands of times.
-_FLOW_UNIT_BYTES: Final = "bytes"
-_FLOW_UNIT_BLOCKED: Final = "blocked"
-_FLOW_UNIT_CONNECTIONS: Final = "connections"
 _FLOW_UNIT_BY_FAMILY: Final = {
-    "download": _FLOW_UNIT_BYTES,
-    "upload": _FLOW_UNIT_BYTES,
-    "local:download": _FLOW_UNIT_BYTES,
-    "local:upload": _FLOW_UNIT_BYTES,
-    "dnsB": _FLOW_UNIT_BLOCKED,
-    "ipB:in": _FLOW_UNIT_BLOCKED,
-    "ipB:out": _FLOW_UNIT_BLOCKED,
-    "local:ipB:in": _FLOW_UNIT_BLOCKED,
-    "local:ipB:out": _FLOW_UNIT_BLOCKED,
-    "local:in": _FLOW_UNIT_CONNECTIONS,
-    "local:out": _FLOW_UNIT_CONNECTIONS,
+    "download": FLOW_UNIT_BYTES,
+    "upload": FLOW_UNIT_BYTES,
+    "local:download": FLOW_UNIT_BYTES,
+    "local:upload": FLOW_UNIT_BYTES,
+    "dnsB": FLOW_UNIT_BLOCKED,
+    "ipB:in": FLOW_UNIT_BLOCKED,
+    "ipB:out": FLOW_UNIT_BLOCKED,
+    "local:ipB:in": FLOW_UNIT_BLOCKED,
+    "local:ipB:out": FLOW_UNIT_BLOCKED,
+    "local:in": FLOW_UNIT_CONNECTIONS,
+    "local:out": FLOW_UNIT_CONNECTIONS,
 }
-
-# Direction comes from the family name, never from `fd`. Measured: `fd` is "in"
-# on all 199 `download` *and* all 199 `upload` rows, so it cannot be a byte
-# direction, and it is absent on `dnsB` entirely.
-_FLOW_DIRECTION_INBOUND: Final = "inbound"
-_FLOW_DIRECTION_OUTBOUND: Final = "outbound"
-_FLOW_DIRECTION_LOCAL: Final = "local"
 
 
 def flow_row_host_id(raw_row: Mapping[str, object]) -> str | None:
@@ -342,17 +340,23 @@ def flow_family_direction(family: str) -> str | None:
 
     ``fd`` is **not** used, and must not be: it reads ``"in"`` on both byte
     families and on every regular record measured, so it cannot be a direction.
-    The family name is the only carrier, and ``local:`` families are neither
-    inbound nor outbound -- they never leave the network.
+
+    Only a name that actually carries a direction is answered. ``download`` /
+    ``upload`` and an ``:in`` / ``:out`` suffix do; **``dnsB`` does not**, and
+    returns ``None`` rather than being inferred as inbound. A DNS block is a
+    query the device made being refused, so neither reading is obviously right,
+    and inventing one would be a guess presented as a measurement.
+
+    A ``local:`` family is ``local`` even when it also carries an ``:in`` /
+    ``:out`` suffix: that suffix describes the interface side, while the traffic
+    itself never left the network.
     """
     if family.startswith(f"{_LOCAL_FAMILY_SEGMENT}:"):
-        return _FLOW_DIRECTION_LOCAL
-    if family.endswith(":in") or family == "download":
-        return _FLOW_DIRECTION_INBOUND
-    if family.endswith(":out") or family == "upload":
-        return _FLOW_DIRECTION_OUTBOUND
-    if family.endswith("B"):
-        return _FLOW_DIRECTION_INBOUND
+        return FLOW_DIRECTION_LOCAL
+    if family == "download" or family.endswith(":in"):
+        return FLOW_DIRECTION_INBOUND
+    if family == "upload" or family.endswith(":out"):
+        return FLOW_DIRECTION_OUTBOUND
     return None
 
 

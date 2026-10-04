@@ -30,9 +30,12 @@ from ..const import (
 )
 from ..models import (
     FirewallaFlowRecordSet,
+    FirewallaFlowReportView,
     FirewallaFlowRollup,
     FirewallaFlowWindow,
+    format_policy_rule_name,
 )
+from ..utils.flow_report import build_record_view, summarise_rollup
 from .base_manager import FirewallaBaseManager
 
 _LOGGER: Final = logging.getLogger(__package__)
@@ -244,6 +247,122 @@ class FirewallaFlowManager(FirewallaBaseManager):
                 )
 
             cursor = next_cursor
+
+    async def async_get_report(
+        self,
+        *,
+        target_type: str,
+        target: str,
+        window_hours: int = DEFAULT_FLOW_REPORT_WINDOW_HOURS,
+        include_summary: bool = True,
+        include_blocked_records: bool = False,
+        include_flow_records: bool = False,
+        fetch_all_records: bool = False,
+        page_size: int = MAX_FLOW_LOG_PAGE_SIZE,
+    ) -> FirewallaFlowReportView:
+        """Build one flow report, reading only the sections that were asked for.
+
+        A summary is a single rollup and needs no log read at all, so the common
+        call costs one request. The record families are separate reads and are
+        only made when requested, because a full day on a busy target is thousands
+        of records.
+
+        A section that could not be read comes back as ``None`` rather than
+        failing the call, and the caller reports it as unavailable. Connectivity
+        and auth failures still propagate.
+        """
+        summary = None
+        if include_summary:
+            rollup = await self.async_get_rollup(
+                target_type=target_type,
+                target=target,
+                window_hours=window_hours,
+            )
+            if rollup is not None:
+                summary = summarise_rollup(
+                    rollup,
+                    device_names=self._device_names(),
+                    device_addresses=self._device_addresses(),
+                )
+
+        blocked_records = None
+        if include_blocked_records:
+            record_set = await self.async_get_block_log(
+                target_type=target_type,
+                target=target,
+                page_size=page_size,
+                fetch_all=fetch_all_records,
+            )
+            if record_set is not None:
+                blocked_records = build_record_view(
+                    record_set, rule_names=self._rule_names()
+                )
+
+        flow_records = None
+        if include_flow_records:
+            record_set = await self.async_get_flow_log(
+                target_type=target_type,
+                target=target,
+                page_size=page_size,
+                fetch_all=fetch_all_records,
+            )
+            if record_set is not None:
+                flow_records = build_record_view(
+                    record_set, rule_names=self._rule_names()
+                )
+
+        return FirewallaFlowReportView(
+            target_type=target_type,
+            target=target,
+            summary=summary,
+            blocked_records=blocked_records,
+            flow_records=flow_records,
+        )
+
+    def _device_names(self) -> dict[str, str]:
+        """Return the host inventory's device id to display name mapping.
+
+        Used to name a rollup member. A member id that is not a host -- a VPN peer
+        carries a ``wg_peer:`` prefix, an interface an ``if:`` one -- simply has no
+        entry, which is why the name is optional on the member rather than
+        defaulting to the id.
+        """
+        host_manager = self.coordinator.host_manager
+        if host_manager is None:
+            return {}
+        return {
+            host.mac: host.host_name
+            for host in host_manager.get_hosts()
+            if host.host_name
+        }
+
+    def _device_addresses(self) -> dict[str, str]:
+        """Return the host inventory's device id to address mapping."""
+        host_manager = self.coordinator.host_manager
+        if host_manager is None:
+            return {}
+        return {
+            host.mac: host.ip_address
+            for host in host_manager.get_hosts()
+            if host.ip_address is not None
+        }
+
+    def _rule_names(self) -> dict[int, str]:
+        """Return the live rule id to name mapping, for the block-to-rule join.
+
+        Read from the rule manager rather than the client, so this uses the same
+        registry the rule surfaces do and cannot drift from it. A record reports
+        its blocking rule as a number while a rule id is a string, so the join is
+        keyed on the integer form.
+        """
+        rule_manager = self.coordinator.rule_manager
+        if rule_manager is None:
+            return {}
+        return {
+            int(rule.rule_id): name
+            for rule in rule_manager.get_rules()
+            if rule.rule_id.isdigit() and (name := format_policy_rule_name(rule))
+        }
 
 
 def _normalise_flow_families(

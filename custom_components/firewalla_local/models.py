@@ -1148,6 +1148,222 @@ class FirewallaFlowRecordSet:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaFlowTotals:
+    """Whole-window totals for one flow rollup.
+
+    Byte and count totals are separate fields rather than one number, because the
+    box overloads ``count`` per family and the units are not interchangeable.
+    """
+
+    download_bytes: int = 0
+    upload_bytes: int = 0
+    local_download_bytes: int = 0
+    local_upload_bytes: int = 0
+    blocked_dns_count: int = 0
+    blocked_ip_count: int = 0
+    denied_ip_count: int = 0
+    connection_count: int = 0
+
+    @property
+    def total_bytes(self) -> int:
+        """Return the combined WAN-facing transfer total."""
+        return self.download_bytes + self.upload_bytes
+
+    @property
+    def blocked_total(self) -> int:
+        """Return how many blocks the box reported across all blocked families."""
+        return self.blocked_dns_count + self.blocked_ip_count + self.denied_ip_count
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowDestination:
+    """One destination's WAN-facing traffic, merged across both byte families.
+
+    The rollup lists ``download`` and ``upload`` separately and names the same
+    destinations in both, so one row here carries both directions. Ranking by
+    either is therefore a choice the caller makes over one set of rows rather than
+    a second request.
+
+    ``destination`` is whatever the box resolved, which is subdomain-granular
+    (``catalog.gamepass.com`` rather than ``gamepass.com``). Rolling up to a
+    registrable domain would need a public suffix list to be correct for the likes
+    of ``co.uk``, so it is deliberately not attempted here rather than being
+    approximated wrongly.
+
+    ``destination_ips`` is a tuple because one hostname resolves to many
+    addresses -- measured, 43 of 116 hosts in a single window had more than one.
+    Aggregating per address would list ``speed.cloudflare.com`` several times over
+    and understate each entry, so the hostname is the key and its addresses are
+    reported alongside it.
+    """
+
+    destination: str | None = None
+    destination_kind: str | None = None
+    destination_ips: tuple[str, ...] = ()
+    download_bytes: int = 0
+    upload_bytes: int = 0
+    rollup_rows: int = 0
+    device_ids: tuple[str, ...] = ()
+
+    @property
+    def total_bytes(self) -> int:
+        """Return this destination's combined transfer total."""
+        return self.download_bytes + self.upload_bytes
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaBlockedDestination:
+    """One destination the box stopped, and what it stopped.
+
+    A blocked record never travelled, so it carries a **count of blocks** rather
+    than bytes. That is a different measurement from
+    :class:`FirewallaFlowDestination` and is kept in a different model so the two
+    cannot be read as one another.
+
+    ``destination_ips`` is a tuple for the same reason as on
+    :class:`FirewallaFlowDestination`: a hostname can resolve to several
+    addresses, and keying per address would split one destination into a
+    confusing run of near-identical rows.
+
+    ``direction`` is ``None`` when the family name does not carry one, which is
+    the case for ``dnsB``.
+    """
+
+    destination: str | None = None
+    destination_kind: str | None = None
+    destination_ips: tuple[str, ...] = ()
+    block_type: str | None = None
+    direction: str | None = None
+    block_count: int = 0
+    rollup_rows: int = 0
+    device_ids: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaLocalPeer:
+    """One LAN peer a device talked to, which never left the network.
+
+    Identified by MAC because a peer inside the LAN has no hostname to resolve to,
+    and counted in connections rather than bytes.
+    """
+
+    peer_id: str
+    connection_count: int = 0
+    rollup_rows: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowMember:
+    """One device's totals, from the rollup's per-member block.
+
+    Only populated on a ``tag`` request: a device report has no members to rank,
+    so an empty member list means "not applicable" rather than "no members".
+
+    ``device_name`` is resolved from the host inventory when the device is known.
+    VPN peers **are** in that inventory -- the box synthesizes them from its
+    ``wgPeers`` / ``awgPeers`` blocks -- so a ``wg_peer:`` or ``awg_peer:`` member
+    normally does resolve. A member whose id has no entry keeps ``None``, which is
+    the honest answer for an id that is not a host: an ``if:`` device names a
+    network interface, which has no inventory entry at all.
+    """
+
+    device_id: str
+    device_name: str | None = None
+    device_ip: str | None = None
+    download_bytes: int = 0
+    upload_bytes: int = 0
+    connection_count: int = 0
+    dns_count: int = 0
+    blocked_dns_count: int = 0
+    blocked_ip_count: int = 0
+    denied_ip_count: int = 0
+    ntp_count: int = 0
+    local_download_bytes: int = 0
+    local_upload_bytes: int = 0
+
+    @property
+    def total_bytes(self) -> int:
+        """Return this device's combined WAN-facing transfer total."""
+        return self.download_bytes + self.upload_bytes
+
+    @property
+    def blocked_total(self) -> int:
+        """Return how many of this device's flows the box stopped."""
+        return self.blocked_dns_count + self.blocked_ip_count + self.denied_ip_count
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowSummary:
+    """The summarized view of one flow rollup.
+
+    Every section is derived from the **same single response** -- the rollup
+    already carries totals, per-destination rows, the blocked breakdown and the
+    per-member ranking -- so this is one fetch presented several ways rather than
+    several fetches.
+    """
+
+    window: FirewallaFlowWindow
+    totals: FirewallaFlowTotals = field(default_factory=FirewallaFlowTotals)
+    top_download: tuple[FirewallaFlowDestination, ...] = ()
+    top_upload: tuple[FirewallaFlowDestination, ...] = ()
+    blocked: tuple[FirewallaBlockedDestination, ...] = ()
+    local_peers: tuple[FirewallaLocalPeer, ...] = ()
+    top_members: tuple[FirewallaFlowMember, ...] = ()
+    family_row_counts: Mapping[str, int] = field(default_factory=dict)
+
+    @property
+    def rollup_rows(self) -> int:
+        """Return how many destination rows the rollup carried in total."""
+        return sum(self.family_row_counts.values())
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowRecordView:
+    """One normalized record family, with the block-to-rule join applied.
+
+    ``rule_names`` maps each blocking rule id found in these records to its
+    current name. A rule id is **not durable** across a delete and re-create, so a
+    record can name a rule that no longer exists; those records are kept and
+    counted in ``unattributed_blocks`` rather than dropped, because an
+    unattributable block is exactly the signal worth surfacing.
+    """
+
+    records: tuple[FirewallaFlowRecord, ...] = ()
+    rows_available: int | None = None
+    next_cursor: float | None = None
+    truncated: bool = False
+    pages_fetched: int = 1
+    records_dropped_as_duplicates: int = 0
+    unattributed_blocks: int = 0
+    rule_names: Mapping[int, str] = field(default_factory=dict)
+
+    @property
+    def rows_returned(self) -> int:
+        """Return how many records this family carries."""
+        return len(self.records)
+
+    @property
+    def blocked_count(self) -> int:
+        """Return how many of these records the box stopped."""
+        return sum(1 for record in self.records if record.is_blocked is True)
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowReportView:
+    """Everything one flow report contains, before it is shaped for a response.
+
+    ``records`` is ``None`` when the record families were not requested, which is
+    the common case: a summary is a single rollup and needs no log read at all.
+    """
+
+    target_type: str
+    target: str
+    summary: FirewallaFlowSummary | None = None
+    blocked_records: FirewallaFlowRecordView | None = None
+    flow_records: FirewallaFlowRecordView | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaPolicyRule:
     """Normalized local policy rule data from the Firewalla init payload."""
 

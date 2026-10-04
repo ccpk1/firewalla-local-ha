@@ -257,6 +257,23 @@ MAX_FLOW_LOG_PAGE_SIZE: Final = 5000
 # field: a caller able to raise it without limit would defeat its purpose.
 FLOW_LOG_PAGE_DEADLINE_SECONDS: Final = 30
 
+# Which unit a rollup family's `count` is in. The box overloads the field and
+# documents doing so: "number of TCP connections or UDP sessions for flow, or
+# block count for blocked flow". Measured, the byte families run 49,148+ against
+# the blocked ones' 5,410 maximum, so reading one as the other is not a rounding
+# error -- it is a thousands-fold misstatement.
+FLOW_UNIT_BYTES: Final = "bytes"
+FLOW_UNIT_BLOCKED: Final = "blocked"
+FLOW_UNIT_CONNECTIONS: Final = "connections"
+
+# A flow's direction, taken from the family name and never from `fd`. Measured:
+# `fd` is "in" on all 199 `download` rows *and* all 199 `upload` rows, so it
+# cannot be a byte direction. `local` is a third case -- the traffic never left
+# the network, so it is neither inbound nor outbound.
+FLOW_DIRECTION_INBOUND: Final = "inbound"
+FLOW_DIRECTION_OUTBOUND: Final = "outbound"
+FLOW_DIRECTION_LOCAL: Final = "local"
+
 # Config entry data and options keys
 CONF_AID: Final = "aid"
 CONF_EID: Final = "eid"
