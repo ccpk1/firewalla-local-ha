@@ -696,40 +696,82 @@ files. Every method also exercised **read-only against the dev box**.
 
 ### Phase 3 — Normalization
 
-- [ ] **3.1 Reuse target resolution.** Accept a device (MAC or name) or a
-      group/user (name or id); resolve to `type` + target through the existing
-      resolver. Ambiguity raises the same class of error as
-      `time_usage_report_scope_ambiguous`; not found raises the same class as
-      `time_usage_report_scope_not_found`. **Do not add a parallel name→id lookup.**
-- [ ] **3.1b Extract the shared matching core (Q12).** Three resolvers already
-      implement the same algorithm — `_resolve_requested_host`,
-      `_resolve_membership_target` and `_resolve_usage_history_target`, ~322 lines
-      between them. Extract **only the matching core** (exact id, then casefolded
-      name, then zero/one/many) into one helper returning `(exact, name_matches)`
-      with no exceptions and no translation keys. **Do not build a single unified
-      resolver**: the three differ in the name fields they match, in whether the
-      ambiguous error names the matches, and in their return types, and the errors
-      are translation-key `ServiceValidationError`s which `ARCHITECTURE.md` assigns
-      to the service layer. Each caller keeps its own error mapping and match-list
-      formatting. **Full suite must pass with no changed expectations**, since this
-      touches two shipped services.
-- [ ] **3.1c Fold in the Q14 rework before building on top of it.** In order:
-      **R1  DONE 2026-10-04** — `device_mac` renamed to `device_id` in the hit model,
-      the attribute keys and the service payload, with the model docstring recording
-      why (3 of 48 live values are prefixed). The remaining items: **R2** replace
-      `FirewallaRuleHit` with the shared flow-record
-      model and keep `build_rule_hit_attributes` as its attribute projector, so there
-      is **one** reader for a record the box stores in one shape; **R3** surface the
-      recovered `download` / `upload` / `duration` / `count` / `ltype`; **R4** do
-      **not** validate `category` — it is an open set locally carrying real
-      categories, `TL-` / `TLX-` target-list ids and `dap_*` ids, and the existing
-      prefix-based target-list handling is correct, so unknown values pass through.
-      All four rest on local measurement. **Two changes previously listed here are
-      withdrawn** (adding `network` to `scope_kind`, and splitting `category` into
-      two closed sets) because they rested on the published MSP model, which is a
-      remapping rather than a wire reference — see Q14. This must land **before** the
-      flow view is built, so the view consumes the shared record rather than the
-      subset.
+**IN PROGRESS — started 2026-10-04.** The two foundational pieces are done and
+committed; the view builder and the service envelope are not.
+
+| Commit | Covers | Result |
+| --- | --- | --- |
+| `ea8bd85` | R2, R3, 3.5b–3.5e | `FirewallaFlowRecord` + `build_flow_record` + `flow_family_unit` / `flow_family_direction`; 28 tests |
+| `8cd14b8` | 3.1b (helper + 1 caller) | `utils/selectors.py`; the usage resolver migrated; 13 tests |
+
+- [x] **R2/R3 — one flow-record model and reader.** Done, and the equivalence was
+      **proven by field-set comparison** rather than inferred from coverage:
+      `lastHitFlow` carried 35 keys, a live flow-log record 32, **32 shared**,
+      `lastHitFlow`-only 3, log-record-only **0** — and the per-`ltype` sets match.
+      `FirewallaRuleHit` is replaced by `FirewallaFlowRecord` and
+      `_normalize_rule_hit` calls the shared reader. Verified live: a regular record
+      reads `is_blocked=False, bytes=5246/2246, duration=0.18`; a blocked one
+      `is_blocked=True, block_type='dns', bytes=None`, and `None` is deliberate —
+      a blocked flow never travelled, so `0` would read as a measured empty
+      transfer. Ten now-dead `_RAW_HIT_*` constants removed from the client.
+- [x] **3.5b direction, 3.5c units, 3.5d port shapes, 3.5e MAC destination.**
+      `flow_family_direction` reads direction from the family name and **never**
+      from `fd`; a record has no family and therefore no direction, which is
+      asserted. `flow_family_unit` maps a family to the unit its overloaded `count`
+      is in, returning `None` for an unrecognised family rather than assuming bytes
+      — measured, byte families run 49,148+ against the blocked ones' 5,410 max, so
+      that misreading is a thousands-fold understatement. The reader coerces
+      `port` / `devicePort` and adds `mac` as a third destination kind for a LAN
+      peer, which has no hostname to resolve to.
+- [x] **3.1b shared matching core — helper done, 1 of 3 callers migrated.**
+      `utils/selectors.py` with `SelectorMatch` / `match_selector`. The usage
+      resolver is migrated; **`_resolve_requested_host` and
+      `_resolve_membership_target` are not yet.** 666 pre-existing tests pass
+      untouched, so the extraction preserved behaviour.
+- [ ] **3.1 Full target resolution for the flow service.** Not started. Blocked on
+      3.1b completion so there is no fourth resolver.
+- [ ] **3.2–3.6 The view builder and shared envelope.** Not started. This is the
+      phase's actual deliverable: the summary (totals, top destinations, blocked
+      breakdown, member ranking), the two record families, the Q9 identity gate,
+      and the `_serialize_report_*` envelope.
+- [ ] **3.5f The `intf` / `tags` joins.** Not started.
+- [ ] **3.7 Fixture tests.** Not started; the real capture is available.
+
+#### Phase 3 findings so far
+
+- **A name is trimmed before matching but the selector is not.** So
+  `"  kid-ipad  "` reports not-found while a stored name with stray whitespace
+  still matches. Pinned in a test with the reasoning: it is what all three
+  resolvers did, and changing it is a deliberate behaviour change to two shipped
+  services rather than part of an extraction. A plausible improvement, separately.
+- **`is_blocked` is tri-state.** It returns `None` when a record carries no
+  `ltype` rather than `False`, because `False` would be a positive claim that a
+  record we could not classify was allowed through. `ltype` was present on every
+  record measured, so this is a guard rather than a live case.
+- **The record model legitimately keeps byte fields absent for blocked records.**
+  This is why the attribute projector emits `download_bytes: None` rather than `0`
+  for a blocked hit, and a test pins both directions.
+
+#### Remaining Phase 3 work
+
+| # | Item |
+| --- | --- |
+| 1 | Migrate the remaining two resolvers onto `match_selector` |
+| 2 | Full target resolution for the flow service (device / group / user → `tag` / `host`) |
+| 3 | The summary view: totals, top destinations, blocked breakdown by family, member ranking |
+| 4 | The two record families with the Q9 identity gate |
+| 5 | The `intf` → network and `tags` → group/user joins |
+| 6 | The `_serialize_report_*` envelope with `provenance` and `unavailable_sections` |
+| 7 | Fixture tests built from the real capture |
+
+**Q14 rework status:** R1 (`device_mac` → `device_id`) done 2026-10-04; **R2/R3
+done** (`ea8bd85`); **R4** is a "do not" rather than a change — `category` is an
+open set locally carrying real categories, `TL-`/`TLX-` target-list ids and
+`dap_*` ids, and the existing prefix-based handling is correct, so unknown values
+pass through; **R5** (shared matching core) is in progress under 3.1b. The two
+earlier-proposed changes (adding `network` to `scope_kind`, splitting `category`
+into two closed sets) remain **withdrawn** — see Q14.
+
 - [ ] **3.2 Build the summary from the rollup using the Phase 1 core.** Totals from
       the shared window extractor `extract_usage_window` in `utils/flow.py`;
       destination rows from the shared
