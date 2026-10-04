@@ -3,8 +3,8 @@
 **Initiative:** Flow Reporting Service (`get_flow_report`)
 **Branch:** `feature/flow-reporting`, off `main` (the rule-hit-data work is already on `main`)
 **Depends on:** `2.5.0-beta.1` (rule hit data), issue #53 (stale rule switches) for one edge case only
-**Status:** Phases 1–3 complete and validated live; **Phase 4 (surface) not started**. Awaiting Q9 alignment before Phase 4 begins.
-**Last updated:** 2026-10-04 — Q9 re-derived from live measurement (see Q9 and 4.1b).
+**Status:** Phases 1–3 complete and validated live; **Phase 4 (surface) not started**. Q9 is settled from live measurement; ready for the Phase 4 handoff.
+**Last updated:** 2026-10-04 — Phase 3 closed out (checkboxes, findings, `78abe40`), Q9 settled, Phase 4 handoff written.
 
 ---
 
@@ -728,17 +728,22 @@ files. Every method also exercised **read-only against the dev box**.
 
 ### Phase 3 — Normalization
 
-**COMPLETE (normalization) — executed 2026-10-04 on `feature/flow-reporting`.**
-Validation: 702 tests pass, `ruff check` and `format` clean, `mypy` clean across 46
-files. Every section verified **read-only against the dev box**. Five commits:
+**COMPLETE — executed 2026-10-04 on `feature/flow-reporting`.** Validation: 705
+tests pass, `ruff check` and `format` clean, `mypy` clean across 46 files. Every
+section verified **read-only against the dev box**. Six commits:
 
 | Commit | Covers | Result |
 | --- | --- | --- |
 | `ea8bd85` | R2, R3, 3.5b–3.5e | `FirewallaFlowRecord` + `build_flow_record` + unit/direction/port/destination-kind helpers; 28 tests |
-| `8cd14b8` | 3.1b (helper, 1 caller) | `utils/selectors.py`; the usage resolver migrated; 13 tests |
+| `8cd14b8` | 3.1b (helper, 1 caller), R5 | `utils/selectors.py`; the usage resolver migrated; 13 tests |
 | `d4044a3` | 3.2–3.6 (view) | `FirewallaFlowSummary` and the section models, `utils/flow_report.py`, `async_get_report`; 18 tests |
-| `7137892` | 3.1b (remaining) | `_resolve_requested_host` + `_resolve_membership_target` migrated; all three now share one implementation |
+| `7137892` | 3.1b (remaining), R5 | `_resolve_requested_host` + `_resolve_membership_target` migrated; all three now share one implementation |
 | `938700a` | 3.5f | `intf` → network and `tags` / `userTags` → group or user names; 3 tests |
+| `78abe40` | post-phase corrections | three claims a single-page measurement could not support, corrected in the model, the RE doc and 3 tests |
+
+**One item is genuinely open: 3.6c**, a docstring recording that `ts` is the flow's
+*end* instant. It was not written, so its box stays unticked — one line on
+`FirewallaFlowRecord.timestamp`, carried into Phase 4.1.
 
 **The phase's deliverable is done.** One rollup request yields totals, top
 destinations ranked per direction, the blocked breakdown, LAN peers and the member
@@ -782,16 +787,28 @@ This is a boundary correction rather than dropped work.
 - **A name is trimmed before matching but the selector is not**, so `"  kid-ipad  "`
   reports not-found. Pinned, not fixed — it is what all three resolvers did, and
   changing it is a deliberate change to two shipped services.
+- **Three claims from a single-page sample did not survive a wider measurement**
+  (`78abe40`). The box *does* send an explicit `0` for bytes, so a byte total has
+  three states rather than two and `None` must not be collapsed into `0`; a rule hit
+  can carry LAN traffic the record logs never return (21 of 48 hits, against **0 of
+  20,000** log records), so the two sources share a field set but not a population; and
+  `dstMac` holds a device id, not necessarily a MAC. All three were the same error —
+  reading a shape off one page instead of measuring every source.
+- **`is_blocked` is tri-state is a guard, not a live case.** `ltype` was `"audit"` or
+  `"flow"` on all 12,315 records measured across four pages and the capture. The
+  `None` state exists so a shape change surfaces rather than being read as "allowed".
 
-**Q14 rework status:** R1 (`device_mac` → `device_id`) done 2026-10-04; **R2/R3
-done** (`ea8bd85`); **R4** is a "do not" rather than a change — `category` is an
-open set locally carrying real categories, `TL-`/`TLX-` target-list ids and
-`dap_*` ids, and the existing prefix-based handling is correct, so unknown values
-pass through; **R5** (shared matching core) is in progress under 3.1b. The two
-earlier-proposed changes (adding `network` to `scope_kind`, splitting `category`
-into two closed sets) remain **withdrawn** — see Q14.
+**Q14 rework status: all five complete.** **R1** (`device_mac` → `device_id`) done
+2026-10-04 (`b277e32`); **R2/R3** done (`ea8bd85`) — one flow-record model and
+reader, with `build_rule_hit_attributes` kept as the attribute projector; **R4**
+is a "do not" rather than a change — `category` is an open set locally carrying
+real categories, `TL-`/`TLX-` target-list ids and `dap_*` ids, and the existing
+prefix-based handling is correct, so unknown values pass through; **R5** (shared
+matching core) done (`8cd14b8` helper, `7137892` all three resolvers migrated). The
+two earlier-proposed changes (adding `network` to `scope_kind`, splitting
+`category` into two closed sets) remain **withdrawn** — see Q14.
 
-- [ ] **3.2 Build the summary from the rollup using the Phase 1 core.** Totals from
+- [x] **3.2 Build the summary from the rollup using the Phase 1 core.** Totals from
       the shared window extractor `extract_usage_window` in `utils/flow.py`;
       destination rows from the shared
       destination ranking (1.4) — grouped by `host`, which is the subdomain-granular
@@ -800,10 +817,10 @@ into two closed sets) remain **withdrawn** — see Q14.
       one row set, not two fetches. **The rollup's `flows` families are the same
       shape as `item=intf`'s, so this step must consume the shared builders and add
       none.**
-- [ ] **3.3 Add the blocked breakdown.** `dnsB`, `ipB:in`, `ipB:out`,
+- [x] **3.3 Add the blocked breakdown.** `dnsB`, `ipB:in`, `ipB:out`,
       `local:ipB:*` from the rollup, reported as separate directions because in/out
       are different questions.
-- [ ] **3.4 Add member ranking via the shared ranker (1.4)**, and mark
+- [x] **3.4 Add member ranking via the shared ranker (1.4)**, and mark
       `member_ranking` unavailable on device targets (Q3). **The model carries
       every identity-bearing field; the Q9 gate is applied when the report is
       serialized, so it belongs to the service layer in 4.1b, not here.** Building
@@ -812,7 +829,7 @@ into two closed sets) remain **withdrawn** — see Q14.
       `d4044a3`: `top_members` and per-destination `device_ids` are built
       unconditionally, and `build_record_view` populates `device_id` / `device_ip`
       on every record.
-- [ ] **3.5 Build the blocked and regular views.** Discriminate on **`ltype`**, not
+- [x] **3.5 Build the blocked and regular views.** Discriminate on **`ltype`**, not
       on the request flag (Q4b): `"audit"` is a blocked record, `"flow"` is regular
       traffic. Join `pid` → rule via the existing rule index, and apply Q5's rule:
       unmatched `pid` keeps the row with `rule_name: null` and increments
@@ -827,34 +844,42 @@ into two closed sets) remain **withdrawn** — see Q14.
       `download`, `upload`, `duration`, `devicePort`, and `apid`, so it can answer
       "how much and for how long" where a blocked record only answers "what was
       stopped".
-- [ ] **3.5b Model direction explicitly.** Add a typed `direction`
+- [x] **3.5b Model direction explicitly.** Add a typed `direction`
       (`inbound` / `outbound` / `local`) derived from the **family name**, matching
       the vendor's documented field (Q4c). Do **not** read `fd`: it is `"in"` on both
       the `download` and `upload` families and on 300/300 regular records, so it
       cannot be a byte direction and would invert a report.
-- [ ] **3.5c Derive the unit from the family, and name fields for the unit.** The
+- [x] **3.5c Derive the unit from the family, and name fields for the unit.** The
       family a row came from decides what its `count` means: `download` / `upload` /
       `local:download` / `local:upload` → **bytes**; `dnsB` / `ipB:*` / `local:*B:*`
       → **block count**; `local:in` / `local:out` → connections. Firewalla's own API
       documents the overload, so it is intended, not a quirk. **Never name a field
       `value`**: a generic name is what let a byte total and a block count become
       interchangeable in the existing ranking builder.
-- [ ] **3.5d Coerce `port` and `devicePort` to tuples.** Measured: `port` is a
+- [x] **3.5d Coerce `port` and `devicePort` to tuples.** Measured: `port` is a
       **list** on every rollup row (207/207 `download`) and an **`int`** on every
       event row (1500/1500); `devicePort` follows the same split (`["8080"]` on a
       rollup row, `54568` on a record). A reader that assumes either shape returns
       nothing or a stray character.
-- [ ] **3.5e Add a third destination kind for local flows.** `local:` families carry
+- [x] **3.5e Add a third destination kind for local flows.** `local:` families carry
       **`dstMac`** and no `host` / `domain` / `country`, because a LAN peer has no
       hostname. The vendor's model covers this — `destination.id` is "device ID if
-      local, otherwise remote host domain or ip" — so `destination_kind` needs `mac`
-      alongside domain and ip, and `dstMac` resolves against the host inventory.
-- [ ] **3.5f Resolve the network and the group joins.** `intf` → local network name
+      local, otherwise remote host domain or ip" — so `destination_kind` needs a
+      third value alongside domain and ip, and `dstMac` resolves against the host
+      inventory. **The value is `device`, not `mac`** — corrected in `78abe40`:
+      measured, 1 of 21 local records carried an `awg_peer:` id rather than a MAC,
+      and in that record the MAC was in `device` while the peer id was in `dstMac`.
+      A third value named after one value's *shape* was wrong twice over — the id is
+      not necessarily a MAC, and `dstMac` is not only a destination-side field.
+- [x] **3.5f Resolve the network and the group joins.** `intf` → local network name
       and `oIntf` / `wanIntf` → WAN name, both through `build_network_inventory` with
       no extra request (verified live: `VLAN10 CORE` and `WAN-ONE`). `tags` /
       `userTags` → group and user names through the existing indexes. This closes the
       same identity chain the rule and membership surfaces already use.
-- [ ] **3.6 Emit the shared report envelope.** `config_entry_id`, `target`, `query`,
+- [ ] **3.6 Emit the shared report envelope — MOVED to 4.1.** The view model *is*
+      built (`FirewallaFlowReportView`, `d4044a3`), but the envelope is
+      `_serialize_report_*` output and belongs with the handler that returns it.
+      `config_entry_id`, `target`, `query`,
       `time_basis` (`_serialize_report_time_basis`), `summary`, sections,
       `metadata` (`_serialize_report_metadata` with `applied`, `warnings`,
       `unavailable_sections`, `provenance`). State the source (`item=tag|host` and
@@ -863,27 +888,36 @@ into two closed sets) remain **withdrawn** — see Q14.
       have different time semantics** — the rollup is a windowed aggregate, the log
       is a reverse walk from a timestamp — so `time_basis.kind` must distinguish
       them (`window` vs `flow_log`), or `is_partial` becomes meaningless.
-- [ ] **3.6b Adopt the vendor's field names where they are better.** `is_blocked`
-      (v. `ltype`), `block_type` (v. `type`), `region` (wire `country`),
-      `flow_direction`, `bytes_download` / `bytes_upload`. Where a wire name is
-      clearer, keep it and say so in `provenance`. **Validate `category` against the
-      documented closed set** — `ad`, `edu`, `games`, `gamble`, `intel`, `p2p`,
-      `porn`, `private`, `social`, `shopping`, `video`, `vpn` — and pass an
-      unrecognised value through rather than dropping the row.
-- [ ] **3.6c Document `ts` as the flow's *end* instant.** The vendor states it
+- [x] **3.6b Adopt the vendor's field names where they are better.** Done:
+      `is_blocked` (v. `ltype`), `block_type` (v. `type`), `region` (wire
+      `country`), `flow_direction`, `bytes_download` / `bytes_upload` are all on
+      `FirewallaFlowRecord`. Where a wire name is
+      clearer, keep it and say so in `provenance`. **The `category` instruction this
+      step used to carry is withdrawn — do NOT validate `category` against the
+      vendor's list.** That list (`ad`, `edu`, `games`, …) is MSP's own and matches
+      neither local field; locally `category` is an **open set** carrying real
+      categories, `TL-` / `TLX-` target-list ids and `dap_*` ids, so the existing
+      prefix-based handling is correct and unknown values must pass through. See
+      Q14 R4.
+- [ ] **3.6c Document `ts` as the flow's *end* instant — NOT DONE, carried into
+      4.1.** The vendor states it
       explicitly ("the time the flow ended"), and it is not obvious from the name.
       It matters for any window that a caller compares against.
-- [ ] **3.7 Tests against the real capture.** Build the fixture from the 300
-      captured records and the live rollup, and cover: summary shape; blocked and
-      regular records with attributed and unattributed rules; member ranking absent
-      on a device target; window fallback + warning; pagination dedupe across a
-      boundary; deadline
-      truncation sets `truncated`; `rows_returned` vs `rows_available`; and **both
-      sides of the Q9 gate** — per-device fields absent by default and present with
-      `include: ["device_detail"]` — so the gate cannot silently become a wall.
-      **Also fabricate the malformed payloads** — a wrong shape, a missing
-      `flows` key, a non-dict rollup — so the fail-soft path (2.7) is covered by a
-      test rather than by prose. Snapshot the shapes.
+      `FirewallaFlowRecord.timestamp` currently carries no such note, and the
+      meaning is not recoverable from the field name.
+- [x] **3.7 Tests against the real capture.** Done, with three deviations. **The
+      fixture is synthetic, not capture-derived** — "build the fixture from the 300
+      captured records" was not done, because those records pinned the *field set*
+      rather than any behaviour, and a synthetic row states the case a test is
+      about. Covered: the summary shape; blocked and regular records with
+      attributed and unattributed rules; member ranking absent on a device target;
+      `rows_returned` vs `rows_available`; and the id→name joins resolving only what
+      a row references. **The fail-soft path is pinned at the manager seam** — the
+      client is mocked to raise `FirewallaProtocolError`, with a second test proving
+      a connectivity error is *not* swallowed — rather than by pushing malformed
+      payloads through the client. **The two Q9-gate assertions moved to 4.1b**,
+      where the gate is applied; asserting them here would have had nothing to
+      assert against.
 
 ### Phase 4 — Surface
 
@@ -891,6 +925,10 @@ into two closed sets) remain **withdrawn** — see Q14.
       `_SERVICE_REGISTRATIONS` as **read-only and `admin=False`** — matching every
       other query service (Q11). It must be non-admin or the Phase 4 tool cannot
       live in `llm_tools_read.py`, where all 13 read tools call non-admin services.
+      **This step also carries 3.6** (emit the shared `_serialize_report_*`
+      envelope, with `time_basis.kind` distinguishing `window` from `flow_log`) and
+      **3.6c** (document `ts` as the flow's *end* instant on
+      `FirewallaFlowRecord.timestamp`).
 - [ ] **4.1b Apply the Q9 identity gate at serialization.** `include:
       ["device_detail"]` governs exactly three fields — `top_members`, a
       destination's `device_ids`, and a record's `device_id` / `device_ip` — because
@@ -938,7 +976,7 @@ into two closed sets) remain **withdrawn** — see Q14.
 | --- | --- |
 | **1** | **Done.** 560 tests pass with no existing assertion or snapshot changed; `ruff check`, `ruff format`, `mypy` clean. The before/after throughput measurement was dropped by owner decision as one-off activity. |
 | **2** | **Done.** Read-only live probes on the dev box: all three methods, window clamping (24h vs 168h), count clamping, single-page and all-available modes, and a `category`-filtered blocked read. A 24h flow-log walk took 3 pages / 7,545 rows; a block-log walk 2 pages / 1,154 rows, all `audit`. |
-| **3** | **Done.** Pure-aggregation unit tests (21) plus live read-only verification of every section on the dev box: window clamping, totals per unit, destination merging across addresses, the blocked breakdown, LAN peers, member ranking, the block-to-rule join, and the network/tag name joins. |
+| **3** | **Done.** Pure-aggregation unit tests (21) plus live read-only verification of every section on the dev box: window clamping, totals per unit, destination merging across addresses, the blocked breakdown, LAN peers, member ranking, the block-to-rule join, and the network/tag name joins. A post-phase re-measurement over four pages and the 2026-10-03 capture (12,315 records) corrected three claims a single-page sample could not support — see the Phase 3 findings. |
 | **4** | Full suite; live end-to-end for both detail levels; `python3 -m script.hassfest` if manifest or translation metadata moves. |
 
 Commands: `python -m ruff check .` · `python -m ruff format .` ·
@@ -994,28 +1032,34 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
 
 ---
 
-## 8. Phase 1 handoff to `Firewalla Builder`
+## 8. Phase 4 handoff to `Firewalla Builder`
 
 **Target agent:** `Firewalla Builder`
-**Authorizes:** **Phase 1 only** (steps 1.1–1.10). Phases 2–4 are handed off
-individually after the previous phase is validated.
-**Blockers:** none. Q9 was confirmed by the owner on 2026-10-03 (gated by default,
-always retrievable) and is folded into Phase 3.4.
+**Authorizes:** **Phase 4 only** (4.1, 4.1b, 4.2–4.7). Phases 1–3 are complete and
+validated.
+**Blockers:** none. Q9 is settled from live measurement (see Q9 and 4.1b) and is
+applied when the report is **serialized**, not in the aggregation.
 
-**Branch.** The rule-hit-data work is on `main`, so the flow branch is created from
-`main`, not from `feature/rule-hit-data`:
+**Branch.** Continue on `feature/flow-reporting`. Nothing is pushed; the branch is
+26 commits ahead of `main`.
+
+Prerequisite reading, in order: **Q9** and **4.1b** (the gate and why it lives in
+the serializer), then Phase 3's *Moved to Phase 4* note, then `services.py` →
+`_serialize_network_segment_report` as the envelope precedent — it is also the
+`include_hosts` precedent the gate should copy rather than reinvent.
+
+**The one rule for this phase:** Phase 3 already built every field, including the
+identity-bearing ones. Phase 4 **serializes** that and adds no aggregation. If a
+step appears to need a new summary field, that is a signal the serializer is
+reaching past its boundary — stop and report it, do not add the builder.
+
+**One open item is carried in:** 3.6c, a one-line docstring on
+`FirewallaFlowRecord.timestamp`. Fold it into 4.1 or land it standalone.
+
+Do not begin 4.4 until 4.1 is registered, and registered **non-admin** — an admin
+registration puts the tool outside the only tier `llm_tools_read.py` can use.
 
 ```bash
-git checkout main && git pull
-git checkout -b feature/flow-reporting
+git checkout feature/flow-reporting
+git log --oneline main..HEAD
 ```
-
-Prerequisite reading, in order: the audit note, then
-`docs/REVERSE_ENGINEERING_WORKFLOW.md` → *Flow reporting and the local block log*.
-
-**The one rule for this phase:** no new flow processing. Phase 1 generalizes what
-`integration_manager.py` already does for `item=intf` and moves the existing
-consumers onto it. If a step appears to need a new builder, that is a signal the
-generalization is incomplete — stop and report it, do not add the builder.
-
-Do not begin Phase 2 until Phase 1's suite passes with **no changed expectations**.
