@@ -269,6 +269,7 @@ from .models import (
 from .utils.duration import parse_duration_to_seconds
 from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
+from .utils.selectors import SelectorMatch, match_selector
 from .utils.values import normalized_bool, normalized_int, normalized_string
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
@@ -3212,91 +3213,61 @@ def _resolve_usage_history_target(
     scope_kind: str,
     scope_target: str,
 ) -> FirewallaUsageHistoryTarget:
-    """Resolve one usage-history target against normalized runtime metadata."""
+    """Resolve one usage-history target against normalized runtime metadata.
+
+    The matching itself is shared (``utils/selectors.py``); this keeps the
+    usage-specific parts -- which name fields count, and the translation keys the
+    failure maps to.
+    """
     if scope_kind == "device":
         host_manager = entry.runtime_data.host_manager
-        if host := host_manager.get_host(scope_target):
-            return FirewallaUsageHistoryTarget(
-                scope_kind=scope_kind,
-                target_id=host.mac,
-                target_name=host.host_name,
-                request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
-            )
-
         choices = host_manager.get_watched_device_choices()
-        matches = [
-            host.mac
-            for host in host_manager.get_hosts()
-            if host.host_name.casefold() == scope_target.casefold()
-            or choices.get(host.mac, "").casefold() == scope_target.casefold()
-        ]
-        if (
-            len(matches) == 1
-            and (host := host_manager.get_host(matches[0])) is not None
-        ):
+        match = match_selector(
+            scope_target,
+            (
+                (host.mac, (host.host_name, choices.get(host.mac)))
+                for host in host_manager.get_hosts()
+            ),
+            normalize_identifier=normalize_mac_address,
+        )
+        if (mac := match.resolved) is not None and (
+            host := host_manager.get_host(mac)
+        ) is not None:
             return FirewallaUsageHistoryTarget(
                 scope_kind=scope_kind,
                 target_id=host.mac,
                 target_name=host.host_name,
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
             )
-        if len(matches) > 1:
-            raise _service_validation_error(
-                translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
-                translation_placeholders={
-                    TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
-                    TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
-                },
-            )
-        raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
-            translation_placeholders={
-                TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
-                TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
-            },
+        raise _usage_history_scope_error(
+            match,
+            scope_kind=scope_kind,
+            scope_target=scope_target,
         )
 
     if scope_kind == "user":
         user_manager = entry.runtime_data.user_manager
-        if user := user_manager.get_user(scope_target):
-            return FirewallaUsageHistoryTarget(
-                scope_kind=scope_kind,
-                target_id=user.user_id,
-                target_name=user.name,
-                request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
-            )
-
         choices = user_manager.get_watched_user_choices()
-        matches = [
-            user.user_id
-            for user in user_manager.get_users()
-            if user.name.casefold() == scope_target.casefold()
-            or choices.get(user.user_id, "").casefold() == scope_target.casefold()
-        ]
-        if (
-            len(matches) == 1
-            and (user := user_manager.get_user(matches[0])) is not None
-        ):
+        match = match_selector(
+            scope_target,
+            (
+                (user.user_id, (user.name, choices.get(user.user_id)))
+                for user in user_manager.get_users()
+            ),
+        )
+        if (user_id := match.resolved) is not None and (
+            user := user_manager.get_user(user_id)
+        ) is not None:
             return FirewallaUsageHistoryTarget(
                 scope_kind=scope_kind,
                 target_id=user.user_id,
                 target_name=user.name,
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
             )
-        if len(matches) > 1:
-            raise _service_validation_error(
-                translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
-                translation_placeholders={
-                    TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
-                    TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
-                },
-            )
-        raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
-            translation_placeholders={
-                TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
-                TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
-            },
+        raise _usage_history_scope_error(
+            match,
+            scope_kind=scope_kind,
+            scope_target=scope_target,
         )
 
     # Group scope. The tag collection holds plain groups and user affiliations
@@ -3304,43 +3275,48 @@ def _resolve_usage_history_target(
     # plain groups is what keeps a group-scoped request from resolving to a
     # user's backing tag and returning that user's usage labelled as a group.
     # Users resolve through the user branch above, not here.
-    groups = [
-        group
-        for group in entry.runtime_data.integration_manager.get_groups()
-        if group.kind == _MEMBERSHIP_KIND_GROUP
-    ]
-    exact_match = next(
-        (group for group in groups if group.group_id == scope_target),
-        None,
+    match = match_selector(
+        scope_target,
+        (
+            (group.group_id, (group.name,))
+            for group in entry.runtime_data.integration_manager.get_groups()
+            if group.kind == _MEMBERSHIP_KIND_GROUP
+        ),
     )
-    if exact_match is not None:
-        return FirewallaUsageHistoryTarget(
+    if (group_id := match.resolved) is None:
+        raise _usage_history_scope_error(
+            match,
             scope_kind=scope_kind,
-            target_id=exact_match.group_id,
-            target_name=exact_match.name,
-            request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
+            scope_target=scope_target,
         )
+    for group in entry.runtime_data.integration_manager.get_groups():
+        if group.group_id == group_id:
+            return FirewallaUsageHistoryTarget(
+                scope_kind=scope_kind,
+                target_id=group.group_id,
+                target_name=group.name,
+                request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
+            )
+    raise _usage_history_scope_error(
+        match,
+        scope_kind=scope_kind,
+        scope_target=scope_target,
+    )
 
-    group_matches: list[FirewallaGroupRuntime] = [
-        group for group in groups if group.name.casefold() == scope_target.casefold()
-    ]
-    if len(group_matches) == 1:
-        return FirewallaUsageHistoryTarget(
-            scope_kind=scope_kind,
-            target_id=group_matches[0].group_id,
-            target_name=group_matches[0].name,
-            request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
-        )
-    if len(group_matches) > 1:
-        raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
-            translation_placeholders={
-                TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
-                TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
-            },
-        )
-    raise _service_validation_error(
-        translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
+
+def _usage_history_scope_error(
+    match: SelectorMatch,
+    *,
+    scope_kind: str,
+    scope_target: str,
+) -> ServiceValidationError:
+    """Build the usage-report error for a selector that did not resolve."""
+    return _service_validation_error(
+        translation_key=(
+            TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS
+            if match.is_ambiguous
+            else TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND
+        ),
         translation_placeholders={
             TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
             TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
