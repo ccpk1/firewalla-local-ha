@@ -478,8 +478,8 @@ and the `timeUsage` shape divergence. All recorded, none needed for the flow rep
 | --- | --- | --- | --- |
 | **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
 | **2** | Protocol layer | **COMPLETE** — `managers/flow_manager.py` and the three client methods, with served-window read-back, deadline-bounded pagination, content dedupe and fail-soft. | 638 tests pass (37 new); every method verified read-only live. |
-| **3** | Normalization | One view builder producing the summary and both record families over the Phase 1 core, reusing target resolution; flow models land here with their first caller. | Unit tests against a fixture built from the real 300-record capture. |
-| **4** | Surface | Service, translations, LLM tool, docs, quality scale. | Full validation suite green; live end-to-end call. |
+| **3** | Normalization | **COMPLETE** — `FirewallaFlowRecord` and one reader for all three record surfaces, `utils/flow_report.py` aggregation, `async_get_report`, the shared matching core, and the network/tag joins. | 702 tests pass; every section verified read-only live. Target resolution and the envelope moved to Phase 4 as service-layer work. |
+| **4** | Surface | The service with its target resolution and the shared `_serialize_report_*` envelope, translations, LLM tool, docs, quality scale. | Full validation suite green; live end-to-end call. |
 
 Phases are sequential. **Phase 1 is not optional, and it is not busywork.** The flow
 report needs the *same* processing the integration already does for `item=intf` at a
@@ -696,73 +696,60 @@ files. Every method also exercised **read-only against the dev box**.
 
 ### Phase 3 — Normalization
 
-**IN PROGRESS — started 2026-10-04.** The two foundational pieces are done and
-committed; the view builder and the service envelope are not.
+**COMPLETE (normalization) — executed 2026-10-04 on `feature/flow-reporting`.**
+Validation: 702 tests pass, `ruff check` and `format` clean, `mypy` clean across 46
+files. Every section verified **read-only against the dev box**. Five commits:
 
 | Commit | Covers | Result |
 | --- | --- | --- |
-| `ea8bd85` | R2, R3, 3.5b–3.5e | `FirewallaFlowRecord` + `build_flow_record` + `flow_family_unit` / `flow_family_direction`; 28 tests |
-| `8cd14b8` | 3.1b (helper + 1 caller) | `utils/selectors.py`; the usage resolver migrated; 13 tests |
+| `ea8bd85` | R2, R3, 3.5b–3.5e | `FirewallaFlowRecord` + `build_flow_record` + unit/direction/port/destination-kind helpers; 28 tests |
+| `8cd14b8` | 3.1b (helper, 1 caller) | `utils/selectors.py`; the usage resolver migrated; 13 tests |
+| `d4044a3` | 3.2–3.6 (view) | `FirewallaFlowSummary` and the section models, `utils/flow_report.py`, `async_get_report`; 18 tests |
+| `7137892` | 3.1b (remaining) | `_resolve_requested_host` + `_resolve_membership_target` migrated; all three now share one implementation |
+| `938700a` | 3.5f | `intf` → network and `tags` / `userTags` → group or user names; 3 tests |
 
-- [x] **R2/R3 — one flow-record model and reader.** Done, and the equivalence was
-      **proven by field-set comparison** rather than inferred from coverage:
-      `lastHitFlow` carried 35 keys, a live flow-log record 32, **32 shared**,
-      `lastHitFlow`-only 3, log-record-only **0** — and the per-`ltype` sets match.
-      `FirewallaRuleHit` is replaced by `FirewallaFlowRecord` and
-      `_normalize_rule_hit` calls the shared reader. Verified live: a regular record
-      reads `is_blocked=False, bytes=5246/2246, duration=0.18`; a blocked one
-      `is_blocked=True, block_type='dns', bytes=None`, and `None` is deliberate —
-      a blocked flow never travelled, so `0` would read as a measured empty
-      transfer. Ten now-dead `_RAW_HIT_*` constants removed from the client.
-- [x] **3.5b direction, 3.5c units, 3.5d port shapes, 3.5e MAC destination.**
-      `flow_family_direction` reads direction from the family name and **never**
-      from `fd`; a record has no family and therefore no direction, which is
-      asserted. `flow_family_unit` maps a family to the unit its overloaded `count`
-      is in, returning `None` for an unrecognised family rather than assuming bytes
-      — measured, byte families run 49,148+ against the blocked ones' 5,410 max, so
-      that misreading is a thousands-fold understatement. The reader coerces
-      `port` / `devicePort` and adds `mac` as a third destination kind for a LAN
-      peer, which has no hostname to resolve to.
-- [x] **3.1b shared matching core — helper done, 1 of 3 callers migrated.**
-      `utils/selectors.py` with `SelectorMatch` / `match_selector`. The usage
-      resolver is migrated; **`_resolve_requested_host` and
-      `_resolve_membership_target` are not yet.** 666 pre-existing tests pass
-      untouched, so the extraction preserved behaviour.
-- [ ] **3.1 Full target resolution for the flow service.** Not started. Blocked on
-      3.1b completion so there is no fourth resolver.
-- [ ] **3.2–3.6 The view builder and shared envelope.** Not started. This is the
-      phase's actual deliverable: the summary (totals, top destinations, blocked
-      breakdown, member ranking), the two record families, the Q9 identity gate,
-      and the `_serialize_report_*` envelope.
-- [ ] **3.5f The `intf` / `tags` joins.** Not started.
-- [ ] **3.7 Fixture tests.** Not started; the real capture is available.
+**The phase's deliverable is done.** One rollup request yields totals, top
+destinations ranked per direction, the blocked breakdown, LAN peers and the member
+ranking; the record families are read only when asked for. Live totals for one group
+over 24h: **2.43 GB down / 398 MB up, 30,715 blocks, 5,087 LAN connections**, and
+the blocked figure cross-checks against the rollup's own per-member count.
 
-#### Phase 3 findings so far
+#### Moved to Phase 4
 
-- **A name is trimmed before matching but the selector is not.** So
-  `"  kid-ipad  "` reports not-found while a stored name with stray whitespace
-  still matches. Pinned in a test with the reasoning: it is what all three
-  resolvers did, and changing it is a deliberate behaviour change to two shipped
-  services rather than part of an extraction. A plausible improvement, separately.
-- **`is_blocked` is tri-state.** It returns `None` when a record carries no
-  `ltype` rather than `False`, because `False` would be a positive claim that a
-  record we could not classify was allowed through. `ltype` was present on every
-  record measured, so this is a guard rather than a live case.
-- **The record model legitimately keeps byte fields absent for blocked records.**
-  This is why the attribute projector emits `download_bytes: None` rather than `0`
-  for a blocked hit, and a test pins both directions.
+Two items the plan had in Phase 3 are **service-layer** work and moved:
 
-#### Remaining Phase 3 work
+- **3.1 full target resolution** produces a `(target_type, target_id)` for the flow
+  service and raises `ServiceValidationError`, which `ARCHITECTURE.md` assigns to the
+  service layer. The matching it needs is built and shared (`3.1b`); what remains is
+  the flow service's own selector contract.
+- **3.6 the report envelope** is `_serialize_report_*` output, which lives with the
+  handler that returns it.
 
-| # | Item |
-| --- | --- |
-| 1 | Migrate the remaining two resolvers onto `match_selector` |
-| 2 | Full target resolution for the flow service (device / group / user → `tag` / `host`) |
-| 3 | The summary view: totals, top destinations, blocked breakdown by family, member ranking |
-| 4 | The two record families with the Q9 identity gate |
-| 5 | The `intf` → network and `tags` → group/user joins |
-| 6 | The `_serialize_report_*` envelope with `provenance` and `unavailable_sections` |
-| 7 | Fixture tests built from the real capture |
+This is a boundary correction rather than dropped work.
+
+#### Phase 3 findings
+
+- **A hostname resolves to many addresses.** Measured, 43 of 116 hosts in one window
+  had more than one. Keying destinations per address listed `speed.cloudflare.com`
+  twice and understated each row; the hostname is now the key with its addresses as a
+  tuple. Live, the two merged to one row at 438,654,495 bytes.
+- **`dnsB` was being given an invented direction.** The name carries none, and
+  neither reading is obviously right. It now returns `None` rather than being
+  inferred from a trailing `B`.
+- **A user membership is referenced by two different ids.** `tags` holds the
+  affiliation tag and `userTags` the user id, and the collection models one
+  membership as `group_id` + `user_id`. A map keyed on the group id alone left every
+  user tag unresolved.
+- **A helper split introduced a generator-exhaustion bug.** `match_selector`
+  traverses the candidates for its identifier pass and then handed the same sequence
+  to `match_names`, so a caller passing a generator matched nothing. Four service
+  tests caught it; two now pin the lazy case. The helper's own tests had passed
+  throughout because they used tuples.
+- **`is_blocked` is tri-state**, returning `None` for a record with no `ltype`
+  rather than claiming it was allowed through.
+- **A name is trimmed before matching but the selector is not**, so `"  kid-ipad  "`
+  reports not-found. Pinned, not fixed — it is what all three resolvers did, and
+  changing it is a deliberate change to two shipped services.
 
 **Q14 rework status:** R1 (`device_mac` → `device_id`) done 2026-10-04; **R2/R3
 done** (`ea8bd85`); **R4** is a "do not" rather than a change — `category` is an
@@ -897,7 +884,7 @@ into two closed sets) remain **withdrawn** — see Q14.
 | --- | --- |
 | **1** | **Done.** 560 tests pass with no existing assertion or snapshot changed; `ruff check`, `ruff format`, `mypy` clean. The before/after throughput measurement was dropped by owner decision as one-off activity. |
 | **2** | **Done.** Read-only live probes on the dev box: all three methods, window clamping (24h vs 168h), count clamping, single-page and all-available modes, and a `category`-filtered blocked read. A 24h flow-log walk took 3 pages / 7,545 rows; a block-log walk 2 pages / 1,154 rows, all `audit`. |
-| **3** | Unit tests over the capture-derived fixture, including the adversarial cases (unmatched `pid`, boundary dedupe, over-wide window, device-target member ranking, both sides of the Q9 gate). A review check that Phase 3 **added no new flow builder**. |
+| **3** | **Done.** Pure-aggregation unit tests (21) plus live read-only verification of every section on the dev box: window clamping, totals per unit, destination merging across addresses, the blocked breakdown, LAN peers, member ranking, the block-to-rule join, and the network/tag name joins. |
 | **4** | Full suite; live end-to-end for both detail levels; `python3 -m script.hassfest` if manifest or translation metadata moves. |
 
 Commands: `python -m ruff check .` · `python -m ruff format .` ·
