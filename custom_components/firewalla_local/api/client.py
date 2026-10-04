@@ -20,6 +20,7 @@ from ..const import (
     FIREWALLA_PROTOCOL_CLIENT_ID,
     FIREWALLA_PROTOCOL_CLIENT_VERSION,
     LOGGER,
+    MAX_FLOW_LOG_PAGE_SIZE,
 )
 from ..models import (
     FirewallaAlarm,
@@ -47,7 +48,9 @@ from .exceptions import (
     FirewallaConnectionError,
     FirewallaLocalRuntimeNotReadyError,
     FirewallaProtocolError,
+    FirewallaValidationError,
 )
+from .models import FlowLogPage
 
 _FWMESSAGE_TYPE_MSG: Final = "msg"
 _FWMESSAGE_TYPE_JSONDATA: Final = "jsondata"
@@ -89,6 +92,46 @@ _HTTP_CONNECTION_HEADER: Final = "Connection"
 _HTTP_CONNECTION_CLOSE_VALUE: Final = "close"
 _COMMAND_ITEM_KEY: Final = "item"
 _COMMAND_VALUE_KEY: Final = "value"
+
+# Flow reporting. Three queries share a target of a tag id or a host id and differ
+# in `item` and in which parameters they accept. Verified against the app's own
+# requests and by live probe on 2026-10-04.
+_FLOW_API_VERSION: Final = 2
+_FLOW_LOG_ITEM: Final = "flows"
+_FLOW_BLOCK_LOG_ITEM: Final = "auditLogs"
+_FLOW_TARGET_TYPES: Final = ("tag", "host")
+_RAW_FLOW_API_VER_KEY: Final = "apiVer"
+_RAW_FLOW_AUDIT_KEY: Final = "audit"
+_RAW_FLOW_CATEGORY_KEY: Final = "category"
+_RAW_FLOW_COUNT_KEY: Final = "count"
+_RAW_FLOW_END_KEY: Final = "end"
+_RAW_FLOW_ETS_KEY: Final = "ets"
+_RAW_FLOW_EXCLUDE_KEY: Final = "exclude"
+_RAW_FLOW_HOURBLOCK_KEY: Final = "hourblock"
+_RAW_FLOW_LOCAL_KEY: Final = "local"
+_RAW_FLOW_START_KEY: Final = "start"
+_RAW_FLOW_TS_KEY: Final = "ts"
+# The same wire key names the flow target type and the user-scope type. They are
+# different concepts that collide on the name, so each keeps its own constant.
+_RAW_FLOW_TARGET_TYPE_KEY: Final = "type"
+_RAW_FLOW_RECORDS_KEY: Final = "flows"
+_RAW_FLOW_BLOCK_RECORDS_KEY: Final = "logs"
+_RAW_FLOW_NEXT_CURSOR_KEY: Final = "nextTs"
+
+# The box honours a positive `count` up to MAX_FLOW_LOG_PAGE_SIZE and silently
+# caps anything larger, so a bigger request buys no more rows. Below
+# _MIN_FLOW_LOG_PAGE_SIZE its behaviour is undefined rather than merely small --
+# measured: `count: 1` returned zero rows while `count: 0` returned 100 -- and a
+# non-positive value returns the ENTIRE retained window (~6,956 rows), so a
+# caller-supplied count is clamped rather than forwarded.
+_MIN_FLOW_LOG_PAGE_SIZE: Final = 50
+
+# `hourblock` is a gate, not the granularity the name implies. Measured across a
+# fixed 24h window: 0 and 1 both return an **empty** response, while 2 and every
+# value above it return identical data -- 592 rows over 11 families, span 24.00h,
+# unchanged. So it must be at least 2 to be served at all, and it is clamped
+# rather than forwarded because a caller passing 1 gets silence, not an error.
+_MIN_FLOW_HOURBLOCK: Final = 2
 _COMMAND_GET_KEY: Final = "get"
 _COMMAND_INIT_INCLUDE_INACTIVE_HOSTS_KEY: Final = "includeInactiveHosts"
 _COMMAND_SET_POLICY: Final = "policy"
@@ -1139,6 +1182,176 @@ class FirewallaApiClient:
             )
 
         return data_payload
+
+    async def async_get_flow_rollup_payload(
+        self,
+        *,
+        target_type: str,
+        target: str,
+        start_timestamp: int,
+        end_timestamp: int,
+        hourblock: int,
+    ) -> dict[str, object]:
+        """Fetch the windowed flow rollup for one tag or host target.
+
+        The window actually covered must be read from the returned rows'
+        ``begin`` and ``end``. The box **silently clamps** rather than rejecting:
+        measured, requests for 1h, 24h, 25h, 48h and 168h windows all returned
+        identical data spanning 24.00h with code 200 and no indication of the
+        difference.
+
+        ``local: True`` is what the app sends, and it is required for
+        completeness: a live comparison showed it adds the four LAN-to-LAN
+        families (``local:download`` / ``upload`` / ``in`` / ``out``), taking the
+        response from 7 families to 11.
+
+        ``hourblock`` is **clamped to at least 2**, and despite its name it is not
+        a granularity: measured over a fixed 24h window, ``0`` and ``1`` return an
+        empty response while ``2`` and every value above it return identical data
+        (592 rows, 11 families, span 24.00h). Passing 1 therefore yields silence
+        rather than an error, which is why it is clamped here.
+        """
+        self._validate_flow_target_type(target_type)
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: target_type,
+                _RAW_FLOW_API_VER_KEY: _FLOW_API_VERSION,
+                _RAW_FLOW_LOCAL_KEY: True,
+                _RAW_FLOW_START_KEY: start_timestamp,
+                _RAW_FLOW_END_KEY: end_timestamp,
+                _RAW_FLOW_HOURBLOCK_KEY: max(_MIN_FLOW_HOURBLOCK, hourblock),
+            },
+            target=target,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                "Firewalla flow rollup response did not include a JSON object"
+            )
+
+        return data_payload
+
+    async def async_get_flow_log_payload(
+        self,
+        *,
+        target_type: str,
+        target: str,
+        count: int,
+        since_timestamp: float | None = None,
+        include_blocked: bool = False,
+    ) -> FlowLogPage:
+        """Fetch one page of flow-log records for one tag or host target.
+
+        This is the **flow** log, not the block log. ``include_blocked`` *adds*
+        blocked records to the page rather than filtering to them: measured, one
+        300-record page carried 26 blocked and 274 regular records. Use
+        :meth:`async_get_block_log_payload` for blocked records alone.
+
+        A record is identified by ``ltype`` -- ``"audit"`` for blocked, ``"flow"``
+        for regular -- and ``pid`` is present only when blocked.
+        """
+        self._validate_flow_target_type(target_type)
+        data: dict[str, object] = {
+            _COMMAND_ITEM_KEY: _FLOW_LOG_ITEM,
+            _RAW_FLOW_TARGET_TYPE_KEY: target_type,
+            _RAW_FLOW_AUDIT_KEY: include_blocked,
+            _RAW_FLOW_COUNT_KEY: self._resolve_flow_log_page_size(count),
+            _RAW_FLOW_EXCLUDE_KEY: [],
+        }
+        if since_timestamp is not None:
+            data[_RAW_FLOW_TS_KEY] = since_timestamp
+
+        return await self._async_get_flow_records(
+            data=data,
+            target=target,
+            records_key=_RAW_FLOW_RECORDS_KEY,
+            description="flow log",
+        )
+
+    async def async_get_block_log_payload(
+        self,
+        *,
+        target_type: str,
+        target: str,
+        count: int,
+        since_timestamp: float | None = None,
+        category: str | None = None,
+        end_timestamp: int | None = None,
+    ) -> FlowLogPage:
+        """Fetch one page of blocked-only records for one tag or host target.
+
+        This is the query that returns blocked records alone, and the record key
+        is ``logs`` rather than ``flows``. It takes no ``audit`` parameter -- the
+        app does not send one, and the rollup ignores one entirely.
+
+        ``category`` and ``end_timestamp`` (``ets``) narrow the result on the box,
+        which this query accepts and the flow log does not.
+        """
+        self._validate_flow_target_type(target_type)
+        data: dict[str, object] = {
+            _COMMAND_ITEM_KEY: _FLOW_BLOCK_LOG_ITEM,
+            _RAW_FLOW_TARGET_TYPE_KEY: target_type,
+            _RAW_FLOW_COUNT_KEY: self._resolve_flow_log_page_size(count),
+            _RAW_FLOW_EXCLUDE_KEY: [],
+        }
+        if since_timestamp is not None:
+            data[_RAW_FLOW_TS_KEY] = since_timestamp
+        if category is not None:
+            data[_RAW_FLOW_CATEGORY_KEY] = category
+        if end_timestamp is not None:
+            data[_RAW_FLOW_ETS_KEY] = end_timestamp
+
+        return await self._async_get_flow_records(
+            data=data,
+            target=target,
+            records_key=_RAW_FLOW_BLOCK_RECORDS_KEY,
+            description="block log",
+        )
+
+    async def _async_get_flow_records(
+        self,
+        *,
+        data: dict[str, object],
+        target: str,
+        records_key: str,
+        description: str,
+    ) -> FlowLogPage:
+        """Send one flow-log or block-log query and narrow its page envelope."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data=data,
+            target=target,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                f"Firewalla {description} response did not include a JSON object"
+            )
+
+        raw_records = data_payload.get(records_key)
+        if not isinstance(raw_records, list):
+            raise FirewallaProtocolError(
+                f"Firewalla {description} response did not include a {records_key} list"
+            )
+
+        return FlowLogPage(
+            records=tuple(item for item in raw_records if isinstance(item, dict)),
+            reported_count=normalized_int(data_payload.get(_RAW_FLOW_COUNT_KEY)),
+            next_cursor=normalized_float(data_payload.get(_RAW_FLOW_NEXT_CURSOR_KEY)),
+        )
+
+    @staticmethod
+    def _resolve_flow_log_page_size(count: int) -> int:
+        """Clamp a requested page size into the range the box answers predictably."""
+        return max(_MIN_FLOW_LOG_PAGE_SIZE, min(count, MAX_FLOW_LOG_PAGE_SIZE))
+
+    @staticmethod
+    def _validate_flow_target_type(target_type: str) -> None:
+        """Reject a flow target type the box does not accept."""
+        if target_type not in _FLOW_TARGET_TYPES:
+            raise FirewallaValidationError(
+                "Firewalla flow queries accept a target type of "
+                f"{' or '.join(_FLOW_TARGET_TYPES)}, not {target_type!r}"
+            )
 
     def _extract_appliance_identity(
         self, data: dict[str, object]

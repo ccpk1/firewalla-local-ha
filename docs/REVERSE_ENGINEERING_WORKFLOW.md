@@ -1717,20 +1717,54 @@ in the published model, while locally time limits use `disturbLevel` /
 
 ### What the time filter actually is
 
-The app's window selector is **two separate parameters**:
+The app's window selector sends **three separate parameters**:
 
 - **`start` / `end`** — the window bounds, in epoch seconds
-- **`hourblock`** — the granularity: `24` for the default 24-hour view, `1` after
-  narrowing
+- **`local`** — whether to include LAN-to-LAN families (see below)
+- **`hourblock`** — **not a granularity, despite the name**
 
-Captured transitions on the same tag: `start=1790949600, end=1791036000,
-hourblock=24` → `start=1791032400, end=1791036000, hourblock=1`. So narrowing
-moved `start` forward and dropped `hourblock` to 1 in one step, which is why the
-two must not be conflated.
+Captured transition on the same tag: `start=1790949600, end=1791036000,
+hourblock=24` → `start=1791032400, end=1791036000, hourblock=1`. An earlier
+revision of this section read that as "narrowing the window drops the granularity
+to 1". **Measured, that reading is wrong on both counts.**
+
+**`hourblock` gates the response and changes nothing else.** Over a fixed 24-hour
+window:
+
+| `hourblock` | Result |
+| --- | --- |
+| `0` | **200, empty** — the families are present but every one is a zero-row list |
+| **`1`** | **200, empty** — same |
+| `2`, `3`, `6`, `12`, `24`, `48`, `168` | **identical** — 592 rows, 11 families, span 24.00h |
+| `-1` | same as `>= 2` |
+
+So it must be **at least 2** to be served at all, and above that it has **no
+observable effect**: the row set, the families and the covered span are byte-identical
+for every value from 2 to 168. The window is not the gate either — a 1-hour window
+with `hourblock: 2` returns the full data, and a 24-hour window with `hourblock: 1`
+returns nothing.
+
+Whether `hourblock` is the intended bucket size for a chart axis the local API does
+not expose is unresolved. What is established is the operational rule: **never send
+below 2**, because 0 and 1 produce silence rather than an error.
+
+**`local: true` is what turns on the LAN-to-LAN families.** Measured with everything
+else held constant:
+
+| Request | Families | Rows |
+| --- | --- | --- |
+| `local: true` (or `local: true, audit: true`) | **11** | 592 |
+| no `local`, `local: false`, or `audit: true` alone | 7 | 574 |
+
+`local: true` adds `local:download`, `local:upload`, `local:in` and `local:out`.
+Those four answer "what is talking to what **inside** the LAN", which the WAN-facing
+families cannot. **`audit` on the rollup does nothing at all** — `{local: true}` and
+`{local: true, audit: true}` returned byte-identical responses, and `{audit: true}`
+alone matched `{}` exactly. `audit` is meaningful only on `item: "flows"`.
 
 **The app offers no window beyond about 24 hours.** The `start`/`end` parameters
-may accept more, but nothing observed does, so a longer window is unverified —
-see *Open questions*.
+accept more and then **silently clamp** — see *Limits: retention, page size, and
+window validity*.
 
 ### Live data volume
 
@@ -1838,7 +1872,8 @@ that the endpoints reject a bad window. Every one of these returned **code 200**
 | `end` seven days in the future | normal response |
 | `start` 30 days back, or **1 year** back | normal response, same 24h of data |
 | `hourblock: 168`, `999` | normal response |
-| **`hourblock: 0`** | **200, and zero rows** |
+| **`hourblock: 0`** | **200, and an empty response** |
+| **`hourblock: 1`** | **200, and an empty response** |
 | `ts: -1` | 200, zero rows |
 | `ts: 0` | 200, treated as absent (falsy) and defaulted to now |
 | `count: -5` | **200, and ~6,950 rows** |
@@ -1881,8 +1916,10 @@ below the low single digits as undefined rather than as a row limit.
 group is about a second. The ceiling is not a performance problem; it is a
 completeness problem.
 
-**`hourblock` accepts 1 through at least 168**, but **`0` silently returns
-nothing**. Validate it to be at least 1 rather than passing it through.
+**`hourblock` must be at least 2.** `0` and `1` both return an **empty** response
+with no error, while every value from `2` to `168` returns identical full data. It
+is a gate rather than the granularity its name suggests — see *What the time filter
+actually is*.
 
 
 ### The rollup is the app's report, in one response

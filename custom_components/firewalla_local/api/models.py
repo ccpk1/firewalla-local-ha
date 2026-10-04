@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, TypedDict
 
@@ -161,3 +162,26 @@ class FirewallaProvisionedCredentials:
     aid: str
     symmetric_key: str
     box_name: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class FlowLogPage:
+    """One page of flow-log or block-log records.
+
+    ``records`` stay raw mappings deliberately. A flow record carries up to 35
+    fields whose presence depends on whether the record is blocked or regular, so
+    a stronger type would describe the common fields and lie about the rest.
+    Shaping into integration models belongs to the manager layer.
+
+    ``reported_count`` is the box's own count for this page, **not** the length of
+    ``records``: the box caps a requested page and returns no indication that it
+    did, so the two can differ and a caller needs both to tell a truncated page
+    from a quiet target.
+
+    ``next_cursor`` walks backwards through the retained window. It is a float and
+    is passed back verbatim -- rounding it could skip records.
+    """
+
+    records: tuple[Mapping[str, object], ...]
+    reported_count: int | None
+    next_cursor: float | None

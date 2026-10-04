@@ -301,8 +301,8 @@ below returned **code 200**:
 | `start` after `end` | normal response |
 | `end` seven days in the future | normal response |
 | `start` **1 year** back | normal response, same 24h of data |
-| `hourblock: 168`, `999` | normal response |
-| **`hourblock: 0`** | **200, zero rows** |
+| | `hourblock: 168`, `999` | normal response |
+| | **`hourblock: 0` and `1`** | **200, and an empty response** |
 | `ts: 0` | 200, treated as absent (falsy), defaulted to now |
 | `count: -5` | **200, ~6,950 rows** |
 
@@ -351,7 +351,7 @@ opposite of "nothing". Two constants now carry this:
 | **T4e** | Assuming the requested count is the returned count | A positive count is silently capped at 5,000, and `count: 1` returned 0 rows | Report rows returned against the box's own `count`; enforce the minimum and the cap — Phase 2.5 |
 | **T5** | Duplicate rows across a page boundary | `ts` bounds are inclusive, so adjacent pages overlap | Dedupe on `(ts, device, pid, domain or ip, port)` — Phase 2.5 |
 | **T6** | A bespoke response envelope | Four report services share an envelope; a fifth shape fragments the surface | Phase 3.6 reuses the existing serializers |
-| **T7** | Conflating `hourblock` with retention | `hourblock` is granularity, not the window; every value 1–168 works, and **`0` silently returns nothing** | Documented in 2.4, with a clamp to at least 1 |
+| **T7** | Treating `hourblock` as granularity | Measured, it is a gate: `0` and `1` return an **empty** response, and `2`–`168` are byte-identical | Clamp to at least 2 — Phase 2.4 |
 | **T8** | Unbounded service response | 6,956 records in one group's 24h window; a full day is thousands of identity-bearing rows | Summary default, bounded page default, explicit opt-in for all-available (Q1) |
 | **T9** | A silent filter no-op | `audit: true` does not filter to blocks, it adds them | Phase 2 names one method per query; Phase 3 discriminates on `ltype`; `exclude` stays internal (Q4) |
 | **T10** | Implying a record set is complete | Blocked coverage is uneven: `domain` 265/300 but `category` 52 and `app` 10; regular records are near-complete on `host`/`ip` but `category` is 111/300 | Phase 3.5 must not summarize absent fields as zero |

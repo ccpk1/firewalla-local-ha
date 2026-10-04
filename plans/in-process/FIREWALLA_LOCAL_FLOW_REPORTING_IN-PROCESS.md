@@ -65,7 +65,7 @@ new consumer exists that could tilt toward a parallel path.
   from the response and reported, because the box silently shortens a wider request
   instead of rejecting it.
 - Validation on our side, since the box performs none: a bounded positive `count`,
-  `hourblock` clamped to at least 1, and no falsy `ts`.
+  `hourblock` clamped to at least 2, and no falsy `ts`.
 - Pagination: a bounded default page, an explicit **all-available** mode, and an
   exposed cursor.
 - `detail: summary` — aggregate totals, top destinations, top flows, blocked
@@ -143,7 +143,8 @@ already guards against.
 rather than defensive:
 - a non-positive `count` **returns the whole retained window** (~6,956 rows), the
   reverse of the intuitive reading, so it is never forwarded unvalidated
-- `hourblock: 0` returns zero rows silently, so it is clamped to at least 1
+- `hourblock` **below 2 returns an empty response silently** (`0` and `1` both), so
+  it is clamped to at least 2. Above 2 it has no observable effect at all
 - a falsy `ts` is treated as absent by the box, so `0` is never sent
 - `count` at or below the low single digits is undefined (`count: 1` returned 0
   rows while `count: 0` returned 100), so a sane minimum applies
@@ -605,7 +606,7 @@ files. No existing assertion or snapshot was modified.
 ### Phase 2 — Protocol layer
 
 - [ ] **2.1 Add `async_get_flow_rollup_payload`.** `item` = `tag` or `host`,
-      `apiVer: 2`, `audit: true`, `start`, `end`, `hourblock`, targeting the tag id
+      `apiVer: 2`, `local: true`, `start`, `end`, `hourblock`, targeting the tag id
       or MAC. Returns the raw dict.
 - [ ] **2.2 Add `async_get_flow_log_payload`.** `item: "flows"`, `type`, `count`,
       `ts`, `exclude: []`, and **`audit` as a caller-supplied flag** — it *adds*
@@ -624,8 +625,12 @@ files. No existing assertion or snapshot was modified.
       `window_clamped` warning when the served span is shorter than the requested
       one. The box rejects nothing and clamps silently — a 168h request was served
       24.00h with code 200 — so there is **no rejection to catch and no fallback to
-      write**. Do **not** conflate `hourblock` (granularity) with the window, and
-      clamp `hourblock` to at least 1 because `0` silently returns nothing.
+      write**. `hourblock` is **not** the granularity its name implies: measured, `0`
+      and `1` return an empty response while `2` through `168` return identical full
+      data (592 rows, 11 families, span 24.00h), so it is clamped to at least 2 and
+      otherwise has no effect. Also send **`local: true`**, which is what the app
+      sends and which is what enables the four LAN-to-LAN families (11 families with
+      it, 7 without). Do **not** send `audit` on the rollup: it has no effect there.
 - [ ] **2.5 Implement pagination with a deadline and a loop check.** Walk `nextTs`
       only in all-available mode. Stop on deadline, on a **non-advancing** cursor, or
       on an empty page. **Validate `count` before every call**: it must be a positive
