@@ -3,8 +3,8 @@
 **Initiative:** Flow Reporting Service (`get_flow_report`)
 **Branch:** `feature/flow-reporting`, off `main` (the rule-hit-data work is already on `main`)
 **Depends on:** `2.5.0-beta.1` (rule hit data), issue #53 (stale rule switches) for one edge case only
-**Status:** Phases 1–3 complete and validated live; **Phase 4 (surface) not started**. Q9 is settled from live measurement; ready for the Phase 4 handoff.
-**Last updated:** 2026-10-04 — Phase 3 closed out (checkboxes, findings, `78abe40`), Q9 settled, Phase 4 handoff written.
+**Status:** Phases 1–3 complete; **Phase 4 in progress** — the service, its identity gate, `services.yaml` and translations are done (`d4cb98d`); the LLM tool, docs, quality scale and the live end-to-end run remain.
+**Last updated:** 2026-10-04 — Phase 4.1–4.3 landed; a user scope was found to need the affiliated tag rather than the user id.
 
 ---
 
@@ -511,7 +511,7 @@ and the `timeUsage` shape divergence. All recorded, none needed for the flow rep
 | **1** | Shared flow core | **COMPLETE** — one numeric-coercion policy, one shared flow-row reader, single-pass host accumulation, one usage-window projection, plus enforced `utils/` and `api/` purity tests. No new behaviour. | 560 tests pass (37 new); no existing assertion or snapshot changed. |
 | **2** | Protocol layer | **COMPLETE** — `managers/flow_manager.py` and the three client methods, with served-window read-back, deadline-bounded pagination, content dedupe and fail-soft. | 638 tests pass (37 new); every method verified read-only live. |
 | **3** | Normalization | **COMPLETE** — `FirewallaFlowRecord` and one reader for all three record surfaces, `utils/flow_report.py` aggregation, `async_get_report`, the shared matching core, and the network/tag joins. | 705 tests pass; every section verified read-only live. Target resolution, the envelope and the identity gate moved to Phase 4 as service-layer work. |
-| **4** | Surface | The service with its target resolution and the shared `_serialize_report_*` envelope, translations, LLM tool, docs, quality scale. | Full validation suite green; live end-to-end call. |
+| **4** | Surface | **IN PROGRESS** — the non-admin `get_flow_report` service with its scope resolution, the shared `_serialize_report_*` envelope and the default-off identity gate, plus `services.yaml` and translations. LLM tool, docs, quality scale and the live end-to-end run remain. | 715 tests pass (10 new); serializer run against the live box at both detail levels; the gate verified open and closed on real data. |
 
 Phases are sequential. **Phase 1 is not optional, and it is not busywork.** The flow
 report needs the *same* processing the integration already does for `item=intf` at a
@@ -876,10 +876,9 @@ two earlier-proposed changes (adding `network` to `scope_kind`, splitting
       no extra request (verified live: `VLAN10 CORE` and `WAN-ONE`). `tags` /
       `userTags` → group and user names through the existing indexes. This closes the
       same identity chain the rule and membership surfaces already use.
-- [ ] **3.6 Emit the shared report envelope — MOVED to 4.1.** The view model *is*
-      built (`FirewallaFlowReportView`, `d4044a3`), but the envelope is
-      `_serialize_report_*` output and belongs with the handler that returns it.
-      `config_entry_id`, `target`, `query`,
+- [x] **3.6 Emit the shared report envelope — DONE in 4.1.** The envelope is
+      `_serialize_report_*` output and landed with the handler: `config_entry_id`,
+      `target`, `query`,
       `time_basis` (`_serialize_report_time_basis`), `summary`, sections,
       `metadata` (`_serialize_report_metadata` with `applied`, `warnings`,
       `unavailable_sections`, `provenance`). State the source (`item=tag|host` and
@@ -899,12 +898,11 @@ two earlier-proposed changes (adding `network` to `scope_kind`, splitting
       categories, `TL-` / `TLX-` target-list ids and `dap_*` ids, so the existing
       prefix-based handling is correct and unknown values must pass through. See
       Q14 R4.
-- [ ] **3.6c Document `ts` as the flow's *end* instant — NOT DONE, carried into
-      4.1.** The vendor states it
+- [x] **3.6c Document `ts` as the flow's *end* instant — DONE in 4.1.** The vendor
+      states it
       explicitly ("the time the flow ended"), and it is not obvious from the name.
-      It matters for any window that a caller compares against.
-      `FirewallaFlowRecord.timestamp` currently carries no such note, and the
-      meaning is not recoverable from the field name.
+      It matters for any window that a caller compares against. Now recorded on
+      `FirewallaFlowRecord.timestamp`, which previously carried no such note.
 - [x] **3.7 Tests against the real capture.** Done, with three deviations. **The
       fixture is synthetic, not capture-derived** — "build the fixture from the 300
       captured records" was not done, because those records pinned the *field set*
@@ -921,15 +919,40 @@ two earlier-proposed changes (adding `network` to `scope_kind`, splitting
 
 ### Phase 4 — Surface
 
-- [ ] **4.1 Service schema and handler** in `services.py`, registered in
+**4.1, 4.1b, 4.2 and 4.3 COMPLETE — executed 2026-10-04 on `feature/flow-reporting`.**
+`d4cb98d`. Validation: 715 tests pass (10 new), `ruff check` and `format` clean,
+`mypy` clean across 46 files. The serializer was also run **against the live box**
+for a group and a device at both detail levels, and the gate was verified open and
+closed on real data. Remaining: **4.4–4.7**.
+
+- [x] **4.1 Service schema and handler** in `services.py`, registered in
       `_SERVICE_REGISTRATIONS` as **read-only and `admin=False`** — matching every
       other query service (Q11). It must be non-admin or the Phase 4 tool cannot
       live in `llm_tools_read.py`, where all 13 read tools call non-admin services.
       **This step also carries 3.6** (emit the shared `_serialize_report_*`
       envelope, with `time_basis.kind` distinguishing `window` from `flow_log`) and
       **3.6c** (document `ts` as the flow's *end* instant on
-      `FirewallaFlowRecord.timestamp`).
-- [ ] **4.1b Apply the Q9 identity gate at serialization.** `include:
+      `FirewallaFlowRecord.timestamp`). Both done.
+
+      Two decisions taken while writing it, each a departure worth recording:
+      - **Target resolution is its own function, not the usage resolver.** The plan
+        said to reuse the existing resolver. For a **user** that would have been a
+        defect: measured, 8 of 10 users returned 398–578 rollup rows for their
+        **affiliated tag** and **zero** for their **user id**, while
+        `item=appTimeUsage` returned byte-identical payloads for both. So the two
+        endpoints key a user differently. The matching core (`utils/selectors.py`)
+        is shared and the policy is not, which is what Q12 concluded. The usage
+        service was **not** changed.
+      - **`scope_kind` is caller vocabulary and `target.kind` is protocol.** The
+        service takes `device` / `group` / `user` (as `get_time_usage_report`
+        does) and resolves internally to `host` / `tag`, so a caller never needs
+        the protocol's words. `query` keeps what was asked, `target` reports what
+        it became.
+      - **The page-size floor moved to `const.py`.** It was a private
+        `_MIN_FLOW_LOG_PAGE_SIZE` in the client, so the schema could not express
+        the range the transport supports and would have admitted a count the client
+        then silently raised. `MIN_FLOW_LOG_PAGE_SIZE` is now imported by both.
+- [x] **4.1b Apply the Q9 identity gate at serialization.** Done. `include:
       ["device_detail"]` governs exactly three fields — `top_members`, a
       destination's `device_ids`, and a record's `device_id` / `device_ip` — because
       those are the one thing a report names that the caller did not name.
@@ -938,22 +961,26 @@ two earlier-proposed changes (adding `network` to `scope_kind`, splitting
       the report rather than protect anything. **The gate is auto-satisfied when the
       target is a device**, because a host report contains no identity beyond the
       host that was asked for — measured 0 devices other than the target across five
-      hosts. Express that as a property of the data, not as a special case, so that
-      asking about one device does not return records that decline to say which
-      device. **Withheld is not unavailable:** an omitted section is simply absent
-      and `metadata.applied.include` records that the flag was not set, exactly as
-      `_serialize_network_segment_report` handles `include_hosts`. Do **not** add a
-      `withheld_sections` key, and do not put a withheld section in
-      `unavailable_sections`, which means "we tried and the box would not give it to
-      us". This is a **default, not a permission** — the service is non-admin (Q11),
-      so any caller who can reach it can pass the flag — and it must not be
-      described as an access control.
-- [ ] **4.2 Field descriptions** in `services.yaml`, with the observed retention
+      hosts. Expressed as a property of the data, not as a special case. **Withheld
+      is not unavailable:** an omitted section is simply absent and
+      `applied.device_detail` records whether the include was in effect, exactly as
+      `_serialize_network_segment_report` handles `include_hosts`. No
+      `withheld_sections` key was added, and a withheld section is **not** listed in
+      `unavailable_sections`. This is a **default, not a permission** — the service
+      is non-admin (Q11), so any caller who can reach it can pass the flag — and the
+      field descriptions say so.
+- [x] **4.2 Field descriptions** in `services.yaml`, with the observed retention
       limit stated in prose on the window field, and the `device_detail` include
-      described as widening the report rather than unlocking it.
-- [ ] **4.3 Translations.** `strings.json` + regenerate
-      `translations/en.json`; exception keys for scope ambiguous / not found / flow
-      report failed, following the existing naming.
+      described as widening the report rather than unlocking it. Done — the window
+      field says the box retains about 24 hours and serves that much for a wider
+      request, and points at `window_is_clamped` / `window_hours_served`.
+- [x] **4.3 Translations.** Done. This integration has no `strings.json`;
+      `translations/en.json` is the source. Added the service entry with all ten
+      field names and descriptions, plus `flow_report_failed`,
+      `flow_report_scope_ambiguous` and `flow_report_scope_not_found`. Checked for
+      parity in both directions: every `TRANS_KEY_EXCEPTION_*` constant has a
+      message, every service in `services.yaml` has a translation entry, and the
+      two field sets match exactly.
 - [ ] **4.4 LLM tool** in `llm_tools_read.py` at the read-only tier: summary-first
       with the window and its actual served span stated, and an explicit sentence
       that the data covers the last ~24 hours rather than being a history. Update
@@ -977,7 +1004,7 @@ two earlier-proposed changes (adding `network` to `scope_kind`, splitting
 | **1** | **Done.** 560 tests pass with no existing assertion or snapshot changed; `ruff check`, `ruff format`, `mypy` clean. The before/after throughput measurement was dropped by owner decision as one-off activity. |
 | **2** | **Done.** Read-only live probes on the dev box: all three methods, window clamping (24h vs 168h), count clamping, single-page and all-available modes, and a `category`-filtered blocked read. A 24h flow-log walk took 3 pages / 7,545 rows; a block-log walk 2 pages / 1,154 rows, all `audit`. |
 | **3** | **Done.** Pure-aggregation unit tests (21) plus live read-only verification of every section on the dev box: window clamping, totals per unit, destination merging across addresses, the blocked breakdown, LAN peers, member ranking, the block-to-rule join, and the network/tag name joins. A post-phase re-measurement over four pages and the 2026-10-03 capture (12,315 records) corrected three claims a single-page sample could not support — see the Phase 3 findings. |
-| **4** | Full suite; live end-to-end for both detail levels; `python3 -m script.hassfest` if manifest or translation metadata moves. |
+| **4** | **Partly done.** The serializer ran against the dev box for a group and a device at both detail levels, and the gate was measured open (21 members, 2 of 2 destinations with ids, 14,419 B) and closed (withheld, 5,322 B) on real data. Still to run: the full suite with `prek`, and the 4.7 end-to-end call **through the service** rather than through the serializer directly. |
 
 Commands: `python -m ruff check .` · `python -m ruff format .` ·
 `python -m mypy custom_components/firewalla_local` · `python -m pytest tests/ -v`
