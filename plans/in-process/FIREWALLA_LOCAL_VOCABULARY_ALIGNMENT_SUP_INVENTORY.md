@@ -732,3 +732,47 @@ Two consistent options:
 Option 1 preserves both the capability and the safety property, and matches an
 existing pattern, so it is the recommendation — but it is a design choice about a
 mutating service, so it is being put back rather than taken unilaterally.
+
+### 10g. `create_rule`'s scope is worse than "requested then discarded" — measured
+
+Checked before writing 9f-3, and the finding is stronger than 9c recorded. Read
+`services.py` 4538-4545:
+
+```python
+scope_kind = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_KIND))
+scope_target = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_TARGET))
+scope = (
+    (scope_target,)
+    if scope_kind == "device" and scope_target is not None
+    else ()
+)
+```
+
+The field is declared `vol.In(("device", "network", "all"))`, but **only `device` is
+ever read**. So:
+
+| Caller writes | Intended | Actually created |
+| --- | --- | --- |
+| `scope_kind: device`, MAC | rule applies to that host | correct |
+| `scope_kind: all` | every host | every host — *coincidentally correct* |
+| **`scope_kind: network`, VLAN10 id** | **rule applies to VLAN10** | **empty scope = every host** |
+
+**A network-scoped rule becomes a box-wide rule, silently.** An empty scope is the
+all-device scope, which is not inference: `scope_kind: "all"` maps to the same `()`,
+and `block_alarm_target` relies on omitting scope entirely to mean "block everywhere".
+So the two paths that should be different are the same value.
+
+Three further defects in the same field, all in the untested path:
+
+1. **`scope_target` is `cv.string`, passed raw as a scope value.** The wire expects
+   MACs there (`scope: list[str]`). A caller writing a host name gets that name sent
+   as if it were a MAC, with nothing in the integration checking otherwise.
+2. **Nothing enforces that the target matches the kind.** `device` + a network id, or
+   `network` + a MAC, are both accepted.
+3. **Coverage: none.** No test exercises `create_rule`'s scope at all. Grepping the
+   suite for a non-report `scope_kind` finds only the LLM schema declaration and two
+   *alarm* tests. The silent widening has never been asserted either way.
+
+This is why 9f-3 is not cosmetic. The unifying change is what removes a defect that
+turns a narrow rule into a sweeping one without an error, and the typed pairs are
+what make the mistake impossible rather than merely visible.
