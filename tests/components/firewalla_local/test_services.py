@@ -47,8 +47,10 @@ from custom_components.firewalla_local.const import (
     LLM_TOOL_MODE_READ_ONLY,
     LLM_TOOL_MODE_SUMMARY_ONLY,
     RULE_PURPOSE_DAP,
+    RULE_TARGET_TYPE_DNS,
     RULE_TARGET_TYPE_MAC,
     SERVICE_ARCHIVE_ALARMS,
+    SERVICE_CREATE_RULE,
     SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
@@ -56,6 +58,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_ALARM_STATUS,
     SERVICE_FIELD_ALARM_TARGET_TYPE,
     SERVICE_FIELD_ALARM_TARGET_VALUE,
+    SERVICE_FIELD_ALL_HOSTS,
     SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
@@ -94,9 +97,10 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
-    SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
+    SERVICE_FIELD_TARGET_TYPE,
+    SERVICE_FIELD_TARGET_VALUE,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
@@ -149,6 +153,7 @@ from custom_components.firewalla_local.models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
+    FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
     FirewallaUserRuntime,
@@ -8396,7 +8401,7 @@ async def test_admin_service_allows_automation_call(hass: HomeAssistant) -> None
             SERVICE_MUTE_ALARM,
             {
                 SERVICE_FIELD_DURATION: "always",
-                SERVICE_FIELD_SCOPE_KIND: "all",
+                SERVICE_FIELD_ALL_HOSTS: True,
                 SERVICE_FIELD_ALARM_TARGET_TYPE: ALARM_TARGET_ALARM_TYPE,
                 SERVICE_FIELD_ALARM_TARGET_VALUE: "ALARM_GAME",
             },
@@ -8634,6 +8639,178 @@ async def test_alarm_services_require_exactly_one_selector(
 
     with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(DOMAIN, service, service_data, blocking=True)
+
+    assert err.value.translation_key == expected_key
+
+
+async def _create_rule_template(
+    hass: HomeAssistant, **data: object
+) -> FirewallaRuleTemplate:
+    """Set up an entry, create one rule, and return the template it built."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            side_effect=lambda *args, **kwargs: _usage_history_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.rule_manager."
+            "FirewallaRuleManager.async_create_rule",
+            new=AsyncMock(return_value="9001"),
+        ) as create_rule,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_CREATE_RULE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_TARGET_TYPE: RULE_TARGET_TYPE_DNS,
+                SERVICE_FIELD_TARGET_VALUE: "vimeo.com",
+                **data,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    return cast("FirewallaRuleTemplate", create_rule.await_args.args[0])
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_scope", "expected_tag_refs"),
+    [
+        pytest.param(
+            {SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC"},
+            ("EC:0D:51:CC:BA:BC",),
+            (),
+            id="host-by-mac",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_HOST_NAME: "Kaden Phone"},
+            ("EC:0D:51:CC:BA:BC",),
+            (),
+            id="host-by-name",
+        ),
+        pytest.param({SERVICE_FIELD_GROUP_ID: "12"}, (), ("tag:12",), id="group-by-id"),
+        pytest.param(
+            {SERVICE_FIELD_GROUP_NAME: "Quarantine"},
+            (),
+            ("tag:12",),
+            id="group-by-name",
+        ),
+        pytest.param(
+            # The affiliated tag `10`, NOT the user id `21`. The box addresses a user
+            # by its affiliated tag, so writing the user id would scope the rule to
+            # nothing while looking correct.
+            {SERVICE_FIELD_USER_ID: "21"},
+            (),
+            ("tag:10",),
+            id="user-by-id-writes-the-affiliated-tag",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_USER_NAME: "KADEN"},
+            (),
+            ("tag:10",),
+            id="user-by-name-writes-the-affiliated-tag",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_NETWORK_NAME: "VLAN10 CORE"},
+            (),
+            ("intf:5799d896-5e0f-40a5-a776-38a5d7746204",),
+            id="network-by-name",
+        ),
+        pytest.param({SERVICE_FIELD_ALL_HOSTS: True}, (), (), id="all-hosts"),
+    ],
+)
+async def test_create_rule_scope_reaches_the_wire(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_scope: tuple[str, ...],
+    expected_tag_refs: tuple[str, ...],
+) -> None:
+    """Test each scope selector becomes the reference form the box expects.
+
+    The user cases are the ones to watch. The tag collection holds groups and users
+    together, and a user entry's `group_id` is its affiliated backing tag, so a user is
+    written as `tag:<affiliated tag>` -- the *group* prefix -- and never as the user id
+    or under a `utag:` prefix. Getting that wrong scopes the rule to the wrong
+    population with no error, which is why the expected value is `10` and not `21`.
+    """
+    template = await _create_rule_template(hass, **data)
+
+    assert template.scope == expected_scope
+    assert template.tag_refs == expected_tag_refs
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_key"),
+    [
+        pytest.param({}, "selector_required", id="no-scope"),
+        pytest.param(
+            {
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_USER_NAME: "KADEN",
+            },
+            "selector_conflict",
+            id="two-scopes",
+        ),
+        pytest.param(
+            {
+                SERVICE_FIELD_ALL_HOSTS: True,
+                SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC",
+            },
+            "selector_conflict",
+            id="all-hosts-plus-a-scope",
+        ),
+    ],
+)
+async def test_create_rule_requires_exactly_one_scope(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_key: str,
+) -> None:
+    """Test a rule's scope cannot be widened by accident.
+
+    An empty scope on the wire *is* every host, so `all_hosts` is required to state the
+    wide case out loud. Without that, a selector that dropped out would silently produce
+    a rule covering the whole network instead of an error.
+    """
+    await async_setup_services(hass)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_CREATE_RULE,
+            {
+                SERVICE_FIELD_TARGET_TYPE: RULE_TARGET_TYPE_DNS,
+                SERVICE_FIELD_TARGET_VALUE: "vimeo.com",
+                **data,
+            },
+            blocking=True,
+            return_response=True,
+        )
 
     assert err.value.translation_key == expected_key
 

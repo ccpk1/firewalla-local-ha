@@ -1432,14 +1432,6 @@
           "name": "Target value",
           "description": "Optional. Required with target_type when alarm_id is omitted. The domain, IP, or MAC to block."
         },
-        "scope_kind": {
-          "name": "Scope kind",
-          "description": "Optional. Where the rule applies. Defaults to everywhere when omitted."
-        },
-        "scope_target": {
-          "name": "Scope target",
-          "description": "Optional. The scope value for the chosen kind (a MAC for device, a network uuid for network)."
-        },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
           "description": "Use this when you have more than one Firewalla setup."
@@ -1447,6 +1439,42 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        },
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "host_name": {
+          "name": "Host name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_uuid": {
+          "name": "Network UUID",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_name": {
+          "name": "Network name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "all_hosts": {
+          "name": "All hosts",
+          "description": "Optional. The wide scope must be stated explicitly, because on the wire an empty scope means every host."
         }
       }
     },
@@ -1514,14 +1542,6 @@
           "name": "Alarm target value (Optional)",
           "description": "Raw ALARM_* identifier, domain, or IP. May be resolved from alarm_id where available."
         },
-        "scope_kind": {
-          "name": "Scope kind",
-          "description": "Required. Choose device, group, user, network, or all. Global scope must be selected explicitly."
-        },
-        "scope_target": {
-          "name": "Scope target (Optional)",
-          "description": "Required unless scope_kind is all. Use the ID for the selected device, group, user, or network."
-        },
         "duration": {
           "name": "Duration",
           "description": "Choose 1h, today in the Firewalla box timezone, or always."
@@ -1533,6 +1553,42 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        },
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "host_name": {
+          "name": "Host name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_uuid": {
+          "name": "Network UUID",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_name": {
+          "name": "Network name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "all_hosts": {
+          "name": "All hosts",
+          "description": "Optional. The wide scope must be stated explicitly, because on the wire an empty scope means every host."
         }
       }
     },

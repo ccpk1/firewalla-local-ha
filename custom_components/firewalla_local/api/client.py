@@ -23,6 +23,24 @@ from ..const import (
     MAX_FLOW_LOG_PAGE_SIZE,
     MIN_FLOW_LOG_PAGE_SIZE,
 )
+from ..const import (
+    TAG_REF_PREFIX_DEVICE as _RAW_TAG_PREFIX_DEVICE,
+)
+from ..const import (
+    TAG_REF_PREFIX_GROUP as _RAW_TAG_PREFIX_GROUP,
+)
+from ..const import (
+    TAG_REF_PREFIX_NETWORK as _RAW_TAG_PREFIX_NETWORK,
+)
+from ..const import (
+    TAG_REF_PREFIX_USER as _RAW_TAG_PREFIX_USER,
+)
+from ..const import (
+    TAG_REF_PREFIX_USER_ALT as _RAW_TAG_PREFIX_USER_ALT,
+)
+from ..const import (
+    TAG_REF_SEPARATOR as _RAW_TAG_SEPARATOR,
+)
 from ..models import (
     FirewallaAlarm,
     FirewallaAlarmException,
@@ -297,13 +315,6 @@ _RAW_INTERNET_QUALITY_MEAN_KEY: Final = "mean"
 _RAW_INTERNET_QUALITY_MAX_KEY: Final = "max"
 _RAW_INTERNET_QUALITY_MEDIAN_KEY: Final = "median"
 _RAW_INTERNET_QUALITY_MIN_KEY: Final = "min"
-
-_RAW_TAG_PREFIX_GROUP: Final = "tag"
-_RAW_TAG_PREFIX_DEVICE: Final = "dtag"
-_RAW_TAG_PREFIX_USER: Final = "utag"
-_RAW_TAG_PREFIX_USER_ALT: Final = "userTag"
-_RAW_TAG_PREFIX_NETWORK: Final = "intf"
-_RAW_TAG_SEPARATOR: Final = ":"
 
 _RULE_TARGET_TAG: Final = "TAG"
 _RULE_TARGET_LIST_PREFIX: Final = "TL-"
@@ -2600,7 +2611,9 @@ class FirewallaApiClient:
             return None
         if tag_prefix == _RAW_TAG_PREFIX_DEVICE:
             if tag_name := device_tags.get(tag_value):
-                return tag_name, "device"
+                # The machine register: a device tag names a host, and `device` is
+                # reserved for the Firewalla box itself.
+                return tag_name, "host"
             return None
         if tag_prefix in {_RAW_TAG_PREFIX_USER, _RAW_TAG_PREFIX_USER_ALT}:
             if tag_name := user_tags.get(tag_value):

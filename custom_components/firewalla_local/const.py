@@ -245,6 +245,39 @@ SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED: Final = "include_system_managed"
 HIDDEN_RULE_PURPOSES: Final = ("dap", "family")
 SERVICE_FIELD_NETWORK_NAME: Final = "network_name"
 SERVICE_FIELD_NETWORK_UUID: Final = "network_uuid"
+
+# A rule's scope can name a whole population instead of specific hosts. It is a flag
+# rather than a `scope_kind: "all"` value for two reasons: the wide case must be
+# chosen rather than reached by leaving a field out, and on the wire an empty scope
+# *is* the wide case -- so a scope that gets dropped by mistake would silently widen
+# a rule. Naming it `all_hosts` keeps the machine word (`host`, never `device`).
+SERVICE_FIELD_ALL_HOSTS: Final = "all_hosts"
+
+# How a rule names what it applies to, on the wire. A rule carries its scope as a
+# list of prefixed references, and the prefix says what kind each one is. The
+# vocabulary lives here rather than in the API client because it is shared: the client
+# reads these back and the service layer writes them, and a second copy is how the two
+# would drift.
+#
+# **A user is a group-prefixed reference.** The box expresses a rule's user attachment
+# as `tag:<affiliated_tag_id>` -- the *group* prefix carrying the user's affiliated
+# backing tag -- not as `utag:<user_id>`. The client's reader reconciles exactly that
+# shape, resolving a `tag:` reference to a user when the id is an affiliated tag. So a
+# `utag:` reference, which looks like the obvious choice from this list, is wrong for
+# a rule.
+TAG_REF_PREFIX_GROUP: Final = "tag"
+TAG_REF_PREFIX_DEVICE: Final = "dtag"
+TAG_REF_PREFIX_USER: Final = "utag"
+TAG_REF_PREFIX_USER_ALT: Final = "userTag"
+TAG_REF_PREFIX_NETWORK: Final = "intf"
+TAG_REF_SEPARATOR: Final = ":"
+
+
+def build_tag_reference(prefix: str, value: str) -> str:
+    """Return one prefixed rule-scope reference as the wire expects it."""
+    return f"{prefix}{TAG_REF_SEPARATOR}{value}"
+
+
 SERVICE_FIELD_OFFSET: Final = "offset"
 SERVICE_FIELD_REFRESH: Final = "refresh"
 SERVICE_FIELD_RESERVED_IPV4: Final = "reserved_ipv4"
@@ -446,6 +479,27 @@ RULE_TARGET_TYPE_IP: Final = "ip"
 RULE_TARGET_TYPE_MAC: Final = "mac"
 RULE_TARGET_TYPE_NETWORK: Final = "network"
 RULE_TARGET_TYPE_REMOTE_PORT: Final = "remotePort"
+
+# Every matcher type a live rule can carry, which is what a rule filter may ask for.
+# The read side produces all six, so a filter that accepted fewer would reject values
+# it had just returned.
+RULE_TARGET_TYPES: Final = (
+    RULE_TARGET_TYPE_CATEGORY,
+    RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_IP,
+    RULE_TARGET_TYPE_MAC,
+    RULE_TARGET_TYPE_NETWORK,
+    RULE_TARGET_TYPE_REMOTE_PORT,
+)
+
+# What `create_rule` can build. A deliberate subset: the create path is verified for
+# these three, and the wider set above describes rules the box may hold rather than
+# rules this integration can author.
+CREATE_RULE_TARGET_TYPES: Final = (
+    RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_IP,
+    RULE_TARGET_TYPE_MAC,
+)
 CONFIG_ERROR_CANNOT_CONNECT: Final = "cannot_connect"
 CONFIG_ERROR_INVALID_HOST: Final = "invalid_host"
 CONFIG_ERROR_INVALID_QR: Final = "invalid_qr"
@@ -651,6 +705,8 @@ TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED: Final = "delete_host_failed"
 TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED: Final = "delete_host_confirm_required"
 TRANS_KEY_EXCEPTION_DELETE_RULE_CONFIRM_REQUIRED: Final = "delete_rule_confirm_required"
 TRANS_KEY_EXCEPTION_RULE_NOT_FOUND: Final = "rule_not_found"
+TRANS_KEY_EXCEPTION_RULE_SCOPE_AMBIGUOUS: Final = "rule_scope_ambiguous"
+TRANS_KEY_EXCEPTION_RULE_SCOPE_NOT_FOUND: Final = "rule_scope_not_found"
 TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND: Final = "alarm_not_found"
 TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED: Final = "alarm_scope_target_required"
 TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED: Final = "alarm_selector_required"

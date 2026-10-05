@@ -729,11 +729,15 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Stop alerting me about this." / "Silence this alarm type / domain / IP."
 - **When to use / not:** creates a **silence** (an exception) so future matching alarms stop alerting — it does **not** block traffic and does **not** remove the alarm. For blocking traffic use `block_alarm_target`; for clearing one alarm use `archive_alarm`. Idempotent (`already_in_state`).
-- **Inputs (flat):** `alarm_id` (optional — derive target from it), `alarm_target_type` (`alarm_type` | `domain` | `ip`), `alarm_target_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`).
+- **Inputs (flat):** `alarm_id` (optional — derive target from it), `alarm_target_type`
+  (`alarm_type` | `domain` | `ip`), `alarm_target_value`, `duration` (**required**,
+  enum `1h`|`today`|`always`), and **exactly one** scope selector: `host_mac`,
+  `host_name`, `group_id`, `group_name`, `user_id`, `user_name`, `network_uuid`,
+  `network_name`, or `all_hosts`.
 - **Returns:** action-result (`target`, `undo`).
 - **Reversibility & undo:** reversible — `undo` unmutes (removes the silence).
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
-- **Caveats (must state):** scope is **mandatory** — a `matchAll`/`all` default mutes for **every** device; durations are the app's three fixed values (not free text).
+- **Caveats (must state):** scope is **mandatory** — omitting every scope selector would otherwise mean every host, so `all_hosts: true` is required to say that out loud; durations are the app's three fixed values (not free text).
 
 ### `firewalla_local__unmute_alarm`
 
@@ -753,7 +757,10 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Block this." / "Block the domain/IP/device that caused this alarm."
 - **When to use / not:** creates a **block rule** for the alarm's target (traffic is actually blocked). It is **not** a mute (that is `set_alarm_muted`) and does not by itself clear the alarm (though it auto-archives it). Idempotent — blocking an already-blocked target reports `already_in_state`.
-- **Inputs (flat):** `alarm_id` (derive target/scope from the alarm) **or** `target_type`/`target_value` (`dns`/`ip`/`mac`) + `scope_kind`/`scope_target`.
+- **Inputs (flat):** `alarm_id` (derive target/scope from the alarm) **or** the pair
+  `target_type` / `target_value` (`dns`/`ip`/`mac`), plus **exactly one** scope
+  selector: `host_mac`, `host_name`, `group_id`, `group_name`, `user_id`,
+  `user_name`, `network_uuid`, `network_name`, or `all_hosts`.
 - **Returns:** action-result (`target` = the created rule id + name, `undo`).
 - **Availability:** control (behind the toggle). *(Planned — a thin facade over `create_rule`.)*
 - **Reversibility & undo:** reversible — `firewalla_local__unblock_alarm_target`. Each block consumes a finite rule slot.

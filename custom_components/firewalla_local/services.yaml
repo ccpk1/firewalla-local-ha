@@ -1680,27 +1680,69 @@ create_rule:
         text:
       name: Target value
       description: Optional. Required with target_type when alarm_id is omitted. The domain, IP, or MAC to block.
-    scope_kind:
+    host_mac:
       required: false
-      example: "device"
-      selector:
-        select:
-          options:
-            - value: "device"
-              label: One device
-            - value: "network"
-              label: One network
-            - value: "all"
-              label: Everywhere
-      name: Scope kind
-      description: Optional. Where the rule applies. Defaults to everywhere when omitted.
-    scope_target:
-      required: false
-      example: "0C:85:E1:B0:1D:1C"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
-      name: Scope target
-      description: Optional. The scope value for the chosen kind (a MAC for device, a network uuid for network).
+      name: Host MAC
+      description: Optional. Apply the rule to this host, by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Apply the rule to this host, by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text:
+      name: Group ID
+      description: Optional. Apply the rule to this group, by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Apply the rule to this group, by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Apply the rule to this user, by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text:
+      name: User name
+      description: Optional. Apply the rule to this user, by name. Provide exactly one scope selector.
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Optional. Apply the rule to this network, by UUID. Provide exactly one scope selector.
+    network_name:
+      required: false
+      example: "VLAN10 CORE"
+      selector:
+        text:
+      name: Network name
+      description: Optional. Apply the rule to this network, by name. Provide exactly one scope selector.
+    all_hosts:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: All hosts
+      description: Optional. Apply the rule to every host. The wide scope must be stated, because on the wire an empty scope means every host.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1829,31 +1871,69 @@ mute_alarm:
         text:
       name: Alarm target value
       description: Raw ALARM_* type, domain, or IP. May be inferred from alarm_id where available.
-    scope_kind:
-      required: true
-      example: "device"
-      selector:
-        select:
-          options:
-            - value: "device"
-              label: Device
-            - value: "group"
-              label: Group
-            - value: "user"
-              label: User
-            - value: "network"
-              label: Network
-            - value: "all"
-              label: All devices
-      name: Scope kind
-      description: Required. Choose all explicitly to create a box-wide silence.
-    scope_target:
+    host_mac:
       required: false
-      example: "00:11:22:33:44:55"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
-      name: Scope target
-      description: Required unless scope kind is all. Provide the target ID for the selected scope.
+      name: Host MAC
+      description: Optional. Silence for this host, by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Silence for this host, by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text:
+      name: Group ID
+      description: Optional. Silence for this group, by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Silence for this group, by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Silence for this user, by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text:
+      name: User name
+      description: Optional. Silence for this user, by name. Provide exactly one scope selector.
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Optional. Silence for this network, by UUID. Provide exactly one scope selector.
+    network_name:
+      required: false
+      example: "VLAN10 CORE"
+      selector:
+        text:
+      name: Network name
+      description: Optional. Silence for this network, by name. Provide exactly one scope selector.
+    all_hosts:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: All hosts
+      description: Optional. Silence for every host. The box-wide case must be stated, because on the wire an empty scope means every host.
     duration:
       required: true
       example: "1h"

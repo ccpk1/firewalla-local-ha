@@ -224,10 +224,10 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         if (
             alarm is not None
             and not alarm.is_archived
-            and scope_kind in ("device", "all")
+            and scope_kind in ("host", "all")
         ):
             info: dict[str, object] = {"type": wire_key, "target": target}
-            if scope_kind == "device":
+            if scope_kind == "host":
                 info["device"] = scope_target or ""
             if expiry is not None:
                 info["expireTs"] = expiry
@@ -294,10 +294,16 @@ class FirewallaAlarmManager(FirewallaBaseManager):
     def _get_scope_payload(
         scope_kind: str, scope_target: str | None
     ) -> dict[str, object]:
-        """Map explicit scope selections to the local exception scope keys."""
+        """Map one resolved scope onto the local exception scope keys.
+
+        The kinds are the machine vocabulary the service layer resolved, so a host is
+        `host` -- the wire key is still the wire's own `p.device.mac`. A user arrives
+        already resolved to its affiliated tag, because that is the id the box
+        addresses a user by.
+        """
         if scope_kind == "all":
             return {}
-        if scope_kind == "device":
+        if scope_kind == "host":
             return {"p.device.mac": scope_target or ""}
         if scope_kind in ("group", "user"):
             return {"p.tag.ids": [scope_target or ""]}

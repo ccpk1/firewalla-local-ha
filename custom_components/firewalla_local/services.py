@@ -50,7 +50,10 @@ from .const import (
     RULE_ACTION_BLOCK,
     RULE_PURPOSE_DAP,
     RULE_PURPOSE_FAMILY,
+    RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_IP,
     RULE_TARGET_TYPE_MAC,
+    RULE_TARGET_TYPES,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_CREATE_RULE,
     SERVICE_DELETE_ALARMS,
@@ -62,6 +65,7 @@ from .const import (
     SERVICE_FIELD_ALARM_TARGET_TYPE,
     SERVICE_FIELD_ALARM_TARGET_VALUE,
     SERVICE_FIELD_ALARM_TYPE,
+    SERVICE_FIELD_ALL_HOSTS,
     SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
@@ -102,8 +106,6 @@ from .const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
-    SERVICE_FIELD_SCOPE_KIND,
-    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
@@ -150,12 +152,13 @@ from .const import (
     SERVICE_SYNC_RUNTIME,
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
+    TAG_REF_PREFIX_GROUP,
+    TAG_REF_PREFIX_NETWORK,
     TARGET_KIND_HOST,
     TARGET_KIND_NETWORK,
     TARGET_KIND_USER,
     TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
     TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
-    TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED,
     TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_CONFIG_ENTRY_NAME_NOT_FOUND,
@@ -198,6 +201,8 @@ from .const import (
     TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT,
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
     TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_RULE_SCOPE_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_RULE_SCOPE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
     TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_SELECTOR_REQUIRED,
@@ -236,6 +241,7 @@ from .const import (
     TRANS_PLACEHOLDER_SSID_PROFILE_ID,
     TRANS_PLACEHOLDER_WAN_NAME,
     TRANS_PLACEHOLDER_WAN_UUID,
+    build_tag_reference,
 )
 from .coordinator import FirewallaConfigEntry, get_llm_tool_mode
 from .helpers.usage_report import serialize_usage_summary
@@ -279,7 +285,9 @@ from .models import (
     FirewallaReportTarget,
     FirewallaReportTimeBasis,
     FirewallaReportWarning,
+    FirewallaRuleScope,
     FirewallaRuleTemplate,
+    FirewallaScopeIdentity,
     FirewallaSpeedTestResult,
     FirewallaUsageHistoryDeviceUsage,
     FirewallaUsageHistoryEntry,
@@ -336,7 +344,7 @@ GET_RULES_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_ACTION): vol.In(
             ("block", "allow", "qos", "disturb")
         ),
-        vol.Optional(SERVICE_FIELD_TARGET_TYPE): cv.string,
+        vol.Optional(SERVICE_FIELD_TARGET_TYPE): vol.In(RULE_TARGET_TYPES),
         vol.Optional(SERVICE_FIELD_APPLIES_TO): cv.string,
         vol.Optional(SERVICE_FIELD_INCLUDE_PURPOSE): vol.All(
             cv.ensure_list_csv,
@@ -380,6 +388,14 @@ REPORT_SCOPE_SELECTOR_FIELDS: Final = (
     SERVICE_FIELD_USER_NAME,
 )
 
+# What a rule can apply to. Wider than a report's scope: a rule can also target a
+# whole network, and can be applied to every host.
+RULE_SCOPE_SELECTOR_FIELDS: Final = (
+    *REPORT_SCOPE_SELECTOR_FIELDS,
+    SERVICE_FIELD_NETWORK_UUID,
+    SERVICE_FIELD_NETWORK_NAME,
+)
+
 GET_FLOW_REPORT_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
@@ -414,10 +430,29 @@ GET_FLOW_REPORT_SCHEMA = vol.Schema(
 CREATE_RULE_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
-        vol.Optional(SERVICE_FIELD_TARGET_TYPE): vol.In(("dns", "ip", "mac")),
+        vol.Optional(SERVICE_FIELD_TARGET_TYPE): vol.In(
+            (
+                RULE_TARGET_TYPE_DNS,
+                RULE_TARGET_TYPE_IP,
+                RULE_TARGET_TYPE_MAC,
+            )
+        ),
         vol.Optional(SERVICE_FIELD_TARGET_VALUE): cv.string,
-        vol.Optional(SERVICE_FIELD_SCOPE_KIND): vol.In(("device", "network", "all")),
-        vol.Optional(SERVICE_FIELD_SCOPE_TARGET): cv.string,
+        # What the rule applies to: one host, one group, one user, one network, or
+        # every host. The pairs are typed so a name cannot be passed where the wire
+        # expects an identifier, and `all_hosts` makes the wide case explicit -- on the
+        # wire an empty scope *is* the wide case, so a scope that got dropped would
+        # silently widen the rule. The handler enforces "exactly one" because
+        # voluptuous cannot express it.
+        vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
+        vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_ALL_HOSTS, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -461,10 +496,15 @@ DELETE_ALARMS_SCHEMA = vol.Schema(
 )
 
 _ALARM_SCOPE_SCHEMA_FIELDS: dict[object, object] = {
-    vol.Required(SERVICE_FIELD_SCOPE_KIND): vol.In(
-        ("device", "group", "user", "network", "all")
-    ),
-    vol.Optional(SERVICE_FIELD_SCOPE_TARGET): cv.string,
+    vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+    vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
+    vol.Optional(SERVICE_FIELD_GROUP_ID): cv.string,
+    vol.Optional(SERVICE_FIELD_GROUP_NAME): cv.string,
+    vol.Optional(SERVICE_FIELD_USER_ID): cv.string,
+    vol.Optional(SERVICE_FIELD_USER_NAME): cv.string,
+    vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
+    vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
+    vol.Optional(SERVICE_FIELD_ALL_HOSTS, default=False): cv.boolean,
 }
 
 MUTE_ALARM_SCHEMA = vol.Schema(
@@ -4510,12 +4550,16 @@ async def _async_handle_create_rule(call: ServiceCall) -> JsonObjectType:
     Blocking a target from an alarm is ordinary rule creation: the alarm is used
     as the rule source and its id is recorded as a back-reference.
     """
+    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
+    # An alarm supplies the scope from the alarm it came from, so a scope selector is
+    # required only when the caller is naming one themselves. Selecting before the
+    # entry is resolved means a caller mistake is reported without any I/O.
+    selection = None if alarm_id is not None else _select_one_scope(call)
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
-    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
     target_type = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_TYPE))
     target_value = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_VALUE))
 
@@ -4531,16 +4575,13 @@ async def _async_handle_create_rule(call: ServiceCall) -> JsonObjectType:
                 translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
             )
     else:
+        assert selection is not None
         if target_type is None or target_value is None:
             raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
             )
-        scope_kind = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_KIND))
-        scope_target = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_TARGET))
-        scope = (
-            (scope_target,)
-            if scope_kind == "device" and scope_target is not None
-            else ()
+        rule_scope = _rule_scope_from_identity(
+            _resolve_scope_identity(entry, selection)
         )
         template = FirewallaRuleTemplate(
             source_rule_id="",
@@ -4548,8 +4589,9 @@ async def _async_handle_create_rule(call: ServiceCall) -> JsonObjectType:
             action=RULE_ACTION_BLOCK,
             target=target_value,
             target_type=target_type,
-            scope=scope,
-            dnsmasq_only=True if target_type == "dns" else None,
+            scope=rule_scope.scope,
+            tag_refs=rule_scope.tag_refs,
+            dnsmasq_only=True if target_type == RULE_TARGET_TYPE_DNS else None,
         )
 
     try:
@@ -4568,6 +4610,7 @@ async def _async_handle_create_rule(call: ServiceCall) -> JsonObjectType:
         "target": template.target,
         "target_type": template.target_type,
         "scope": list(template.scope),
+        "tag_refs": list(template.tag_refs),
         "alarm_id": template.alarm_id,
     }
 
@@ -4667,16 +4710,148 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     return result
 
 
-def _get_alarm_scope_target(call: ServiceCall) -> tuple[str, str | None]:
-    """Validate and return one explicitly selected alarm scope."""
-    scope_kind = cast(str, call.data[SERVICE_FIELD_SCOPE_KIND])
-    scope_target = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_TARGET))
-    if scope_kind != "all" and not scope_target:
+def _select_one_scope(call: ServiceCall) -> SelectorSelection:
+    """Return the one scope a call selected, or raise, without touching runtime data.
+
+    Split from the resolution so a caller mistake is reported before any I/O: the
+    "exactly one" rule needs only `call.data`, while resolving a selector needs the
+    loaded entry. Both services that take a scope share this, so the wide case is
+    stated the same way in each.
+
+    `all_hosts` is reported as the selected field, which keeps the caller's shape --
+    one selection -- even though the wide case carries no value to resolve.
+    """
+    selection = select_scope(call.data, fields=RULE_SCOPE_SELECTOR_FIELDS)
+    all_hosts = cast(bool, call.data.get(SERVICE_FIELD_ALL_HOSTS, False))
+    field_list = ", ".join((*RULE_SCOPE_SELECTOR_FIELDS, SERVICE_FIELD_ALL_HOSTS))
+
+    if all_hosts and selection.is_selected:
         raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED,
-            translation_placeholders={SERVICE_FIELD_SCOPE_KIND: scope_kind},
+            translation_key=TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT,
+            translation_placeholders={TRANS_PLACEHOLDER_SELECTOR_FIELDS: field_list},
         )
-    return scope_kind, scope_target
+    if all_hosts:
+        return SelectorSelection(field=SERVICE_FIELD_ALL_HOSTS)
+    if selection.supplied:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT,
+            translation_placeholders={TRANS_PLACEHOLDER_SELECTOR_FIELDS: field_list},
+        )
+    if not selection.is_selected:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_SELECTOR_REQUIRED,
+            translation_placeholders={TRANS_PLACEHOLDER_SELECTOR_FIELDS: field_list},
+        )
+    return selection
+
+
+def _resolve_scope_identity(
+    entry: FirewallaConfigEntry,
+    selection: SelectorSelection,
+) -> FirewallaScopeIdentity:
+    """Resolve the one scope a call selected, in the machine vocabulary.
+
+    Shared by the two services that take a scope, because the resolution is where the
+    mistakes live and a second copy is how they would come to disagree.
+
+    **A group and a user are not interchangeable.** The tag collection holds both, and
+    a user entry's `group_id` is its *affiliated backing tag* rather than a group. The
+    box addresses a user by that affiliated tag, not by the user id, so the id returned
+    here for a user is deliberately the affiliated tag. Matching is still on the user's
+    own id or name, because that is what a caller has.
+    """
+    if selection.field == SERVICE_FIELD_ALL_HOSTS:
+        return FirewallaScopeIdentity(kind="all")
+
+    if selection.kind == "host":
+        host_manager = entry.runtime_data.host_manager
+        match = _match_scope_selection(
+            selection,
+            ((host.mac, (host.host_name,)) for host in host_manager.get_hosts()),
+            normalize_identifier=normalize_mac_address,
+        )
+        if (mac := match.resolved) is not None:
+            return FirewallaScopeIdentity(kind="host", identifier=mac)
+        raise _rule_scope_error(match, selection=selection)
+
+    if selection.kind == "network":
+        match = _match_scope_selection(
+            selection,
+            (
+                (network.uuid, (network.name,))
+                for network in entry.runtime_data.integration_manager.get_networks()
+            ),
+        )
+        if (uuid := match.resolved) is not None:
+            return FirewallaScopeIdentity(kind="network", identifier=uuid)
+        raise _rule_scope_error(match, selection=selection)
+
+    if selection.kind == "user":
+        match = _match_scope_selection(
+            selection,
+            (
+                (group.user_id, (group.name,))
+                for group in entry.runtime_data.integration_manager.get_groups()
+                if group.kind == _MEMBERSHIP_KIND_USER and group.user_id is not None
+            ),
+        )
+        if (user_id := match.resolved) is None:
+            raise _rule_scope_error(match, selection=selection)
+        for group in entry.runtime_data.integration_manager.get_groups():
+            if group.kind == _MEMBERSHIP_KIND_USER and group.user_id == user_id:
+                return FirewallaScopeIdentity(kind="user", identifier=group.group_id)
+        raise _rule_scope_error(match, selection=selection)
+
+    # Plain groups only. The collection holds user affiliations too, and a user entry
+    # carries the user's own name, so an unfiltered match would let a group request
+    # resolve to a user's backing tag and apply to that user instead.
+    match = _match_scope_selection(
+        selection,
+        (
+            (group.group_id, (group.name,))
+            for group in entry.runtime_data.integration_manager.get_groups()
+            if group.kind == _MEMBERSHIP_KIND_GROUP
+        ),
+    )
+    if (group_id := match.resolved) is not None:
+        return FirewallaScopeIdentity(kind="group", identifier=group_id)
+    raise _rule_scope_error(match, selection=selection)
+
+
+def _rule_scope_from_identity(identity: FirewallaScopeIdentity) -> FirewallaRuleScope:
+    """Translate one resolved scope into the two lists a rule carries."""
+    if identity.kind == "all":
+        return FirewallaRuleScope()
+    assert identity.identifier is not None
+    if identity.kind == "host":
+        return FirewallaRuleScope(scope=(identity.identifier,))
+    if identity.kind == "network":
+        reference = build_tag_reference(TAG_REF_PREFIX_NETWORK, identity.identifier)
+    else:
+        # A group or a user, both carried as a group-prefixed tag. The identity's
+        # identifier is already the affiliated tag for a user, so this needs no
+        # branch -- which is the point of resolving it in one place.
+        reference = build_tag_reference(TAG_REF_PREFIX_GROUP, identity.identifier)
+    return FirewallaRuleScope(tag_refs=(reference,))
+
+
+def _rule_scope_error(
+    match: SelectorMatch,
+    *,
+    selection: SelectorSelection,
+) -> ServiceValidationError:
+    """Build the rule-scope error for a selector that did not resolve."""
+    return _service_validation_error(
+        translation_key=(
+            TRANS_KEY_EXCEPTION_RULE_SCOPE_AMBIGUOUS
+            if match.is_ambiguous
+            else TRANS_KEY_EXCEPTION_RULE_SCOPE_NOT_FOUND
+        ),
+        translation_placeholders={
+            TRANS_PLACEHOLDER_SCOPE_KIND: selection.kind or "",
+            TRANS_PLACEHOLDER_SCOPE_TARGET: selection.value or "",
+        },
+    )
 
 
 def _select_alarm_set(call: ServiceCall) -> SelectorSelection:
@@ -4758,12 +4933,13 @@ async def _async_handle_delete_alarms(call: ServiceCall) -> None:
 
 async def _async_handle_mute_alarm(call: ServiceCall) -> None:
     """Create a silence for one alarm pattern and explicit box scope."""
+    selection = _select_one_scope(call)
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
-    scope_kind, scope_target = _get_alarm_scope_target(call)
+    scope = _resolve_scope_identity(entry, selection)
     alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
     target_type = cast(str, call.data[SERVICE_FIELD_ALARM_TARGET_TYPE])
     target_value = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_TARGET_VALUE))
@@ -4776,8 +4952,8 @@ async def _async_handle_mute_alarm(call: ServiceCall) -> None:
             alarm_id=alarm_id,
             target_type=target_type,
             target_value=target_value,
-            scope_kind=scope_kind,
-            scope_target=scope_target,
+            scope_kind=scope.kind,
+            scope_target=scope.identifier,
             duration=cast(str, call.data[SERVICE_FIELD_DURATION]),
         )
     except ValueError as err:

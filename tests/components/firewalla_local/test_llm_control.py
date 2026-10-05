@@ -37,8 +37,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
-    SERVICE_FIELD_SCOPE_KIND,
-    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_USER_NAME,
     SERVICE_FIELD_WAN_NAME,
@@ -451,8 +449,7 @@ async def test_set_alarm_muted_calls_alarm_manager(hass: HomeAssistant) -> None:
                 SERVICE_FIELD_ALARM_ID: "1728",
                 SERVICE_FIELD_ALARM_TARGET_TYPE: "domain",
                 SERVICE_FIELD_ALARM_TARGET_VALUE: "vimeo.com",
-                SERVICE_FIELD_SCOPE_KIND: "device",
-                SERVICE_FIELD_SCOPE_TARGET: _HOST_MAC,
+                SERVICE_FIELD_HOST_MAC: _HOST_MAC,
                 SERVICE_FIELD_DURATION: "always",
             },
         )

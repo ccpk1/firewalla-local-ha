@@ -55,6 +55,7 @@ SCOPE_SELECTOR_FIELDS: Final[Mapping[str, tuple[str, ...]]] = {
     "host": ("host_id", "host_mac", "host_name"),
     "group": ("group_id", "group_name"),
     "user": ("user_id", "user_name"),
+    "network": ("network_uuid", "network_name"),
 }
 
 # Which fields name an identifier rather than a label. An identifier is assigned by
@@ -62,7 +63,7 @@ SCOPE_SELECTOR_FIELDS: Final[Mapping[str, tuple[str, ...]]] = {
 # case-insensitively. A single free-text field could not make this distinction, which
 # is why it could match a group id against a user's name; a typed pair does not.
 SCOPE_IDENTIFIER_FIELDS: Final[frozenset[str]] = frozenset(
-    {"host_id", "host_mac", "group_id", "user_id"}
+    {"host_id", "host_mac", "group_id", "user_id", "network_uuid"}
 )
 
 

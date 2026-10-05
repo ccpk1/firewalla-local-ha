@@ -488,6 +488,37 @@ class FirewallaFlowReportTarget:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaScopeIdentity:
+    """One resolved scope, in the machine vocabulary, before any wire translation.
+
+    The two services that take a scope need the same resolution and different wire
+    forms, so the shared part stops here: `kind` is `host` / `group` / `user` /
+    `network`, or `all` for the wide case, and `identifier` is the value the *box*
+    addresses that scope by -- which for a user is its affiliated tag, not its user id.
+
+    Keeping the affiliated-tag substitution in one place is deliberate. It is the
+    easiest thing in this area to get wrong, and a second copy of the rule is how two
+    services would come to scope the same request differently.
+    """
+
+    kind: str
+    identifier: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaRuleScope:
+    """What a created rule applies to, in the two shapes the wire uses.
+
+    They are separate lists because the box keys them separately: `scope` holds host
+    MACs, and `tag_refs` holds prefixed references naming a group, a user or a
+    network. Both empty is the wide scope -- every host.
+    """
+
+    scope: tuple[str, ...] = ()
+    tag_refs: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaWanDataUsageSample:
     """One normalized WAN data-usage sample point."""
 

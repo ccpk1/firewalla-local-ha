@@ -152,7 +152,7 @@ async def test_mute_alarm_type_creates_explicit_scoped_exception() -> None:
             alarm_id=None,
             target_type="alarm_type",
             target_value="ALARM_GAME",
-            scope_kind="device",
+            scope_kind="host",
             scope_target="00:11:22:33:44:55",
             duration="always",
         )
@@ -195,7 +195,7 @@ async def test_mute_active_alarm_uses_alarm_allow_for_dns_device_scope() -> None
             alarm_id="alarm-1",
             target_type="domain",
             target_value=None,
-            scope_kind="device",
+            scope_kind="host",
             scope_target="00:11:22:33:44:55",
             duration="always",
         )

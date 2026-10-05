@@ -33,6 +33,7 @@ from .const import (
     SERVICE_FIELD_ALARM_STATUS,
     SERVICE_FIELD_ALARM_TARGET_TYPE,
     SERVICE_FIELD_ALARM_TARGET_VALUE,
+    SERVICE_FIELD_ALL_HOSTS,
     SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIRM,
@@ -53,8 +54,6 @@ from .const import (
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
-    SERVICE_FIELD_SCOPE_KIND,
-    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TARGET_VALUE,
@@ -985,20 +984,46 @@ class SetAlarmMutedTool(_FirewallaControlTool):
                     "alarm_id supplies it)."
                 ),
             ): str,
-            vol.Required(
-                SERVICE_FIELD_SCOPE_KIND,
-                description=(
-                    "Required. Where the silence applies. Choose narrowly — "
-                    "'all' silences for every device."
-                ),
-            ): vol.In(("device", "group", "user", "network", "all")),
             vol.Optional(
-                SERVICE_FIELD_SCOPE_TARGET,
-                description=(
-                    "Optional. The scope value for the chosen kind (a MAC for "
-                    "device, etc.)."
-                ),
+                SERVICE_FIELD_HOST_MAC,
+                description="Optional. Scope by host MAC.",
             ): str,
+            vol.Optional(
+                SERVICE_FIELD_HOST_NAME,
+                description="Optional. Scope by host name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_ID,
+                description="Optional. Scope by group id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_NAME,
+                description="Optional. Scope by group name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_ID,
+                description="Optional. Scope by user id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_NAME,
+                description="Optional. Scope by user name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_UUID,
+                description="Optional. Scope by network UUID.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_NAME,
+                description="Optional. Scope by network name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_ALL_HOSTS,
+                default=False,
+                description=(
+                    "Optional. Apply to every host. The wide scope must be "
+                    "stated, because an empty scope means every host on the wire."
+                ),
+            ): bool,
             vol.Required(
                 SERVICE_FIELD_DURATION,
                 description="Required. How long the silence lasts.",
@@ -1119,13 +1144,45 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
                 description="Optional. The domain, IP, or MAC to block.",
             ): str,
             vol.Optional(
-                SERVICE_FIELD_SCOPE_KIND,
-                description="Optional. Where the block applies.",
-            ): vol.In(("device", "network", "all")),
-            vol.Optional(
-                SERVICE_FIELD_SCOPE_TARGET,
-                description="Optional. The scope value for the chosen kind.",
+                SERVICE_FIELD_HOST_MAC,
+                description="Optional. Scope by host MAC.",
             ): str,
+            vol.Optional(
+                SERVICE_FIELD_HOST_NAME,
+                description="Optional. Scope by host name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_ID,
+                description="Optional. Scope by group id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_NAME,
+                description="Optional. Scope by group name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_ID,
+                description="Optional. Scope by user id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_NAME,
+                description="Optional. Scope by user name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_UUID,
+                description="Optional. Scope by network UUID.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_NAME,
+                description="Optional. Scope by network name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_ALL_HOSTS,
+                default=False,
+                description=(
+                    "Optional. Apply to every host. The wide scope must be "
+                    "stated, because an empty scope means every host on the wire."
+                ),
+            ): bool,
         }
     )
     _service = SERVICE_CREATE_RULE

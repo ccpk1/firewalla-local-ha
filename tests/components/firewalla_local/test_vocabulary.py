@@ -99,25 +99,16 @@ _GUARDED_CONSTANT_PREFIXES: Final = ("SERVICE_FIELD_", "ATTR_", "FLOW_REPORT_")
 # assumed.
 # ---------------------------------------------------------------------------
 
-# Phase 3 deletes `scope_kind` for typed pairs (Q4) and gives `target_type` a real
-# vocabulary (Q5).
+# Phase 3 gives `target_type` a real vocabulary (Q5) and deletes `scope_kind` for
+# typed pairs (Q4).
 #
-# The two report services are migrated: they take the typed pairs the other eleven
-# scope-taking services take, the free-text field that could not tell a group from a
-# user sharing a name is gone, and the duplicate `scope_kind` constant it used was
-# deleted outright. What remains is the `create_rule` and alarm-silence `scope_kind`,
-# and `get_rules`' unvalidated `target_type`.
-_ENUM_VIOLATIONS: Final = {
-    "CREATE_RULE_SCHEMA.SERVICE_FIELD_SCOPE_KIND": (
-        "Phase 3 — `scope_kind` deleted for typed pairs (Q4)"
-    ),
-    "_ALARM_SCOPE_SCHEMA_FIELDS.SERVICE_FIELD_SCOPE_KIND": (
-        "Phase 3 — `scope_kind` deleted for typed pairs (Q4)"
-    ),
-    "GET_RULES_SCHEMA.SERVICE_FIELD_TARGET_TYPE": (
-        "Phase 3 — unvalidated `cv.string`; needs a vocabulary (Q5)"
-    ),
-}
+# Both remaining `scope_kind` enums are gone: `create_rule` and the alarm silences now
+# take typed pairs with an explicit `all_hosts` flag, so the wide case is stated rather
+# than reached by a value. `get_rules`' unvalidated `target_type` is validated against
+# the full `RULE_TARGET_TYPE_*` set, because a filter must accept every value the read
+# side can return -- a typo used to return an empty list indistinguishable from "no such
+# rules".
+_ENUM_VIOLATIONS: Final = {}
 
 _CONSTANT_VIOLATIONS: Final = {
     "ATTR_SYSTEM_DEVICES_ONLINE": "Phase 4 — becomes `hosts_online`",
@@ -144,6 +135,51 @@ _KNOWN_VIOLATIONS: Final = _ENUM_VIOLATIONS | _CONSTANT_VIOLATIONS
 def _module_tree(path: Path) -> ast.Module:
     """Return the parsed module for one integration file."""
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _sequence_constants(constants: Mapping[str, str]) -> dict[str, list[str]]:
+    """Return every module-level name bound to a sequence of enum values.
+
+    The same indirection as :func:`_string_constants`, one level up: an enum is now
+    written as `vol.In(RULE_TARGET_TYPES)` where that name holds the values. A scan
+    that only reads literal sequences would fail closed on every named enum, which
+    makes the guard noisy rather than wrong -- but resolving it keeps the two styles
+    equivalent, so declaring an enum through a named constant is not a way to be
+    skipped.
+
+    `constants` is needed because a named sequence is itself usually a tuple of
+    *constants* (`RULE_TARGET_TYPE_DNS`, ...) rather than of string literals, so both
+    levels have to resolve. A sequence with an element that resolves to neither is
+    omitted entirely, matching the fail-closed rule the enum reader uses.
+    """
+    resolved_sequences: dict[str, list[str]] = {}
+    for path in (SERVICES_PATH, CONST_PATH):
+        for node in ast.walk(_module_tree(path)):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                value = node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                target = node.target
+                value = node.value
+            else:
+                continue
+            if not isinstance(target, ast.Name):
+                continue
+            if not isinstance(value, (ast.Tuple, ast.List)):
+                continue
+            elements: list[str] = []
+            resolvable = True
+            for element in value.elts:
+                if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                    elements.append(element.value)
+                elif isinstance(element, ast.Name) and element.id in constants:
+                    elements.append(constants[element.id])
+                else:
+                    resolvable = False
+                    break
+            if resolvable and elements:
+                resolved_sequences.setdefault(target.id, elements)
+    return resolved_sequences
 
 
 def _string_constants() -> dict[str, str]:
@@ -396,12 +432,19 @@ def _declared_field_name(key: ast.expr) -> str | None:
     return None
 
 
-def _enum_strings(node: ast.expr, constants: Mapping[str, str]) -> list[str] | None:
+def _enum_strings(
+    node: ast.expr,
+    constants: Mapping[str, str],
+    sequences: Mapping[str, list[str]],
+) -> list[str] | None:
     """Return the string values of a `vol.In(...)`, or `None` if it is not one.
 
     An element that is neither a literal nor a resolvable module constant returns
     `None` for the whole enum rather than being skipped, because a partially-read
     enum would be reported as clean on the strength of the elements it could read.
+    The sequence may also be a *named* tuple -- `vol.In(RULE_TARGET_TYPES)` -- which is
+    resolved the same way, so declaring an enum through a constant is not a way past
+    this check.
     """
     if not isinstance(node, ast.Call):
         return None
@@ -410,6 +453,8 @@ def _enum_strings(node: ast.expr, constants: Mapping[str, str]) -> list[str] | N
     if name != "In" or not node.args:
         return None
     values = node.args[0]
+    if isinstance(values, ast.Name):
+        return sequences.get(values.id)
     if not isinstance(values, (ast.Tuple, ast.List)):
         return None
     resolved: list[str] = []
@@ -457,6 +502,7 @@ def _find_enum_violations() -> list[str]:
     """
     tree = _module_tree(SERVICES_PATH)
     constants = _string_constants()
+    sequences = _sequence_constants(constants)
     found: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Dict):
@@ -469,7 +515,7 @@ def _find_enum_violations() -> list[str]:
                 continue
             schema = _enclosing_schema_name(tree, node)
             entry = f"{schema}.{field_name}"
-            values = _enum_strings(value, constants)
+            values = _enum_strings(value, constants, sequences)
             if values is None or any(_uses_human_word(item) for item in values):
                 found.add(entry)
     return sorted(found)
