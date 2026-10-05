@@ -7041,6 +7041,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
         "total_download_bytes": 406504404,
         "total_upload_bytes": 133546109,
         "includes_series": False,
+        "flow_families": ["download", "upload"],
     }
     assert response["sections"]["devices"] == {
         "count": 2,
@@ -7226,6 +7227,13 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
         "total_download_bytes": 406504604,
         "total_upload_bytes": 133546149,
         "includes_series": False,
+        "flow_families": [
+            "appDetails",
+            "categoryDetails",
+            "download",
+            "recent",
+            "upload",
+        ],
     }
     assert response["sections"]["devices"] == {
         "count": 2,
@@ -9049,3 +9057,134 @@ async def test_flow_report_publishes_the_same_user_id_as_the_usage_service(
     # The usage service reports `target_id` = the user id for the same user; see
     # `_usage_history_snapshot`, where the user is user_id "21" in tag "10".
     assert flow_response["target"]["id"] == _FLOW_USER_ID
+
+
+@pytest.mark.asyncio
+async def test_network_segment_usage_warns_when_rankings_were_not_returned(
+    hass: HomeAssistant,
+) -> None:
+    """Test an empty ranking says *why* it is empty.
+
+    An empty `top_download_hosts` has two causes that look identical: nothing
+    transferred, or the box never returned the ranking families. A bare
+    `item=intf` produced the second and reported it as the first, so a caller was
+    told "nothing is using bandwidth" by a payload that had not measured it. The
+    warning names the families that *were* returned so the distinction is visible.
+    """
+    # A bare v1 read: the app families only, with no ranking families at all.
+    base = _network_interface_payload()
+    payload = {
+        **base,
+        "flows": {
+            "appDetails": {"youtube": [{"device": "00:AA:BB:CC:DD:26"}]},
+            "categoryDetails": {"av": [{"device": "00:AA:BB:CC:DD:26"}]},
+            "recent": [],
+        },
+    }
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["sections"]["rankings"]["top_download_hosts"] == []
+    assert [w["code"] for w in response["metadata"]["warnings"]] == [
+        "ranking_families_unavailable"
+    ]
+    assert response["summary"]["flow_families"] == [
+        "appDetails",
+        "categoryDetails",
+        "recent",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_network_segment_usage_stays_silent_when_rankings_are_present(
+    hass: HomeAssistant,
+) -> None:
+    """Test a network with real rankings raises no warning."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=_network_interface_payload()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["summary"]["top_download_count"] > 0
+    assert response["metadata"]["warnings"] == []

@@ -665,6 +665,15 @@ class FirewallaNetworkUsageSummary:
     ``monthly`` is the current calendar-month total (from the WAN monthly
     usage source) and is distinct from the rolling ``last_30d`` window; the two
     are never conflated.
+
+    ``flow_families`` records which ``flows`` families the payload actually
+    carried. The box returns two **disjoint** sets depending on the request -- the
+    app and category families (``appDetails``, ``categoryDetails``) or the eleven
+    traffic families (``download``, ``upload``, ``dnsB``, ``ipB:*``, ``local:*``)
+    -- so a caller can tell a network with no traffic from a network whose ranking
+    families were never returned. Without it, an empty ``top_download_hosts`` reads
+    as "nothing is using bandwidth", which is a statement the payload does not
+    support.
     """
 
     last_24h: FirewallaNetworkUsageWindow | None = None
@@ -672,6 +681,7 @@ class FirewallaNetworkUsageSummary:
     last_30d: FirewallaNetworkUsageWindow | None = None
     last_12m: FirewallaNetworkUsageWindow | None = None
     monthly: FirewallaNetworkUsageWindow | None = None
+    flow_families: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -837,6 +847,17 @@ class FirewallaNetworkSegmentView:
     last60: tuple[FirewallaNetworkMetricSeries, ...] = ()
     last30: tuple[FirewallaNetworkMetricSeries, ...] = ()
     last12_months: tuple[FirewallaNetworkMetricSeries, ...] = ()
+    flow_families: tuple[str, ...] = ()
+
+    @property
+    def has_ranking_families(self) -> bool:
+        """Return whether the payload carried the per-device ranking families.
+
+        An empty ``top_download_hosts`` means "nothing transferred" only when this
+        is true. When it is false the ranking was never measured, which is a
+        different statement a caller must be able to distinguish.
+        """
+        return "download" in self.flow_families or "upload" in self.flow_families
 
     @property
     def host_count(self) -> int:

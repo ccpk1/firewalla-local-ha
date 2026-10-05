@@ -2463,7 +2463,14 @@ async def test_get_wan_events_payload_sends_paged_get_request() -> None:
 
 @pytest.mark.asyncio
 async def test_get_network_interface_payload_sends_targeted_get_request() -> None:
-    """Test item=intf pulls use the confirmed targeted get shape."""
+    """Test item=intf pulls use the confirmed targeted get shapes.
+
+    Two requests, because the box returns two disjoint family sets: a bare read
+    carries the app and category families, and adding `apiVer: 2` plus `local`
+    swaps them for the eleven traffic families. Asserting only the first request
+    is what let the ranking families go unrequested -- an empty top-talker list
+    looked like a quiet network rather than a missing call.
+    """
     async with ClientSession() as session:
         client = FirewallaApiClient(
             session=session,
@@ -2484,11 +2491,97 @@ async def test_get_network_interface_payload_sends_targeted_get_request() -> Non
                 network_uuid="5799d896-5e0f-40a5-a776-38a5d7746204"
             )
 
-    assert mock_send.await_args.kwargs == {
+    assert mock_send.await_count == 2
+    first, second = (call.kwargs for call in mock_send.await_args_list)
+    assert first == {
         "message_type": "get",
         "data": {"item": "intf"},
         "target": "5799d896-5e0f-40a5-a776-38a5d7746204",
     }
+    assert second == {
+        "message_type": "get",
+        "data": {"item": "intf", "apiVer": 2, "local": True},
+        "target": "5799d896-5e0f-40a5-a776-38a5d7746204",
+    }
+    # The window is deliberately absent: measured, sending start/end on this call
+    # reduces the response from 11 families to 3.
+    assert "start" not in second["data"]
+    assert "end" not in second["data"]
+
+
+@pytest.mark.asyncio
+async def test_network_interface_payload_merges_both_family_sets() -> None:
+    """Test the two intf responses are merged rather than one chosen.
+
+    The v1 and v2 payloads are complementary, not alternatives: merging them is
+    what gives one view both the app/category families and the traffic rankings.
+    """
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        app_payload = {
+            "uuid": "net-1",
+            "flows": {"appDetails": {"youtube": []}, "recent": []},
+            "hosts": {"AA:BB": {"download": 0}},
+        }
+        traffic_payload = {
+            "uuid": "net-1",
+            "flows": {"download": [{"device": "AA:BB", "count": "10"}], "upload": []},
+        }
+
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(side_effect=[app_payload, traffic_payload]),
+        ):
+            merged = await client.async_get_network_interface_payload(
+                network_uuid="net-1"
+            )
+
+    assert sorted(merged["flows"]) == ["appDetails", "download", "recent", "upload"]
+    # Non-family keys come from the primary payload untouched.
+    assert merged["hosts"] == {"AA:BB": {"download": 0}}
+
+
+@pytest.mark.asyncio
+async def test_network_interface_payload_survives_a_failed_traffic_read() -> None:
+    """Test a failing ranking read degrades instead of failing the refresh.
+
+    The app and category families are still useful on their own, so a network
+    whose v2 read fails must keep its v1 data rather than losing the whole view.
+    """
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        app_payload = {"uuid": "net-1", "flows": {"appDetails": {}}}
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(
+                side_effect=[app_payload, FirewallaProtocolError("no traffic data")]
+            ),
+        ):
+            payload = await client.async_get_network_interface_payload(
+                network_uuid="net-1"
+            )
+
+    assert payload == app_payload
 
 
 @pytest.mark.asyncio

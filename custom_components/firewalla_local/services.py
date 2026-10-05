@@ -3490,6 +3490,27 @@ def _serialize_network_segment_usage(
             )
         )
 
+    # An empty ranking has two very different causes: no device transferred
+    # anything, or the box did not return the ranking families at all. The second
+    # is what a bare `item=intf` produces, and without a warning the empty list
+    # reads as the first. The families are reported alongside so a caller can see
+    # what the payload actually carried.
+    families = view.flow_families
+    ranking_families_present = view.has_ranking_families
+    warnings: list[FirewallaReportWarning] = []
+    if families and not ranking_families_present and not serialized_top_download_hosts:
+        warnings.append(
+            FirewallaReportWarning(
+                code="ranking_families_unavailable",
+                message=(
+                    "The box did not return the per-device ranking families for "
+                    "this network, so the top talker lists are empty because "
+                    "nothing was measured, not because nothing was transferred. "
+                    f"Families returned: {', '.join(families)}."
+                ),
+            )
+        )
+
     return {
         "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
@@ -3537,6 +3558,7 @@ def _serialize_network_segment_usage(
                 else derived_upload_total
             ),
             "includes_series": include_series,
+            "flow_families": list(families),
         },
         "sections": sections,
         "metadata": _serialize_report_metadata(
@@ -3546,6 +3568,7 @@ def _serialize_network_segment_usage(
                 "include": list(applied_include),
                 "time_zone": time_zone_name,
             },
+            warnings=tuple(warnings),
             provenance=tuple(provenance_items),
         ),
     }

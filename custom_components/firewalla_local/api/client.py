@@ -46,6 +46,7 @@ from ..utils.network import build_network_inventory
 from ..utils.values import normalized_bool, normalized_float, normalized_int
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
+    FirewallaApiError,
     FirewallaAuthError,
     FirewallaConnectionError,
     FirewallaLocalRuntimeNotReadyError,
@@ -332,6 +333,40 @@ def _extract_created_rule_id(response: dict[str, object]) -> str | None:
     if isinstance(raw_id, (int, str)):
         return str(raw_id)
     return None
+
+
+def _merge_network_interface_payloads(
+    primary: dict[str, object],
+    traffic: dict[str, object],
+) -> dict[str, object]:
+    """Merge the v1 and v2 ``item=intf`` payloads into one.
+
+    The two calls return the same envelope with **disjoint** ``flows`` families,
+    so the merge is a union: the v2 traffic families are added to the v1 app and
+    category families rather than replacing them. Every other key is identical
+    between the two, so the primary is kept and only ``flows`` is combined.
+
+    ``hosts`` is deliberately taken from the primary. The block is present on both
+    and reads all-zero on both -- the per-device counters come from the families,
+    not from here -- so there is nothing to reconcile.
+    """
+    merged = dict(primary)
+
+    primary_flows = primary.get("flows")
+    traffic_flows = traffic.get("flows")
+    if not isinstance(traffic_flows, dict):
+        return merged
+
+    combined: dict[str, object] = (
+        dict(primary_flows) if isinstance(primary_flows, dict) else {}
+    )
+    for family, rows in traffic_flows.items():
+        # A family present in both is kept from the traffic payload: it is the
+        # one that was asked for the ranking data, so its rows are the better
+        # source if they ever differ.
+        combined[family] = rows
+    merged["flows"] = combined
+    return merged
 
 
 class FirewallaApiClient:
@@ -1142,7 +1177,32 @@ class FirewallaApiClient:
         *,
         network_uuid: str,
     ) -> dict[str, object]:
-        """Fetch one network-interface summary payload from the local runtime."""
+        """Fetch one network-interface summary payload from the local runtime.
+
+        **Two requests, because the box returns two disjoint family sets.** With a
+        bare ``item=intf`` the response carries ``appDetails`` and
+        ``categoryDetails`` and **no** ``download`` / ``upload``; adding
+        ``apiVer: 2`` and ``local: true`` swaps them for the eleven traffic
+        families (``download``, ``upload``, ``dnsB``, ``ipB:*``, ``local:*``) and
+        drops the app families entirely. Measured on VLAN10 CORE: bare returned 3
+        families, ``apiVer: 2`` returned 11, and neither returned both. So one call
+        cannot answer "what is using the most bandwidth on this network" -- the
+        ranking families are simply absent from the v1 response.
+
+        This is why top talkers read empty for networks whose app families were
+        populated: the per-request ``download`` list was never requested. A bare v1
+        read is also *inconsistent* -- polling VLAN20 CORE-AUX at 20-second
+        intervals returned ``download`` present, present, absent, present -- so
+        relying on it is not merely incomplete, it is unreliable.
+
+        **Do not send ``start`` / ``end`` / ``hourblock``.** The app's own request
+        carries them, but measured here they reduce the response to **3 families**,
+        the same as a bare read. The window is what breaks it, not what improves it.
+
+        The v2 read is best-effort: a failure keeps the v1 result rather than
+        failing the refresh, since the app and category families are still useful
+        on their own.
+        """
         data_payload = await self._async_send_local_message_data(
             message_type=_GET_MESSAGE_TYPE,
             data={_COMMAND_ITEM_KEY: "intf"},
@@ -1153,7 +1213,28 @@ class FirewallaApiClient:
                 "Firewalla local runtime payload did not include an intf object"
             )
 
-        return data_payload
+        try:
+            traffic_payload = await self._async_send_local_message_data(
+                message_type=_GET_MESSAGE_TYPE,
+                data={
+                    _COMMAND_ITEM_KEY: "intf",
+                    _RAW_FLOW_API_VER_KEY: _FLOW_API_VERSION,
+                    _RAW_FLOW_LOCAL_KEY: True,
+                },
+                target=network_uuid,
+            )
+        except FirewallaApiError as err:
+            LOGGER.debug(
+                "Traffic ranking families unavailable for %s: %s",
+                network_uuid,
+                err,
+            )
+            return data_payload
+
+        if not isinstance(traffic_payload, dict):
+            return data_payload
+
+        return _merge_network_interface_payloads(data_payload, traffic_payload)
 
     async def async_get_internet_quality_payload(self) -> dict[str, object]:
         """Fetch the internet-quality payload for all WANs from the local runtime."""

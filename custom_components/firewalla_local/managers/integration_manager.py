@@ -635,11 +635,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         raw_payload: dict[str, object],
     ) -> FirewallaNetworkUsageSummary:
         """Build a bounded usage summary from one raw ``item=intf`` payload."""
+        flows = raw_payload.get("flows")
         return FirewallaNetworkUsageSummary(
             last_24h=extract_usage_window(raw_payload.get("newLast24")),
             last_60m=extract_usage_window(raw_payload.get("last60")),
             last_30d=extract_usage_window(raw_payload.get("last30")),
             last_12m=extract_usage_window(raw_payload.get("last12Months")),
+            flow_families=tuple(sorted(flows)) if isinstance(flows, dict) else (),
         )
 
     async def async_refresh_internet_quality(self) -> None:
@@ -974,6 +976,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             top_categories=self._build_network_usage_buckets(
                 flows.get("categoryDetails")
             ),
+            flow_families=tuple(sorted(flows)),
             new_last24=self._build_network_metric_series(raw_payload.get("newLast24")),
             last60=self._build_network_metric_series(raw_payload.get("last60")),
             last30=self._build_network_metric_series(raw_payload.get("last30")),
