@@ -520,17 +520,17 @@ Reads that explain what the network is doing and how it is performing.
   rule reference at all, so *which rule stopped this* is answerable only there.
 - **Narrow it:** the summary is lean by default. Records are large (one page is
   hundreds of rows), so keep `record_count` small and only raise it if the answer
-  is not there. Add `include: ['device_detail']` only when the question is *which*
+  is not there. Add `include: ['host_detail']` only when the question is *which*
   device — the per-device member ranking, the devices behind a destination, and
   each record's device — because that adds the household's device inventory.
 - **Inputs:** `scope_kind` (`device` | `group` | `user`), `scope_target` (a MAC, id,
   or name for a device; a name, user id, or affiliated tag for a user; a name or id
   for a group), `window_hours` (default 24), `detail` (`summary` | `records`),
-  `record_count`, `include` (`['device_detail']`).
+  `record_count`, `include` (`['host_detail']`).
 - **Returns:** read envelope — `result` with `summary` (window, totals, counts),
   `sections` (`top_download`, `top_upload`, `blocked`, `local_peers`,
   `rollup_families`, plus `blocked_records` / `flow_records` at records detail), and
-  `metadata` (`applied.device_detail`). `target` names the scope in the caller's own
+  `metadata` (`applied.host_detail`). `target` names the scope in the caller's own
   vocabulary, and `query.resolved_type` / `query.resolved_target` report what the
   box was actually asked — for a user those differ, because the flow queries key a
   user by the affiliated tag while the identity stays the user id.

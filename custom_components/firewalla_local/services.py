@@ -33,7 +33,7 @@ from .const import (
     DOMAIN,
     FLOW_REPORT_DETAIL_RECORDS,
     FLOW_REPORT_DETAIL_SUMMARY,
-    FLOW_REPORT_INCLUDE_DEVICE_DETAIL,
+    FLOW_REPORT_INCLUDE_HOST_DETAIL,
     HIDDEN_RULE_PURPOSES,
     HOST_DEVICE_TYPE_OPTIONS,
     LLM_TOOL_MODE_OFF,
@@ -146,6 +146,9 @@ from .const import (
     SERVICE_SYNC_RUNTIME,
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
+    TARGET_KIND_BY_REPORT_SCOPE,
+    TARGET_KIND_HOST,
+    TARGET_KIND_NETWORK,
     TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
     TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
     TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED,
@@ -382,7 +385,7 @@ GET_FLOW_REPORT_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_FETCH_ALL_RECORDS, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_INCLUDE): vol.All(
             cv.ensure_list_csv,
-            [vol.In((FLOW_REPORT_INCLUDE_DEVICE_DETAIL,))],
+            [vol.In((FLOW_REPORT_INCLUDE_HOST_DETAIL,))],
         ),
         vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
@@ -1174,6 +1177,7 @@ def _serialize_report_target(target: FirewallaReportTarget) -> JsonObjectType:
         "kind": target.kind,
         "id": target.id,
         "name": target.name,
+        "network_kind": target.network_kind,
     }
 
 
@@ -1448,7 +1452,7 @@ def _serialize_usage_history_view(
     return {
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind=view.target.scope_kind,
+                kind=TARGET_KIND_BY_REPORT_SCOPE[view.target.scope_kind],
                 id=view.target.target_id,
                 name=view.target.target_name,
             )
@@ -1696,7 +1700,8 @@ def _serialize_wan_data_usage_report(
     return {
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="wan",
+                kind=TARGET_KIND_NETWORK,
+                network_kind=FirewallaNetworkKind.WAN.value,
                 id=report.wan_uuid,
                 name=report.wan_name,
             )
@@ -2099,6 +2104,32 @@ def _resolve_requested_network_required(
     raise _service_validation_error(
         translation_key=TRANS_KEY_EXCEPTION_NETWORK_REQUIRED,
     )
+
+
+def _require_full_network(
+    entry: FirewallaConfigEntry,
+    network: FirewallaNetworkSegment,
+) -> FirewallaNetwork:
+    """Return the unified network behind one resolved segment selector.
+
+    The segment model carries only identity, so the geometry and the network's own
+    kind come from the unified model. Both segment services need the kind, because a
+    network target publishes it.
+    """
+    full_network = next(
+        (
+            candidate
+            for candidate in entry.runtime_data.integration_manager.get_networks()
+            if candidate.uuid == network.uuid
+        ),
+        None,
+    )
+    if full_network is None:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
+            translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
+        )
+    return full_network
 
 
 def _resolve_requested_host(
@@ -2759,13 +2790,13 @@ def _serialize_flow_totals(totals: FirewallaFlowTotals) -> JsonObjectType:
 def _serialize_flow_destination(
     destination: FirewallaFlowDestination,
     *,
-    include_device_detail: bool,
+    include_host_detail: bool,
 ) -> JsonObjectType:
     """Serialize one ranked destination.
 
     The hostname and its addresses are the report's subject and are never gated.
     ``device_ids`` names the devices that reached it, which is a device the caller
-    may not have named, so it follows the ``device_detail`` include.
+    may not have named, so it follows the ``host_detail`` include.
     """
     payload: JsonObjectType = {
         "destination": destination.destination,
@@ -2776,7 +2807,7 @@ def _serialize_flow_destination(
         "total_bytes": destination.total_bytes,
         "rollup_rows": destination.rollup_rows,
     }
-    if include_device_detail:
+    if include_host_detail:
         payload["device_ids"] = list(destination.device_ids)
     return payload
 
@@ -2784,7 +2815,7 @@ def _serialize_flow_destination(
 def _serialize_blocked_destination(
     destination: FirewallaBlockedDestination,
     *,
-    include_device_detail: bool,
+    include_host_detail: bool,
 ) -> JsonObjectType:
     """Serialize one blocked destination, counted in blocks rather than bytes."""
     payload: JsonObjectType = {
@@ -2796,7 +2827,7 @@ def _serialize_blocked_destination(
         "block_count": destination.block_count,
         "rollup_rows": destination.rollup_rows,
     }
-    if include_device_detail:
+    if include_host_detail:
         payload["device_ids"] = list(destination.device_ids)
     return payload
 
@@ -2844,12 +2875,12 @@ def _serialize_flow_record(
     rule_names: Mapping[int, str],
     network_names: Mapping[str, str],
     membership_names: Mapping[str, str],
-    include_device_detail: bool,
+    include_host_detail: bool,
 ) -> JsonObjectType:
     """Serialize one flow record, resolving the ids it references to names.
 
     ``device_id`` and ``device_ip`` identify the device a flow belongs to and
-    follow the ``device_detail`` include. Everything the *destination* is --
+    follow the ``host_detail`` include. Everything the *destination* is --
     hostname, address, port -- is the record's subject and is not gated.
     """
     payload: JsonObjectType = {
@@ -2890,7 +2921,7 @@ def _serialize_flow_record(
         "group_names": _resolved_names(record.tags, membership_names),
         "user_names": _resolved_names(record.user_tags, membership_names),
     }
-    if include_device_detail:
+    if include_host_detail:
         payload["device_id"] = record.device_id
         payload["device_ip"] = record.device_ip
     return payload
@@ -2901,7 +2932,7 @@ def _serialize_flow_record_view(
     *,
     detail: str,
     time_basis: FirewallaReportTimeBasis,
-    include_device_detail: bool,
+    include_host_detail: bool,
 ) -> JsonObjectType:
     """Serialize one record family, with its own reverse-walk time basis.
 
@@ -2927,7 +2958,7 @@ def _serialize_flow_record_view(
                 rule_names=record_view.rule_names,
                 network_names=record_view.network_names,
                 membership_names=record_view.membership_names,
-                include_device_detail=include_device_detail,
+                include_host_detail=include_host_detail,
             )
             for record in record_view.records
         ],
@@ -2961,8 +2992,8 @@ def _serialize_flow_report(
     summary = view.summary
     # A device target names nothing the caller did not itself name, so it needs no
     # flag: this is a property of the data, not a special case for one scope.
-    include_device_detail = (
-        FLOW_REPORT_INCLUDE_DEVICE_DETAIL in requested_include
+    include_host_detail = (
+        FLOW_REPORT_INCLUDE_HOST_DETAIL in requested_include
         or view.target_type == _USAGE_HISTORY_REQUEST_SCOPE_HOST
     )
 
@@ -2985,19 +3016,19 @@ def _serialize_flow_report(
         sections["totals"] = _serialize_flow_totals(summary.totals)
         sections["top_download"] = [
             _serialize_flow_destination(
-                destination, include_device_detail=include_device_detail
+                destination, include_host_detail=include_host_detail
             )
             for destination in summary.top_download
         ]
         sections["top_upload"] = [
             _serialize_flow_destination(
-                destination, include_device_detail=include_device_detail
+                destination, include_host_detail=include_host_detail
             )
             for destination in summary.top_upload
         ]
         sections["blocked"] = [
             _serialize_blocked_destination(
-                destination, include_device_detail=include_device_detail
+                destination, include_host_detail=include_host_detail
             )
             for destination in summary.blocked
         ]
@@ -3005,7 +3036,7 @@ def _serialize_flow_report(
             _serialize_local_peer(peer) for peer in summary.local_peers
         ]
         sections["rollup_families"] = dict(summary.family_row_counts)
-        if summary.top_members and include_device_detail:
+        if summary.top_members and include_host_detail:
             sections["member_ranking"] = [
                 _serialize_flow_member(member) for member in summary.top_members
             ]
@@ -3045,7 +3076,7 @@ def _serialize_flow_report(
                     boundary_source="request",
                     time_zone=time_zone_name,
                 ),
-                include_device_detail=include_device_detail,
+                include_host_detail=include_host_detail,
             )
 
     time_basis = (
@@ -3084,7 +3115,7 @@ def _serialize_flow_report(
         # count is not read as a target with no members.
         "member_count": (
             len(summary.top_members)
-            if summary is not None and include_device_detail
+            if summary is not None and include_host_detail
             else None
         ),
         "includes_records": detail == FLOW_REPORT_DETAIL_RECORDS,
@@ -3097,7 +3128,7 @@ def _serialize_flow_report(
                 # The caller-facing identity, in the caller's own vocabulary, so a
                 # user is named by its user id exactly as the watched-user
                 # entities and `get_time_usage_report` do.
-                kind=target.scope_kind,
+                kind=TARGET_KIND_BY_REPORT_SCOPE[target.scope_kind],
                 id=target.identity_id,
                 name=target.identity_name,
             )
@@ -3132,7 +3163,7 @@ def _serialize_flow_report(
                 # that the include is what widens it -- the gate is a default, not
                 # a limit on what can be retrieved, and not an access control: the
                 # service is non-admin, so any caller who can reach it can ask.
-                "device_detail": include_device_detail,
+                "host_detail": include_host_detail,
             },
             warnings=tuple(warnings),
             unavailable_sections=tuple(unavailable_sections),
@@ -3182,7 +3213,8 @@ def _serialize_network_segment_report(
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind=network.kind.value,
+                kind=TARGET_KIND_NETWORK,
+                network_kind=network.kind.value,
                 id=view.target.uuid,
                 name=view.target.name,
             )
@@ -3339,6 +3371,7 @@ def _serialize_network_segment_usage(
     entry: FirewallaConfigEntry,
     *,
     view: FirewallaNetworkSegmentView,
+    network: FirewallaNetwork,
     refresh_requested: bool,
     window: str,
     top_n: int,
@@ -3516,7 +3549,8 @@ def _serialize_network_segment_usage(
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="network_segment",
+                kind=TARGET_KIND_NETWORK,
+                network_kind=network.kind.value,
                 id=view.target.uuid,
                 name=view.target.name,
             )
@@ -4996,7 +5030,7 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="host",
+                kind=TARGET_KIND_HOST,
                 id=host.mac,
                 name=host.host_name,
             )
@@ -5182,7 +5216,7 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="host",
+                kind=TARGET_KIND_HOST,
                 id=host.mac,
                 name=host.host_name,
             )
@@ -5263,7 +5297,7 @@ async def _async_handle_set_host_notification(
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="host",
+                kind=TARGET_KIND_HOST,
                 id=host.mac,
                 name=host.host_name,
             )
@@ -5443,7 +5477,7 @@ async def _async_handle_host_string_mutation(
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="host",
+                kind=TARGET_KIND_HOST,
                 id=host.mac,
                 name=host.host_name,
             )
@@ -5559,7 +5593,7 @@ async def _async_handle_set_host_dhcp_reservation(
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind="host",
+                kind=TARGET_KIND_HOST,
                 id=host.mac,
                 name=host.host_name,
             )
@@ -5970,7 +6004,6 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
                 ),
             )
         )
-    target_kind = "wan" if wan is not None else "wan_collection"
     time_basis = _build_wan_data_usage_time_basis(
         usage_reports,
         time_zone_name=time_zone_name,
@@ -5981,7 +6014,10 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind=target_kind,
+                kind=TARGET_KIND_NETWORK,
+                network_kind=FirewallaNetworkKind.WAN.value,
+                # Null id means every WAN, which is what the query covers; the
+                # narrowing is expressed by absence rather than by a second kind.
                 id=wan.uuid if wan is not None else None,
                 name=wan.name if wan is not None else None,
             )
@@ -6073,7 +6109,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
         fetch_all_records=cast(bool, call.data[SERVICE_FIELD_FETCH_ALL_RECORDS]),
         requested_include=_normalize_report_include(
             call.data.get(SERVICE_FIELD_INCLUDE),
-            allowed=(FLOW_REPORT_INCLUDE_DEVICE_DETAIL,),
+            allowed=(FLOW_REPORT_INCLUDE_HOST_DETAIL,),
         ),
         refresh_requested=refresh_requested,
         requested_at=int(dt_util.utcnow().timestamp()),
@@ -6102,14 +6138,7 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
 
     # The unified network model carries the geometry/usage/advanced-option
     # fields surfaced alongside the item=intf segment view.
-    full_network = next(
-        (
-            candidate
-            for candidate in entry.runtime_data.integration_manager.get_networks()
-            if candidate.uuid == network.uuid
-        ),
-        None,
-    )
+    full_network = _require_full_network(entry, network)
 
     try:
         network_views = (
@@ -6125,12 +6154,6 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
         )
 
     if not network_views:
-        raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
-            translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
-        )
-
-    if full_network is None:
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
             translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
@@ -6172,6 +6195,7 @@ async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObje
         allowed=("series",),
     )
     time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    full_network = _require_full_network(entry, network)
 
     try:
         network_views = (
@@ -6195,6 +6219,7 @@ async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObje
     return _serialize_network_segment_usage(
         entry,
         view=network_views[0],
+        network=full_network,
         refresh_requested=refresh_requested,
         window=window,
         top_n=top_n,

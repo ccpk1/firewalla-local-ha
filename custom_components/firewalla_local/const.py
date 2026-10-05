@@ -16,6 +16,25 @@ MANUFACTURER: Final = "Firewalla"
 # predicate lives in llm_support.py.
 MIN_LLM_TOOLS_HA_VERSION: Final = (2026, 10)
 
+# Published report target kinds. This is the machine register for "what sort of
+# thing is this target", so an endpoint is `host` and never the human word
+# `device`. A network reports `network` and carries the box's own lan/vlan/vpn/wan
+# type on a separate `network_kind` field rather than in the kind, because those
+# are different questions and collapsing them would lose one.
+TARGET_KIND_HOST: Final = "host"
+TARGET_KIND_GROUP: Final = "group"
+TARGET_KIND_USER: Final = "user"
+TARGET_KIND_NETWORK: Final = "network"
+
+# The request vocabulary spells an endpoint `device`; the published vocabulary
+# spells it `host`. A resolved scope cannot be passed through as its own kind, so
+# every report translates through this map rather than re-deciding per service.
+TARGET_KIND_BY_REPORT_SCOPE: Final = {
+    "device": TARGET_KIND_HOST,
+    "group": TARGET_KIND_GROUP,
+    "user": TARGET_KIND_USER,
+}
+
 # Entity state attributes
 ATTR_INTEGRATION: Final = "integration"
 ATTR_PURPOSE: Final = "purpose"
@@ -291,12 +310,12 @@ FLOW_DIRECTION_LOCAL: Final = "local"
 FLOW_REPORT_DETAIL_SUMMARY: Final = "summary"
 FLOW_REPORT_DETAIL_RECORDS: Final = "records"
 
-# The one include that widens a report: it adds the device identifiers the caller
-# did not itself name (member ranking, a destination's device ids, a record's
-# device id and address). Destination hostnames and addresses are never gated --
-# they are the report's subject -- and a device target needs no flag at all,
-# because it contains no identity beyond the device that was asked for.
-FLOW_REPORT_INCLUDE_DEVICE_DETAIL: Final = "device_detail"
+# The one include that widens a report: it adds the host identifiers the caller did
+# not itself name (member ranking, a destination's host ids, a record's host id and
+# address). Destination hostnames and addresses are never gated -- they are the
+# report's subject -- and a host target needs no flag at all, because it contains no
+# identity beyond the host that was asked for.
+FLOW_REPORT_INCLUDE_HOST_DETAIL: Final = "host_detail"
 
 # The page a records read asks for when the caller does not say. One page is the
 # default because a full day on a busy target is thousands of records; asking for

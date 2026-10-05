@@ -226,12 +226,12 @@ get_flow_report:
       description: Optional. Defaults to false. Walk the record cursor until Firewalla stops returning more, instead of fetching one page. A walk that hits its deadline reports truncated true with a cursor, so a partial result is never mistaken for a complete one.
     include:
       required: false
-      example: "device_detail"
+      example: "host_detail"
       selector:
         select:
           multiple: true
           options:
-            - value: "device_detail"
+            - value: "host_detail"
               label: Include the device behind each member, destination, and record
       name: Include
       description: Optional. Add the device identifiers you did not yourself name — the member ranking, each destination's device IDs, and each record's device ID and address. Absent by default because a group report would otherwise carry the household's device inventory. Destination hostnames and addresses are always returned, and a device scope needs no flag, since it names nothing beyond the device you asked for.

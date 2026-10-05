@@ -34,7 +34,18 @@ SERVICES_PATH: Final = PACKAGE_ROOT / "services.py"
 # Machine-register values a published `target.kind` may take. `network` carries the
 # box's `lan`/`vlan`/`vpn`/`wan` distinction on a separate `network_kind` field
 # rather than in the kind, because collapsing it would lose real information.
+#
+# Held here rather than read from `const.py` on purpose: this is the independent
+# statement of the rule, and `test_the_canonical_set_matches_the_vocabulary_module`
+# is what keeps the two in step. Deriving it from the module would make the guard
+# agree with whatever the module happens to say.
 _CANONICAL_TARGET_KINDS: Final = frozenset({"host", "group", "user", "network"})
+
+# A kind is reached either as one of the canonical constants or by looking it up in a
+# mapping that translates into them. Both are named by prefix so a new one is
+# covered the moment it is added, and neither can hide a value the set rejects.
+_TARGET_KIND_CONSTANT_PREFIX: Final = "TARGET_KIND_"
+_TARGET_KIND_MAPPING_PREFIX: Final = "TARGET_KIND_BY_"
 
 # The machine word for an endpoint. `device` is the human word and must not appear
 # as a machine value.
@@ -55,27 +66,21 @@ _EXEMPT_PRECEDING_TOKEN: Final = "host"
 # is present.
 _GUARDED_ENUM_FIELD_VALUES: Final = ("scope_kind", "target_type")
 
-# Constants whose *values* are machine keys an automation writes.
-_GUARDED_CONSTANT_PREFIXES: Final = ("SERVICE_FIELD_", "ATTR_")
+# Constants whose *values* are machine keys an automation writes. `FLOW_REPORT_` is
+# included because its values are keys inside a report payload, which the register
+# rule names explicitly.
+_GUARDED_CONSTANT_PREFIXES: Final = ("SERVICE_FIELD_", "ATTR_", "FLOW_REPORT_")
 
 # ---------------------------------------------------------------------------
 # The work list. Every entry is a current violation with the phase that removes it.
 # Phase 4.4 deletes this mapping outright; if it cannot be deleted, the initiative
 # is not finished.
+#
+# Phase 2 emptied the response side entirely: every `target.kind` now resolves
+# through `const.py`'s vocabulary, so there is no entry left to carry. That is what
+# `_find_target_kind_violations` returning `[]` means, and it is asserted rather than
+# assumed.
 # ---------------------------------------------------------------------------
-
-_TARGET_KIND_VIOLATIONS: Final = {
-    "services.py:kind='network_segment'": (
-        "Phase 2 — `network_segment` retires for `network`"
-    ),
-    "services.py:kind=network.kind.value": "Phase 2 — sub-kind moves to `network_kind`",
-    "services.py:kind='wan'": "Phase 2 — a WAN is a network with a sub-kind (Q3)",
-    "services.py:kind=target_kind": "Phase 2 — emits `wan`/`wan_collection` (Q3)",
-    "services.py:kind=view.target.scope_kind": (
-        "Phase 2 — emits `device`; becomes `host`"
-    ),
-    "services.py:kind=target.scope_kind": ("Phase 2 — emits `device`; becomes `host`"),
-}
 
 # Phase 3 deletes `scope_kind` for typed pairs (Q4) and gives `target_type` a real
 # vocabulary (Q5). Two constants share the value "scope_kind" —
@@ -118,9 +123,7 @@ _CONSTANT_VIOLATIONS: Final = {
     "ATTR_ALARM_DEVICE_NAME": "Phase 4 — becomes `host_name`",
 }
 
-_KNOWN_VIOLATIONS: Final = (
-    _TARGET_KIND_VIOLATIONS | _ENUM_VIOLATIONS | _CONSTANT_VIOLATIONS
-)
+_KNOWN_VIOLATIONS: Final = _ENUM_VIOLATIONS | _CONSTANT_VIOLATIONS
 
 
 def _module_tree(path: Path) -> ast.Module:
@@ -193,9 +196,85 @@ def _enclosing_schema_name(tree: ast.Module, target: ast.AST) -> str:
     return "<module>"
 
 
+def _target_kind_constants(constants: Mapping[str, str]) -> dict[str, str]:
+    """Return every `const.py` constant that declares a published target kind."""
+    return {
+        name: value
+        for name, value in constants.items()
+        if name.startswith(_TARGET_KIND_CONSTANT_PREFIX)
+    }
+
+
+def _target_kind_mappings(
+    constants: Mapping[str, str],
+) -> dict[str, list[str] | None]:
+    """Return every `const.py` mapping that translates into a target kind.
+
+    A value that cannot be resolved makes the whole mapping `None` rather than being
+    skipped, for the same reason an unresolvable enum is rejected: a partially-read
+    mapping would be reported as canonical on the strength of the entries it could
+    read.
+    """
+    tree = _module_tree(CONST_PATH)
+    mappings: dict[str, list[str] | None] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign) and node.value is not None:
+            name = node.target.id if isinstance(node.target, ast.Name) else None
+            value = node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            name = target.id if isinstance(target, ast.Name) else None
+            value = node.value
+        else:
+            continue
+        if name is None or not name.startswith(_TARGET_KIND_MAPPING_PREFIX):
+            continue
+        if not isinstance(value, ast.Dict):
+            continue
+        resolved: list[str] | None = []
+        for item in value.values:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                resolved.append(item.value)
+            elif isinstance(item, ast.Name) and item.id in constants:
+                resolved.append(constants[item.id])
+            else:
+                resolved = None
+                break
+        mappings[name] = resolved
+    return mappings
+
+
+def _is_canonical_kind_expression(
+    node: ast.expr,
+    canonical_names: frozenset[str],
+    mapping_names: frozenset[str],
+) -> bool:
+    """Return whether one `kind=` expression can only produce a canonical kind.
+
+    Three forms are accepted, and nothing else: a canonical literal, one of the
+    canonical constants, or a lookup in a mapping that resolves into them. A service
+    that reaches a kind any other way fails here, which is what stops a new service
+    from inventing one.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value in _CANONICAL_TARGET_KINDS
+    if isinstance(node, ast.Name):
+        return node.id in canonical_names
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+        return node.value.id in mapping_names
+    return False
+
+
 def _find_target_kind_violations() -> list[str]:
-    """Return every non-canonical `target.kind` emitted from `services.py`."""
+    """Return every `target.kind` that could be published outside the vocabulary."""
     tree = _module_tree(SERVICES_PATH)
+    constants = _string_constants()
+    canonical_names = frozenset(
+        name
+        for name, value in _target_kind_constants(constants).items()
+        if value in _CANONICAL_TARGET_KINDS
+    )
+    mapping_names = frozenset(_target_kind_mappings(constants))
     found: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -207,14 +286,26 @@ def _find_target_kind_violations() -> list[str]:
         for keyword in node.keywords:
             if keyword.arg != "kind":
                 continue
-            value = keyword.value
-            is_canonical = (
-                isinstance(value, ast.Constant)
-                and isinstance(value.value, str)
-                and value.value in _CANONICAL_TARGET_KINDS
-            )
-            if not is_canonical:
-                found.add(f"services.py:kind={_dump(value)}")
+            if not _is_canonical_kind_expression(
+                keyword.value, canonical_names, mapping_names
+            ):
+                found.add(f"services.py:kind={_dump(keyword.value)}")
+    return sorted(found)
+
+
+def _find_target_kind_mapping_violations() -> list[str]:
+    """Return every kind mapping that resolves to a value the set rejects.
+
+    The mapping is the one route by which a dynamic kind reaches a response, so it is
+    checked where it is declared rather than only where it is read.
+    """
+    constants = _string_constants()
+    found: set[str] = set()
+    for name, values in _target_kind_mappings(constants).items():
+        if values is None or any(
+            value not in _CANONICAL_TARGET_KINDS for value in values
+        ):
+            found.add(f"const.py:{name}")
     return sorted(found)
 
 
@@ -339,6 +430,7 @@ def _found_violations() -> dict[str, str]:
     """
     return {
         **dict.fromkeys(_find_target_kind_violations(), ""),
+        **dict.fromkeys(_find_target_kind_mapping_violations(), ""),
         **dict.fromkeys(_find_enum_violations(), ""),
         **dict.fromkeys(_find_constant_violations(), ""),
     }
@@ -378,6 +470,22 @@ def test_every_work_list_entry_names_the_phase_that_removes_it() -> None:
         key for key, reason in _KNOWN_VIOLATIONS.items() if "Phase " not in reason
     )
     assert unowned == [], f"work-list entries with no owning phase: {unowned}"
+
+
+def test_the_canonical_set_matches_the_vocabulary_module() -> None:
+    """Test the guard's set and `const.py` declare the same target kinds.
+
+    The guard holds the set independently so that it cannot agree with the module by
+    construction, which means the two have to be compared. A constant the guard would
+    reject, or a kind with no constant, is a vocabulary that is only half-sourced.
+    """
+    declared = set(_target_kind_constants(_string_constants()).values())
+
+    assert declared == set(_CANONICAL_TARGET_KINDS), (
+        "const.py's `TARGET_KIND_*` constants and the guard's canonical set disagree; "
+        f"module declares {sorted(declared)}, guard enforces "
+        f"{sorted(_CANONICAL_TARGET_KINDS)}"
+    )
 
 
 def test_the_canonical_set_matches_the_documented_one() -> None:

@@ -372,3 +372,88 @@ Does **not** check, and why:
 
 The second is the property that makes the list a work list rather than a suppression
 list, and it was observed during development rather than argued for.
+
+---
+
+## 8. What Phase 2 surfaced that this note did not inventory
+
+Phase 2 was scoped to the seven `services.py` emitters in §3. Executing it showed
+that scope was drawn too tightly in two places, and that the guard's coverage is
+narrower than the rule it states. All three are recorded here rather than fixed
+silently, because each changes something a phase already declared settled.
+
+### 8a. A second published `target.kind` vocabulary *(needs an owner decision)*
+
+`llm_tools_control.py` publishes the same `{"kind", "id", "name"}` target object to
+the LLM, with a vocabulary §3 never saw:
+
+| File | Published kind | Canonical? |
+| --- | --- | --- |
+| `llm_tools_control.py` ×3 | `rule` | no |
+| `llm_tools_control.py` ×2 | `alarm` | no |
+| `llm_tools_control.py` ×2 | `silence` | no |
+| `llm_tools_control.py` ×1 | `ssid` | no |
+| `llm_tools_control.py` ×1 | `wan` | **no — and now contradicts `services.py`** |
+
+The `wan` is the sharp one. Phase 2 retargeted every report to
+`kind: "network"` + `network_kind: "wan"`, and the speed-test control tool still
+publishes `kind: "wan"` for the same concept. The two surfaces disagree, which is
+the exact defect the initiative exists to remove — introduced *by* the fix, because
+the inventory only looked at one file.
+
+The guard never saw any of this: it scans `services.py` only. **That blind spot was
+flagged as a risk when Phase 1 shipped, and it was correct.**
+
+This needs a decision because it changes the canonical set, which Phase 1 fixed:
+
+- **Option A (recommended).** Widen the set to every published target kind —
+  `host`, `group`, `user`, `network`, `rule`, `alarm`, `silence`, `ssid` — and scan
+  the whole package. One vocabulary for "what can a target name", with the report
+  scopes a subset of it. `wan` collapses into `network` + `network_kind` as already
+  done. Cost: one constant, one guard set, one `ARCHITECTURE.md` sentence, and the
+  control-tool `wan`.
+- **Option B.** Declare two vocabularies — report scopes and action targets — and
+  document the boundary. Cheaper, but leaves two `kind` vocabularies under one name,
+  which is §2c's collision problem in a new place.
+
+Recommendation is A: the object shape is identical, the reader is the same reader,
+and B re-creates the ambiguity the whole initiative is about.
+
+### 8b. Payload keys using the human word *(Phase 4)*
+
+Flow records and their member rows publish `device_id` and `device_ip` as keys:
+
+| Site | Key |
+| --- | --- |
+| `services.py` (member rows, record payload) | `device_id`, `device_ip` |
+| `models.py` | `device_id`, `device_ip` |
+| `utils/flow.py`, `utils/flow_report.py` | the same, as dataclass fields |
+
+These are keys inside a payload, which `ARCHITECTURE.md` explicitly calls machine.
+They are violations of the rule as written. They are **not** in the guard, because
+8c below. Phase 4 owns them, alongside the twelve `ATTR_*` values.
+
+### 8c. The guard is narrower than the rule *(Phase 4.5)*
+
+`ARCHITECTURE.md` says "a key inside a payload is machine". The guard checks three
+things: `target.kind` expressions, two named enum fields, and the values of
+`SERVICE_FIELD_*` / `ATTR_*` / `FLOW_REPORT_*` constants.
+
+So it does **not** see:
+
+- any dict key written literally in `services.py`, `models.py`, or a helper — which
+  is how 8b survives
+- the enum values inside `llm_tools_read.py` / `llm_tools_control.py` schemas, which
+  duplicate the service schemas — which is how 8a survives
+
+Both were found by reading, not by the test. **Phase 4.5's "absolute guard" must
+widen the scan to the whole package and to literal payload keys**, or the rule stays
+partly unenforced and the allowlist reaching empty will mean less than it appears to.
+Recorded now so Phase 4.5 is specified by evidence rather than intent.
+
+### 8d. An answered question with no owner
+
+Q7 (does `device_detail` become `host_detail`) was answered "yes" in the plan, and no
+phase step owned the change. It would have been silently skipped. It was done in
+Phase 2 — but the general point is worth keeping: **answering a question is not
+scheduling the work**, and this note is the only place that maps one to the other.

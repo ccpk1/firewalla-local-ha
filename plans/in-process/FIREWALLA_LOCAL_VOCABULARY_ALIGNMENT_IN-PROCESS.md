@@ -3,7 +3,9 @@
 **Initiative:** One vocabulary across every surface a user or model reads or writes
 **Branch:** `feature/flow-reporting` (the vocabulary work continues on it; nothing here is pushed)
 **Depends on:** nothing. Independent of the flow-reporting initiative, though it finishes work that initiative started.
-**Status:** **Phase 1 complete** — rule stated, guard live and proven to fail; Phases 2–4 not started
+**Status:** **Phase 2 complete for the report surface** — rule stated, guard live and
+proven to fail, report targets canonical; Phases 3–4 not started, and two findings
+are awaiting an owner decision (inventory §8)
 **Last updated:** 2026-10-05
 
 ---
@@ -297,31 +299,52 @@ and documentation prose (the guard reads code — Phase 4.3).
 
 ### Phase 2 — Responses: one canonical `target`
 
+**COMPLETE for the report surface.** 732 tests pass. `ruff`, `ruff format`, `mypy`
+clean. The work list shrank from 23 entries to 17.
+
 Purpose: every response names its scope from one vocabulary, and the one concept the
 codebase already unified — a network — stops being reported under two names.
 
-- [ ] **2.1 Create the canonical vocabulary module.** A single source for the
-      published kinds and the network sub-kinds, in the layer that owns published
-      contract values. `const.py` already owns `SERVICE_FIELD_*` and is imported by
-      every layer, so it is the home unless 2.1 finds a reason otherwise; record the
-      choice. The kinds are the canonical set from Q1/Q3.
-- [ ] **2.2 Emit `target` from the module everywhere.** Replace every
-      `FirewallaReportTarget(kind=...)` literal and every `network.kind.value` pass-
-      through with the canonical value. `network_segment` is retired. Each service's
-      `target` is then asserted against the canonical set rather than against a
-      literal string, so a future service cannot invent a kind.
-- [ ] **2.3 Carry the network sub-kind as a field.** The `lan`/`vlan`/`vpn`/`wan`
-      distinction is real information and must not be lost by collapsing it into
-      `network`; it moves to a `network_kind` field on the same object. Verify the
-      sub-kind survives on every service that previously emitted it — a collapse
-      that drops information is a regression dressed as consistency.
-- [ ] **2.4 Align the LLM tool descriptions.** Any tool description naming a target
-      kind updates to the canonical value, and `llm_tools_common.PROMPT` gains the
-      register rule in one sentence if it does not already carry it. The contract
-      test that requires every registered tool to be named in the reference must
-      still pass.
-- [ ] **2.5 Shrink the allowlist and validate.** Remove the response-side entries.
-      Full chain green.
+- [x] **2.1 Create the canonical vocabulary module.** Done, in `const.py`: it already
+      owns `SERVICE_FIELD_*`, is imported by every layer, and is free of
+      `homeassistant` imports, so it stays importable from the pure layers. It gains
+      `TARGET_KIND_HOST` / `_GROUP` / `_USER` / `_NETWORK`, plus
+      `TARGET_KIND_BY_REPORT_SCOPE`, which maps the request vocabulary onto the
+      published one. The network sub-kinds need no new source: `FirewallaNetworkKind`
+      is already the single one.
+- [x] **2.2 Emit `target` from the module everywhere.** Done — all 11
+      `FirewallaReportTarget` call sites. The five static ones use `TARGET_KIND_HOST`;
+      the two scope-driven ones index `TARGET_KIND_BY_REPORT_SCOPE`, which is why
+      that map exists rather than a per-service conditional. `network_segment` is
+      retired.
+- [x] **2.3 Carry the network sub-kind as a field.** Done — `network_kind` on
+      `FirewallaReportTarget`, published by `_serialize_report_target`. The
+      information-loss check passed and found one real gap: the segment *usage*
+      serializer had no `FirewallaNetwork` to read the kind from, only the segment
+      identity. Rather than derive it from `view.network_type` (the raw wire string,
+      a guess), the lookup the report path already performed inline was extracted to
+      `_require_full_network` and both paths now use it. **A WAN collection is
+      `network` with a null `id`**, not a second kind: the narrowing is already
+      expressed by absence, so no information is lost and the set stays closed.
+- [x] **2.4 Align the LLM tool descriptions.** Done, and this uncovered an
+      **unassigned** item: Q7 answered `include: ["device_detail"]` → `host_detail`
+      but no phase step owned it, so it would silently never have happened.
+      Answering a question is not the same as scheduling it. Renamed here, since it
+      is a published machine value on the same response as `target.kind` and leaving
+      it would have produced `target.kind: "host"` beside `applied.device_detail`.
+      The guard gained `FLOW_REPORT_` as a guarded constant prefix so it cannot
+      regress.
+- [x] **2.5 Shrink the allowlist and validate.** Done — the six response-side entries
+      are gone, and `_TARGET_KIND_VIOLATIONS` was deleted rather than left empty. The
+      guard now resolves the vocabulary module instead of only literals, and asserts
+      the module's constants and its own set agree, so neither can drift.
+
+**Two gaps this phase surfaced that the plan did not inventory — see the inventory
+note §8.** Both are outside Phase 2's stated boundary and neither is fixed by it:
+a second published `target.kind` vocabulary in the control tools (including a `wan`
+that now contradicts the report vocabulary), and payload keys using the human word
+in flow records. The first needs an owner decision because it changes the canonical
+set, which Phase 1 fixed.
 
 ### Phase 3 — Inputs: one selector vocabulary
 

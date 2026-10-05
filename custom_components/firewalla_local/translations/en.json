@@ -1701,7 +1701,7 @@
         },
         "include": {
           "name": "Include",
-          "description": "Optional. 'device_detail' adds the device identifiers the caller did not itself name: the member ranking, each destination's device IDs, and each record's device ID and address. It is absent by default because a group report would otherwise carry the household's device inventory. Destination hostnames and addresses are always returned, and a device scope needs no flag, since it names nothing beyond the device asked for."
+          "description": "Optional. 'host_detail' adds the host identifiers the caller did not itself name: the member ranking, each destination's host IDs, and each record's host ID and address. It is absent by default because a group report would otherwise carry the household's device inventory. Destination hostnames and addresses are always returned, and a host scope needs no flag, since it names nothing beyond the host asked for."
         },
         "refresh": {
           "name": "Refresh first",

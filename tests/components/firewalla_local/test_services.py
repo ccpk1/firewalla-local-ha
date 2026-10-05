@@ -2615,6 +2615,7 @@ async def test_wake_host_service_returns_acknowledgement_for_host_mac(
             "kind": "host",
             "id": "00:AA:BB:CC:DD:26",
             "name": "Plex Server",
+            "network_kind": None,
         },
         "query": {
             "host_id": None,
@@ -3135,6 +3136,7 @@ async def test_set_host_notify_when_next_online_returns_acknowledgement(
             "kind": "host",
             "id": "00:AA:BB:CC:DD:26",
             "name": "Plex Server",
+            "network_kind": None,
         },
         "query": {
             "enabled": True,
@@ -3281,6 +3283,7 @@ async def test_set_host_name_returns_acknowledgement_for_host_mac(
             "kind": "host",
             "id": "00:AA:BB:CC:DD:26",
             "name": "Plex Server",
+            "network_kind": None,
         },
         "query": {
             "new_name": "Plex Server Renamed",
@@ -3419,6 +3422,7 @@ async def test_set_host_dns_hostname_returns_acknowledgement_for_host_mac(
             "kind": "host",
             "id": "00:AA:BB:CC:DD:26",
             "name": "Plex Server",
+            "network_kind": None,
         },
         "query": {
             "dns_hostname": "plex.server.3",
@@ -3501,6 +3505,7 @@ async def test_set_host_device_type_returns_acknowledgement_for_host_mac(
             "kind": "host",
             "id": "00:AA:BB:CC:DD:26",
             "name": "Plex Server",
+            "network_kind": None,
         },
         "query": {
             "host_device_type": "tablet",
@@ -5218,6 +5223,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
             "kind": "host",
             "id": "00:AA:BB:CC:DD:26",
             "name": "Plex Server",
+            "network_kind": None,
         },
         "network": {
             "uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
@@ -5661,9 +5667,10 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
     }
     assert response is not None
     assert response["target"] == {
-        "kind": "device",
+        "kind": "host",
         "id": "EC:0D:51:CC:BA:BC",
         "name": "Kaden Phone",
+        "network_kind": None,
     }
     assert response["query"] == {
         "detail": "standard",
@@ -6323,9 +6330,10 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_when_req
     assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is True
     assert response["target"] == {
-        "kind": "wan_collection",
+        "kind": "network",
         "id": None,
         "name": None,
+        "network_kind": "wan",
     }
     assert response["query"] == {
         "detail": "summary",
@@ -6362,7 +6370,12 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_when_req
     assert response["time_basis"]["kind"] == "period_bundle"
     assert response["time_basis"]["time_zone"] == "America/New_York"
     first_report = response["sections"]["reports"][0]
-    assert first_report["target"] == {"kind": "wan", "id": "wan-1", "name": "WAN-ONE"}
+    assert first_report["target"] == {
+        "kind": "network",
+        "id": "wan-1",
+        "name": "WAN-ONE",
+        "network_kind": "wan",
+    }
     assert first_report["current"]["month"]["usage"] == {
         "download_bytes": 3072,
         "upload_bytes": 1280,
@@ -6552,7 +6565,12 @@ async def test_get_wan_data_usage_service_returns_history_months_only(
 
     assert mock_get_history.await_count == 1
     assert response is not None
-    assert response["target"] == {"kind": "wan", "id": "wan-1", "name": "WAN-ONE"}
+    assert response["target"] == {
+        "kind": "network",
+        "id": "wan-1",
+        "name": "WAN-ONE",
+        "network_kind": "wan",
+    }
     assert response["refreshed"] is False
     assert response["query"] == {
         "detail": "summary",
@@ -6690,9 +6708,10 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is False
     assert response["target"] == {
-        "kind": "lan",
+        "kind": "network",
         "id": "5799d896-5e0f-40a5-a776-38a5d7746204",
         "name": "VLAN10 CORE",
+        "network_kind": "lan",
     }
     assert response["query"] == {"refresh": False}
     assert response["time_basis"] == {
@@ -7004,9 +7023,10 @@ async def test_get_network_segment_usage_service_returns_summary_report(
     assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is False
     assert response["target"] == {
-        "kind": "network_segment",
+        "kind": "network",
         "id": "5799d896-5e0f-40a5-a776-38a5d7746204",
         "name": "VLAN10 CORE",
+        "network_kind": "lan",
     }
     assert response["query"] == {
         "refresh": False,
@@ -8667,6 +8687,7 @@ async def test_flow_report_summarises_a_group_without_reading_records(
         "kind": "group",
         "id": _FLOW_GROUP_ID,
         "name": "Quarantine",
+        "network_kind": None,
     }
     # A group's identity and its protocol target are the same id, so the resolution
     # is reported but does not remap anything.
@@ -8726,7 +8747,7 @@ async def test_flow_report_records_detail_reads_both_record_families(
 
 
 @pytest.mark.asyncio
-async def test_flow_report_withholds_device_detail_by_default_on_a_group(
+async def test_flow_report_withholds_host_detail_by_default_on_a_group(
     hass: HomeAssistant,
 ) -> None:
     """Test a group report names no device the caller did not itself name.
@@ -8748,12 +8769,12 @@ async def test_flow_report_withholds_device_detail_by_default_on_a_group(
     record = response["sections"]["blocked_records"]["records"][0]
     assert "device_id" not in record
     assert "device_ip" not in record
-    assert response["metadata"]["applied"]["device_detail"] is False
+    assert response["metadata"]["applied"]["host_detail"] is False
     assert "member_ranking" not in response["metadata"]["unavailable_sections"]
 
 
 @pytest.mark.asyncio
-async def test_flow_report_returns_device_detail_when_it_is_asked_for(
+async def test_flow_report_returns_host_detail_when_it_is_asked_for(
     hass: HomeAssistant,
 ) -> None:
     """Test the include widens the same report rather than unlocking it."""
@@ -8761,12 +8782,12 @@ async def test_flow_report_returns_device_detail_when_it_is_asked_for(
         hass,
         extra={
             SERVICE_FIELD_DETAIL: "records",
-            SERVICE_FIELD_INCLUDE: ["device_detail"],
+            SERVICE_FIELD_INCLUDE: ["host_detail"],
         },
     )
 
     assert response is not None
-    assert response["metadata"]["applied"]["device_detail"] is True
+    assert response["metadata"]["applied"]["host_detail"] is True
     assert response["summary"]["member_count"] == 2
     assert response["sections"]["member_ranking"][0]["device_id"] == _FLOW_HOST_MAC
     assert response["sections"]["top_download"][0]["device_ids"] == [_FLOW_HOST_MAC]
@@ -8795,10 +8816,10 @@ async def test_flow_report_needs_no_flag_to_name_the_device_it_was_asked_about(
     )
 
     assert response is not None
-    assert response["target"]["kind"] == "device"
+    assert response["target"]["kind"] == "host"
     assert response["target"]["id"] == _FLOW_HOST_MAC
     assert response["query"]["resolved_target"] == _FLOW_HOST_MAC
-    assert response["metadata"]["applied"]["device_detail"] is True
+    assert response["metadata"]["applied"]["host_detail"] is True
     assert (
         response["sections"]["blocked_records"]["records"][0]["device_id"]
         == _FLOW_HOST_MAC
@@ -9020,7 +9041,7 @@ async def test_flow_report_accepts_exactly_the_fields_the_llm_tool_passes(
     assert response["query"]["record_count"] == 300
     assert response["query"]["fetch_all_records"] is False
     assert response["summary"]["totals"] is not None
-    assert response["metadata"]["applied"]["device_detail"] is False
+    assert response["metadata"]["applied"]["host_detail"] is False
 
 
 @pytest.mark.parametrize(
@@ -9058,6 +9079,7 @@ async def test_flow_report_accepts_every_user_selector_it_can_report(
         "kind": "user",
         "id": _FLOW_USER_ID,
         "name": "KADEN",
+        "network_kind": None,
     }
     assert response["query"]["resolved_target"] == _FLOW_AFFILIATED_TAG_ID
 

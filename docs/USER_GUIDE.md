@@ -1035,7 +1035,7 @@ carries:
 - `sections.blocked` — blocked destinations, as block **counts** rather than bytes,
   with the direction only where the family carries one
 - `sections.local_peers` — LAN peers, counted in connections
-- `metadata.applied.device_detail` — whether per-device detail is included
+- `metadata.applied.host_detail` — whether per-host detail is included
 
 `detail: records` adds the blocked and regular flow records. **This is the level to
 use when diagnosing**, because it is the only one that names the rule responsible:
@@ -1055,12 +1055,12 @@ thousand rows on a busy target, so it is opt-in and paginated:
 group. That is not in an ordinary report by default, so per-device attribution sits
 behind an explicit ask:
 
-- `include: ["device_detail"]` adds the member ranking, each destination's device
+- `include: ["host_detail"]` adds the member ranking, each destination's host
   ids, and each record's device id and address
 - destination hostnames and addresses are always returned — they are the report's
   subject, not identity
 - a **device** scope needs no flag, because it names nothing beyond the device you
-  asked for; `metadata.applied.device_detail` is `true` either way
+  asked for; `metadata.applied.host_detail` is `true` either way
 - this is a **default, not a permission**. The service is non-admin, so anything it
   can return, a caller can ask for in one request; the flag keeps the household's
   device inventory out of an ordinary report rather than restricting access

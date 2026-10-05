@@ -25,7 +25,7 @@ from .const import (
     DOMAIN,
     FLOW_REPORT_DETAIL_RECORDS,
     FLOW_REPORT_DETAIL_SUMMARY,
-    FLOW_REPORT_INCLUDE_DEVICE_DETAIL,
+    FLOW_REPORT_INCLUDE_HOST_DETAIL,
     MAX_FLOW_LOG_PAGE_SIZE,
     MIN_FLOW_LOG_PAGE_SIZE,
     SERVICE_FIELD_ACTION,
@@ -680,10 +680,10 @@ class GetFlowReportTool(_FirewallaReadTool):
         "so keep `record_count` small and raise it only if the answer is not "
         "there.\n"
         "\n"
-        "Device detail is not included by default. Add "
-        '`include: ["device_detail"]` when the question needs to know which device '
-        "was behind a member row, a destination, or a record. A device scope always "
-        "names its own device whether or not the flag is set."
+        "Per-host detail is not included by default. Add "
+        '`include: ["host_detail"]` when the question needs to know which host '
+        "was behind a member row, a destination, or a record. A host scope always "
+        "names its own host whether or not the flag is set."
     )
     parameters = vol.Schema(
         {
@@ -733,12 +733,12 @@ class GetFlowReportTool(_FirewallaReadTool):
             vol.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
-                    "Optional. Add per-device detail, which is absent by default. "
-                    "Allowed: 'device_detail'."
+                    "Optional. Add per-host detail, which is absent by default. "
+                    "Allowed: 'host_detail'."
                 ),
             ): vol.All(
                 cv.ensure_list,
-                [vol.In((FLOW_REPORT_INCLUDE_DEVICE_DETAIL,))],
+                [vol.In((FLOW_REPORT_INCLUDE_HOST_DETAIL,))],
             ),
         }
     )

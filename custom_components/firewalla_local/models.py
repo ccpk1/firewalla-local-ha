@@ -413,6 +413,9 @@ class FirewallaReportTarget:
     kind: str
     id: str | None = None
     name: str | None = None
+    # Only set for a network target. The kind says "a network"; this says which
+    # kind of network, which the box distinguishes and the kind must not lose.
+    network_kind: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
