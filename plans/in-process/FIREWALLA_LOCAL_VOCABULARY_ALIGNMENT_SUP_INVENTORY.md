@@ -463,3 +463,166 @@ Q7 (does `device_detail` become `host_detail`) was answered "yes" in the plan, a
 phase step owned the change. It would have been silently skipped. It was done in
 Phase 2 — but the general point is worth keeping: **answering a question is not
 scheduling the work**, and this note is the only place that maps one to the other.
+
+---
+
+## 9. Phase 3.2 — measured, and the proposed standardisation
+
+**Status: proposal, awaiting approval.** The findings below are measured against the
+tree, not inferred. The plan's own §3.2 description was written from the earlier
+audit and is **wrong in three places**, corrected here.
+
+### 9a. The audit's three errors, corrected
+
+The plan described "the `target_type` treatment that loses" and "the `mode`
+near-duplicate" with the counts it had at planning time. Measuring each schema:
+
+| Claim in §3.2 | Measured |
+| --- | --- |
+| "`target_type` — **three** treatments" | Three *services*, but only **two vocabularies**, and two of the three are the **same** one (see 9b) |
+| "`detail`'s two types (boolean on `get_alarms`, enum elsewhere)" | **Four** treatments: `summary\|records`, **boolean**, `summary\|full` ×2, `summary\|standard` |
+| "`mode` near-duplicate" | Also collides with a third, unrelated `mode` (`set_host_dhcp_reservation`: `dynamic\|static`) |
+
+The `detail` finding is the largest in the whole audit and the plan understated it by
+half. Every count below comes from parsing each `*_SCHEMA` assignment.
+
+### 9b. `target_type` is one vocabulary plus one genuine collision
+
+| Service | Values | What it names | Validated |
+| --- | --- | --- | --- |
+| `create_rule` | `dns\|ip\|mac` | **how a new rule matches** — wire values | yes, a **subset** |
+| `get_rules` | `cv.string` | filters on `rule.target_type` — **the same field** | **no** |
+| `mute_alarm` | `alarm_type\|domain\|ip` | **what kind of thing to silence** | yes |
+
+`create_rule` and `get_rules` are **not a collision**: they are the same concept —
+the rule's matcher type — and `const.py` already defines six values for it
+(`RULE_TARGET_TYPE_CATEGORY/DNS/IP/MAC/NETWORK/REMOTE_PORT`). Both depart from those
+constants: `create_rule` validates 3 of the 6, `get_rules` validates none. And
+`create_rule` is not merely narrower — **it cannot express `category`, `network` or
+`remotePort` rules**, while `get_rules` can filter on them and the test fixtures carry
+`category` rules (19 occurrences across 4 test files), so the narrower enum is already
+out of step with the data the integration handles. The pair is one vocabulary with a
+drift problem, not a naming problem. The rules side also mirrors the protocol record,
+which is why it keeps the name: `FirewallaPolicyRule.target` / `.target_type` are wire
+fields.
+
+Only `mute_alarm` is a real collision — a different concept under the same name. And
+its values are **our own**, not the wire's: `alarm_manager` translates `domain`→`dns`
+and `alarm_type`→`alarmType`. So renaming them is free of protocol consequence.
+
+### 9c. `scope_kind` has three more enums, and two `all` members
+
+| Service | Values | Wire form (verified in `alarm_manager._get_scope_payload`) |
+| --- | --- | --- |
+| `create_rule` | `device\|network\|all` | MAC tuple / network |
+| `mute_alarm`, `unmute_alarm` | `device\|group\|user\|network\|all` | `p.device.mac` / `p.tag.ids` / **`p.intf.id`** |
+
+Verified: device scope is a **MAC**; group and user scopes are **tag ids**. **Not
+verified: the network scope's `p.intf.id`** — it has no test and no capture, and it is
+not established that a network's `uuid` is that interface id. That is a protocol
+unknown of the same class as Q8, and it must be resolved before the network field is
+named.
+
+### 9d. Q8 — answered, and the answer is "leave it"
+
+`RULE_TARGET_TYPE_MAC` describes **how a rule matches**; the host identity travels
+separately in the rule's `scope` tuple (`create_rule` puts the MAC there, and
+`FirewallaRuleTemplate.scope` is a tuple of MACs). So `mac` is a **matcher**, not an
+identity, and the plan's condition ("if the handler presents it as an identity")
+is not met. **It stays as the wire says** — which is exactly what the Q8 check was
+for, so this is a resolved question rather than a deferred one.
+
+### 9e. The organising principle
+
+Two rules, and the second is what dissolves most of the work:
+
+1. **One name carries one vocabulary.** A field name may not mean two different
+   things across services.
+2. **An enum member that restates the selection's arity is a smell.** `all` (in two
+   enums here) and `this` (in two more) both say *"no selection"* or *"the one you
+   named"* — which the **presence or absence of a selector already says**. Every
+   `all` and every `this` in this integration is removable by making the selector
+   optional or required, not by inventing a better word.
+
+This is why renaming `this` is the wrong fix: the problem is not that the word is
+poor, it is that the axis should not be an enum at all.
+
+### 9f. The recommendation
+
+**1. `target_type`/`target_value` — rules keep it, silences get their own name.**
+Rules keep the pair because it mirrors the protocol record. `create_rule` and
+`get_rules` both move to the `RULE_TARGET_TYPE_*` constants, with `create_rule`
+gaining whatever it can actually create and `get_rules` gaining validation — a typo
+today returns an empty list indistinguishable from "no such rules", the same defect
+class as 4.2. `mute_alarm`/`unmute_alarm` rename to **`match_type` / `match_value`**:
+it names the operation (*which alarms to match and silence*) and stops reusing
+`target`, which everywhere else means what a rule blocks.
+
+**2. `mode` on the alarm services — split into `alarm_id` XOR `alarm_set`.**
+`alarm_id` names one alarm; `alarm_set` (`active` | `archived`) names a population.
+Exactly one, enforced by the same rule the scopes use. `this` disappears because
+naming an alarm *is* selecting one, and today's `mode: "this"` with no `alarm_id` is a
+runtime error that becomes unrepresentable. `set_host_dhcp_reservation`'s `mode` is
+untouched: it is a different concept, and it stops colliding the moment the alarm
+axis is gone. Its values already match the `ip_assignment.mode` it writes.
+
+**3. `scope_kind` — typed pairs, `all` by omission, on the two remaining services.**
+- `create_rule`: `host_mac` | `network_uuid`/`network_name` | omit → all
+- `mute_alarm`/`unmute_alarm`: the host/group/user pairs, plus a network pair
+
+  **gated on 9c**: the network form is recommended but must not be named until
+  `p.intf.id` is verified. Host, group and user can proceed without it.
+
+**4. `detail` — one vocabulary, `summary|full`.**
+Four treatments collapse to two values. `full` is already used twice and reads
+better than `standard`; `get_alarms`' boolean becomes the enum and
+`get_time_usage_report`'s `standard` becomes `full`. **The one real cost:**
+`get_flow_report`'s `records` becomes `full`, losing a word that currently carries
+the "includes the raw records" cue — mitigated because the value alone never carried
+it (the tool description does), but it is the only place this change subtracts
+information, and it is called out rather than buried.
+
+**5. The conflict keys — six keys with three meanings become two.**
+`host_selector_conflict`, `network_selector_conflict`,
+`speed_test_wan_selector_conflict`, `scope_selector_conflict`,
+`pause_rule_timing_conflict` and `membership_target_conflict` all say "you supplied
+the wrong number of these fields", in three different wordings. They become
+`selector_conflict` and `selector_required`, carrying the accepted field list as a
+placeholder, so each service gets an accurate message with no key of its own. The
+helper needs `required` and *at-most-one* modes, because `pause_rule` accepts
+neither field and `_resolve_requested_host` already has a `required` flag.
+`membership_target_conflict` keeps one bespoke rule: its `clear` axis is separate
+from the four membership fields.
+
+**6. `get_hosts`' `kind` — accepted as-is.** `mac_host`/`pseudo_host` is a machine
+vocabulary naming a host's own classification, contains no human word, and mirrors the
+protocol's distinction. Nothing to change, recorded so it is a decision rather than an
+omission. (Note the field lives on `get_hosts`, whose schema is named
+`GET_HOST_NAME_MAPPING_SCHEMA` — a schema name that no longer describes it, since the
+service returns hosts with their identity, not a name mapping. Worth a rename for the
+same reason 2.2 renamed `network_segment`, but it is an internal name and not
+user-visible, so it is noted rather than sequenced.)
+
+### 9g. Rejected alternatives
+
+| Alternative | Why not |
+| --- | --- |
+| Unify the three `scope_kind` enums into one superset | Keeps a field whose vocabulary a caller cannot infer, and keeps `device` in the machine register. The plan already rejected this for Q4 and the reports proved it: typed pairs delete the collision, they do not reconcile it |
+| Rename `mode`'s values (`one`/`active`/`archived`) | Still an enum encoding arity, still allows `one` with no id. Cheaper, but fixes the word and not the axis |
+| Give silences three typed fields (`alarm_type`/`domain`/`ip`) | `domain` and `ip` are too vague as service-level fields, and `alarm_type` already means a *filter* on `get_alarms` — it would become a third meaning of one name |
+| Rename the rules side to free `target_*` for silences | The rules side mirrors `FirewallaPolicyRule.target`/`.target_type`; breaking that correspondence to keep a name on the smaller surface is backwards |
+
+### 9h. Churn
+
+| Surface | Count |
+| --- | --- |
+| Services with a selector to change | 6 (`create_rule`, `get_rules`, `mute_alarm`, `unmute_alarm`, `archive_alarms`, `delete_alarms`) |
+| Services changing `detail` | 3 (`get_alarms`, `get_time_usage_report`, `get_flow_report`) |
+| Translation keys removed / added | 6 removed · 2 added · 3 added (`match_*`, `alarm_set`) |
+| LLM tools touched | 6 (`create_rule`, `get_rules`, `mute_alarm`, `unmute_alarm`, `archive_alarm`, `delete_alarm`) plus their `_INTENTIONAL_OMISSIONS` entries |
+| Guard work-list entries cleared | 3 (both remaining `scope_kind`s and the unvalidated `target_type`) |
+
+**Sequencing.** 9f-2 and 9f-5 are independent of the protocol question and can land
+first. 9f-1's rules half is independent. 9f-3's **network** form is the only part
+gated on a capture, and 9f-4 is the only part that subtracts information — so both
+are worth confirming before they are built rather than after.
