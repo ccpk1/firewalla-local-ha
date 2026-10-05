@@ -913,3 +913,75 @@ live mute, only documented and matched by shape.
 
 One mute with a network scope would close it. Lower priority than the rule path was,
 because that code already existed and is not newly written.
+
+---
+
+## 13. Phase 4 — measured before building
+
+### 13a. The four "discarded" WAN filters return nothing, and never have
+
+§5 listed four requested-then-discarded filters. Measured against the live box before
+changing anything:
+
+| Probe | Result |
+| --- | --- |
+| `action/ping_RTT` (control) | **1 event** — so the query itself works |
+| `state/ethernet_state` | 0 |
+| `state/ap_ethernet_state` | 0 |
+| `state/ap_ethernet_speed_change` | 0 |
+| `action/wpa_connection` | 0 |
+
+Over a **400-day** window, all four return zero. And the decisive check: an
+unfiltered read of the whole firehose (173 events) contains only `dns` (154), `ping`
+(14), `overall_wan_state` (2), `wan_state` (2) and `ping_RTT` (1) — **none of the four
+appear anywhere**, so this is not a case of the event being rare within a window.
+
+**Conclusion: these are not requested-then-discarded, because the box has no content
+for them.** The filters cost nothing and drop nothing observable.
+
+**Recommendation: leave the code, record the measurement.** Removing the four would
+re-diverge from the app's own 14-filter list, and that parity was a deliberate fix —
+`544b18e` widened this from 3 filters to 14 precisely because the narrower list missed
+latency and loss faults. Trading a measured-harmless parity for a hypothetical is a
+bad trade.
+
+**The one thing that stays true:** if a future firmware, or an AP7, ever emits one of
+these families, the normalizer would drop it silently. That is the same defect class
+the rest of this initiative removed. It is recorded here as a latent risk rather than
+fixed, because there is no sample to build against and no observed data to serve —
+surfacing them is a feature needing its own evidence. **Lowest priority in the
+initiative.**
+
+### 13b. 4.1's blast radius is exactly the 12 attribute keys
+
+Checked before proposing the rename, because the concern was changing user-facing
+names. Measured:
+
+| Surface | Contains `device`? | Changes in 4.1? |
+| --- | --- | --- |
+| Attribute **values** (`ATTR_*` constant values) | yes, 12 of them | **yes** |
+| Attribute **labels** (translation `name:`) | yes — *"Devices online"*, *"Device group"* | **no** |
+| Entity **names** | no — `'{host_name}'`, `'Presence'` | no |
+| Entity **ids** (`object_id`) | **no** — `system_status`, `alarm_active`, `network_{uuid}`, `ap_{id}_system_status`, `mac`, `user_id` | no |
+| `device_tracker` | the platform name | no — Home Assistant owns it |
+| Entity translation **keys** (`watched_device`) | yes, as a lookup key | optional, see below |
+
+So the rename is **machine-facing only**: an automation reading `devices_online` has
+to read `hosts_online`, and nothing a person sees changes. Per the register boundary
+that is exactly right — a key inside a payload is machine; a sentence explaining it is
+human — and the two are supposed to differ.
+
+**`watched_device` is the one judgement call.** It is the *value* of
+`TRANS_KEY_ENTITY_BINARY_SENSOR_WATCHED_DEVICE`, used to look up
+`entity.binary_sensor.watched_device`. It is a machine key, so the rule applies, but it
+is internal — no user reads it, and nothing derives from it that a user writes. The
+entity shows the host's name and its `entity_id` is the host's MAC. **Rename it for
+consistency or not; it is not part of the breaking change either way.** Recommendation:
+rename only if it is free, and never as part of the same change, so the breaking part
+stays narrowly defined.
+
+**Not a finding:** seven pairs of `ATTR_*` constants share a value (`ports`,
+`timezone`, `vlan_id`, `wan_name`, `wan_uuid`, `last_active`, `purpose`). Those are the
+same key name on different entity types, which is intentional reuse, not the
+duplicate-under-one-name defect §2b found. Recorded so the scan result is not mistaken
+for a problem later.
