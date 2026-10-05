@@ -523,7 +523,7 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target=target,
-            after={"device_type": args[SERVICE_FIELD_HOST_DEVICE_TYPE]},
+            after={"host_device_type": args[SERVICE_FIELD_HOST_DEVICE_TYPE]},
             result=result,
         )
 
@@ -627,7 +627,7 @@ class _SetHostMembershipTool(_FirewallaControlTool):
         target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, args)
         membership = (result or {}).get("membership") or {}
-        removed = ((result or {}).get("device_rules") or {}).get("removed") or []
+        removed = ((result or {}).get("host_rules") or {}).get("removed") or []
         return self._result(
             status="applied",
             changed=bool(membership.get("changed")),

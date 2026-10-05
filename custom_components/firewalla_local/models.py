@@ -1945,7 +1945,8 @@ def build_rule_hit_attributes(
     attribute, and a record carries 35 fields whose meaning depends on whether it
     was blocked or regular.
 
-    ``device_id`` is a device id, not necessarily a MAC. For a blocked record
+    ``host_id`` identifies the host the flow belongs to and is not necessarily a
+    MAC; a VPN peer's id is not one. For a blocked record
     ``block_type`` and ``blocked_by_rule_id`` are populated and the byte keys are
     **absent, not zero**: a blocked flow never travelled. For a regular record the
     reverse holds, so ``block_type`` is ``None`` rather than a default.
@@ -1959,14 +1960,14 @@ def build_rule_hit_attributes(
             "is_blocked": None,
             "block_type": None,
             "blocked_by_rule_id": None,
-            "device_id": None,
-            "device_ip": None,
+            "host_id": None,
+            "host_ip": None,
             "destination": None,
             "destination_kind": None,
             "destination_ip": None,
             "destination_mac": None,
             "port": None,
-            "device_port": None,
+            "host_port": None,
             "protocol": None,
             "download_bytes": None,
             "upload_bytes": None,
@@ -1987,14 +1988,14 @@ def build_rule_hit_attributes(
         "is_blocked": hit.is_blocked,
         "block_type": hit.block_type,
         "blocked_by_rule_id": hit.blocked_by_rule_id,
-        "device_id": hit.device_id,
-        "device_ip": hit.device_ip,
+        "host_id": hit.device_id,
+        "host_ip": hit.device_ip,
         "destination": hit.destination,
         "destination_kind": hit.destination_kind,
         "destination_ip": hit.destination_ip,
         "destination_mac": hit.destination_mac,
         "port": hit.port,
-        "device_port": hit.device_port,
+        "host_port": hit.device_port,
         "protocol": hit.protocol,
         "download_bytes": hit.download_bytes,
         "upload_bytes": hit.upload_bytes,

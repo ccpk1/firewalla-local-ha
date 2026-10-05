@@ -425,9 +425,9 @@ That distinction is now stated in the guard: it enforces where a kind is **writt
 accepted. The structural test for a target object is stated rather than implied: a
 payload dict carrying both a `kind` and an `id`.
 
-### 8b. Payload keys using the human word *(Phase 4)*
+### 8b. Payload keys using the human word *(Phase 4)* — **RESOLVED**
 
-Flow records and their member rows publish `device_id` and `device_ip` as keys:
+Flow records and their member rows published `device_id` and `device_ip` as keys:
 
 | Site | Key |
 | --- | --- |
@@ -436,8 +436,11 @@ Flow records and their member rows publish `device_id` and `device_ip` as keys:
 | `utils/flow.py`, `utils/flow_report.py` | the same, as dataclass fields |
 
 These are keys inside a payload, which `ARCHITECTURE.md` explicitly calls machine.
-They are violations of the rule as written. They are **not** in the guard, because
-8c below. Phase 4 owns them, alongside the twelve `ATTR_*` values.
+They were violations of the rule as written. The **published** keys were renamed to
+`host_*` in §15; the dataclass *field* names stayed, because they are internal.
+
+The reasoning that deferred them — that a mirrored vendor record keeps the vendor's
+names — is the part that did not survive measurement. See §15.
 
 ### 8c. The guard is narrower than the rule *(Phase 4.5)*
 
@@ -1037,11 +1040,13 @@ exists to remove.
   the entity translation key and the options-flow wording), and it sits directly beside
   `device_tracker` — the area the owner asked to treat carefully. Renaming the feature
   is a separate, wider change (options text, entity keys, class names) and is **not**
-  part of this. Flagged, not decided.
+  part of this. **Decided by the owner: leave it for now.** The constants are private, so
+  no published name carries `device` as a result.
 - **`device_id` / `device_ip` / `device_name` on flow records, usage rows and member
-  rankings.** §8b's deferred wave. These are literal payload keys, so the guard cannot
-  see them, and each is part of an object with sibling `device_*` keys — renaming one
-  would leave a mixed object. A separate change with its own justification.
+  rankings.** Originally deferred as §8b. **Now resolved — see §15.** The deferral
+  argument ("a mirrored vendor record keeps the vendor's names") did not survive the
+  measurement: the record layer renames the vendor's keys in the same row, so keeping
+  three of them was drift, not a boundary.
 
 ### 14c. The work list is deleted, and the guard's claim was narrowed
 
@@ -1059,9 +1064,96 @@ guard's documented scope was shrunk to match what it enforces, and the uncovered
 surfaces are named in the guard itself rather than left ambiguous. A narrower claim that
 is completely true beats a broad claim that is mostly true.
 
+That decline was about *widening the guard*, and it still stands: the guard still does
+not read literal keys. It was never a reason to leave the keys themselves alone — §15
+renamed them by hand, and the service and entity tests that assert exact payloads are
+what hold them now. The guard comment was updated to say so, so the gap is not misread
+as a deferral.
+
 ### 14d. One pre-existing smell surfaced and left alone
 
 `get_runtime_inventory`'s summary publishes **both** `host_count` (raw payload entries)
 and `hosts_total` (normalized hosts). They are usually the same number computed two
 ways. Renaming the second made the pair visible; merging or dropping one is a behaviour
 change nobody asked for, so it is recorded rather than fixed.
+
+## 15. The `device_*` published keys — measured, then removed
+
+Asked whether the LLM instructions and the documentation should state that `host` is
+primary *because* flow rows still hand an agent `device_id` / `device_name`, and the agent
+would have to guess whether those mean a host. Two answers came out of measuring it, and
+the second one replaced the justification that had already been written into the docs.
+
+### 15a. The justification was wrong, in both directions
+
+The first draft of the doctrine said these keys were a **mirrored vendor record** — the
+row keeps the vendor's field names, so renaming would break the correspondence with a
+capture. That claim was asserted, not measured, and measuring it killed it:
+
+- The vendor's host inventory keys are **`mac`, `bname`, `bonjourName`, `dhcpName`, `ip`,
+  `type`, `deviceTags`, `userTags`** — not `device_id` / `device_name` / `device_type`.
+- The vendor's flow row *does* say **`device`** for the host id, and **`deviceIP`** and
+  **`devicePort`** — so `device_id` / `device_ip` / `device_port` were the closest thing
+  to a genuine mirror.
+- But that same row's other keys are **renamed by us**: `dstMac` publishes as
+  `destination_mac`, `pid` as `blocked_by_rule_id`, `type` as `block_type`, `intf` as
+  `network_id`, `country` as `region`. The keys kept verbatim — `port`, `protocol`,
+  `apid`, `category`, `app` — are ones that are already exact and are not the host
+  concept.
+
+So there was no mirror register to appeal to. The record layer normalizes, and `device`
+happened to be the one vendor key that was left alone. The honest statement is the
+opposite of the first draft: **the vendor says `device` and we deliberately do not echo
+it, because in Home Assistant a *device* is a device-registry entry.** That is the reason
+the vocabulary needed to exist in the first place, and it now reads that way in
+`ARCHITECTURE.md`, `DEVELOPMENT_STANDARDS.md` and the LLM prompt.
+
+The first draft also over-claimed in the other direction — it promised "these rows are the
+only place `device_` still appears; everywhere else the field name says `host`". False:
+`device_type`, `device_host_count` and `device_rules` were published too, none of them
+from a vendor row. An agent told "everywhere else says host" and then shown `device_type`
+beside `host_id` in the same object would be less sure, not more.
+
+### 15b. What was renamed
+
+Eight published keys, in a row-level sweep so no object ends up mixed:
+
+| Was | Now | Class |
+| --- | --- | --- |
+| `device_id` / `device_ip` / `device_port` | `host_id` / `host_ip` / `host_port` | flow records, rule `last_hit`, and their projections |
+| `device_name` | `host_name` | flow member rows, usage rows, network top talkers |
+| `device_ids` | `host_ids` | flow destination rows |
+| `device_type` | `host_device_type` | network segment host rows and the `set_host_device_type` tool result |
+| `device_host_count` | *(deleted)* | it carried the same value as `host_count` in the same dict |
+| `device_rules` | `host_rules` | the membership response's removed-rule list |
+
+Two were not drift on someone else's terms — they were internally contradictory already.
+`device_type` sat in a row whose siblings were `host_id` and `host_name`, and the same
+concept was published as `host_device_type` by the service field, the service result key
+and one other serializer. `device_host_count` was a second name for a number already in
+the dict under `host_count`.
+
+### 15c. The breaking-change accounting is smaller than it looks
+
+`build_rule_hit_attributes` is released and user-visible — it feeds the `ATTR_RULE_LAST_HIT`
+attribute and the `get_rules` service. On `main` it publishes **`device_mac`**; this branch
+had already renamed it to `device_id`. Renaming it again to `host_id` is therefore **the
+same single break, only better named** — not a second one. `device_ip` and `device_port`
+are on the same object and were already changing on this branch.
+
+The remaining breaks are the usage-history rows and the network top-talker rows, both
+released, and both covered by the one migration table in `USER_GUIDE.md` and the entry in
+`RELEASE_CHECKLIST.md`.
+
+### 15d. What holds it now
+
+The guard in `test_vocabulary.py` reads constant *values*, so it cannot see a literal
+payload key — the limitation it states. What holds these eight is the tests that assert
+the exact payloads: `test_services.py`, `test_switch.py` and `test_binary_sensor.py` all
+compare whole dicts. Verified by injecting `"device_id": member.device_id` back into the
+flow member row and watching `test_flow_report_returns_host_detail_when_it_is_asked_for`
+fail; restored, 761 pass.
+
+**Measured end state:** `grep` for a literal `device_` key in the package returns only
+`device_tracker` / `device_trackers` / `device_tracker_away_window` — the Home Assistant
+platform names, which must not move.

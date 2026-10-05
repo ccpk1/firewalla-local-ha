@@ -220,7 +220,7 @@ allowlist at the end is a failed phase, not a passing one.
 | **1** | The rule, and the machinery that enforces it | The register rule stated once in `ARCHITECTURE.md` and `DEVELOPMENT_STANDARDS.md`, the wrong `Scoped identity` section corrected, the audit published as a reference note, and a guard test whose allowlist names every current violation | Guard test added and proven to fail on a deliberately introduced violation; every current violation is in the allowlist; **no production behaviour changed** |
 | **2** | Responses: one canonical `target` | One vocabulary module; every serializer emits `kind` from it; `network_segment` retired; the network sub-kind carried as `network_kind` rather than as the kind; tool descriptions aligned | Full suite green; each service's `target` asserted against the canonical set; allowlist shrinks by the response-side entries |
 | **3** | Inputs: one selector vocabulary | Typed selector pairs everywhere; `scope_kind` removed; the `target_type` collision resolved; one shared conflict rule replacing the per-service ones; `services.yaml`, translations and tool parameters aligned | Full suite green; one test per service proving exactly-one-selector and the conflict path; allowlist shrinks by the input-side entries |
-| **4** | Entities, residual findings, and the absolute guard | Entity attribute keys on the rule; the WAN event filter/supported-set mismatch fixed and the class audited; docs swept; **the allowlist deleted** | Full suite green with **no allowlist**; a deliberately introduced violation fails; `USER_GUIDE.md` and `MCP_TOOL_REFERENCE.md` use the human register consistently |
+| **4** | Entities, residual findings, and the absolute guard | Entity attribute keys and labels on the rule; the eight `device_*` payload keys removed; 4.2 closed by measurement; docs swept; **the allowlist deleted** | Full suite green with **no allowlist**; a deliberately introduced violation fails; no published key contains `device_` except the `device_tracker` platform name; `ARCHITECTURE.md` states the rule as one word plus the Home Assistant exception |
 
 Phases are sequential. **Phase 1 is not optional and is not documentation busywork.**
 It is the phase that makes the other three mechanical: without a written register
@@ -380,39 +380,62 @@ a "`mode` near-duplicate". Measurement corrected both: `target_type` was one
 vocabulary with a validation gap rather than three treatments, and `mode` was three
 unrelated uses. The decisions actually taken are recorded in inventory §9-§12.
 
-### Phase 4 — Entities, residual findings, and the absolute guard
+### Phase 4 — Entities, residual findings, and the absolute guard — **COMPLETE**
 
 Purpose: the remaining user-visible surface, the one live instance of the
 "requested then discarded" class, and the deletion of the allowlist that makes the
 rule absolute.
 
-- [ ] **4.1 Bring entity attribute keys onto the rule.** Rename the Q2 list, update
-      every consumer (`binary_sensor.py`, `sensor.py`, the diagnostics dump, the
-      tests, and `USER_GUIDE.md`'s *Rich data lives in entity attributes* section).
-      Attributes are part of the published contract, so this is a deliberate
-      breaking change and it is recorded as one.
-- [ ] **4.2 Fix the WAN event filter/supported-set mismatch.** Four of the fourteen
-      filters — `ethernet_state`, `ap_ethernet_state`, `ap_ethernet_speed_change`,
-      `wpa_connection` — are requested and then discarded by
-      `_SUPPORTED_WAN_EVENT_STATE_FAMILIES` / `_SUPPORTED_WAN_EVENT_ACTION_FAMILIES`.
-      Each either gains a supported family or is removed from the filter set, and
-      **the choice is made from a capture, not a guess**, because the box ignores an
-      unknown filter silently and a wrong addition looks identical to a quiet week.
-      Then audit for the same class: any other place a value is requested and
-      discarded, or accepted and ignored. **`get_rules`' unvalidated filter is the
-      second instance of this class and is fixed in 3.2**, so this step searches for
-      the rest rather than repeating that one.
-- [ ] **4.3 Sweep the documents.** `USER_GUIDE.md`, `MCP_TOOL_REFERENCE.md`,
-      `QUALITY_REFERENCE.md` and `README.md` against the register rule — machine
-      values corrected, prose left in the human register. `REVERSE_ENGINEERING_WORKFLOW.md`
-      gains the filter/supported-set finding.
-- [ ] **4.4 Delete the allowlist.** The guard test becomes absolute. Confirm a
-      deliberately introduced violation fails, and that the test gives a message
-      naming the field and the rule rather than only the line number.
-- [ ] **4.5 Quality scale and close.** Confirm no quality-scale rule regresses
-      (`docs-actions` and `action-exceptions` are the likely ones, both currently
-      `done`), move the plan to `plans/completed/`, and update
-      `plans/in-process/README.md`.
+- [x] **4.1 Bring entity attribute keys onto the rule.** The twelve `ATTR_*` **values**
+      renamed (`devices_online` → `hosts_online`, `associated_devices` →
+      `associated_hosts`, and so on) and their **labels** with them, so the key and the
+      label agree. Every consumer updated: `binary_sensor.py`, `sensor.py`,
+      `device_tracker.py`, the diagnostics dump, the tests, and `USER_GUIDE.md`. Recorded
+      as a breaking change with an old→new table.
+- [x] **4.1b The eight `device_*` payload keys.** Added after 4.1, because asking whether
+      the documentation should state that `host` is primary exposed them: if an agent
+      reads `device_id` in a flow row it has to guess whether that means a host. Measuring
+      it killed the justification a first draft had already written into the docs — there
+      is no "mirrored vendor record" register, because the record layer renames the
+      vendor's keys in that same row (`dstMac` → `destination_mac`, `pid` →
+      `blocked_by_rule_id`). So `device_id`/`device_ip`/`device_port`, `device_name`,
+      `device_ids`, `device_type`, `device_host_count` and `device_rules` were renamed
+      too, and the duplicate `device_host_count` deleted. `device_*` no longer appears in
+      any published key. Full record in the inventory note §15.
+- [x] **4.2 Closable only by measurement, and measurement closed it.** Probed live: the
+      four filters (`ethernet_state`, `ap_ethernet_state`, `ap_ethernet_speed_change`,
+      `wpa_connection`) returned **zero** events over 400 days, and the unfiltered
+      firehose — 173 events, of which 154 dns, 14 ping, 2 `overall_wan_state`, 2
+      `wan_state`, 1 `ping_RTT` — contains none of them. So there is nothing to gain by
+      adding a family and nothing broken by the discard. **Left as-is**, deliberately:
+      the filter set mirrors the app's fourteen, and `544b18e` established that parity on
+      purpose.
+- [x] **4.3 Sweep the documents.** `USER_GUIDE.md` (examples plus the *Upgrading* table),
+      `MCP_TOOL_REFERENCE.md`, `ARCHITECTURE.md`, `DEVELOPMENT_STANDARDS.md`,
+      `RELEASE_CHECKLIST.md`. `REVERSE_ENGINEERING_WORKFLOW.md` gained the rule-scope
+      finding. Re-swept in 4.1b after the doctrine was corrected.
+- [x] **4.4 Delete the allowlist.** `_KNOWN_VIOLATIONS` is **deleted, not emptied** — an
+      empty allowlist is an invitation to add an entry. The three checks assert zero
+      violations with no exemption mechanism. Confirmed by injecting a violation into
+      `ATTR_ALARM_HOST_NAME` and watching it fail with nowhere to record it. A fourth test
+      proves the scanners read real data, so a passing suite cannot mean "the scanner
+      stopped working".
+- [x] **4.5 Quality scale and close.** No quality-scale rule regressed (`docs-actions` and
+      `action-exceptions` still `done`; the renamed keys are covered by
+      `action-exceptions`). The guard's *widening* was declined on purpose — scanning
+      literal payload keys would have been a second breaking wave on a weaker argument —
+      and the guard's stated scope was narrowed to match what it enforces, with the gap
+      named inside the guard rather than left ambiguous. The doctrine was corrected from
+      the two-register rule to one word plus the Home Assistant exception, on measurement.
+
+**Two things deliberately not done**, both recorded rather than silently skipped:
+
+- **`ATTR_WATCHED_DEVICE_*`** keeps its prefix. The values are clean; only the private
+  constant name says `device`, and it is the feature's name next to `device_tracker`.
+  Owner decision: leave it for now.
+- **`get_runtime_inventory` publishes both `host_count` and `hosts_total`** — two names
+  for usually the same number, computed two ways. Pre-existing; renaming the second made
+  the pair visible. Merging them is a behaviour change nobody asked for.
 
 ---
 

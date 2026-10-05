@@ -53,15 +53,17 @@ Checklist:
 
 ### Known breaking change pending release
 
-Renamed the entity attribute keys and labels from `device` to `host`, because `host`
-is this integration's word for a Firewalla endpoint on every surface. `device_tracker`
-is unaffected — it is a Home Assistant platform. Full old-to-new table in
-`docs/USER_GUIDE.md` under *Upgrading: renamed attributes*.
+Renamed the entity attribute keys, service-response keys and labels from `device` to
+`host`, because `host` is this integration's word for a Firewalla endpoint on every
+surface. Firewalla's own payloads say `device` (`deviceIP`, `devicePort`, `deviceTags`)
+but that word is not echoed, because in Home Assistant a *device* is a device-registry
+entry. `device_tracker` is unaffected — it is a Home Assistant platform. Full
+old-to-new table in `docs/USER_GUIDE.md` under *Upgrading: renamed attributes and keys*.
 
 | What | Detail |
 | --- | --- |
-| Breaks | A template or automation reading `devices_online`, `devices_offline`, `devices_total`, `vpn_devices_*`, `device_count`, `device_group`, `associated_devices`, `associated_device_count`, `associated_device_group` or `device_name` from an entity attribute or a service response |
-| Fix | Read the `hosts_*` / `host_*` / `associated_hosts*` name instead |
+| Breaks | A template or automation reading `devices_online`, `devices_offline`, `devices_total`, `vpn_devices_*`, `device_count`, `device_group`, `associated_devices`, `associated_device_count`, `associated_device_group` or `device_name` from an entity attribute or a service response. Also `device_id` / `device_ip` / `device_port` in `get_rules` `last_hit`, `device_id` / `device_name` in `get_time_usage_report`, `device_type` and `device_host_count` in `get_network_segment_report`, the `device_*` keys on `get_flow_report` rows, and `device_rules.removed` in the membership responses |
+| Fix | Read the `hosts_*` / `host_*` / `associated_hosts*` name instead. `device_host_count` was a duplicate of `host_count` in the same response — read `host_count` |
 | Not affected | `device_tracker` entities and their platform; entity ids; entity names |
 | Migration | One-to-one rename; no value, type or availability changed |
 

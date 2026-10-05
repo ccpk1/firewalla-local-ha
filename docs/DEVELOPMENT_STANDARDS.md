@@ -55,6 +55,8 @@ Register boundary rule:
 
 - **`host` is the word for a Firewalla endpoint on every surface** — field names, enum values, published discriminators, entity attribute keys **and their labels**, service `name:`/`description:` values, tool descriptions, and prose. There is no second register
 - the one exception is where `device` means a **Home Assistant device-registry concept**: the `device_tracker` platform (HA's name, never rename it), the device registry, and the options a user picks to create those entries. Those say `device` and must keep saying it
+- **the vendor's word is not kept either.** Firewalla's flow rows name a host `device`, `deviceIP`, `devicePort`, and its host tag names are `deviceTags`; a published key still says `host`, because echoing `device` would collide with the Home Assistant concept above. Renaming the vendor's keys is what the record layer does generally and is visible in the same row — `dstMac` publishes as `destination_mac`, `pid` as `blocked_by_rule_id`, `intf` as `network_id`. Only keys that are already exact and are not the host concept stay verbatim: `port`, `protocol`, `apid`, `category`, `app`
+- `host_port` is a port on a host, not a host, and `host_id` is not always a MAC
 - a Firewalla protocol word we must send in input stays as the wire says
 - measured support: service text says `host` 111 times against 26 for `device`; every device selector field is `host_*`; every device-facing service name uses `host`; no service is named `*device*`
 - `target.kind` is `host` / `group` / `user` / `network`; never the protocol's `tag` and never `device`

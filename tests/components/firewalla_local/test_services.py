@@ -3725,14 +3725,14 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
         "is_blocked": None,
         "block_type": None,
         "blocked_by_rule_id": None,
-        "device_id": "74:A7:EA:24:44:44",
-        "device_ip": "192.168.202.43",
+        "host_id": "74:A7:EA:24:44:44",
+        "host_ip": "192.168.202.43",
         "destination": "www.youtube.com",
         "destination_kind": "domain",
         "destination_ip": None,
         "destination_mac": None,
         "port": 53,
-        "device_port": None,
+        "host_port": None,
         "protocol": "dns",
         "download_bytes": None,
         "upload_bytes": None,
@@ -5103,7 +5103,7 @@ async def test_set_host_membership_removes_the_device_own_rules(
     # Rule 577 belongs to another device and must never be touched.
     deleted = [call.args[0] for call in delete.await_args_list]
     assert deleted == ["575", "576", "578", "579"]
-    assert response["device_rules"] == {
+    assert response["host_rules"] == {
         "removed": ["575", "576", "578", "579"],
     }
     assert response["membership"]["after"] == {
@@ -5137,7 +5137,7 @@ async def test_set_host_membership_removes_nothing_when_the_device_has_no_rules(
         )
 
     assert delete.await_count == 0
-    assert response["device_rules"] == {"removed": []}
+    assert response["host_rules"] == {"removed": []}
 
 
 def test_set_host_membership_is_registered_as_an_admin_action() -> None:
@@ -5774,8 +5774,8 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
         "unique_minutes": 120,
     }
     assert response["sections"]["apps"][0]["devices"][0] == {
-        "device_id": "EC:0D:51:CC:BA:BC",
-        "device_name": "Kaden Phone",
+        "host_id": "EC:0D:51:CC:BA:BC",
+        "host_name": "Kaden Phone",
         "summary": {
             "total_minutes": 15,
             "unique_minutes": 15,
@@ -6826,7 +6826,6 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     assert response["summary"] == {
         "host_count": 2,
         "returned_host_count": 2,
-        "device_host_count": 2,
         "has_dhcp_config": True,
         "has_ipv4_addressing": True,
         "has_ipv6_addressing": False,
@@ -6872,7 +6871,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
         "host_name": "Plex Server",
         "ip_address": "192.168.10.10",
         "dhcp_name": "plex-server",
-        "device_type": "tablet",
+        "host_device_type": "tablet",
         "ip_assignment": {
             "mode": "static",
             "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -6889,7 +6888,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
         "host_name": "Office Phone",
         "ip_address": "192.168.10.44",
         "dhcp_name": "office-phone",
-        "device_type": "phone",
+        "host_device_type": "phone",
         "ip_assignment": {
             "mode": "dynamic",
             "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -9150,11 +9149,11 @@ async def test_flow_report_withholds_host_detail_by_default_on_a_group(
     assert response is not None
     assert "member_ranking" not in response["sections"]
     assert response["summary"]["member_count"] is None
-    assert "device_ids" not in response["sections"]["top_download"][0]
-    assert "device_ids" not in response["sections"]["blocked"][0]
+    assert "host_ids" not in response["sections"]["top_download"][0]
+    assert "host_ids" not in response["sections"]["blocked"][0]
     record = response["sections"]["blocked_records"]["records"][0]
-    assert "device_id" not in record
-    assert "device_ip" not in record
+    assert "host_id" not in record
+    assert "host_ip" not in record
     assert response["metadata"]["applied"]["host_detail"] is False
     assert "member_ranking" not in response["metadata"]["unavailable_sections"]
 
@@ -9175,11 +9174,11 @@ async def test_flow_report_returns_host_detail_when_it_is_asked_for(
     assert response is not None
     assert response["metadata"]["applied"]["host_detail"] is True
     assert response["summary"]["member_count"] == 2
-    assert response["sections"]["member_ranking"][0]["device_id"] == _FLOW_HOST_MAC
-    assert response["sections"]["top_download"][0]["device_ids"] == [_FLOW_HOST_MAC]
+    assert response["sections"]["member_ranking"][0]["host_id"] == _FLOW_HOST_MAC
+    assert response["sections"]["top_download"][0]["host_ids"] == [_FLOW_HOST_MAC]
     record = response["sections"]["blocked_records"]["records"][0]
-    assert record["device_id"] == _FLOW_HOST_MAC
-    assert record["device_ip"] == "192.168.200.25"
+    assert record["host_id"] == _FLOW_HOST_MAC
+    assert record["host_ip"] == "192.168.200.25"
 
 
 @pytest.mark.asyncio
@@ -9206,7 +9205,7 @@ async def test_flow_report_needs_no_flag_to_name_the_device_it_was_asked_about(
     assert response["query"]["resolved_target"] == _FLOW_HOST_MAC
     assert response["metadata"]["applied"]["host_detail"] is True
     assert (
-        response["sections"]["blocked_records"]["records"][0]["device_id"]
+        response["sections"]["blocked_records"]["records"][0]["host_id"]
         == _FLOW_HOST_MAC
     )
 

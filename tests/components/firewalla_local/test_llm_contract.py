@@ -334,10 +334,10 @@ async def test_rule_scope_precedence_is_stated_consistently(
     assert "no longer apply" in rules_description
 
 
-async def test_membership_change_warns_that_it_deletes_device_rules(
+async def test_membership_change_warns_that_it_deletes_host_rules(
     hass: HomeAssistant,
 ) -> None:
-    """The prompt says a membership change deletes the device's rules.
+    """The prompt says a membership change deletes the host's rules.
 
     This is destructive and cannot be undone by the tool, so a model that
     discovers it only from the call result has already done the damage. Verified
@@ -349,11 +349,11 @@ async def test_membership_change_warns_that_it_deletes_device_rules(
     four membership tools are added in a later phase and this guidance must exist
     before a model can call one.
     """
-    assert "DELETES THE RULES ATTACHED TO THAT DEVICE" in PROMPT
+    assert "DELETES THE RULES ATTACHED TO THAT HOST" in PROMPT
     assert "enabled rules the user created" in PROMPT
-    assert "device_rules.removed" in PROMPT
+    assert "host_rules.removed" in PROMPT
     # The blast radius must be bounded, or a model will over-warn and a user may
-    # refuse a harmless change: only this device's rules go.
+    # refuse a harmless change: only this host's rules go.
     assert "are NOT affected" in PROMPT
     # And it must check first, so the confirmation is proportionate rather than
     # blanket on a call that often destroys nothing.

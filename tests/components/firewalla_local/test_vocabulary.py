@@ -100,10 +100,11 @@ _GUARDED_CONSTANT_PREFIXES: Final = ("SERVICE_FIELD_", "ATTR_", "FLOW_REPORT_")
 # What this guard does **not** cover, stated so it is not mistaken for total:
 #
 # - **literal payload keys.** The checks read `ATTR_*` / `SERVICE_FIELD_*` /
-#   `FLOW_REPORT_*` *values*, so a key written directly as `"device_id": ...` in
-#   `services.py` or `models.py` is invisible. Flow records and usage rows still
-#   publish `device_id` / `device_ip` / `device_name` that way. That is a recorded,
-#   deliberate deferral, not an oversight -- see the inventory note.
+#   `FLOW_REPORT_*` *values*, so a key written directly as `"host_id": ...` in
+#   `services.py` or `models.py` is invisible. This is a gap in the check, not a
+#   licence: the `device_*` keys that used to live there were renamed by hand and are
+#   asserted by the service and entity tests that read the payloads. A future literal
+#   key that departs from the vocabulary would pass here.
 # - **enum values inside the tool schemas** that duplicate a service schema.
 # - **documentation prose.** One check asserts the rule is stated in
 #   `ARCHITECTURE.md`; the rest of the prose is not machine-checked.

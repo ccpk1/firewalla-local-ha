@@ -583,7 +583,7 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         """
         return [
             {
-                "device_name": talker.device_name,
+                "host_name": talker.device_name,
                 "download_bytes": talker.download_bytes,
                 "upload_bytes": talker.upload_bytes,
             }

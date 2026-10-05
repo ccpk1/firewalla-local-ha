@@ -590,12 +590,12 @@ async def test_delete_host_deletes_host(hass: HomeAssistant) -> None:
     assert result.data["warnings"] == ["irreversible"]
 
 
-async def test_set_host_group_deletes_the_device_rules_and_reports_them(
+async def test_set_host_group_deletes_the_host_rules_and_reports_them(
     hass: HomeAssistant,
 ) -> None:
-    """set_host_group assigns the group, deletes the device's rules, names the undo.
+    """set_host_group assigns the group, deletes the host's rules, names the undo.
 
-    A membership change deletes the rules attached to the device -- confirmed by
+    A membership change deletes the rules attached to the host -- confirmed by
     two captures -- so the tool must surface that in `warnings` rather than report
     a clean success, and its `undo` must point at the clear tool without implying
     the deleted rules come back.

@@ -265,14 +265,14 @@ Services added after 1.0.0:
 - `firewalla_local.get_system_overview`
 - `firewalla_local.get_flow_report`
 
-## Upgrading: renamed attributes
+## Upgrading: renamed attributes and keys
 
-**If you read these attributes in an automation or template, they were renamed.**
-`host` is the word this integration uses for a Firewalla endpoint, on every surface,
-so the attribute keys and the labels shown in the UI now both say it. Nothing about
-the data changed — only the names.
+**If you read these attributes or service-response keys in an automation or template,
+they were renamed.** `host` is the word this integration uses for a Firewalla endpoint,
+on every surface, so the keys and the labels shown in the UI now both say it. Nothing
+about the data changed — only the names.
 
-| Entity | Was | Now |
+| Entity / service | Was | Now |
 | --- | --- | --- |
 | `binary_sensor` system status | `devices_online` / `devices_offline` / `devices_total` | `hosts_online` / `hosts_offline` / `hosts_total` |
 | `binary_sensor` system status | `vpn_devices_online` / `_offline` / `_total` | `vpn_hosts_online` / `_offline` / `_total` |
@@ -281,10 +281,30 @@ the data changed — only the names.
 | `device_tracker` presence | `device_group` | `host_group` |
 | `sensor` watched user usage | `associated_devices` / `associated_device_count` / `associated_device_group` | `associated_hosts` / `associated_host_count` / `associated_host_group` |
 | `binary_sensor` alarm | `device_name` | `host_name` |
+| `binary_sensor` network top talkers | `device_name` | `host_name` |
 
 The same rename applies where those values are returned by a service, so
 `get_runtime_inventory` reports `hosts_online` / `hosts_offline` / `hosts_total`, and
 the network list in `get_system_overview` reports `host_count`.
+
+**Rule matches, membership and flow rows were renamed too.** These keys appear inside
+service responses and tool results:
+
+| Service / tool | Was | Now |
+| --- | --- | --- |
+| `get_rules` (`last_hit`) | `device_id` / `device_ip` / `device_port` | `host_id` / `host_ip` / `host_port` |
+| `get_time_usage_report` | `device_id` / `device_name` | `host_id` / `host_name` |
+| `get_network_segment_report` host rows | `device_type` | `host_device_type` |
+| `get_network_segment_report` summary | `device_host_count` | *(removed — it duplicated `host_count`)* |
+| `get_flow_report` member and record rows | `device_id` / `device_name` / `device_ip` / `device_ids` | `host_id` / `host_name` / `host_ip` / `host_ids` |
+| `set_host_group` / `set_host_user` and the group/journal variant | `device_rules.removed` | `host_rules.removed` |
+
+In a flow record, `port` is the destination's port and `host_port` is the port on the
+host. `host_id` is not always a MAC: a VPN peer's id is not one.
+
+Firewalla's own payloads call these `device` (`deviceIP`, `devicePort`, `deviceTags`).
+That word is not echoed here, because in Home Assistant a *device* is a device-registry
+entry — a different concept.
 
 If you used the attribute **name** shown in the UI, it changed too, from *"Devices
 online"* to *"Hosts online"* and so on — the labels and the keys now agree.
@@ -1268,22 +1288,21 @@ it directly.
   the watched-user entities and the usage reports use) or its affiliated backing tag
   (what a rule's `tag_refs` reports). Both select the same user; the write is always
   the affiliated tag, because that is how the box addresses a user
-- **this service is destructive: your rules on that device are deleted.** This is
-  the one irreversible part of the call. Assigning a device to a group or a user
-  **permanently deletes the rules attached to that device**, including **enabled
-  rules you created**, because from then on the device follows only the rules of
+- **this service is destructive: your rules on that host are deleted.** This is
+  the one irreversible part of the call. Assigning a host to a group or a user
+  **permanently deletes the rules attached to that host**, including **enabled
+  rules you created**, because from then on the host follows only the rules of
   the group or user it belongs to. The rules are removed from the box outright —
   they are not merely detached — and re-creating them gives them new ids, so there
-  is nothing to re-attach. `clear: true` deletes them too, leaving the device with
+  is nothing to re-attach. `clear: true` deletes them too, leaving the host with
   no rules until you add some. This mirrors the Firewalla app, which warns you at
-  assignment time. The response reports what was removed in
-  `device_rules.removed`
+  assignment time. The response reports what was removed in `host_rules.removed`
 - **rules attached to groups or users are not affected.** Those rules stay exactly
-  as they were, including the rules of the user this device is leaving, and they
-  still cover that user's other devices. Only rules scoped to **this device** are
-  deleted. A device in a group has no rules of its own, so re-assigning a device
+  as they were, including the rules of the user this host is leaving, and they
+  still cover that user's other hosts. Only rules scoped to **this host** are
+  deleted. A host in a group has no rules of its own, so re-assigning a host
   that is already in a group normally deletes nothing
-- **a device has exactly one membership.** Assigning a group to a device that is
+- **a host has exactly one membership.** Assigning a group to a host that is
   already assigned to a user therefore *replaces* the user assignment rather
   than adding alongside it. This mirrors the Firewalla app, which shows groups
   and users together but allows only one selection
@@ -1295,7 +1314,7 @@ it directly.
 - `refresh` defaults to `true`
 - the response reports the membership `before` and `after` plus a `changed`
   flag, so an automation can tell whether the call actually altered anything, and
-  `device_rules.removed` listing the rule ids that were deleted
+  `host_rules.removed` listing the rule ids that were deleted
 
 #### Delete host
 

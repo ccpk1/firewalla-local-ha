@@ -1076,8 +1076,8 @@ def _serialize_usage_history_device_usage(
 ) -> JsonObjectType:
     """Serialize one device-level usage-history breakdown."""
     payload: JsonObjectType = {
-        "device_id": device_usage.device_id,
-        "device_name": device_usage.device_name,
+        "host_id": device_usage.device_id,
+        "host_name": device_usage.device_name,
         "summary": _serialize_usage_history_summary(
             total_minutes=device_usage.total_minutes,
             unique_minutes=device_usage.unique_minutes,
@@ -1946,7 +1946,7 @@ def _serialize_network_host_detail(
         "host_name": host.host_name,
         "ip_address": host.ip_address,
         "dhcp_name": host.dhcp_name,
-        "device_type": host.host_device_type,
+        "host_device_type": host.host_device_type,
         "ip_assignment": _serialize_network_host_ip_assignment(host.ip_assignment),
         "notifications": _serialize_network_host_notifications(host.notifications),
         "actions": _serialize_network_host_actions(host.actions),
@@ -2894,8 +2894,8 @@ def _serialize_flow_destination(
     """Serialize one ranked destination.
 
     The hostname and its addresses are the report's subject and are never gated.
-    ``device_ids`` names the devices that reached it, which is a device the caller
-    may not have named, so it follows the ``host_detail`` include.
+    ``host_ids`` names the hosts that reached it, which are hosts the caller may
+    not have named, so they follow the ``host_detail`` include.
     """
     payload: JsonObjectType = {
         "destination": destination.destination,
@@ -2907,7 +2907,7 @@ def _serialize_flow_destination(
         "rollup_rows": destination.rollup_rows,
     }
     if include_host_detail:
-        payload["device_ids"] = list(destination.device_ids)
+        payload["host_ids"] = list(destination.device_ids)
     return payload
 
 
@@ -2927,7 +2927,7 @@ def _serialize_blocked_destination(
         "rollup_rows": destination.rollup_rows,
     }
     if include_host_detail:
-        payload["device_ids"] = list(destination.device_ids)
+        payload["host_ids"] = list(destination.device_ids)
     return payload
 
 
@@ -2943,9 +2943,9 @@ def _serialize_local_peer(peer: FirewallaLocalPeer) -> JsonObjectType:
 def _serialize_flow_member(member: FirewallaFlowMember) -> JsonObjectType:
     """Serialize one ranked member of a group or user report."""
     return {
-        "device_id": member.device_id,
-        "device_name": member.device_name,
-        "device_ip": member.device_ip,
+        "host_id": member.device_id,
+        "host_name": member.device_name,
+        "host_ip": member.device_ip,
         "download_bytes": member.download_bytes,
         "upload_bytes": member.upload_bytes,
         "total_bytes": member.total_bytes,
@@ -2978,9 +2978,9 @@ def _serialize_flow_record(
 ) -> JsonObjectType:
     """Serialize one flow record, resolving the ids it references to names.
 
-    ``device_id`` and ``device_ip`` identify the device a flow belongs to and
-    follow the ``host_detail`` include. Everything the *destination* is --
-    hostname, address, port -- is the record's subject and is not gated.
+    ``host_id`` and ``host_ip`` identify the host a flow belongs to and follow
+    the ``host_detail`` include. Everything the *destination* is -- hostname,
+    address, port -- is the record's subject and is not gated.
     """
     payload: JsonObjectType = {
         "timestamp": record.timestamp,
@@ -2997,7 +2997,7 @@ def _serialize_flow_record(
         "destination_ip": record.destination_ip,
         "destination_mac": record.destination_mac,
         "port": record.port,
-        "device_port": record.device_port,
+        "host_port": record.device_port,
         "protocol": record.protocol,
         "download_bytes": record.download_bytes,
         "upload_bytes": record.upload_bytes,
@@ -3021,8 +3021,8 @@ def _serialize_flow_record(
         "user_names": _resolved_names(record.user_tags, membership_names),
     }
     if include_host_detail:
-        payload["device_id"] = record.device_id
-        payload["device_ip"] = record.device_ip
+        payload["host_id"] = record.device_id
+        payload["host_ip"] = record.device_ip
     return payload
 
 
@@ -3331,14 +3331,13 @@ def _serialize_network_segment_report(
             )
         ),
         "summary": {
-            # Stable regardless of `include`: the network's device count from
-            # the host inventory, never the size of the optionally-returned row
-            # set. `returned_host_count` reports that row set when it is asked
-            # for, since the segment view can return fewer rows than the
-            # inventory counts.
+            # Stable regardless of `include`: the network's host count from the
+            # host inventory, never the size of the optionally-returned row set.
+            # `returned_host_count` reports that row set when it is asked for,
+            # since the segment view can return fewer rows than the inventory
+            # counts.
             "host_count": network.device_host_count,
             "returned_host_count": len(host_details) if include_hosts else None,
-            "device_host_count": network.device_host_count,
             "has_dhcp_config": dhcp_config is not None,
             "has_ipv4_addressing": bool(view.ipv4_addresses or view.ipv4_subnets),
             "has_ipv6_addressing": bool(view.ipv6_addresses or view.ipv6_subnets),
@@ -5532,7 +5531,7 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
             "after": cast(JsonValueType, after),
             "changed": before != after,
         },
-        "device_rules": {
+        "host_rules": {
             "removed": cast(JsonValueType, device_rule_ids),
         },
         "command": {

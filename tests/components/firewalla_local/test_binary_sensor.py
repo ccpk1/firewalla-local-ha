@@ -950,12 +950,12 @@ async def test_network_binary_sensor_exposes_ranked_top_talkers(
     assert vlan_state is not None
     assert vlan_state.attributes[ATTR_NETWORK_TOP_TALKERS] == [
         {
-            "device_name": "nas1",
+            "host_name": "nas1",
             "download_bytes": 7_600_000_000,
             "upload_bytes": 563_000_000,
         },
         {
-            "device_name": "clsrazer",
+            "host_name": "clsrazer",
             "download_bytes": 1_017_664_978,
             "upload_bytes": 216_289_236,
         },

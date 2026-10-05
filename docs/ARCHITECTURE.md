@@ -104,14 +104,38 @@ This is the critical rule above, not a carve-out from it:
 - **the device registry** — entities that create device-registry entries, and the
   options a user picks to do so (*"Devices to expose as device trackers"*), are about
   Home Assistant devices.
-- **the Firewalla protocol's own words** — where the box or its API uses a word in
-  input we must send, the wire's vocabulary is the wire's.
 
 Everything else that names a Firewalla endpoint is `host`. Measured support: all 15
 device selector fields are `host_*`, every device-facing service name uses `host`
 (`get_hosts`, `wake_host`, `set_host_membership`), no service is named `*device*`, and
 service text says `host` four times for every `device`. A new field that departs from
 this is the deviation, and must say what forced it.
+
+**The vendor says `device` for a host, and we do not echo it.** Firewalla's flow rows
+name the host `device`, `deviceIP` and `devicePort`, and its host tag names are
+`deviceTags`. None of that survives into a published key, because in Home Assistant a
+*device* is already a device-registry entry — a different concept — and a `host` that
+is sometimes a `device` is the ambiguity this vocabulary exists to remove.
+
+This is not a special case for one word. Translating the vendor's record keys into ours
+is what the record layer does generally, and it is visible in the same row: `dstMac`
+publishes as `destination_mac`, `pid` as `blocked_by_rule_id`, `type` as `block_type`,
+`intf` as `network_id`, `country` as `region`. The keys kept verbatim are the ones that
+are already exact and are not the host concept — `port`, `protocol`, `apid`, `category`,
+`app`. `device` was the one vendor word that could not be kept, so it becomes `host`
+everywhere it is published.
+
+Two published keys are still easy to misread once the prefix is gone, and are documented
+at their source: `host_port` is a **port on** that host rather than a host, and `host_id`
+is **not always a MAC** — a VPN peer's id is not one.
+
+The separate rule for wire *values* is unchanged: where the box or its API uses a word in
+input we must send, the wire's spelling stays (`target_type`'s `remotePort`, the `tag` /
+`utag` / `intf` reference prefixes).
+
+So the boundary is: **the vendor's record keys are read at the record layer and
+published in our vocabulary**, and the reconciliation happens where the raw row is
+normalized into a model, never in the published row.
 
 Identity presentation rule:
 
