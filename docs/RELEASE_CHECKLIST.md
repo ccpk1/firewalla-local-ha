@@ -47,6 +47,23 @@ Checklist:
 - [ ] `docs/USER_GUIDE.md` still matches the actual setup, removal, and runtime behavior.
 - [ ] `CONTRIBUTING.md`, `SUPPORT.md`, and `SECURITY.md` still reflect the real repository process.
 - [ ] Any user-visible change has a short release summary prepared for the GitHub release body.
+- [ ] **Any breaking change is called out in the release body**, naming the old and new
+      value so an upgrading user can find it. `USER_GUIDE.md`'s *Upgrading* section is
+      the source; the release body summarises it.
+
+### Known breaking change pending release
+
+Renamed the entity attribute keys and labels from `device` to `host`, because `host`
+is this integration's word for a Firewalla endpoint on every surface. `device_tracker`
+is unaffected — it is a Home Assistant platform. Full old-to-new table in
+`docs/USER_GUIDE.md` under *Upgrading: renamed attributes*.
+
+| What | Detail |
+| --- | --- |
+| Breaks | A template or automation reading `devices_online`, `devices_offline`, `devices_total`, `vpn_devices_*`, `device_count`, `device_group`, `associated_devices`, `associated_device_count`, `associated_device_group` or `device_name` from an entity attribute or a service response |
+| Fix | Read the `hosts_*` / `host_*` / `associated_hosts*` name instead |
+| Not affected | `device_tracker` entities and their platform; entity ids; entity names |
+| Migration | One-to-one rename; no value, type or availability changed |
 
 ## 5) HACS and Home Assistant posture
 

@@ -4125,7 +4125,7 @@ async def test_get_system_overview_reports_counts_without_identities(
             "name",
             "kind",
             "ipv4_subnets",
-            "device_count",
+            "host_count",
             "online",
             "offline",
         }

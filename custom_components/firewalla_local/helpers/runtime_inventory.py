@@ -643,8 +643,8 @@ def build_runtime_inventory_report(
     group_count = sum(1 for group in groups if group["kind"] == "group")
     group_policy_controls = _build_group_policy_controls(groups)
     target_list_references = _build_target_list_references(rules)
-    devices_total = len(hosts)
-    devices_online = count_online_hosts(
+    hosts_total = len(hosts)
+    hosts_online = count_online_hosts(
         hosts,
         online_window_seconds=online_window_seconds,
     )
@@ -665,9 +665,9 @@ def build_runtime_inventory_report(
             "rules_needing_review_count": len(rules_needing_review),
             "target_list_reference_count": len(target_list_references),
             "host_count": host_count,
-            "devices_total": devices_total,
-            "devices_online": devices_online,
-            "devices_offline": devices_total - devices_online,
+            "hosts_total": hosts_total,
+            "hosts_online": hosts_online,
+            "hosts_offline": hosts_total - hosts_online,
             "network_count": network_count,
         },
         "groups": groups,
@@ -721,9 +721,9 @@ def render_runtime_inventory_markdown(report: dict[str, object]) -> str:
             "rules_needing_review_count",
             "target_list_reference_count",
             "host_count",
-            "devices_total",
-            "devices_online",
-            "devices_offline",
+            "hosts_total",
+            "hosts_online",
+            "hosts_offline",
             "network_count",
         ):
             lines.append(f"- {key}: {summary.get(key)}")

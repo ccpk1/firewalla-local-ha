@@ -60,20 +60,20 @@ No paid service or separate app is needed to reach any of this.
 ### Example: read the online device count over REST
 
 The system-status entity reports how many devices are currently online in its
-`devices_online` attribute. To read it from anywhere on your network, create a
+`hosts_online` attribute. To read it from anywhere on your network, create a
 token under **Profile → Security → Long-lived access tokens**, then:
 
 ```bash
 curl -s -H "Authorization: Bearer $HA_TOKEN" \
   http://homeassistant.local:8123/api/states/binary_sensor.firewalla_system_status \
-  | jq '.attributes.devices_online'
+  | jq '.attributes.hosts_online'
 ```
 
 That prints a plain number you can drop into a script, a status page, or any
 other tool. The same value inside Home Assistant is:
 
 ```jinja
-{{ state_attr('binary_sensor.firewalla_system_status', 'devices_online') }}
+{{ state_attr('binary_sensor.firewalla_system_status', 'hosts_online') }}
 ```
 
 The entity ID follows your box's name, so yours may differ from the example.
@@ -88,19 +88,19 @@ same device counts the entity reports:
 ```bash
 curl -s -X POST -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" \
   -d '{}' "http://homeassistant.local:8123/api/services/firewalla_local/get_runtime_inventory?return_response" \
-  | jq '.service_response.inventory.summary | {devices_online, devices_offline}'
+  | jq '.service_response.inventory.summary | {hosts_online, hosts_offline}'
 ```
 
 ```json
 {
-  "devices_online": 42,
-  "devices_offline": 176
+  "hosts_online": 42,
+  "hosts_offline": 176
 }
 ```
 
 Add `?return_response` so Home Assistant sends the result back, and note that
 this service requires an administrator token. The summary also carries
-`devices_total`, `host_count`, rule counts, and network counts, so one call can
+`hosts_total`, `host_count`, rule counts, and network counts, so one call can
 feed a dashboard or a monitoring script.
 
 One difference worth knowing: the REST API hands back every attribute, while
@@ -264,6 +264,33 @@ Services added after 1.0.0:
 - `firewalla_local.sync_runtime`
 - `firewalla_local.get_system_overview`
 - `firewalla_local.get_flow_report`
+
+## Upgrading: renamed attributes
+
+**If you read these attributes in an automation or template, they were renamed.**
+`host` is the word this integration uses for a Firewalla endpoint, on every surface,
+so the attribute keys and the labels shown in the UI now both say it. Nothing about
+the data changed — only the names.
+
+| Entity | Was | Now |
+| --- | --- | --- |
+| `binary_sensor` system status | `devices_online` / `devices_offline` / `devices_total` | `hosts_online` / `hosts_offline` / `hosts_total` |
+| `binary_sensor` system status | `vpn_devices_online` / `_offline` / `_total` | `vpn_hosts_online` / `_offline` / `_total` |
+| `binary_sensor` network | `device_count` | `host_count` |
+| `binary_sensor` watched host | `device_group` | `host_group` |
+| `device_tracker` presence | `device_group` | `host_group` |
+| `sensor` watched user usage | `associated_devices` / `associated_device_count` / `associated_device_group` | `associated_hosts` / `associated_host_count` / `associated_host_group` |
+| `binary_sensor` alarm | `device_name` | `host_name` |
+
+The same rename applies where those values are returned by a service, so
+`get_runtime_inventory` reports `hosts_online` / `hosts_offline` / `hosts_total`, and
+the network list in `get_system_overview` reports `host_count`.
+
+If you used the attribute **name** shown in the UI, it changed too, from *"Devices
+online"* to *"Hosts online"* and so on — the labels and the keys now agree.
+
+**What did not change:** `device_tracker` entities. That is a Home Assistant platform,
+not this integration's vocabulary, and it keeps its name and its behavior.
 
 ## Installation
 
@@ -878,8 +905,8 @@ it directly.
 - useful for rule discovery, group and user correlation, and debugging the
   normalized runtime model
 - returns structured `inventory` data plus a rendered `markdown` summary
-- the `summary` block includes `devices_total`, `devices_online`, and
-  `devices_offline`, which use the same online definition as the system-status
+- the `summary` block includes `hosts_total`, `hosts_online`, and
+  `hosts_offline`, which use the same online definition as the system-status
   entity, plus `host_count` (the raw host records the box reported) and rule,
   group, user, and network counts
 - unlike the newer report services, it predates the shared report envelope

@@ -985,3 +985,83 @@ stays narrowly defined.
 same key name on different entity types, which is intentional reuse, not the
 duplicate-under-one-name defect §2b found. Recorded so the scan result is not mistaken
 for a problem later.
+
+---
+
+## 14. Phase 4 — what landed, and the one thing that did not
+
+### 14a. The doctrine was corrected, because measurement contradicted it
+
+This initiative's *Register boundary* — "machine says `host`, human says `device`" —
+was **wrong**, and the numbers said so before the code did:
+
+| Human surface | `device` | `host` |
+| --- | --- | --- |
+| `services.yaml` names and descriptions | 26 | **111** |
+| LLM control tool descriptions | 28 | **38** |
+| LLM read tool descriptions | 18 | 19 |
+| Entity attribute labels | **13** | 0 |
+| Options/setup flow prose | **13** | 0 |
+
+The rule described an intention rather than the code. What the code actually does —
+and what the pre-existing *critical rule* always said — is **`host` everywhere, except
+where `device` means a Home Assistant device-registry concept**. The 13 attribute
+labels were the outlier, not the human register.
+
+`ARCHITECTURE.md` now states one vocabulary with one exception, and names
+`device_tracker` explicitly, because that platform is Home Assistant's and must never
+be renamed. `DEVELOPMENT_STANDARDS.md` gained the same rule plus *"one concept never
+gets two published names"* — which is the rule that caught the two service responses.
+
+### 14b. What was renamed
+
+**12 attribute keys and their constant names**, **13 labels**, and **five
+same-concept service-response keys**:
+
+| Surface | Count | Breaking? |
+| --- | --- | --- |
+| `ATTR_*` constant names + values | 12 | values yes, names internal |
+| Translation labels (`'Devices online'` → `'Hosts online'`) | 13 | cosmetic — a person reads different words |
+| Service-response keys that are the same concept (`get_runtime_inventory`'s three counts; the network list's `host_count`; the alarm's `host_name`) | 5 | **yes** |
+
+The service-response renames were not in the agreed scope; they were required by *"one
+concept never gets two published names"*. `get_runtime_inventory` published
+`devices_online` while the entity published `devices_online` too — renaming only the
+entity would have split one value across two names, which is the defect this initiative
+exists to remove.
+
+**Deliberately left alone:**
+
+- **`ATTR_WATCHED_DEVICE_*` constant prefix** (17 constants). The *values* are clean; only
+  the internal prefix says `device`. It is the feature's name (`watched_device` is also
+  the entity translation key and the options-flow wording), and it sits directly beside
+  `device_tracker` — the area the owner asked to treat carefully. Renaming the feature
+  is a separate, wider change (options text, entity keys, class names) and is **not**
+  part of this. Flagged, not decided.
+- **`device_id` / `device_ip` / `device_name` on flow records, usage rows and member
+  rankings.** §8b's deferred wave. These are literal payload keys, so the guard cannot
+  see them, and each is part of an object with sibling `device_*` keys — renaming one
+  would leave a mixed object. A separate change with its own justification.
+
+### 14c. The work list is deleted, and the guard's claim was narrowed
+
+`_KNOWN_VIOLATIONS` is **gone** — not empty, deleted. An empty allowlist is an
+invitation to add one entry to it. The three checks now assert zero violations, with no
+exemption mechanism, and a fourth test proves the scanners are reading real data so a
+passing suite cannot mean "the scanner stopped working". Verified by injecting a
+violation into `ATTR_ALARM_HOST_NAME` and watching the guard fail with nowhere to record
+it.
+
+**4.5's widening was declined, deliberately.** Scanning literal payload keys would have
+flagged roughly a dozen more published keys — a second breaking wave on a weaker
+argument (internal payload keys rather than published discriminators). Instead the
+guard's documented scope was shrunk to match what it enforces, and the uncovered
+surfaces are named in the guard itself rather than left ambiguous. A narrower claim that
+is completely true beats a broad claim that is mostly true.
+
+### 14d. One pre-existing smell surfaced and left alone
+
+`get_runtime_inventory`'s summary publishes **both** `host_count` (raw payload entries)
+and `hosts_total` (normalized hosts). They are usually the same number computed two
+ways. Renaming the second made the pair visible; merging or dropping one is a behaviour
+change nobody asked for, so it is recorded rather than fixed.

@@ -162,9 +162,6 @@
           "alarm_type": {
             "name": "Latest alarm type"
           },
-          "device_name": {
-            "name": "Latest alarm device"
-          },
           "message": {
             "name": "Latest alarm message"
           },
@@ -173,6 +170,9 @@
           },
           "alarm_id": {
             "name": "Latest alarm ID"
+          },
+          "host_name": {
+            "name": "Latest alarm host"
           }
         }
       },
@@ -203,15 +203,6 @@
           "current_wan_usage": {
             "name": "Current WAN usage"
           },
-          "devices_offline": {
-            "name": "Devices offline"
-          },
-          "devices_online": {
-            "name": "Devices online"
-          },
-          "devices_total": {
-            "name": "Devices total"
-          },
           "ddns": {
             "name": "DDNS"
           },
@@ -236,15 +227,6 @@
           "uptime_seconds": {
             "name": "Uptime seconds"
           },
-          "vpn_devices_offline": {
-            "name": "VPN devices offline"
-          },
-          "vpn_devices_online": {
-            "name": "VPN devices online"
-          },
-          "vpn_devices_total": {
-            "name": "VPN devices total"
-          },
           "purpose": {
             "name": "Purpose",
             "state": {
@@ -265,6 +247,24 @@
           },
           "timezone": {
             "name": "Timezone"
+          },
+          "hosts_online": {
+            "name": "Hosts online"
+          },
+          "hosts_offline": {
+            "name": "Hosts offline"
+          },
+          "hosts_total": {
+            "name": "Hosts total"
+          },
+          "vpn_hosts_online": {
+            "name": "VPN hosts online"
+          },
+          "vpn_hosts_offline": {
+            "name": "VPN hosts offline"
+          },
+          "vpn_hosts_total": {
+            "name": "VPN hosts total"
           }
         }
       },
@@ -360,9 +360,6 @@
           "dhcp": {
             "name": "DHCP"
           },
-          "device_count": {
-            "name": "Device count"
-          },
           "network_usage": {
             "name": "Network usage"
           },
@@ -380,6 +377,9 @@
           },
           "block_icmp": {
             "name": "Block ICMP"
+          },
+          "host_count": {
+            "name": "Host count"
           }
         }
       },
@@ -433,9 +433,6 @@
           "connection_type": {
             "name": "Connection type"
           },
-          "device_group": {
-            "name": "Device group"
-          },
           "download_usage": {
             "name": "Data downloaded"
           },
@@ -465,6 +462,9 @@
           },
           "wifi_ssid": {
             "name": "WiFi network"
+          },
+          "host_group": {
+            "name": "Host group"
           }
         }
       }
@@ -501,9 +501,6 @@
           "connection_type": {
             "name": "Connection type"
           },
-          "device_group": {
-            "name": "Device group"
-          },
           "ip_address": {
             "name": "IP address"
           },
@@ -512,6 +509,9 @@
           },
           "network_name": {
             "name": "Network name"
+          },
+          "host_group": {
+            "name": "Host group"
           }
         }
       }
@@ -856,20 +856,20 @@
           "app_usage_by_app": {
             "name": "App usage by app"
           },
-          "associated_device_count": {
-            "name": "Associated device count"
-          },
-          "associated_device_group": {
-            "name": "Associated device group"
-          },
-          "associated_devices": {
-            "name": "Associated devices"
-          },
           "last_active": {
             "name": "Last active"
           },
           "unique_usage_today": {
             "name": "Unique usage today"
+          },
+          "associated_hosts": {
+            "name": "Associated hosts"
+          },
+          "associated_host_count": {
+            "name": "Associated host count"
+          },
+          "associated_host_group": {
+            "name": "Associated host group"
           }
         }
       }

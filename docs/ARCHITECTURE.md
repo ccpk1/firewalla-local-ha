@@ -82,41 +82,36 @@ Critical rule:
 - never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
 - never use `device` for Firewalla endpoint inventory, naming fields, or selector behavior unless the code is explicitly referring to a Home Assistant device registry concept
 
-### Register boundary
+### Vocabulary: `host`, with one exception
 
-The vocabulary has two registers, and the same concept is named differently in each.
-This is deliberate, not drift. It must be stated because it was violated three times
-before it was written down.
+**`host` is the word for a Firewalla endpoint, on every surface** — machine and human
+alike. There is no second register. A service field, an enum value, a published
+discriminator, an entity attribute key **and its label**, a service description, and
+an LLM tool description all say `host`.
 
-| Register | Reader | Word |
-| --- | --- | --- |
-| **Machine** | automations, models, code | **`host`** |
-| **Human** | people | `device` |
+This replaced an earlier two-register rule — "machine says `host`, human says
+`device`" — which measurement did not support. Service-facing text already said `host`
+**111 times against 26** for `device`, so the human register was never `device`; the
+attribute labels were the outlier, and the rule was describing an intention rather
+than the code. One word is both simpler and what the code was already doing.
 
-Machine surfaces are **always `host`**:
+**The one exception: where `device` means a Home Assistant device-registry concept.**
+This is the critical rule above, not a carve-out from it:
 
-- service field names and their enum values
-- `target.kind` and every other published discriminator
-- `include` / `exclude` values
-- entity attribute keys
-- LLM tool parameter names and their enum values
+- **`device_tracker`** — Home Assistant's own platform name. It is not ours, it is not
+  translatable, and it must not be renamed. Our options text that talks about
+  *device trackers* is naming an HA concept and stays.
+- **the device registry** — entities that create device-registry entries, and the
+  options a user picks to do so (*"Devices to expose as device trackers"*), are about
+  Home Assistant devices.
+- **the Firewalla protocol's own words** — where the box or its API uses a word in
+  input we must send, the wire's vocabulary is the wire's.
 
-Human surfaces are **`device`** where it reads better:
-
-- service `name:` and `description:` values
-- LLM tool descriptions and the shared prompt
-- documentation prose
-
-The test that classifies a new field: **a value inside an enum, or a key inside a
-payload, is machine. A sentence explaining it is human.** A field named as a key is
-machine even when the reader is a person, because it is also the name an automation
-writes.
-
-Measured support for `host` being the machine word: all 15 device selector fields in
-the service surface are `host_*`, every device-facing service name uses `host`
-(`get_hosts`, `wake_host`, `set_host_membership`), and no service is named
-`*device*`. The machine register already is `host`; a new field that departs from it
-is the deviation, and must say what forced it.
+Everything else that names a Firewalla endpoint is `host`. Measured support: all 15
+device selector fields are `host_*`, every device-facing service name uses `host`
+(`get_hosts`, `wake_host`, `set_host_membership`), no service is named `*device*`, and
+service text says `host` four times for every `device`. A new field that departs from
+this is the deviation, and must say what forced it.
 
 Identity presentation rule:
 

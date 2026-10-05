@@ -17,7 +17,7 @@ from custom_components.firewalla_local.const import (
     ATTR_INTEGRATION,
     ATTR_PURPOSE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
-    ATTR_WATCHED_DEVICE_DEVICE_GROUP,
+    ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
@@ -196,7 +196,7 @@ async def test_device_tracker_exposes_state_and_attributes(
     )
     assert tracker_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert tracker_state.attributes[ATTR_WATCHED_DEVICE_IP_ADDRESS] == "192.168.200.25"
-    assert tracker_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] == "KADEN"
+    assert tracker_state.attributes[ATTR_WATCHED_DEVICE_HOST_GROUP] == "KADEN"
     assert tracker_state.attributes[ATTR_WATCHED_DEVICE_NETWORK_NAME] == "VLAN10 CORE"
     assert tracker_state.attributes[ATTR_WATCHED_DEVICE_CONNECTION_TYPE] == "phone"
     assert (
@@ -270,10 +270,8 @@ async def test_device_tracker_group_attribute_shows_the_user_for_a_legacy_tag(
         hass, "_0C:85:E1:B0:1D:1C_device_tracker"
     )
 
-    assert (
-        tracker_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] == "KADENS_DEVICES"
-    )
-    assert tracker_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] != (
+    assert tracker_state.attributes[ATTR_WATCHED_DEVICE_HOST_GROUP] == "KADENS_DEVICES"
+    assert tracker_state.attributes[ATTR_WATCHED_DEVICE_HOST_GROUP] != (
         "KADEN's Devices"
     )
 

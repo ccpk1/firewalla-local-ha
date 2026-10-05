@@ -5,11 +5,10 @@ surfaces use `device`. The rule was documented and then violated three times, be
 a rule that is only prose is not enforced. This module is the enforcement.
 
 **The allowlist is a work list, not a suppression list.** The test asserts that the
-violations found in the tree are *exactly* the entries in `_KNOWN_VIOLATIONS`. That
-equality is the point: fixing a violation without removing its entry fails the test,
-and adding a violation fails the test, so the list cannot silently drift out of step
-with reality in either direction. An entry with no removing phase is a planning
-failure, not an approved exemption.
+checks assert **zero** violations. There is no allowlist and no work list: the one this
+replaced went 23 -> 17 -> 12 -> empty across Phases 2, 3 and 4, and the structure was
+deleted rather than left empty, because an empty allowlist is an invitation to add one
+entry to it.
 
 The three checks mirror the three surfaces the register rule governs:
 
@@ -87,53 +86,27 @@ _EXEMPT_PRECEDING_TOKEN: Final = "host"
 # documented.
 _GUARDED_ENUM_FIELD_VALUES: Final = ("scope_kind", "target_type")
 
-# Constants whose *values* are machine keys an automation writes. `FLOW_REPORT_` is
-# included because its values are keys inside a report payload, which the register
-# rule names explicitly.
+# Constants whose *values* are keys an automation writes. `FLOW_REPORT_` is included
+# because its values are keys inside a report payload, which the vocabulary rule names
+# explicitly.
 _GUARDED_CONSTANT_PREFIXES: Final = ("SERVICE_FIELD_", "ATTR_", "FLOW_REPORT_")
 
-# ---------------------------------------------------------------------------
-# The work list. Every entry is a current violation with the phase that removes it.
-# Phase 4.4 deletes this mapping outright; if it cannot be deleted, the initiative
-# is not finished.
+# There is no work list. Every check below asserts **zero** violations, with no
+# exemption mechanism at all -- a new violation fails the build and there is nothing to
+# add it to. The list this replaces went 23 -> 17 -> 12 -> empty across Phases 2, 3 and
+# 4, and deleting the structure rather than leaving it empty is the point: an empty
+# allowlist that still exists is an invitation to add one entry to it.
 #
-# Phase 2 emptied the response side entirely: every `target.kind` now resolves
-# through `const.py`'s vocabulary, so there is no entry left to carry. That is what
-# `_find_target_kind_violations` returning `[]` means, and it is asserted rather than
-# assumed.
-# ---------------------------------------------------------------------------
-
-# Phase 3 gives `target_type` a real vocabulary (Q5) and deletes `scope_kind` for
-# typed pairs (Q4).
+# What this guard does **not** cover, stated so it is not mistaken for total:
 #
-# Both remaining `scope_kind` enums are gone: `create_rule` and the alarm silences now
-# take typed pairs with an explicit `all_hosts` flag, so the wide case is stated rather
-# than reached by a value. `get_rules`' unvalidated `target_type` is validated against
-# the full `RULE_TARGET_TYPE_*` set, because a filter must accept every value the read
-# side can return -- a typo used to return an empty list indistinguishable from "no such
-# rules".
-_ENUM_VIOLATIONS: Final = {}
-
-_CONSTANT_VIOLATIONS: Final = {
-    "ATTR_SYSTEM_DEVICES_ONLINE": "Phase 4 — becomes `hosts_online`",
-    "ATTR_SYSTEM_DEVICES_OFFLINE": "Phase 4 — becomes `hosts_offline`",
-    "ATTR_SYSTEM_DEVICES_TOTAL": "Phase 4 — becomes `hosts_total`",
-    "ATTR_SYSTEM_VPN_DEVICES_ONLINE": "Phase 4 — becomes `vpn_hosts_online`",
-    "ATTR_SYSTEM_VPN_DEVICES_OFFLINE": "Phase 4 — becomes `vpn_hosts_offline`",
-    "ATTR_SYSTEM_VPN_DEVICES_TOTAL": "Phase 4 — becomes `vpn_hosts_total`",
-    "ATTR_NETWORK_DEVICE_COUNT": "Phase 4 — becomes `host_count`",
-    "ATTR_WATCHED_USER_ASSOCIATED_DEVICES": "Phase 4 — becomes `associated_hosts`",
-    "ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT": (
-        "Phase 4 — becomes `associated_host_count`"
-    ),
-    "ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP": (
-        "Phase 4 — becomes `associated_host_group`"
-    ),
-    "ATTR_WATCHED_DEVICE_DEVICE_GROUP": "Phase 4 — becomes `host_group`",
-    "ATTR_ALARM_DEVICE_NAME": "Phase 4 — becomes `host_name`",
-}
-
-_KNOWN_VIOLATIONS: Final = _ENUM_VIOLATIONS | _CONSTANT_VIOLATIONS
+# - **literal payload keys.** The checks read `ATTR_*` / `SERVICE_FIELD_*` /
+#   `FLOW_REPORT_*` *values*, so a key written directly as `"device_id": ...` in
+#   `services.py` or `models.py` is invisible. Flow records and usage rows still
+#   publish `device_id` / `device_ip` / `device_name` that way. That is a recorded,
+#   deliberate deferral, not an oversight -- see the inventory note.
+# - **enum values inside the tool schemas** that duplicate a service schema.
+# - **documentation prose.** One check asserts the rule is stated in
+#   `ARCHITECTURE.md`; the rest of the prose is not machine-checked.
 
 
 def _module_tree(path: Path) -> ast.Module:
@@ -560,40 +533,34 @@ def _found_violations() -> dict[str, str]:
     }
 
 
-def test_violations_match_the_work_list_exactly() -> None:
-    """Test the register boundary holds wherever it is not a recorded exception.
+def test_the_boundary_holds_with_no_exceptions() -> None:
+    """Test every checked surface is clean, with no exemption mechanism.
 
-    The equality is the guard. A violation that is added fails here; a violation that
-    is fixed without removing its entry also fails here, so the work list cannot
-    drift out of step with the tree in either direction.
+    This asserted equality against a work list while the phases were running, so the
+    list could not drift out of step with the tree in either direction. The list is
+    gone and the assertion is now absolute: anything found here is a violation to fix,
+    because there is nowhere to record it.
     """
-    found = set(_found_violations())
-    known = set(_KNOWN_VIOLATIONS)
-
-    added = sorted(found - known)
-    assert added == [], (
-        "new violations of the register boundary; either fix them or add them to "
-        f"the work list with the phase that removes them: {added}"
-    )
-
-    resolved = sorted(known - found)
-    assert resolved == [], (
-        "these are fixed but still listed as violations; remove their work-list "
-        f"entries so the list stays a work list: {resolved}"
+    found = sorted(_found_violations())
+    assert found == [], (
+        "violations of the vocabulary rule; these are not exemptible, because the "
+        f"work list that used to carry them has been deleted: {found}"
     )
 
 
-def test_every_work_list_entry_names_the_phase_that_removes_it() -> None:
-    """Test no entry is an exemption without an owner or a reason.
+def test_the_boundary_check_is_not_silently_empty() -> None:
+    """Test the guard is actually reading the tree, not vacuously passing.
 
-    An entry with no phase is an exemption, which is the thing this list must never
-    become. The check is on the value rather than the key because the value is where
-    the owner and the reason live.
+    A check that finds nothing is only meaningful if it looked at something. This
+    proves each scan returns a populated result set on a deliberate violation, so a
+    passing suite cannot mean "the scanner stopped working".
     """
-    unowned = sorted(
-        key for key, reason in _KNOWN_VIOLATIONS.items() if "Phase " not in reason
-    )
-    assert unowned == [], f"work-list entries with no owning phase: {unowned}"
+    # `_found_violations` returning {} is only trustworthy if the scanners see real
+    # data, so assert they at least read the files they are meant to read.
+    assert _string_constants(), "no module-level string constants resolved"
+    assert _sequence_constants(_string_constants()), "no enum sequences resolved"
+    assert _detail_enum_by_schema(), "no `detail` field found to check"
+    assert _target_kind_constants(_string_constants()), "no target-kind constants found"
 
 
 def test_the_canonical_set_matches_the_vocabulary_module() -> None:
@@ -629,10 +596,15 @@ def test_the_canonical_set_matches_the_documented_one() -> None:
             "ARCHITECTURE.md; the document and the guard must agree"
         )
 
-    # The human word must be documented as belonging to the other register, or the
-    # rule reads as "never say device" rather than "say device in prose".
-    assert "Register boundary" in architecture
-    assert "human" in architecture.lower()
+    # The rule must be documented, since the guard enforces it. The section is named
+    # for the word it prescribes, not for a register boundary -- measurement showed
+    # there is only one register.
+    assert "Vocabulary: `host`, with one exception" in architecture
+    assert "device_tracker" in architecture, (
+        "the one exception is `device` for Home Assistant device-registry concepts; "
+        "the document must name `device_tracker` explicitly or the exception is "
+        "unreadable"
+    )
 
 
 def _detail_enum_by_schema() -> dict[str, list[str] | None]:

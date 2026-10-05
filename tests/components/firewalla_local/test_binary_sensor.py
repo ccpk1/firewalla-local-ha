@@ -27,11 +27,11 @@ from custom_components.firewalla_local.const import (
     ATTR_AP_TX_POWER,
     ATTR_INTEGRATION,
     ATTR_NETWORK_BLOCK_ICMP,
-    ATTR_NETWORK_DEVICE_COUNT,
     ATTR_NETWORK_DHCP,
     ATTR_NETWORK_DNS_SERVERS,
     ATTR_NETWORK_ENABLED,
     ATTR_NETWORK_GATEWAY,
+    ATTR_NETWORK_HOST_COUNT,
     ATTR_NETWORK_IPV4_ADDRESSES,
     ATTR_NETWORK_IPV4_SUBNETS,
     ATTR_NETWORK_KIND,
@@ -53,8 +53,8 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_PORTS,
     ATTR_SYSTEM_TIMEZONE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
-    ATTR_WATCHED_DEVICE_DEVICE_GROUP,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
+    ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
@@ -197,7 +197,7 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
     )
     assert watched_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_IP_ADDRESS] == "192.168.200.25"
-    assert watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] == "KADEN"
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_HOST_GROUP] == "KADEN"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_NETWORK_NAME] == "VLAN10 CORE"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_CONNECTION_TYPE] == "phone"
     assert watched_state.attributes[ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE] == 1234
@@ -272,10 +272,8 @@ async def test_watched_device_group_attribute_shows_the_user_for_a_legacy_tag(
     )
 
     assert watched_state is not None
-    assert (
-        watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] == "KADENS_DEVICES"
-    )
-    assert watched_state.attributes[ATTR_WATCHED_DEVICE_DEVICE_GROUP] != (
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_HOST_GROUP] == "KADENS_DEVICES"
+    assert watched_state.attributes[ATTR_WATCHED_DEVICE_HOST_GROUP] != (
         "KADEN's Devices"
     )
 
@@ -836,7 +834,7 @@ async def test_network_binary_sensor_exposes_state_and_attributes(
     assert vlan_state.attributes[ATTR_NETWORK_SSDP_RELAY] is False
     assert vlan_state.attributes[ATTR_NETWORK_BLOCK_ICMP] is True
     assert vlan_state.attributes[ATTR_NETWORK_DHCP]["gateway"] == "192.168.10.1"
-    assert vlan_state.attributes[ATTR_NETWORK_DEVICE_COUNT] == 2
+    assert vlan_state.attributes[ATTR_NETWORK_HOST_COUNT] == 2
     assert vlan_state.attributes[ATTR_NETWORK_USAGE] == {
         "last_24h": {"download_bytes": 100, "upload_bytes": 50},
         "last_60m": {"download_bytes": None, "upload_bytes": None},

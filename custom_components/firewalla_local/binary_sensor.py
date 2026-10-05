@@ -17,8 +17,8 @@ from .const import (
     ATTR_ALARM_ARCHIVED_COUNT,
     ATTR_ALARM_CATEGORY_COUNTS,
     ATTR_ALARM_CATEGORY_COUNTS_COMPLETE,
-    ATTR_ALARM_DEVICE_NAME,
     ATTR_ALARM_FIRED_AT,
+    ATTR_ALARM_HOST_NAME,
     ATTR_ALARM_ID,
     ATTR_ALARM_MESSAGE,
     ATTR_ALARM_PENDING_COUNT,
@@ -36,11 +36,11 @@ from .const import (
     ATTR_AP_TIMEZONE,
     ATTR_AP_TX_POWER,
     ATTR_NETWORK_BLOCK_ICMP,
-    ATTR_NETWORK_DEVICE_COUNT,
     ATTR_NETWORK_DHCP,
     ATTR_NETWORK_DNS_SERVERS,
     ATTR_NETWORK_ENABLED,
     ATTR_NETWORK_GATEWAY,
+    ATTR_NETWORK_HOST_COUNT,
     ATTR_NETWORK_IPV4_ADDRESSES,
     ATTR_NETWORK_IPV4_SUBNETS,
     ATTR_NETWORK_IPV6_ADDRESSES,
@@ -67,11 +67,11 @@ from .const import (
     ATTR_SYSTEM_CPU_USAGE_1M,
     ATTR_SYSTEM_CURRENT_WAN_USAGE,
     ATTR_SYSTEM_DDNS,
-    ATTR_SYSTEM_DEVICES_OFFLINE,
-    ATTR_SYSTEM_DEVICES_ONLINE,
-    ATTR_SYSTEM_DEVICES_TOTAL,
     ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT,
     ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE,
+    ATTR_SYSTEM_HOSTS_OFFLINE,
+    ATTR_SYSTEM_HOSTS_ONLINE,
+    ATTR_SYSTEM_HOSTS_TOTAL,
     ATTR_SYSTEM_MEMORY_FREE_MB,
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
     ATTR_SYSTEM_PORTS,
@@ -80,18 +80,18 @@ from .const import (
     ATTR_SYSTEM_TIMEZONE,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
-    ATTR_SYSTEM_VPN_DEVICES_OFFLINE,
-    ATTR_SYSTEM_VPN_DEVICES_ONLINE,
-    ATTR_SYSTEM_VPN_DEVICES_TOTAL,
+    ATTR_SYSTEM_VPN_HOSTS_OFFLINE,
+    ATTR_SYSTEM_VPN_HOSTS_ONLINE,
+    ATTR_SYSTEM_VPN_HOSTS_TOTAL,
     ATTR_SYSTEM_WAN_IP,
     ATTR_SYSTEM_WAN_IPS,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
-    ATTR_WATCHED_DEVICE_DEVICE_GROUP,
     ATTR_WATCHED_DEVICE_DNS_DOMAIN,
     ATTR_WATCHED_DEVICE_DNS_FQDN,
     ATTR_WATCHED_DEVICE_DNS_HOSTNAME,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
     ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE,
+    ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_HOST_NAME,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
@@ -250,14 +250,14 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
                 system_status.wan_ips if system_status is not None else None
             ),
             ATTR_SYSTEM_CURRENT_WAN_USAGE: self._build_current_wan_usage_attribute(),
-            ATTR_SYSTEM_DEVICES_TOTAL: self.host_manager.count_total_devices(),
-            ATTR_SYSTEM_DEVICES_ONLINE: self.host_manager.count_online_devices(),
-            ATTR_SYSTEM_DEVICES_OFFLINE: self.host_manager.count_offline_devices(),
-            ATTR_SYSTEM_VPN_DEVICES_TOTAL: self.host_manager.count_vpn_total_devices(),
-            ATTR_SYSTEM_VPN_DEVICES_ONLINE: (
+            ATTR_SYSTEM_HOSTS_TOTAL: self.host_manager.count_total_devices(),
+            ATTR_SYSTEM_HOSTS_ONLINE: self.host_manager.count_online_devices(),
+            ATTR_SYSTEM_HOSTS_OFFLINE: self.host_manager.count_offline_devices(),
+            ATTR_SYSTEM_VPN_HOSTS_TOTAL: self.host_manager.count_vpn_total_devices(),
+            ATTR_SYSTEM_VPN_HOSTS_ONLINE: (
                 self.host_manager.count_vpn_online_devices()
             ),
-            ATTR_SYSTEM_VPN_DEVICES_OFFLINE: (
+            ATTR_SYSTEM_VPN_HOSTS_OFFLINE: (
                 self.host_manager.count_vpn_offline_devices()
             ),
             ATTR_SYSTEM_CPU_USAGE_1M: (
@@ -529,7 +529,7 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_NETWORK_DHCP: (
                 self._serialize_dhcp(network.dhcp) if network is not None else None
             ),
-            ATTR_NETWORK_DEVICE_COUNT: (
+            ATTR_NETWORK_HOST_COUNT: (
                 network.device_host_count if network is not None else None
             ),
             ATTR_NETWORK_USAGE: (
@@ -631,7 +631,7 @@ class FirewallaAlarmActiveBinarySensor(FirewallaEntity, BinarySensorEntity):
                 self.alarm_manager.active_category_counts_complete
             ),
             ATTR_ALARM_TYPE: latest_alarm.alarm_type if latest_alarm else None,
-            ATTR_ALARM_DEVICE_NAME: latest_alarm.device_name if latest_alarm else None,
+            ATTR_ALARM_HOST_NAME: latest_alarm.device_name if latest_alarm else None,
             ATTR_ALARM_MESSAGE: latest_alarm.message if latest_alarm else None,
             ATTR_ALARM_FIRED_AT: latest_alarm.fired_at if latest_alarm else None,
             ATTR_ALARM_ID: latest_alarm.alarm_id if latest_alarm else None,
@@ -775,7 +775,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE: (
                 host.host_device_type if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_DEVICE_GROUP: (
+            ATTR_WATCHED_DEVICE_HOST_GROUP: (
                 host.group_name if host is not None else None
             ),
             ATTR_WATCHED_DEVICE_NETWORK_NAME: (

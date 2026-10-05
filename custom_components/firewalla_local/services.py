@@ -1310,7 +1310,9 @@ def _serialize_alarm(
     return {
         "alarm_id": alarm.alarm_id,
         "alarm_type": alarm.alarm_type,
-        "device_name": alarm.device_name,
+        # The same host name the `alarm_active` entity publishes as an attribute, so
+        # one concept does not get two published names.
+        "host_name": alarm.device_name,
         "message": alarm.message,
         "state": alarm.state,
         "is_archived": alarm.is_archived,
@@ -4310,7 +4312,8 @@ def _build_network_overview_entries(
                 "name": network.name,
                 "kind": network.kind.value,
                 "ipv4_subnets": list(network.ipv4_subnets),
-                "device_count": len(network_hosts),
+                # The same count the `network` entity publishes as an attribute.
+                "host_count": len(network_hosts),
                 "online": online,
                 "offline": len(network_hosts) - online,
             }

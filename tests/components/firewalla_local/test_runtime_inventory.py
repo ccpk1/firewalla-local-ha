@@ -52,13 +52,10 @@ def test_runtime_inventory_reports_device_counts_with_entity_definition() -> Non
     )
 
     summary = report["summary"]
-    assert summary["devices_total"] == 4
-    assert summary["devices_online"] == 1
-    assert summary["devices_offline"] == 3
-    assert (
-        summary["devices_online"] + summary["devices_offline"]
-        == summary["devices_total"]
-    )
+    assert summary["hosts_total"] == 4
+    assert summary["hosts_online"] == 1
+    assert summary["hosts_offline"] == 3
+    assert summary["hosts_online"] + summary["hosts_offline"] == summary["hosts_total"]
 
 
 def test_runtime_inventory_device_counts_are_zero_without_host_timestamps() -> None:
@@ -73,9 +70,9 @@ def test_runtime_inventory_device_counts_are_zero_without_host_timestamps() -> N
     )
 
     summary = report["summary"]
-    assert summary["devices_total"] == 1
-    assert summary["devices_online"] == 0
-    assert summary["devices_offline"] == 1
+    assert summary["hosts_total"] == 1
+    assert summary["hosts_online"] == 0
+    assert summary["hosts_offline"] == 1
 
 
 def test_build_runtime_inventory_report() -> None:

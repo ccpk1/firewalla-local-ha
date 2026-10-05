@@ -48,9 +48,9 @@ from .const import (
     ATTR_SPEED_TEST_WAN_NAME,
     ATTR_SPEED_TEST_WAN_UUID,
     ATTR_WATCHED_USER_APP_USAGE_BY_APP,
-    ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT,
-    ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP,
-    ATTR_WATCHED_USER_ASSOCIATED_DEVICES,
+    ATTR_WATCHED_USER_ASSOCIATED_HOST_COUNT,
+    ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP,
+    ATTR_WATCHED_USER_ASSOCIATED_HOSTS,
     ATTR_WATCHED_USER_LAST_ACTIVE,
     ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     ENTITY_SUFFIX_SENSOR,
@@ -532,15 +532,15 @@ class FirewallaWatchedUserTodayUsageSensor(FirewallaEntity, SensorEntity):
         watched_user = self._watched_user
         return {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_WATCHED_USER_USAGE),
-            ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP: (
+            ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP: (
                 watched_user.affiliated_group_name if watched_user is not None else None
             ),
-            ATTR_WATCHED_USER_ASSOCIATED_DEVICES: (
+            ATTR_WATCHED_USER_ASSOCIATED_HOSTS: (
                 list(watched_user.associated_host_names)
                 if watched_user is not None
                 else None
             ),
-            ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT: (
+            ATTR_WATCHED_USER_ASSOCIATED_HOST_COUNT: (
                 len(watched_user.associated_host_names)
                 if watched_user is not None
                 else None

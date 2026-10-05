@@ -53,14 +53,14 @@ Normalized host identity rule:
 
 Register boundary rule:
 
-- the vocabulary has two registers and the same concept is named differently in each: **machine** surfaces use `host`, **human** surfaces use `device`
-- machine surfaces are service field names and enum values, `target.kind` and other published discriminators, `include`/`exclude` values, entity attribute keys, and LLM tool parameter names and enum values
-- human surfaces are service `name:`/`description:` values, LLM tool descriptions and the shared prompt, and documentation prose
-- the test is positional, not reader-based: **a value inside an enum, or a key inside a payload, is machine; a sentence explaining it is human**. A key is machine even when a person reads it, because it is also the name an automation writes
-- `host` is the established machine word: every device selector field in the service surface is `host_*`, every device-facing service name uses `host`, and no service is named `*device*`
-- `target.kind` is a machine value, so it is `host` / `group` / `user`; never the protocol's `tag` and never the human word `device`
+- **`host` is the word for a Firewalla endpoint on every surface** — field names, enum values, published discriminators, entity attribute keys **and their labels**, service `name:`/`description:` values, tool descriptions, and prose. There is no second register
+- the one exception is where `device` means a **Home Assistant device-registry concept**: the `device_tracker` platform (HA's name, never rename it), the device registry, and the options a user picks to create those entries. Those say `device` and must keep saying it
+- a Firewalla protocol word we must send in input stays as the wire says
+- measured support: service text says `host` 111 times against 26 for `device`; every device selector field is `host_*`; every device-facing service name uses `host`; no service is named `*device*`
+- `target.kind` is `host` / `group` / `user` / `network`; never the protocol's `tag` and never `device`
 - a network reports `kind: network` and carries the box's `lan`/`vlan`/`vpn`/`wan` distinction on a separate `network_kind` field rather than in the kind, because collapsing it would lose real information
 - **a published value must be accepted back as a selector.** A service that reports an id its own resolver rejects is a defect, not a limitation
+- **one concept never gets two published names.** If a value is published both as an entity attribute and in a service response, renaming it means renaming both
 
 Scope selection rule:
 

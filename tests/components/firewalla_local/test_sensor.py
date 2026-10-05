@@ -49,11 +49,11 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_CPU_USAGE_1M,
     ATTR_SYSTEM_CURRENT_WAN_USAGE,
     ATTR_SYSTEM_DDNS,
-    ATTR_SYSTEM_DEVICES_OFFLINE,
-    ATTR_SYSTEM_DEVICES_ONLINE,
-    ATTR_SYSTEM_DEVICES_TOTAL,
     ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT,
     ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE,
+    ATTR_SYSTEM_HOSTS_OFFLINE,
+    ATTR_SYSTEM_HOSTS_ONLINE,
+    ATTR_SYSTEM_HOSTS_TOTAL,
     ATTR_SYSTEM_MEMORY_FREE_MB,
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
     ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
@@ -63,9 +63,9 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_WAN_IP,
     ATTR_SYSTEM_WAN_IPS,
     ATTR_WATCHED_USER_APP_USAGE_BY_APP,
-    ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT,
-    ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP,
-    ATTR_WATCHED_USER_ASSOCIATED_DEVICES,
+    ATTR_WATCHED_USER_ASSOCIATED_HOST_COUNT,
+    ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP,
+    ATTR_WATCHED_USER_ASSOCIATED_HOSTS,
     ATTR_WATCHED_USER_LAST_ACTIVE,
     ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     CONF_AID,
@@ -435,9 +435,9 @@ async def test_sensor_setup_exposes_system_status_and_wan_speed_test_entities(
         "/data": 6,
     }
     assert system_state.attributes[ATTR_SYSTEM_CLOUD_CONNECTED] is True
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_TOTAL] == 3
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_ONLINE] == 2
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_OFFLINE] == 1
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_TOTAL] == 3
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_ONLINE] == 2
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_OFFLINE] == 1
     assert system_state.attributes[ATTR_SYSTEM_DDNS] == "box.example.firewalla.org"
     assert system_state.attributes[ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE] == "alpha"
     assert system_state.attributes[ATTR_SYSTEM_SOFTWARE_VERSION] == "1.0.0"
@@ -710,9 +710,9 @@ async def test_sensor_setup_handles_missing_wan_speed_test_history(
         "/data": 6,
     }
     assert system_state.attributes[ATTR_SYSTEM_CLOUD_CONNECTED] is False
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_TOTAL] == 3
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_ONLINE] == 2
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_OFFLINE] == 1
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_TOTAL] == 3
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_ONLINE] == 2
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_OFFLINE] == 1
     assert system_state.attributes[ATTR_SYSTEM_DDNS] is None
     assert system_state.attributes[ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE] is None
     assert system_state.attributes[ATTR_SYSTEM_SOFTWARE_VERSION] == "1.0.0"
@@ -843,14 +843,14 @@ async def test_sensor_setup_exposes_watched_user_usage_sensor(
     )
     assert watched_user_state.attributes[ATTR_INTEGRATION] == DOMAIN
     assert (
-        watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP]
+        watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP]
         == "KADEN"
     )
-    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICES] == [
+    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_HOSTS] == [
         "Kaden Chromebook",
         "Kaden Phone",
     ]
-    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT] == 2
+    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_HOST_COUNT] == 2
     assert watched_user_state.attributes[ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY] == 381
     assert watched_user_state.attributes[ATTR_WATCHED_USER_APP_USAGE_BY_APP] == {
         "youtube": 47,
@@ -1063,13 +1063,13 @@ async def test_sensor_setup_derives_watched_user_totals_and_group_associations(
     assert watched_user_state is not None
     assert watched_user_state.state == "44"
     assert (
-        watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP]
+        watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP]
         == "PAYTON"
     )
-    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICES] == [
+    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_HOSTS] == [
         "Payton iPad"
     ]
-    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT] == 1
+    assert watched_user_state.attributes[ATTR_WATCHED_USER_ASSOCIATED_HOST_COUNT] == 1
     assert watched_user_state.attributes[ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY] == 42
     assert watched_user_state.attributes[ATTR_WATCHED_USER_APP_USAGE_BY_APP] == {
         "instagram": 42,
@@ -1182,6 +1182,6 @@ async def test_system_status_device_counts_use_recent_activity_not_stale_only(
     )
 
     assert system_state is not None
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_TOTAL] == 4
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_ONLINE] == 2
-    assert system_state.attributes[ATTR_SYSTEM_DEVICES_OFFLINE] == 2
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_TOTAL] == 4
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_ONLINE] == 2
+    assert system_state.attributes[ATTR_SYSTEM_HOSTS_OFFLINE] == 2

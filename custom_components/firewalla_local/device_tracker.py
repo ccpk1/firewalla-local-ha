@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_INTEGRATION,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
-    ATTR_WATCHED_DEVICE_DEVICE_GROUP,
+    ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_DNS_DOMAIN,
     ATTR_WATCHED_DEVICE_DNS_FQDN,
     ATTR_WATCHED_DEVICE_DNS_HOSTNAME,
@@ -183,7 +183,7 @@ class FirewallaDeviceTracker(
             ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE: (
                 host.host_device_type if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_DEVICE_GROUP: (
+            ATTR_WATCHED_DEVICE_HOST_GROUP: (
                 host.group_name if host is not None else None
             ),
             ATTR_WATCHED_DEVICE_NETWORK_NAME: (
