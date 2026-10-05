@@ -23,11 +23,11 @@ from homeassistant.util.json import JsonObjectType, JsonValueType
 
 from .api import FirewallaApiError
 from .const import (
-    ALARM_MATCH_TYPES,
     ALARM_SERVICE_MAX_LIMIT,
     ALARM_SET_SELECTOR_FIELDS,
     ALARM_STATUS_ACTIVE,
     ALARM_STATUS_ARCHIVED,
+    ALARM_TARGET_TYPES,
     DEFAULT_FLOW_REPORT_RECORD_COUNT,
     DEFAULT_FLOW_REPORT_WINDOW_HOURS,
     DEFAULT_INIT_TARGET,
@@ -58,9 +58,9 @@ from .const import (
     SERVICE_DELETE_RULE,
     SERVICE_FIELD_ACTION,
     SERVICE_FIELD_ALARM_ID,
-    SERVICE_FIELD_ALARM_MATCH_TYPE,
-    SERVICE_FIELD_ALARM_MATCH_VALUE,
     SERVICE_FIELD_ALARM_STATUS,
+    SERVICE_FIELD_ALARM_TARGET_TYPE,
+    SERVICE_FIELD_ALARM_TARGET_VALUE,
     SERVICE_FIELD_ALARM_TYPE,
     SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CLEAR,
@@ -470,8 +470,8 @@ _ALARM_SCOPE_SCHEMA_FIELDS: dict[object, object] = {
 MUTE_ALARM_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
-        vol.Required(SERVICE_FIELD_ALARM_MATCH_TYPE): vol.In(ALARM_MATCH_TYPES),
-        vol.Optional(SERVICE_FIELD_ALARM_MATCH_VALUE): cv.string,
+        vol.Required(SERVICE_FIELD_ALARM_TARGET_TYPE): vol.In(ALARM_TARGET_TYPES),
+        vol.Optional(SERVICE_FIELD_ALARM_TARGET_VALUE): cv.string,
         **_ALARM_SCOPE_SCHEMA_FIELDS,
         vol.Required(SERVICE_FIELD_DURATION): vol.In(("1h", "today", "always")),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
@@ -4765,17 +4765,17 @@ async def _async_handle_mute_alarm(call: ServiceCall) -> None:
     )
     scope_kind, scope_target = _get_alarm_scope_target(call)
     alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
-    match_type = cast(str, call.data[SERVICE_FIELD_ALARM_MATCH_TYPE])
-    match_value = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_MATCH_VALUE))
-    if match_value is None and alarm_id is None:
+    target_type = cast(str, call.data[SERVICE_FIELD_ALARM_TARGET_TYPE])
+    target_value = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_TARGET_VALUE))
+    if target_value is None and alarm_id is None:
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
         )
     try:
         await entry.runtime_data.alarm_manager.async_mute_alarm(
             alarm_id=alarm_id,
-            match_type=match_type,
-            match_value=match_value,
+            target_type=target_type,
+            target_value=target_value,
             scope_kind=scope_kind,
             scope_target=scope_target,
             duration=cast(str, call.data[SERVICE_FIELD_DURATION]),

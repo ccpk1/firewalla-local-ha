@@ -729,7 +729,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Stop alerting me about this." / "Silence this alarm type / domain / IP."
 - **When to use / not:** creates a **silence** (an exception) so future matching alarms stop alerting — it does **not** block traffic and does **not** remove the alarm. For blocking traffic use `block_alarm_target`; for clearing one alarm use `archive_alarm`. Idempotent (`already_in_state`).
-- **Inputs (flat):** `alarm_id` (optional — derive target from it), `alarm_match_type` (`alarm_type` | `domain` | `ip`), `alarm_match_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`).
+- **Inputs (flat):** `alarm_id` (optional — derive target from it), `alarm_target_type` (`alarm_type` | `domain` | `ip`), `alarm_target_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`).
 - **Returns:** action-result (`target`, `undo`).
 - **Reversibility & undo:** reversible — `undo` unmutes (removes the silence).
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.

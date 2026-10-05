@@ -20,9 +20,9 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
 
 from .const import (
-    ALARM_MATCH_TYPES,
     ALARM_STATUS_ACTIVE,
     ALARM_STATUS_ARCHIVED,
+    ALARM_TARGET_TYPES,
     DOMAIN,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_CREATE_RULE,
@@ -30,9 +30,9 @@ from .const import (
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
     SERVICE_FIELD_ALARM_ID,
-    SERVICE_FIELD_ALARM_MATCH_TYPE,
-    SERVICE_FIELD_ALARM_MATCH_VALUE,
     SERVICE_FIELD_ALARM_STATUS,
+    SERVICE_FIELD_ALARM_TARGET_TYPE,
+    SERVICE_FIELD_ALARM_TARGET_VALUE,
     SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIRM,
@@ -975,11 +975,11 @@ class SetAlarmMutedTool(_FirewallaControlTool):
                 ),
             ): str,
             vol.Required(
-                SERVICE_FIELD_ALARM_MATCH_TYPE,
+                SERVICE_FIELD_ALARM_TARGET_TYPE,
                 description="Required. What to silence.",
-            ): vol.In(ALARM_MATCH_TYPES),
+            ): vol.In(ALARM_TARGET_TYPES),
             vol.Optional(
-                SERVICE_FIELD_ALARM_MATCH_VALUE,
+                SERVICE_FIELD_ALARM_TARGET_VALUE,
                 description=(
                     "Optional. The domain or IP to silence (required unless "
                     "alarm_id supplies it)."
@@ -1020,7 +1020,7 @@ class SetAlarmMutedTool(_FirewallaControlTool):
         target = {
             "kind": TARGET_KIND_SILENCE,
             "id": alarm_id,
-            "name": args.get(SERVICE_FIELD_ALARM_MATCH_VALUE),
+            "name": args.get(SERVICE_FIELD_ALARM_TARGET_VALUE),
         }
         await self._call_service(hass, llm_context, args)
         undo = (

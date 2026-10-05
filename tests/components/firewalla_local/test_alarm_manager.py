@@ -150,8 +150,8 @@ async def test_mute_alarm_type_creates_explicit_scoped_exception() -> None:
     ) as create_exception:
         await manager.async_mute_alarm(
             alarm_id=None,
-            match_type="alarm_type",
-            match_value="ALARM_GAME",
+            target_type="alarm_type",
+            target_value="ALARM_GAME",
             scope_kind="device",
             scope_target="00:11:22:33:44:55",
             duration="always",
@@ -193,8 +193,8 @@ async def test_mute_active_alarm_uses_alarm_allow_for_dns_device_scope() -> None
     with patch.object(client, "async_mute_alarm", AsyncMock()) as mute_alarm:
         await manager.async_mute_alarm(
             alarm_id="alarm-1",
-            match_type="domain",
-            match_value=None,
+            target_type="domain",
+            target_value=None,
             scope_kind="device",
             scope_target="00:11:22:33:44:55",
             duration="always",

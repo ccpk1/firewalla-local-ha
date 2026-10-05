@@ -485,8 +485,8 @@ SERVICE_MUTE_ALARM: Final = "mute_alarm"
 SERVICE_UNMUTE_ALARM: Final = "unmute_alarm"
 SERVICE_DELETE_RULE: Final = "delete_rule"
 SERVICE_FIELD_ALARM_ID: Final = "alarm_id"
-SERVICE_FIELD_ALARM_MATCH_TYPE: Final = "alarm_match_type"
-SERVICE_FIELD_ALARM_MATCH_VALUE: Final = "alarm_match_value"
+SERVICE_FIELD_ALARM_TARGET_TYPE: Final = "alarm_target_type"
+SERVICE_FIELD_ALARM_TARGET_VALUE: Final = "alarm_target_value"
 SERVICE_FIELD_ALARM_STATUS: Final = "alarm_status"
 SERVICE_FIELD_ALARM_TYPE: Final = "alarm_type"
 SERVICE_FIELD_DURATION: Final = "duration"
@@ -507,14 +507,18 @@ ALARM_SERVICE_MAX_LIMIT: Final = 500
 ALARM_STATUS_ACTIVE: Final = "active"
 ALARM_STATUS_ARCHIVED: Final = "archived"
 
-# What an alarm silence matches on. The caller's vocabulary, deliberately distinct
-# from the wire's (`alarmType` / `dns` / `ip`), because the alarm's own `alarm_type`
-# value is what `alarm_match_value` carries -- naming both the same thing would make
-# "match the alarm type ALARM_INTEL" read as a contradiction.
-MATCH_TYPE_ALARM_TYPE: Final = "alarm_type"
-MATCH_TYPE_DOMAIN: Final = "domain"
-MATCH_TYPE_IP: Final = "ip"
-ALARM_MATCH_TYPES: Final = (MATCH_TYPE_ALARM_TYPE, MATCH_TYPE_DOMAIN, MATCH_TYPE_IP)
+# What an alarm silence targets. The caller's vocabulary, deliberately distinct from
+# the wire's (`alarmType` / `dns` / `ip`), because the alarm's own `alarm_type` value
+# is what `alarm_target_value` carries -- naming both the same thing would make
+# "target the alarm type ALARM_INTEL" read as a contradiction.
+ALARM_TARGET_ALARM_TYPE: Final = "alarm_type"
+ALARM_TARGET_DOMAIN: Final = "domain"
+ALARM_TARGET_IP: Final = "ip"
+ALARM_TARGET_TYPES: Final = (
+    ALARM_TARGET_ALARM_TYPE,
+    ALARM_TARGET_DOMAIN,
+    ALARM_TARGET_IP,
+)
 
 # The selector field sets the alarm services enforce "exactly one of" against.
 # Naming them in one place is what lets the archive, delete and silence services

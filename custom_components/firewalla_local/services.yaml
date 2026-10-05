@@ -1808,7 +1808,7 @@ mute_alarm:
         text:
       name: Alarm ID (Optional)
       description: Use an alarm to infer an omitted target value where available.
-    alarm_match_type:
+    alarm_target_type:
       required: true
       example: "domain"
       selector:
@@ -1820,14 +1820,14 @@ mute_alarm:
               label: DNS domain
             - value: "ip"
               label: IP address
-      name: Alarm match type
-      description: Choose what the silence matches on.
-    alarm_match_value:
+      name: Alarm target type
+      description: Choose what the silence targets.
+    alarm_target_value:
       required: false
       example: "example.com"
       selector:
         text:
-      name: Alarm match value
+      name: Alarm target value
       description: Raw ALARM_* type, domain, or IP. May be inferred from alarm_id where available.
     scope_kind:
       required: true

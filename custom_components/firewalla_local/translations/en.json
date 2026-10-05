@@ -1506,12 +1506,12 @@
           "name": "Alarm ID (Optional)",
           "description": "Use an active or archived alarm to resolve an omitted domain/IP target."
         },
-        "alarm_match_type": {
-          "name": "Alarm match type",
+        "alarm_target_type": {
+          "name": "Alarm target type",
           "description": "Choose alarm_type, domain, or ip."
         },
-        "alarm_match_value": {
-          "name": "Alarm match value (Optional)",
+        "alarm_target_value": {
+          "name": "Alarm target value (Optional)",
           "description": "Raw ALARM_* identifier, domain, or IP. May be resolved from alarm_id where available."
         },
         "scope_kind": {

@@ -745,11 +745,7 @@ Checked before writing 9f-3, and the finding is stronger than 9c recorded. Read
 ```python
 scope_kind = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_KIND))
 scope_target = cast(str | None, call.data.get(SERVICE_FIELD_SCOPE_TARGET))
-scope = (
-    (scope_target,)
-    if scope_kind == "device" and scope_target is not None
-    else ()
-)
+scope = (scope_target,) if scope_kind == "device" and scope_target is not None else ()
 ```
 
 The field is declared `vol.In(("device", "network", "all"))`, but **only `device` is
@@ -780,3 +776,86 @@ Three further defects in the same field, all in the untested path:
 This is why 9f-3 is not cosmetic. The unifying change is what removes a defect that
 turns a narrow rule into a sweeping one without an error, and the typed pairs are
 what make the mistake impossible rather than merely visible.
+
+---
+
+## 11. Phase 3.2 — the scope decisions, and the rule tag-ref trap
+
+### 11a. Decisions taken
+
+| Item | Decision |
+| --- | --- |
+| The wide case | **`all_hosts: true`** — stated, never inferred. Machine word `host` |
+| Silence match fields | **`alarm_target_type` / `alarm_target_value`** — reverses the earlier `alarm_match_*`, see 11b |
+| Group/user rule scope | **Exposed now** — it closes a broken round-trip, see 11d |
+| Single group or user | The app allows **one** group or **one** user, never both, never several |
+
+### 11b. `target` beats `match`, and the reversal is deliberate
+
+`alarm_match_type`/`alarm_match_value` were introduced two commits earlier and are
+replaced by `alarm_target_type`/`alarm_target_value`. Three measurements:
+
+| Evidence | Count / shape |
+| --- | --- |
+| `target` in `services.py` / `api/client.py` / `models.py` | 139 / 108 / 80 |
+| `match` in the same files | 81 / 3 / 9 |
+| The vendor's own silence payload | `{"type": …, "target": …}`, `"if.target"`, `"target_name"` |
+| The vendor's rule payload | `type` + `target`, the same shape |
+
+`match` was our invention; `target` is both our established word and the vendor's
+word for this payload. The `alarm_` prefix stays because bare `target_type` would
+collide with the rule's `target_type`, which is a genuinely different enum
+(`dns|ip|mac|network|category|remotePort` vs `alarm_type|domain|ip`) — a subset or
+superset would not have resolved that, only a distinct name does.
+
+*Honest wrinkle:* of the three values, `alarm_type` maps to the wire's `type` rather
+than `target`. The name is exact for two values and slightly loose for the third,
+which is better than a name exact for one value and inconsistent with the rest.
+
+### 11c. The rule tag-ref trap — a user's rule reference is a **group**-prefixed tag
+
+**This is the finding the whole caution was about.** The read side, at
+`api/client.py` 2595, resolves a rule's tag reference like this:
+
+```python
+if tag_prefix == _RAW_TAG_PREFIX_GROUP:  # "tag:"
+    if user_names := affiliated_users.get(tag_value):
+        return ", ".join(user_names), "user"  # ← a USER, under the GROUP prefix
+```
+
+So the box expresses a rule's **user** attachment as `tag:<affiliated_tag_id>` — the
+group prefix, carrying the user's *affiliated tag*, not the user id. The prefix
+vocabulary (`tag` / `dtag` / `utag` / `userTag` / `intf`) has a `utag` form, and a
+rule does **not** use it for a user.
+
+Consequence for the write side, and the reason this had to be checked rather than
+assumed:
+
+| Scope | Wire reference | Why |
+| --- | --- | --- |
+| host | `scope: [<mac>]` | the identity is the MAC; `scope` is the MAC list |
+| group | `tag: ["tag:<group_id>"]` | the group's **own** tag id |
+| user | `tag: ["tag:<affiliated_tag_id>"]` | the user's **affiliated tag**, under the group prefix |
+| network | `tag: ["intf:<network_uuid>"]` | `intf:` is the network prefix |
+| all hosts | both lists empty | absence is the wide scope |
+
+Writing `utag:<user_id>` for a user — the obvious-looking choice from the prefix
+list — would be wrong for this payload. It is also the same failure shape the flow
+work already found: a user id is accepted, answered, and empty.
+
+**Verification status, stated rather than implied.** The *read* side proves a user
+rule ref is `tag:<affiliated>`; whether the *create* path accepts that form is listed
+as an **open question** in `REVERSE_ENGINEERING_WORKFLOW.md` ("whether all
+internet-block rules share the same `target: TAG` and `type: mac` contract across
+other scopes such as users, networks, and other groups"). So the write is implemented
+to match the read side — the strongest available evidence, and the only form that
+makes the round-trip work — and the tests pin the exact payload so a capture can
+confirm or correct it without re-deriving the design.
+
+### 11d. The round-trip this closes
+
+`ARCHITECTURE.md`: *"Anything a service reports as an id, it must also accept as a
+selector."* Rules violated it: `get_rules` reports `tag_refs` (`tag:17`) and
+`applies_to_kind` (`group`/`user`/`network`), while `create_rule` could write only a
+host MAC and silently discarded everything else. You could read what a rule applies
+to and not create a rule that applies to it.

@@ -12,9 +12,9 @@ from homeassistant.util import dt as dt_util
 from ..api import FirewallaApiClient
 from ..const import (
     ALARM_STATUS_ARCHIVED,
-    MATCH_TYPE_ALARM_TYPE,
-    MATCH_TYPE_DOMAIN,
-    MATCH_TYPE_IP,
+    ALARM_TARGET_ALARM_TYPE,
+    ALARM_TARGET_DOMAIN,
+    ALARM_TARGET_IP,
 )
 from ..models import FirewallaAlarm, FirewallaAlarmException, FirewallaRuntimeSnapshot
 from ..utils.duration import parse_duration_to_seconds
@@ -183,8 +183,8 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         self,
         *,
         alarm_id: str | None,
-        match_type: str,
-        match_value: str | None,
+        target_type: str,
+        target_value: str | None,
         scope_kind: str,
         scope_target: str | None,
         duration: str,
@@ -196,8 +196,8 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             raise ValueError("Alarm was not found in the active or archived set")
         scope = self._get_scope_payload(scope_kind, scope_target)
 
-        if match_type == MATCH_TYPE_ALARM_TYPE:
-            muted_alarm_type = match_value or (
+        if target_type == ALARM_TARGET_ALARM_TYPE:
+            muted_alarm_type = target_value or (
                 alarm.alarm_type if alarm is not None else None
             )
             if muted_alarm_type is None:
@@ -208,17 +208,17 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             await self.client.async_create_alarm_exception(value)
             return
 
-        # The caller's match vocabulary and the wire's are different words for the
+        # The caller's target vocabulary and the wire's are different words for the
         # same three things, so the translation is named for what it produces rather
-        # than reusing `match_*`, which the caller's values already mean here.
-        wire_key, match_target = self._get_match(match_type, match_value)
-        if match_target is None and alarm is not None:
-            match_target = (
+        # than reusing `target_*`, which the caller's values already mean here.
+        wire_key, target = self._get_target(target_type, target_value)
+        if target is None and alarm is not None:
+            target = (
                 alarm.remote_host
-                if match_type == MATCH_TYPE_DOMAIN
+                if target_type == ALARM_TARGET_DOMAIN
                 else alarm.remote_ip
             )
-        if match_target is None:
+        if target is None:
             raise ValueError("A domain or IP target is required for this mute")
 
         if (
@@ -226,7 +226,7 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             and not alarm.is_archived
             and scope_kind in ("device", "all")
         ):
-            info: dict[str, object] = {"type": wire_key, "target": match_target}
+            info: dict[str, object] = {"type": wire_key, "target": target}
             if scope_kind == "device":
                 info["device"] = scope_target or ""
             if expiry is not None:
@@ -242,9 +242,9 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         value.update(
             {
                 "if.type": wire_key,
-                "if.target": match_target,
-                "target_name": match_target,
-                "p.dest.name" if wire_key == "dns" else "p.dest.ip": match_target,
+                "if.target": target,
+                "target_name": target,
+                "p.dest.name" if wire_key == "dns" else "p.dest.ip": target,
             }
         )
         if expiry is not None:
@@ -278,15 +278,17 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         return None
 
     @staticmethod
-    def _get_match(match_type: str, match_value: str | None) -> tuple[str, str | None]:
-        """Return the wire key and target for one caller-side match selection."""
-        if match_type == MATCH_TYPE_ALARM_TYPE:
-            return "alarmType", match_value
-        if match_type == MATCH_TYPE_DOMAIN:
-            return "dns", match_value
-        if match_type == MATCH_TYPE_IP:
-            return "ip", match_value
-        raise ValueError(f"Unsupported alarm match type: {match_type}")
+    def _get_target(
+        target_type: str, target_value: str | None
+    ) -> tuple[str, str | None]:
+        """Return the wire key and target for one caller-side target selection."""
+        if target_type == ALARM_TARGET_ALARM_TYPE:
+            return "alarmType", target_value
+        if target_type == ALARM_TARGET_DOMAIN:
+            return "dns", target_value
+        if target_type == ALARM_TARGET_IP:
+            return "ip", target_value
+        raise ValueError(f"Unsupported alarm target type: {target_type}")
 
     @staticmethod
     def _get_scope_payload(
