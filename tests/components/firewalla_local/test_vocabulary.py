@@ -31,15 +31,30 @@ PACKAGE_ROOT = (
 CONST_PATH: Final = PACKAGE_ROOT / "const.py"
 SERVICES_PATH: Final = PACKAGE_ROOT / "services.py"
 
+# A target object is a payload dict carrying both a `kind` and an `id` key, which is
+# the shape `_serialize_report_target` publishes and the control tools mirror. The
+# pair is what distinguishes it from the other dicts that carry a `kind` in this
+# package -- a time basis, a period, a network entry -- none of which has an `id`,
+# because they describe a thing rather than name it.
+_TARGET_OBJECT_KIND_KEY: Final = "kind"
+_TARGET_OBJECT_ID_KEY: Final = "id"
+
 # Machine-register values a published `target.kind` may take. `network` carries the
 # box's `lan`/`vlan`/`vpn`/`wan` distinction on a separate `network_kind` field
 # rather than in the kind, because collapsing it would lose real information.
+#
+# The set is every object the integration publishes as a target, not only the report
+# scopes: a control tool's result names a rule, an alarm, a silence or an SSID, and
+# those are the same question. One vocabulary, so learning it from a report is not
+# contradicted by a tool result.
 #
 # Held here rather than read from `const.py` on purpose: this is the independent
 # statement of the rule, and `test_the_canonical_set_matches_the_vocabulary_module`
 # is what keeps the two in step. Deriving it from the module would make the guard
 # agree with whatever the module happens to say.
-_CANONICAL_TARGET_KINDS: Final = frozenset({"host", "group", "user", "network"})
+_CANONICAL_TARGET_KINDS: Final = frozenset(
+    {"host", "group", "user", "network", "rule", "alarm", "silence", "ssid"}
+)
 
 # A kind is reached either as one of the canonical constants or by looking it up in a
 # mapping that translates into them. Both are named by prefix so a new one is
@@ -251,10 +266,19 @@ def _is_canonical_kind_expression(
 ) -> bool:
     """Return whether one `kind=` expression can only produce a canonical kind.
 
-    Three forms are accepted, and nothing else: a canonical literal, one of the
-    canonical constants, or a lookup in a mapping that resolves into them. A service
-    that reaches a kind any other way fails here, which is what stops a new service
-    from inventing one.
+    The rule this enforces is about where a kind is **written**. A value that is
+    *read back* -- `.kind` off a normalized record, or off the report target the
+    serializer is itself serializing -- is a relay, and the vocabulary lives in the
+    record's own declaration. So the accepted routes are:
+
+    - a canonical literal
+    - one of the canonical constants
+    - a lookup in a mapping that resolves into them
+    - a conditional whose every branch is one of the above
+    - `.kind` attribute access, i.e. a relay of a value authored elsewhere
+
+    Nothing else. Inventing a kind has to go through one of the first four, so there
+    is no route by which a new service can reach a value the set rejects.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value in _CANONICAL_TARGET_KINDS
@@ -262,12 +286,26 @@ def _is_canonical_kind_expression(
         return node.id in canonical_names
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
         return node.value.id in mapping_names
+    if isinstance(node, ast.IfExp):
+        return _is_canonical_kind_expression(
+            node.body, canonical_names, mapping_names
+        ) and _is_canonical_kind_expression(node.orelse, canonical_names, mapping_names)
+    if isinstance(node, ast.Attribute):
+        return node.attr == _TARGET_OBJECT_KIND_KEY
     return False
 
 
 def _find_target_kind_violations() -> list[str]:
-    """Return every `target.kind` that could be published outside the vocabulary."""
-    tree = _module_tree(SERVICES_PATH)
+    """Return every `target.kind` that could be published outside the vocabulary.
+
+    Scans the whole package, not one file, because a target is published from
+    `services.py` and from the control tools alike, and an earlier version of this
+    check missed a whole second vocabulary by looking at `services.py` alone.
+
+    Both published shapes are covered: a `FirewallaReportTarget(kind=...)` call and a
+    target-object dict literal. A dict is a target object when it carries both a
+    `kind` and an `id` key.
+    """
     constants = _string_constants()
     canonical_names = frozenset(
         name
@@ -276,21 +314,57 @@ def _find_target_kind_violations() -> list[str]:
     )
     mapping_names = frozenset(_target_kind_mappings(constants))
     found: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
+    for path in _package_modules():
+        tree = _module_tree(path)
+        for node in ast.walk(tree):
+            expression = _target_kind_expression(node)
+            if expression is None:
+                continue
+            if not _is_canonical_kind_expression(
+                expression, canonical_names, mapping_names
+            ):
+                found.add(f"{path.name}:kind={_dump(expression)}")
+    return sorted(found)
+
+
+def _package_modules() -> list[Path]:
+    """Return every Python module in the integration package."""
+    return sorted(PACKAGE_ROOT.rglob("*.py"))
+
+
+def _target_kind_expression(node: ast.AST) -> ast.expr | None:
+    """Return the expression that sets a target object's kind, if this node is one.
+
+    Two shapes publish a target: a `FirewallaReportTarget(kind=...)` call carries
+    only the kind keyword, while a dict literal must carry both `kind` and `id` to be
+    a target rather than one of the package's other `kind`-bearing records.
+    """
+    if isinstance(node, ast.Call):
         func = node.func
         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
         if name != "FirewallaReportTarget":
-            continue
+            return None
         for keyword in node.keywords:
-            if keyword.arg != "kind":
-                continue
-            if not _is_canonical_kind_expression(
-                keyword.value, canonical_names, mapping_names
-            ):
-                found.add(f"services.py:kind={_dump(keyword.value)}")
-    return sorted(found)
+            if keyword.arg == "kind":
+                return keyword.value
+        return None
+
+    if isinstance(node, ast.Dict):
+        keys = [
+            key.value
+            for key in node.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        ]
+        if _TARGET_OBJECT_KIND_KEY not in keys:
+            return None
+        if _TARGET_OBJECT_ID_KEY not in keys:
+            return None
+        for key, value in zip(node.keys, node.values, strict=True):
+            if isinstance(key, ast.Constant) and key.value == _TARGET_OBJECT_KIND_KEY:
+                return value
+        return None
+
+    return None
 
 
 def _find_target_kind_mapping_violations() -> list[str]:

@@ -149,6 +149,7 @@ from .const import (
     TARGET_KIND_BY_REPORT_SCOPE,
     TARGET_KIND_HOST,
     TARGET_KIND_NETWORK,
+    TARGET_KIND_USER,
     TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
     TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
     TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED,
@@ -4349,7 +4350,7 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
                 {
                     "id": user.user_id,
                     "name": user.name,
-                    "kind": _MEMBERSHIP_KIND_USER,
+                    "kind": TARGET_KIND_USER,
                     "affiliated_group_id": user.affiliated_group_id,
                     "affiliated_group_name": user.affiliated_group_name,
                 }

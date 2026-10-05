@@ -21,10 +21,19 @@ MIN_LLM_TOOLS_HA_VERSION: Final = (2026, 10)
 # `device`. A network reports `network` and carries the box's own lan/vlan/vpn/wan
 # type on a separate `network_kind` field rather than in the kind, because those
 # are different questions and collapsing them would lose one.
+#
+# The set covers every object the integration publishes as a target, not only the
+# report scopes: a control tool's result target names a rule, an alarm, a silence or
+# an SSID, and those are the same kind of question. One vocabulary, so a reader who
+# learns it from a report is not surprised by a tool result.
 TARGET_KIND_HOST: Final = "host"
 TARGET_KIND_GROUP: Final = "group"
 TARGET_KIND_USER: Final = "user"
 TARGET_KIND_NETWORK: Final = "network"
+TARGET_KIND_RULE: Final = "rule"
+TARGET_KIND_ALARM: Final = "alarm"
+TARGET_KIND_SILENCE: Final = "silence"
+TARGET_KIND_SSID: Final = "ssid"
 
 # The request vocabulary spells an endpoint `device`; the published vocabulary
 # spells it `host`. A resolved scope cannot be passed through as its own kind, so

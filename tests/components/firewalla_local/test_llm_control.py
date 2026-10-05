@@ -41,6 +41,8 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TARGET_VALUE,
     SERVICE_FIELD_USER_NAME,
+    SERVICE_FIELD_WAN_NAME,
+    SERVICE_FIELD_WAN_UUID,
 )
 from custom_components.firewalla_local.models import (
     FirewallaAlarm,
@@ -71,6 +73,7 @@ SET_HOST_GROUP = "firewalla_local__set_host_group"
 CLEAR_HOST_GROUP = "firewalla_local__clear_host_group"
 SET_HOST_USER = "firewalla_local__set_host_user"
 CLEAR_HOST_USER = "firewalla_local__clear_host_user"
+RUN_INTERNET_SPEED_TEST = "firewalla_local__run_internet_speed_test"
 
 _HOST_MAC = "0C:85:E1:B0:1D:1C"
 
@@ -262,6 +265,35 @@ async def test_pause_rule_applies_and_reports_undo(hass: HomeAssistant) -> None:
     assert result.data["before"] == {"enabled": True, "is_paused": False}
     assert result.data["after"] == {"enabled": False, "is_paused": True}
     assert 'resume_rule(rule_target="761")' in result.data["undo"]
+
+
+async def test_run_internet_speed_test_reports_a_network_target(
+    hass: HomeAssistant,
+) -> None:
+    """A speed test names the WAN as a network target, not as a bare `wan`.
+
+    The report services publish every network target as `kind: "network"` plus a
+    `network_kind`, so a tool result must not reintroduce the second vocabulary a
+    `kind: "wan"` here would create.
+    """
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call",
+        new=AsyncMock(return_value={"ok": True}),
+    ):
+        api_instance = await _setup(hass)
+        result = await _call(
+            api_instance,
+            RUN_INTERNET_SPEED_TEST,
+            {SERVICE_FIELD_WAN_UUID: "wan-1", SERVICE_FIELD_WAN_NAME: "WAN-ONE"},
+        )
+
+    assert result.error is False
+    assert result.data["target"] == {
+        "kind": "network",
+        "network_kind": "wan",
+        "id": "wan-1",
+        "name": "WAN-ONE",
+    }
 
 
 async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
@@ -499,6 +531,7 @@ async def test_delete_alarm_uses_single_mode(hass: HomeAssistant) -> None:
     assert delete.await_args.kwargs["mode"] == "this"
     assert delete.await_args.kwargs["alarm_id"] == "1728"
     assert result.data["status"] == "applied"
+    assert result.data["target"] == {"kind": "alarm", "id": "1728"}
 
 
 @pytest.mark.parametrize(

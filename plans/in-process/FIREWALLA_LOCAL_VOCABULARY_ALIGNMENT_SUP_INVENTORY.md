@@ -337,10 +337,14 @@ initiative is not finished.
 
 Checks:
 
-1. **Published target kinds.** Every `FirewallaReportTarget(kind=...)` in `services.py`
-   is canonical. A literal is compared against the canonical set; a pass-through such
-   as `kind=network.kind.value` is reported by its source text, because the shape that
-   hid the `device` violation is exactly the shape a literal-only check cannot see.
+1. **Published target kinds.** Every `FirewallaReportTarget(kind=...)` call and every
+   target-object dict in **the whole package** must be canonical, where a target
+   object is a payload dict carrying both a `kind` and an `id`. A literal is compared
+   against the canonical set; a pass-through such as `kind=network.kind.value` is
+   reported by its source text, because the shape that hid the `device` violation is
+   exactly the shape a literal-only check cannot see. **Scanning one file was a real
+   blind spot** — it hid five control-tool kinds including a `wan` that contradicted
+   `services.py`; see §8a.
 2. **Guarded machine enums.** A field whose published value is `scope_kind` or
    `target_type` must be a `vol.In` **and** its values must not use the human word.
    Matching is on the published value, not the constant name, because two constants
@@ -382,42 +386,44 @@ that scope was drawn too tightly in two places, and that the guard's coverage is
 narrower than the rule it states. All three are recorded here rather than fixed
 silently, because each changes something a phase already declared settled.
 
-### 8a. A second published `target.kind` vocabulary *(needs an owner decision)*
+### 8a. A second published `target.kind` vocabulary — **RESOLVED**
 
 `llm_tools_control.py` publishes the same `{"kind", "id", "name"}` target object to
 the LLM, with a vocabulary §3 never saw:
 
 | File | Published kind | Canonical? |
 | --- | --- | --- |
-| `llm_tools_control.py` ×3 | `rule` | no |
-| `llm_tools_control.py` ×2 | `alarm` | no |
-| `llm_tools_control.py` ×2 | `silence` | no |
-| `llm_tools_control.py` ×1 | `ssid` | no |
-| `llm_tools_control.py` ×1 | `wan` | **no — and now contradicts `services.py`** |
+| `llm_tools_control.py` ×5 | `rule` | was no — **now a constant** |
+| `llm_tools_control.py` ×4 | `alarm` | was no — **now a constant** |
+| `llm_tools_control.py` ×2 | `silence` | was no — **now a constant** |
+| `llm_tools_control.py` ×1 | `ssid` | was no — **now a constant** |
+| `llm_tools_control.py` ×1 | `wan` | was no and **contradicted `services.py`** — now `network` + `network_kind` |
 
-The `wan` is the sharp one. Phase 2 retargeted every report to
-`kind: "network"` + `network_kind: "wan"`, and the speed-test control tool still
-publishes `kind: "wan"` for the same concept. The two surfaces disagree, which is
-the exact defect the initiative exists to remove — introduced *by* the fix, because
-the inventory only looked at one file.
+Resolved by **Option A**: the canonical set widened to every published target kind,
+and the guard now scans the whole package. The `wan` collapse into
+`network` + `network_kind` removes the contradiction Phase 2 had just introduced —
+which was created *by* the fix, because the inventory only looked at one file.
 
-The guard never saw any of this: it scans `services.py` only. **That blind spot was
-flagged as a risk when Phase 1 shipped, and it was correct.**
+The guard's blind spot was real: it scanned `services.py` only. It is closed, and
+proven closed by injecting `kind: "devices"` into `llm_tools_control.py`, which now
+fails with `llm_tools_control.py:kind='devices'` where it previously passed.
 
-This needs a decision because it changes the canonical set, which Phase 1 fixed:
+**What the widened scan then found, and how each was judged.** Widening the scan to
+the whole package surfaced four more sites, and only one was a real violation:
 
-- **Option A (recommended).** Widen the set to every published target kind —
-  `host`, `group`, `user`, `network`, `rule`, `alarm`, `silence`, `ssid` — and scan
-  the whole package. One vocabulary for "what can a target name", with the report
-  scopes a subset of it. `wan` collapses into `network` + `network_kind` as already
-  done. Cost: one constant, one guard set, one `ARCHITECTURE.md` sentence, and the
-  control-tool `wan`.
-- **Option B.** Declare two vocabularies — report scopes and action targets — and
-  document the boundary. Cheaper, but leaves two `kind` vocabularies under one name,
-  which is §2c's collision problem in a new place.
+| Site | Value | Judgement |
+| --- | --- | --- |
+| `services.py` `users_section` item | `_MEMBERSHIP_KIND_USER` | **real violation** — an authored kind reached by an undeclared local constant. Now `TARGET_KIND_USER`. |
+| `services.py` membership description | `group.kind` | relay — `FirewallaGroupRuntime.kind` is `Literal["group","user"]` |
+| `services.py` `groups_section` items | `group.kind` | same relay |
+| `services.py` `_serialize_report_target` | `target.kind` | relay — the serializer re-publishing what it was handed |
+| `runtime_inventory.py` group record | `'user' if … else 'group'` | both branches canonical |
 
-Recommendation is A: the object shape is identical, the reader is the same reader,
-and B re-creates the ambiguity the whole initiative is about.
+That distinction is now stated in the guard: it enforces where a kind is **written**
+(literal, vocabulary constant, or vocabulary mapping) and accepts where one is
+**read back** — a `.kind` attribute, or a conditional whose every branch is already
+accepted. The structural test for a target object is stated rather than implied: a
+payload dict carrying both a `kind` and an `id`.
 
 ### 8b. Payload keys using the human word *(Phase 4)*
 

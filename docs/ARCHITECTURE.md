@@ -192,10 +192,14 @@ Rules:
   device MAC, the group id, or the user id. A protocol target that differs from the
   identity is reported **separately and explicitly** as a resolution, never as the
   target.
-- **`target.kind` uses the machine register** — `host`, `group`, `user`, `network`.
-  The protocol's own word (`tag`) must not appear as a target kind, and neither must
-  the human word `device`; one is an internal detail, the other is prose. This is the
-  register boundary applied to `kind`.
+- **`target.kind` uses the machine register** — `host`, `group`, `user`, `network`,
+  `rule`, `alarm`, `silence`, `ssid`. The protocol's own word (`tag`) must not appear
+  as a target kind, and neither must the human word `device`; one is an internal
+  detail, the other is prose. This is the register boundary applied to `kind`.
+  The set covers every object the integration publishes as a target, not only the
+  report scopes: a control tool's result names a rule, an alarm, a silence or an
+  SSID, and that is the same question. One vocabulary, so a reader who learns it
+  from a report is not contradicted by a tool result.
 - **Anything a service reports as an id, it must also accept as a selector.** A
   report that hands out an id its own resolver rejects is a defect, not a
   limitation. Where a protocol target is remapped (a user), the resolver accepts the
