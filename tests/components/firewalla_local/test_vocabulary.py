@@ -75,10 +75,12 @@ _EXEMPT_PRECEDING_TOKEN: Final = "host"
 # Enums that are machine values and therefore must not carry the human word.
 #
 # Matched on the **published value**, not the constant name, because one published
-# name can have more than one constant: `SERVICE_FIELD_SCOPE_KIND` and
-# `SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND` both have the value `"scope_kind"`. Keying
-# on the constant name is how a guard comes to pass while the value it exists to find
-# is present.
+# name can have more than one constant. That was not hypothetical: two constants
+# published `"scope_kind"` until the report services moved to typed pairs, and a
+# name-keyed scan reported the second as absent -- which is exactly how a guard comes
+# to pass while the value it exists to find is present. Phase 3 removed that second
+# constant, and this match stays value-keyed so the next one is caught rather than
+# documented.
 _GUARDED_ENUM_FIELD_VALUES: Final = ("scope_kind", "target_type")
 
 # Constants whose *values* are machine keys an automation writes. `FLOW_REPORT_` is
@@ -98,16 +100,14 @@ _GUARDED_CONSTANT_PREFIXES: Final = ("SERVICE_FIELD_", "ATTR_", "FLOW_REPORT_")
 # ---------------------------------------------------------------------------
 
 # Phase 3 deletes `scope_kind` for typed pairs (Q4) and gives `target_type` a real
-# vocabulary (Q5). Two constants share the value "scope_kind" —
-# `SERVICE_FIELD_SCOPE_KIND` and `SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND` — which is
-# why the guard matches on the published value rather than the constant name.
+# vocabulary (Q5).
+#
+# The two report services are migrated: they take the typed pairs the other eleven
+# scope-taking services take, the free-text field that could not tell a group from a
+# user sharing a name is gone, and the duplicate `scope_kind` constant it used was
+# deleted outright. What remains is the `create_rule` and alarm-silence `scope_kind`,
+# and `get_rules`' unvalidated `target_type`.
 _ENUM_VIOLATIONS: Final = {
-    "GET_FLOW_REPORT_SCHEMA.SERVICE_FIELD_SCOPE_KIND": (
-        "Phase 3 — `scope_kind` deleted for typed pairs (Q4)"
-    ),
-    "GET_TIME_USAGE_REPORT_SCHEMA.SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND": (
-        "Phase 3 — `scope_kind` deleted for typed pairs (Q4)"
-    ),
     "CREATE_RULE_SCHEMA.SERVICE_FIELD_SCOPE_KIND": (
         "Phase 3 — `scope_kind` deleted for typed pairs (Q4)"
     ),

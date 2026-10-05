@@ -1675,13 +1675,29 @@
       "name": "Get flow report",
       "description": "Return one flow report for a device, group, or user in the shared report envelope from the Firewalla local API.",
       "fields": {
-        "scope_kind": {
-          "name": "Scope kind",
-          "description": "Required. Choose whether the target is a device, group, or user."
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Optional. Scope the report to a host by MAC. Provide exactly one scope selector."
         },
-        "scope_target": {
-          "name": "Scope target",
-          "description": "Required. Use a stable ID or the current display label for the selected scope. A device accepts a MAC, ID, or name; a group or user accepts a name or ID."
+        "host_name": {
+          "name": "Host name",
+          "description": "Optional. Scope the report to a host by name. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Optional. Scope the report to a group by id. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Optional. Scope the report to a group by name. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Optional. Scope the report to a user by id. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Optional. Scope the report to a user by name. Provide exactly one scope selector."
         },
         "window_hours": {
           "name": "Window hours (Optional)",
@@ -2141,13 +2157,29 @@
       "name": "Get time usage report",
       "description": "Return one normalized scoped time-usage report from the Firewalla local API.",
       "fields": {
-        "scope_kind": {
-          "name": "Scope kind",
-          "description": "Required. Choose whether the target is a device, group, or user."
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Optional. Scope the report to a host by MAC. Provide exactly one scope selector."
         },
-        "scope_target": {
-          "name": "Scope target",
-          "description": "Required. Use a stable ID or the current display label for the selected scope."
+        "host_name": {
+          "name": "Host name",
+          "description": "Optional. Scope the report to a host by name. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Optional. Scope the report to a group by id. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Optional. Scope the report to a group by name. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Optional. Scope the report to a user by id. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Optional. Scope the report to a user by name. Provide exactly one scope selector."
         },
         "begin": {
           "name": "Begin",

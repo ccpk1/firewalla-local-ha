@@ -35,6 +35,7 @@ from .const import (
     SERVICE_FIELD_CURRENT_PERIODS,
     SERVICE_FIELD_DETAIL,
     SERVICE_FIELD_ENABLED,
+    SERVICE_FIELD_GROUP_ID,
     SERVICE_FIELD_GROUP_NAME,
     SERVICE_FIELD_HISTORY_COUNT,
     SERVICE_FIELD_HISTORY_PERIOD,
@@ -54,8 +55,6 @@ from .const import (
     SERVICE_FIELD_ONLINE,
     SERVICE_FIELD_RECORD_COUNT,
     SERVICE_FIELD_REFRESH,
-    SERVICE_FIELD_SCOPE_KIND,
-    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TOP_N,
@@ -63,9 +62,9 @@ from .const import (
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
     SERVICE_FIELD_USAGE_HISTORY_END,
     SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
-    SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
-    SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
     SERVICE_FIELD_USER,
+    SERVICE_FIELD_USER_ID,
+    SERVICE_FIELD_USER_NAME,
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
     SERVICE_FIELD_WINDOW,
@@ -603,15 +602,46 @@ class GetUserUsageTool(_FirewallaReadTool):
     )
     parameters = vol.Schema(
         {
-            vol.Required(
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
-                description="Required. What the scope target identifies.",
-            ): vol.In(("device", "group", "user")),
-            vol.Required(
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
+            vol.Optional(
+                SERVICE_FIELD_HOST_MAC,
                 description=(
-                    "Required. The scope identifier for the chosen kind (a MAC "
-                    "for a device, a group id, or a user id)."
+                    "Optional. Select a host by MAC. Provide exactly one of the "
+                    "scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_HOST_NAME,
+                description=(
+                    "Optional. Select a host by name. Provide exactly one of the "
+                    "scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_ID,
+                description=(
+                    "Optional. Select a group by id. Provide exactly one of the "
+                    "scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_NAME,
+                description=(
+                    "Optional. Select a group by name. Provide exactly one of the "
+                    "scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_ID,
+                description=(
+                    "Optional. Select a user by id. Provide exactly one of the "
+                    "scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_NAME,
+                description=(
+                    "Optional. Select a user by name. Provide exactly one of the "
+                    "scope selectors."
                 ),
             ): str,
             vol.Required(
@@ -687,18 +717,46 @@ class GetFlowReportTool(_FirewallaReadTool):
     )
     parameters = vol.Schema(
         {
-            vol.Required(
-                SERVICE_FIELD_SCOPE_KIND,
+            vol.Optional(
+                SERVICE_FIELD_HOST_MAC,
                 description=(
-                    "Required. What the scope target identifies: 'device', "
-                    "'group', or 'user'."
+                    "Optional. Scope the report to a host by MAC. Provide exactly "
+                    "one of the scope selectors."
                 ),
-            ): vol.In(("device", "group", "user")),
-            vol.Required(
-                SERVICE_FIELD_SCOPE_TARGET,
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_HOST_NAME,
                 description=(
-                    "Required. The scope identifier for the chosen kind: a MAC, "
-                    "id, or name for a device; a name or id for a group or user."
+                    "Optional. Scope the report to a host by name. Provide exactly "
+                    "one of the scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_ID,
+                description=(
+                    "Optional. Scope the report to a group by id. Provide exactly "
+                    "one of the scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_NAME,
+                description=(
+                    "Optional. Scope the report to a group by name. Provide "
+                    "exactly one of the scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_ID,
+                description=(
+                    "Optional. Scope the report to a user by id. Provide exactly "
+                    "one of the scope selectors."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_NAME,
+                description=(
+                    "Optional. Scope the report to a user by name. Provide "
+                    "exactly one of the scope selectors."
                 ),
             ): str,
             vol.Optional(

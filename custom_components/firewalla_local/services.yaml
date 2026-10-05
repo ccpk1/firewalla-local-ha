@@ -164,27 +164,48 @@ get_flow_report:
   name: Get flow report
   description: Return one flow report for a device, group, or user in the shared report envelope from the Firewalla local API.
   fields:
-    scope_kind:
-      required: true
-      example: "device"
-      selector:
-        select:
-          options:
-            - value: "device"
-              label: A single device
-            - value: "group"
-              label: A group
-            - value: "user"
-              label: A user
-      name: Scope kind
-      description: Required. Choose whether the target is a device, group, or user.
-    scope_target:
-      required: true
-      example: "kid-ipad"
+    host_mac:
+      required: false
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
-      name: Scope target
-      description: Required. Use a stable ID or the current display label for the selected scope. A device accepts a MAC, ID, or name; a group or user accepts a name or ID.
+      name: Host MAC
+      description: Optional. Scope the report to a host by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Scope the report to a host by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text:
+      name: Group ID
+      description: Optional. Scope the report to a group by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Scope the report to a group by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Scope the report to a user by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text:
+      name: User name
+      description: Optional. Scope the report to a user by name. Provide exactly one scope selector.
     window_hours:
       required: false
       example: 24
@@ -1041,24 +1062,48 @@ get_time_usage_report:
   name: Get time usage report
   description: Return one normalized scoped time-usage report from the Firewalla local API.
   fields:
-    scope_kind:
-      required: true
-      example: "device"
-      selector:
-        select:
-          options:
-            - "device"
-            - "group"
-            - "user"
-      name: Scope kind
-      description: Required. Choose whether the target is a device, group, or user.
-    scope_target:
-      required: true
+    host_mac:
+      required: false
       example: "AA:BB:CC:DD:EE:FF"
       selector:
         text: {}
-      name: Scope target
-      description: Required. Use a stable ID or the current display label for the selected scope.
+      name: Host MAC
+      description: Optional. Scope the report to a host by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text: {}
+      name: Host name
+      description: Optional. Scope the report to a host by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text: {}
+      name: Group ID
+      description: Optional. Scope the report to a group by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text: {}
+      name: Group name
+      description: Optional. Scope the report to a group by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text: {}
+      name: User ID
+      description: Optional. Scope the report to a user by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text: {}
+      name: User name
+      description: Optional. Scope the report to a user by name. Provide exactly one scope selector.
     begin:
       required: true
       example: "2026-03-20 00:00:00"

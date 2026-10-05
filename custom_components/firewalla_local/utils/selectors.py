@@ -1,8 +1,20 @@
-"""Matching a user-supplied selector against runtime inventory records.
+"""Reading a service call's selector and matching it against runtime records.
 
-Three service paths resolve a name-or-id selector the same way: an exact
-identifier match first, then a case-folded name match across a set of name fields,
-then exactly-one → resolved / more-than-one → ambiguous / none → not found.
+Two jobs, in the order a service performs them.
+
+**Reading the selection.** A scope -- a host, a group, or a user -- used to be
+selected two different ways. Eleven services took a typed pair
+(``host_mac``/``host_name``, ``group_id``/``group_name``, ...) while the two report
+services took a ``scope_kind`` enum plus a free-text ``scope_target``. The reports
+were the outliers, and the free-text field had a defect the typed ones do not: a
+group and a user can share a name, and one string with a separate kind cannot tell
+them apart. :func:`select_scope` owns that vocabulary and the rule the services
+share -- exactly one scope is selected -- and :data:`SCOPE_SELECTOR_FIELDS` is the
+single statement of which field belongs to which scope.
+
+**Matching it.** Three service paths resolve a name-or-id selector the same way: an
+exact identifier match first, then a case-folded name match across a set of name
+fields, then exactly-one → resolved / more-than-one → ambiguous / none → not found.
 
 They had grown into three separate implementations --
 ``_resolve_requested_host``, ``_resolve_membership_target`` and
@@ -31,10 +43,90 @@ over three real differences rather than a shared one.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Final
 
 from .values import normalized_string
+
+# Which fields select which scope. Each entry is the machine name of a selector, so
+# these are the published `SERVICE_FIELD_*` values and stay in the machine register.
+SCOPE_SELECTOR_FIELDS: Final[Mapping[str, tuple[str, ...]]] = {
+    "host": ("host_id", "host_mac", "host_name"),
+    "group": ("group_id", "group_name"),
+    "user": ("user_id", "user_name"),
+}
+
+# Which fields name an identifier rather than a label. An identifier is assigned by
+# the box and matched verbatim; a label is typed by a human and matched
+# case-insensitively. A single free-text field could not make this distinction, which
+# is why it could match a group id against a user's name; a typed pair does not.
+SCOPE_IDENTIFIER_FIELDS: Final[frozenset[str]] = frozenset(
+    {"host_id", "host_mac", "group_id", "user_id"}
+)
+
+
+@dataclass(slots=True, frozen=True)
+class ScopeSelection:
+    """The one scope a call selected, or why it did not select exactly one.
+
+    ``is_selected`` is true only when exactly one selector field was supplied, which
+    is the whole contract: no scope and two scopes are both errors, and a caller that
+    supplies two fields of the *same* scope has still made an ambiguous request
+    rather than stated a preference.
+    """
+
+    kind: str | None = None
+    field: str | None = None
+    value: str | None = None
+    supplied: tuple[str, ...] = ()
+
+    @property
+    def is_selected(self) -> bool:
+        """Return whether exactly one selector field was supplied."""
+        return self.kind is not None
+
+    @property
+    def is_identified(self) -> bool:
+        """Return whether the selected field carries an identifier, not a label."""
+        return self.field in SCOPE_IDENTIFIER_FIELDS
+
+
+def select_scope(
+    values: Mapping[str, object],
+    *,
+    fields: Sequence[str] = (),
+) -> ScopeSelection:
+    """Return the scope one call selected from its typed selector fields.
+
+    ``fields`` narrows the vocabulary to the selector fields this service actually
+    accepts, and an empty ``fields`` means all of them. A field a service does not
+    accept is not a selector it was given, so it is ignored rather than silently
+    selecting a scope the service cannot resolve -- which is also why narrowing is
+    expressed as fields and not as kinds: a report resolves a host by MAC or name and
+    never by ``host_id``, so offering the kind would offer a selector it cannot use.
+    """
+    permitted = (
+        frozenset(fields)
+        if fields
+        else frozenset(
+            field for names in SCOPE_SELECTOR_FIELDS.values() for field in names
+        )
+    )
+    supplied: list[tuple[str, str, str]] = []
+    for kind, names in SCOPE_SELECTOR_FIELDS.items():
+        for field in names:
+            if field not in permitted:
+                continue
+            value = normalized_string(values.get(field))
+            if value is not None:
+                supplied.append((kind, field, value))
+
+    if len(supplied) == 1:
+        kind, field, value = supplied[0]
+        return ScopeSelection(kind=kind, field=field, value=value)
+
+    return ScopeSelection(supplied=tuple(field for _kind, field, _value in supplied))
 
 
 @dataclass(slots=True, frozen=True)

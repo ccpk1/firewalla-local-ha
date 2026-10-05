@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, tzinfo
 from ipaddress import AddressValueError, IPv4Address, IPv4Network
-from typing import Any, cast
+from typing import Any, Final, cast
 
 import voluptuous as vol
 from homeassistant.core import (
@@ -107,8 +107,6 @@ from .const import (
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
     SERVICE_FIELD_USAGE_HISTORY_END,
     SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
-    SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
-    SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
     SERVICE_FIELD_USER,
     SERVICE_FIELD_USER_ID,
     SERVICE_FIELD_USER_NAME,
@@ -146,7 +144,6 @@ from .const import (
     SERVICE_SYNC_RUNTIME,
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
-    TARGET_KIND_BY_REPORT_SCOPE,
     TARGET_KIND_HOST,
     TARGET_KIND_NETWORK,
     TARGET_KIND_USER,
@@ -197,6 +194,8 @@ from .const import (
     TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
+    TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT,
+    TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_REQUIRED,
     TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED,
@@ -297,7 +296,13 @@ from .models import (
 from .utils.duration import parse_duration_to_seconds
 from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
-from .utils.selectors import SelectorMatch, match_names, match_selector
+from .utils.selectors import (
+    ScopeSelection,
+    SelectorMatch,
+    match_names,
+    match_selector,
+    select_scope,
+)
 from .utils.values import normalized_bool, normalized_int, normalized_string
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
@@ -354,23 +359,28 @@ GET_SYSTEM_OVERVIEW_SCHEMA = vol.Schema(
     }
 )
 
-# The caller-facing scope vocabulary, shared by the report services and distinct
-# from the protocol's own ``host`` / ``tag``, which is what a resolved scope
-# becomes and what the caller should never have to know.
-_REPORT_SCOPE_DEVICE = "device"
-_REPORT_SCOPE_GROUP = "group"
-_REPORT_SCOPE_USER = "user"
+# The scope selector fields the report services accept. A report resolves a host by
+# MAC or name and never by `host_id`, so it accepts exactly those; the group and user
+# pairs are the same ones the other scope-taking services use. The free-text
+# `scope_kind` + `scope_target` they used to take could not tell a group from a user
+# that share a name, which is the defect the pairs remove.
+REPORT_SCOPE_SELECTOR_FIELDS: Final = (
+    SERVICE_FIELD_HOST_MAC,
+    SERVICE_FIELD_HOST_NAME,
+    SERVICE_FIELD_GROUP_ID,
+    SERVICE_FIELD_GROUP_NAME,
+    SERVICE_FIELD_USER_ID,
+    SERVICE_FIELD_USER_NAME,
+)
 
 GET_FLOW_REPORT_SCHEMA = vol.Schema(
     {
-        vol.Required(SERVICE_FIELD_SCOPE_KIND): vol.In(
-            (
-                _REPORT_SCOPE_DEVICE,
-                _REPORT_SCOPE_GROUP,
-                _REPORT_SCOPE_USER,
-            )
-        ),
-        vol.Required(SERVICE_FIELD_SCOPE_TARGET): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_NAME): cv.string,
         vol.Optional(
             SERVICE_FIELD_WINDOW_HOURS, default=DEFAULT_FLOW_REPORT_WINDOW_HOURS
         ): vol.All(vol.Coerce(int), vol.Range(min=1)),
@@ -686,10 +696,12 @@ GET_INTERNET_QUALITY_REPORT_SCHEMA = vol.Schema(
 
 GET_TIME_USAGE_REPORT_SCHEMA = vol.Schema(
     {
-        vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND): vol.In(
-            ("device", "group", "user")
-        ),
-        vol.Required(SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_GROUP_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_USER_NAME): cv.string,
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_BEGIN): cv.datetime,
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_END): cv.datetime,
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_GRANULARITY): vol.In(("day", "hour")),
@@ -1165,7 +1177,8 @@ def _serialize_usage_history_target(
 ) -> JsonObjectType:
     """Serialize resolved usage-history target metadata."""
     return {
-        "scope_kind": target.scope_kind,
+        "kind": target.kind,
+        "resolved_field": target.selector_field,
         "target_id": target.target_id,
         "target_name": target.target_name,
         "request_scope_type": target.request_scope_type,
@@ -1453,7 +1466,10 @@ def _serialize_usage_history_view(
     return {
         "target": _serialize_report_target(
             FirewallaReportTarget(
-                kind=TARGET_KIND_BY_REPORT_SCOPE[view.target.scope_kind],
+                # The resolved scope's kind, already in the machine vocabulary: the
+                # selector field the caller wrote decides it, so no request-to-
+                # published translation is left to disagree.
+                kind=view.target.kind,
                 id=view.target.target_id,
                 name=view.target.target_name,
             )
@@ -2971,7 +2987,7 @@ def _serialize_flow_report(
     *,
     view: FirewallaFlowReportView,
     target: FirewallaFlowReportTarget,
-    scope_target: str,
+    selection: ScopeSelection,
     detail: str,
     window_hours: int,
     record_count: int,
@@ -2997,6 +3013,7 @@ def _serialize_flow_report(
         FLOW_REPORT_INCLUDE_HOST_DETAIL in requested_include
         or view.target_type == _USAGE_HISTORY_REQUEST_SCOPE_HOST
     )
+    resolved_field = selection.field
 
     warnings: list[FirewallaReportWarning] = []
     unavailable_sections: list[str] = []
@@ -3128,15 +3145,18 @@ def _serialize_flow_report(
             FirewallaReportTarget(
                 # The caller-facing identity, in the caller's own vocabulary, so a
                 # user is named by its user id exactly as the watched-user
-                # entities and `get_time_usage_report` do.
-                kind=TARGET_KIND_BY_REPORT_SCOPE[target.scope_kind],
+                # entities and `get_time_usage_report` do. The kind is the resolved
+                # scope's own, already in the machine vocabulary.
+                kind=target.kind,
                 id=target.identity_id,
                 name=target.identity_name,
             )
         ),
         "query": {
-            "scope_kind": target.scope_kind,
-            "scope_target": scope_target,
+            # Which selector field the caller actually wrote, so a caller who asked
+            # by name and got a MAC back can read which of their inputs was used.
+            # The kind is not repeated here: `target.kind` states it.
+            "resolved_field": resolved_field,
             # What the flow queries were actually asked. Present always, including
             # when it matches the identity, so the shape does not change with the
             # scope kind and a caller can rely on reading it.
@@ -3764,11 +3784,53 @@ def _resolve_requested_network(
     return None
 
 
+def _select_report_scope(call: ServiceCall) -> ScopeSelection:
+    """Return the one scope a report call selected, or raise.
+
+    Both report services select a scope the same way, so they enforce the same rule
+    and raise the same keys: exactly one selector field, never two and never none.
+    That is one sentence for the caller to learn, wherever they meet it, rather than
+    the per-service conflict messages this replaces.
+    """
+    selection = select_scope(call.data, fields=REPORT_SCOPE_SELECTOR_FIELDS)
+    if selection.is_selected:
+        return selection
+    if selection.supplied:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT,
+        )
+    raise _service_validation_error(
+        translation_key=TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_REQUIRED,
+    )
+
+
+def _match_scope_selection(
+    selection: ScopeSelection,
+    candidates: Iterable[tuple[str, Sequence[str | None]]],
+    *,
+    normalize_identifier: Callable[[str], str | None] | None = None,
+) -> SelectorMatch:
+    """Match one typed scope selector against ``(identifier, names)`` records.
+
+    An identifier field matches identifiers only, and a label field matches labels
+    only. That split is the point of the pair: the single free-text field this
+    replaces tried both, so a selector that looked like a group id could resolve
+    against a user's *name* and silently return the wrong scope's data.
+    """
+    assert selection.value is not None
+    if selection.is_identified:
+        return match_selector(
+            selection.value,
+            candidates,
+            normalize_identifier=normalize_identifier,
+        )
+    return SelectorMatch(name_matches=match_names(selection.value, candidates))
+
+
 def _resolve_usage_history_target(
     entry: FirewallaConfigEntry,
     *,
-    scope_kind: str,
-    scope_target: str,
+    selection: ScopeSelection,
 ) -> FirewallaUsageHistoryTarget:
     """Resolve one usage-history target against normalized runtime metadata.
 
@@ -3776,11 +3838,11 @@ def _resolve_usage_history_target(
     usage-specific parts -- which name fields count, and the translation keys the
     failure maps to.
     """
-    if scope_kind == "device":
+    if selection.kind == "host":
         host_manager = entry.runtime_data.host_manager
         choices = host_manager.get_watched_device_choices()
-        match = match_selector(
-            scope_target,
+        match = _match_scope_selection(
+            selection,
             (
                 (host.mac, (host.host_name, choices.get(host.mac)))
                 for host in host_manager.get_hosts()
@@ -3791,22 +3853,19 @@ def _resolve_usage_history_target(
             host := host_manager.get_host(mac)
         ) is not None:
             return FirewallaUsageHistoryTarget(
-                scope_kind=scope_kind,
+                kind=selection.kind,
+                selector_field=selection.field or "",
                 target_id=host.mac,
                 target_name=host.host_name,
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
             )
-        raise _usage_history_scope_error(
-            match,
-            scope_kind=scope_kind,
-            scope_target=scope_target,
-        )
+        raise _usage_history_scope_error(match, selection=selection)
 
-    if scope_kind == "user":
+    if selection.kind == "user":
         user_manager = entry.runtime_data.user_manager
         choices = user_manager.get_watched_user_choices()
-        match = match_selector(
-            scope_target,
+        match = _match_scope_selection(
+            selection,
             (
                 (user.user_id, (user.name, choices.get(user.user_id)))
                 for user in user_manager.get_users()
@@ -3816,24 +3875,21 @@ def _resolve_usage_history_target(
             user := user_manager.get_user(user_id)
         ) is not None:
             return FirewallaUsageHistoryTarget(
-                scope_kind=scope_kind,
+                kind=selection.kind,
+                selector_field=selection.field or "",
                 target_id=user.user_id,
                 target_name=user.name,
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
             )
-        raise _usage_history_scope_error(
-            match,
-            scope_kind=scope_kind,
-            scope_target=scope_target,
-        )
+        raise _usage_history_scope_error(match, selection=selection)
 
     # Group scope. The tag collection holds plain groups and user affiliations
     # together, and a user entry carries the user's own name, so filtering to
     # plain groups is what keeps a group-scoped request from resolving to a
     # user's backing tag and returning that user's usage labelled as a group.
     # Users resolve through the user branch above, not here.
-    match = match_selector(
-        scope_target,
+    match = _match_scope_selection(
+        selection,
         (
             (group.group_id, (group.name,))
             for group in entry.runtime_data.integration_manager.get_groups()
@@ -3841,31 +3897,23 @@ def _resolve_usage_history_target(
         ),
     )
     if (group_id := match.resolved) is None:
-        raise _usage_history_scope_error(
-            match,
-            scope_kind=scope_kind,
-            scope_target=scope_target,
-        )
+        raise _usage_history_scope_error(match, selection=selection)
     for group in entry.runtime_data.integration_manager.get_groups():
         if group.group_id == group_id:
             return FirewallaUsageHistoryTarget(
-                scope_kind=scope_kind,
+                kind=selection.kind or "",
+                selector_field=selection.field or "",
                 target_id=group.group_id,
                 target_name=group.name,
                 request_scope_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
             )
-    raise _usage_history_scope_error(
-        match,
-        scope_kind=scope_kind,
-        scope_target=scope_target,
-    )
+    raise _usage_history_scope_error(match, selection=selection)
 
 
 def _usage_history_scope_error(
     match: SelectorMatch,
     *,
-    scope_kind: str,
-    scope_target: str,
+    selection: ScopeSelection,
 ) -> ServiceValidationError:
     """Build the usage-report error for a selector that did not resolve."""
     return _service_validation_error(
@@ -3875,8 +3923,8 @@ def _usage_history_scope_error(
             else TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND
         ),
         translation_placeholders={
-            TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
-            TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+            TRANS_PLACEHOLDER_SCOPE_KIND: selection.kind or "",
+            TRANS_PLACEHOLDER_SCOPE_TARGET: selection.value or "",
         },
     )
 
@@ -3884,8 +3932,7 @@ def _usage_history_scope_error(
 def _resolve_flow_report_target(
     entry: FirewallaConfigEntry,
     *,
-    scope_kind: str,
-    scope_target: str,
+    selection: ScopeSelection,
 ) -> FirewallaFlowReportTarget:
     """Resolve one flow-report scope to its identity **and** its protocol target.
 
@@ -3908,11 +3955,11 @@ def _resolve_flow_report_target(
     the resolved target, so without it a caller echoing an id this service handed
     out would get a not-found error.
     """
-    if scope_kind == _REPORT_SCOPE_DEVICE:
+    if selection.kind == "host":
         host_manager = entry.runtime_data.host_manager
         choices = host_manager.get_watched_device_choices()
-        match = match_selector(
-            scope_target,
+        match = _match_scope_selection(
+            selection,
             (
                 (host.mac, (host.host_name, choices.get(host.mac)))
                 for host in host_manager.get_hosts()
@@ -3922,22 +3969,18 @@ def _resolve_flow_report_target(
         if (mac := match.resolved) is not None and (
             host := host_manager.get_host(mac)
         ) is not None:
-            # A device's identity and its protocol target are the same MAC; only a
+            # A host's identity and its protocol target are the same MAC; only a
             # user is remapped, so the asymmetry stays visible here.
             return FirewallaFlowReportTarget(
-                scope_kind=scope_kind,
+                kind=selection.kind,
                 identity_id=host.mac,
                 identity_name=host.host_name,
                 request_type=_USAGE_HISTORY_REQUEST_SCOPE_HOST,
                 request_target=host.mac,
             )
-        raise _flow_report_scope_error(
-            match,
-            scope_kind=scope_kind,
-            scope_target=scope_target,
-        )
+        raise _flow_report_scope_error(match, selection=selection)
 
-    if scope_kind == _REPORT_SCOPE_USER:
+    if selection.kind == "user":
         # Read from the tag collection rather than the user manager: a user entry
         # carries both ids, and the affiliation is the whole reason a user needs a
         # remapped protocol target. `FirewallaWatchedUser` exposes only the
@@ -3956,34 +3999,26 @@ def _resolve_flow_report_target(
             if group.kind == _MEMBERSHIP_KIND_USER
             and (user_id := group.user_id) is not None
         ]
-        match = match_selector(scope_target, user_candidates)
+        match = _match_scope_selection(selection, user_candidates)
         if (user_id := match.resolved) is None:
-            raise _flow_report_scope_error(
-                match,
-                scope_kind=scope_kind,
-                scope_target=scope_target,
-            )
+            raise _flow_report_scope_error(match, selection=selection)
         for group in entry.runtime_data.integration_manager.get_groups():
             if group.kind == _MEMBERSHIP_KIND_USER and group.user_id == user_id:
                 return FirewallaFlowReportTarget(
-                    scope_kind=scope_kind,
+                    kind=selection.kind,
                     identity_id=user_id,
                     identity_name=group.name,
                     request_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
                     request_target=group.group_id,
                 )
-        raise _flow_report_scope_error(
-            match,
-            scope_kind=scope_kind,
-            scope_target=scope_target,
-        )
+        raise _flow_report_scope_error(match, selection=selection)
 
     # Group scope. Filtered to plain groups for the same reason the usage resolver
     # is: the tag collection holds user affiliations too, and a user entry carries
     # the user's own name, so resolving a group request to a user's backing tag
     # would return that user's traffic labelled as a group.
-    match = match_selector(
-        scope_target,
+    match = _match_scope_selection(
+        selection,
         (
             (group.group_id, (group.name,))
             for group in entry.runtime_data.integration_manager.get_groups()
@@ -3994,24 +4029,19 @@ def _resolve_flow_report_target(
         for group in entry.runtime_data.integration_manager.get_groups():
             if group.group_id == group_id:
                 return FirewallaFlowReportTarget(
-                    scope_kind=scope_kind,
+                    kind=selection.kind or "",
                     identity_id=group.group_id,
                     identity_name=group.name,
                     request_type=_USAGE_HISTORY_REQUEST_SCOPE_TAG,
                     request_target=group.group_id,
                 )
-    raise _flow_report_scope_error(
-        match,
-        scope_kind=scope_kind,
-        scope_target=scope_target,
-    )
+    raise _flow_report_scope_error(match, selection=selection)
 
 
 def _flow_report_scope_error(
     match: SelectorMatch,
     *,
-    scope_kind: str,
-    scope_target: str,
+    selection: ScopeSelection,
 ) -> ServiceValidationError:
     """Build the flow-report error for a selector that did not resolve."""
     return _service_validation_error(
@@ -4021,8 +4051,8 @@ def _flow_report_scope_error(
             else TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_NOT_FOUND
         ),
         translation_placeholders={
-            TRANS_PLACEHOLDER_SCOPE_KIND: scope_kind,
-            TRANS_PLACEHOLDER_SCOPE_TARGET: scope_target,
+            TRANS_PLACEHOLDER_SCOPE_KIND: selection.kind or "",
+            TRANS_PLACEHOLDER_SCOPE_TARGET: selection.value or "",
         },
     )
 
@@ -5741,8 +5771,7 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
 
     target = _resolve_usage_history_target(
         entry,
-        scope_kind=cast(str, call.data[SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND]),
-        scope_target=cast(str, call.data[SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET]),
+        selection=_select_report_scope(call),
     )
     (
         detail,
@@ -6068,13 +6097,8 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
-    scope_kind = cast(str, call.data[SERVICE_FIELD_SCOPE_KIND])
-    scope_target = cast(str, call.data[SERVICE_FIELD_SCOPE_TARGET])
-    target = _resolve_flow_report_target(
-        entry,
-        scope_kind=scope_kind,
-        scope_target=scope_target,
-    )
+    selection = _select_report_scope(call)
+    target = _resolve_flow_report_target(entry, selection=selection)
 
     detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
     include_records = detail == FLOW_REPORT_DETAIL_RECORDS
@@ -6103,7 +6127,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
         entry,
         view=view,
         target=target,
-        scope_target=scope_target,
+        selection=selection,
         detail=detail,
         window_hours=cast(int, call.data[SERVICE_FIELD_WINDOW_HOURS]),
         record_count=cast(int, call.data[SERVICE_FIELD_RECORD_COUNT]),

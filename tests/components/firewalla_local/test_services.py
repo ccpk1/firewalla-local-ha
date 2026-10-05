@@ -89,7 +89,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_RULE_RESUME_AT,
     SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SCOPE_KIND,
-    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
@@ -99,8 +98,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
     SERVICE_FIELD_USAGE_HISTORY_END,
     SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
-    SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND,
-    SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET,
     SERVICE_FIELD_USER,
     SERVICE_FIELD_USER_ID,
     SERVICE_FIELD_USER_NAME,
@@ -5644,10 +5641,7 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
             SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: (
-                    "Kaden Phone (192.168.200.25)"
-                ),
+                SERVICE_FIELD_HOST_NAME: "Kaden Phone (192.168.200.25)",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: begin,
                 SERVICE_FIELD_USAGE_HISTORY_END: end,
                 SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "day",
@@ -5799,10 +5793,7 @@ async def test_get_time_usage_report_service_detail_intervals_keeps_intervals(
             SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: (
-                    "Kaden Phone (192.168.200.25)"
-                ),
+                SERVICE_FIELD_HOST_NAME: "Kaden Phone (192.168.200.25)",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                     1_774_065_600,
                     UTC,
@@ -5892,8 +5883,7 @@ async def test_get_time_usage_report_service_resolves_user_name_to_tag_scope(
             SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "user",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "KADEN",
+                SERVICE_FIELD_USER_NAME: "KADEN",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                     1_774_065_600,
                     UTC,
@@ -5973,8 +5963,7 @@ async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
                 SERVICE_GET_TIME_USAGE_REPORT,
                 {
                     SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                    SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "group",
-                    SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: scope_target,
+                    SERVICE_FIELD_GROUP_NAME: scope_target,
                     SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                         1_774_065_600,
                         UTC,
@@ -5993,6 +5982,89 @@ async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
         err.value.translation_key
         == TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND
     )
+    assert mock_get_usage_history.await_count == 0
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_key"),
+    [
+        pytest.param(
+            {
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_USER_NAME: "KADEN",
+            },
+            "scope_selector_conflict",
+            id="two-selectors",
+        ),
+        pytest.param({}, "scope_selector_required", id="no-selector"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_time_usage_report_accepts_exactly_one_scope_selector(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_key: str,
+) -> None:
+    """Test the usage report enforces the same exactly-one scope rule.
+
+    One rule, one message, whichever report a caller meets it on. The entry is
+    fully set up so the failure is provably the selector rule and not a missing
+    fixture.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_usage_history_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_usage_history_payload",
+            new=AsyncMock(return_value=_usage_history_payload()),
+        ) as mock_get_usage_history,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_TIME_USAGE_REPORT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
+                        1_774_065_600,
+                        UTC,
+                    ),
+                    SERVICE_FIELD_USAGE_HISTORY_END: datetime.fromtimestamp(
+                        1_774_670_400,
+                        UTC,
+                    ),
+                    SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: "day",
+                    **data,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert err.value.translation_key == expected_key
     assert mock_get_usage_history.await_count == 0
 
 
@@ -6037,8 +6109,7 @@ async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(
             SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "group",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "Quarantine",
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                     1_774_065_600,
                     UTC,
@@ -6103,8 +6174,7 @@ async def test_get_time_usage_report_service_honors_requested_sections(
             SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "EC:0D:51:CC:BA:BC",
+                SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                     1_774_065_600,
                     UTC,
@@ -6175,8 +6245,7 @@ async def test_get_time_usage_report_service_non_empty_app_filter_adds_apps_sect
             SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "EC:0D:51:CC:BA:BC",
+                SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                     1_774_065_600,
                     UTC,
@@ -6244,8 +6313,7 @@ async def test_get_time_usage_report_service_ranks_apps_and_filters_zero_only_ro
             SERVICE_GET_TIME_USAGE_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: "device",
-                SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: "EC:0D:51:CC:BA:BC",
+                SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC",
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
                     1_774_065_600,
                     UTC,
@@ -8646,9 +8714,16 @@ def _flow_report_entry() -> MockConfigEntry:
 async def _flow_report_response(
     hass: HomeAssistant,
     *,
+    scope: dict[str, object] | None = None,
     extra: dict[str, object] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, AsyncMock], MockConfigEntry]:
-    """Set up an entry and call the flow-report service once."""
+    """Set up an entry and call the flow-report service once.
+
+    ``scope`` replaces the default group and ``extra`` adds to it. They are separate
+    because the service accepts exactly one selector field, so a test that changes
+    only the detail level must not also have to restate the scope -- and a test that
+    changes the scope must not leave the default group behind to conflict with it.
+    """
     entry = _flow_report_entry()
     entry.add_to_hass(hass)
 
@@ -8656,16 +8731,18 @@ async def _flow_report_response(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
+        data: dict[str, object] = {
+            SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            SERVICE_FIELD_REFRESH: False,
+            **(
+                scope if scope is not None else {SERVICE_FIELD_GROUP_NAME: "Quarantine"}
+            ),
+            **(extra or {}),
+        }
         response = await hass.services.async_call(
             DOMAIN,
             SERVICE_GET_FLOW_REPORT,
-            {
-                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_SCOPE_KIND: "group",
-                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
-                SERVICE_FIELD_REFRESH: False,
-                **(extra or {}),
-            },
+            data,
             blocking=True,
             return_response=True,
         )
@@ -8808,11 +8885,10 @@ async def test_flow_report_needs_no_flag_to_name_the_device_it_was_asked_about(
     """
     response, _client, _entry = await _flow_report_response(
         hass,
-        extra={
-            SERVICE_FIELD_SCOPE_KIND: "device",
-            SERVICE_FIELD_SCOPE_TARGET: "Kaden Phone",
-            SERVICE_FIELD_DETAIL: "records",
+        scope={
+            SERVICE_FIELD_HOST_NAME: "Kaden Phone",
         },
+        extra={SERVICE_FIELD_DETAIL: "records"},
     )
 
     assert response is not None
@@ -8839,10 +8915,7 @@ async def test_flow_report_resolves_a_user_to_its_affiliated_tag(
     """
     response, _client, _entry = await _flow_report_response(
         hass,
-        extra={
-            SERVICE_FIELD_SCOPE_KIND: "user",
-            SERVICE_FIELD_SCOPE_TARGET: "KADEN",
-        },
+        scope={SERVICE_FIELD_USER_NAME: "KADEN"},
     )
 
     assert response is not None
@@ -8854,8 +8927,7 @@ async def test_flow_report_resolves_a_user_to_its_affiliated_tag(
     assert response["query"]["resolved_type"] == "tag"
     assert response["query"]["resolved_target"] == _FLOW_AFFILIATED_TAG_ID
     assert response["query"]["identity_remapped"] is True
-    assert response["query"]["scope_kind"] == "user"
-    assert response["query"]["scope_target"] == "KADEN"
+    assert response["query"]["resolved_field"] == SERVICE_FIELD_USER_NAME
 
 
 @pytest.mark.asyncio
@@ -8888,8 +8960,7 @@ async def test_flow_report_stops_a_record_walk_that_cannot_advance(
             SERVICE_GET_FLOW_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_SCOPE_KIND: "group",
-                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
                 SERVICE_FIELD_DETAIL: "records",
                 SERVICE_FIELD_RECORD_COUNT: 500,
                 SERVICE_FIELD_FETCH_ALL_RECORDS: True,
@@ -8928,8 +8999,96 @@ async def test_flow_report_rejects_a_group_that_does_not_exist(
                 SERVICE_GET_FLOW_REPORT,
                 {
                     SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                    SERVICE_FIELD_SCOPE_KIND: "group",
-                    SERVICE_FIELD_SCOPE_TARGET: "no-such-group",
+                    SERVICE_FIELD_GROUP_NAME: "no-such-group",
+                    SERVICE_FIELD_REFRESH: False,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert err.value.translation_key == "flow_report_scope_not_found"
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_key"),
+    [
+        pytest.param(
+            {
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
+                SERVICE_FIELD_USER_NAME: "KADEN",
+            },
+            "scope_selector_conflict",
+            id="two-selectors",
+        ),
+        pytest.param(
+            {SERVICE_FIELD_GROUP_NAME: "Quarantine", SERVICE_FIELD_GROUP_ID: "12"},
+            "scope_selector_conflict",
+            id="both-fields-of-one-pair",
+        ),
+        pytest.param({}, "scope_selector_required", id="no-selector"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_flow_report_accepts_exactly_one_scope_selector(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_key: str,
+) -> None:
+    """Test the exactly-one rule: two selectors and none are both errors.
+
+    Two fields of the *same* pair is included deliberately. A caller writing both
+    `group_name` and `group_id` has made an ambiguous request rather than stated a
+    preference, and silently preferring one would hide a typo in the other.
+    """
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    with _flow_report_client():
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_FLOW_REPORT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_REFRESH: False,
+                    **data,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert err.value.translation_key == expected_key
+
+
+@pytest.mark.asyncio
+async def test_flow_report_name_field_does_not_match_an_id(
+    hass: HomeAssistant,
+) -> None:
+    """Test a name selector matches names only, never another group's id.
+
+    This is what the typed pair buys over the free-text field it replaced. That one
+    tried identifiers and names in the same lookup, so a value that happened to be a
+    group's id could satisfy a selector the caller meant as a name -- and the caller
+    would get a different scope's data with no way to notice.
+    """
+    entry = _flow_report_entry()
+    entry.add_to_hass(hass)
+
+    with _flow_report_client():
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_FLOW_REPORT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    # `12` is the group's id, not its name.
+                    SERVICE_FIELD_GROUP_NAME: _FLOW_GROUP_ID,
                     SERVICE_FIELD_REFRESH: False,
                 },
                 blocking=True,
@@ -8962,8 +9121,7 @@ async def test_flow_report_marks_a_section_the_box_did_not_return(
             SERVICE_GET_FLOW_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_SCOPE_KIND: "group",
-                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
                 SERVICE_FIELD_REFRESH: False,
             },
             blocking=True,
@@ -9025,8 +9183,7 @@ async def test_flow_report_accepts_exactly_the_fields_the_llm_tool_passes(
             DOMAIN,
             SERVICE_GET_FLOW_REPORT,
             {
-                SERVICE_FIELD_SCOPE_KIND: "group",
-                SERVICE_FIELD_SCOPE_TARGET: "Quarantine",
+                SERVICE_FIELD_GROUP_NAME: "Quarantine",
             },
             blocking=True,
             return_response=True,
@@ -9045,16 +9202,19 @@ async def test_flow_report_accepts_exactly_the_fields_the_llm_tool_passes(
 
 
 @pytest.mark.parametrize(
-    "selector",
+    ("field", "selector"),
     [
-        pytest.param("KADEN", id="by-name"),
-        pytest.param(_FLOW_USER_ID, id="by-user-id"),
-        pytest.param(_FLOW_AFFILIATED_TAG_ID, id="by-affiliated-tag"),
+        pytest.param(SERVICE_FIELD_USER_NAME, "KADEN", id="by-name"),
+        pytest.param(SERVICE_FIELD_USER_ID, _FLOW_USER_ID, id="by-user-id"),
+        pytest.param(
+            SERVICE_FIELD_USER_ID, _FLOW_AFFILIATED_TAG_ID, id="by-affiliated-tag"
+        ),
     ],
 )
 @pytest.mark.asyncio
 async def test_flow_report_accepts_every_user_selector_it_can_report(
     hass: HomeAssistant,
+    field: str,
     selector: str,
 ) -> None:
     """Test a user resolves the same way by name, user id, or affiliated tag.
@@ -9065,13 +9225,13 @@ async def test_flow_report_accepts_every_user_selector_it_can_report(
     protocol target. Before this, echoing the resolved target back produced
     `flow_report_scope_not_found` -- the report handed out an id it would not
     accept, which no other service in this integration does.
+
+    The affiliated tag is passed through `user_id` rather than `user_name` because
+    it is an identifier the service handed out, not a label anyone types.
     """
     response, _client, _entry = await _flow_report_response(
         hass,
-        extra={
-            SERVICE_FIELD_SCOPE_KIND: "user",
-            SERVICE_FIELD_SCOPE_TARGET: selector,
-        },
+        scope={field: selector},
     )
 
     assert response is not None
@@ -9107,8 +9267,7 @@ async def test_flow_report_publishes_the_same_user_id_as_the_usage_service(
             SERVICE_GET_FLOW_REPORT,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
-                SERVICE_FIELD_SCOPE_KIND: "user",
-                SERVICE_FIELD_SCOPE_TARGET: "KADEN",
+                SERVICE_FIELD_USER_NAME: "KADEN",
                 SERVICE_FIELD_REFRESH: False,
             },
             blocking=True,

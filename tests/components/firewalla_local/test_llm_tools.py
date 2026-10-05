@@ -469,8 +469,7 @@ async def test_flow_report_tool_can_reach_the_records_it_needs_to_diagnose(
     # Both levels validate, so the model can actually select the diagnostic one.
     validated = tool.parameters(
         {
-            "scope_kind": "group",
-            "scope_target": "KIDS",
+            "group_name": "KIDS",
             "detail": "records",
             "record_count": 50,
         }
@@ -478,10 +477,7 @@ async def test_flow_report_tool_can_reach_the_records_it_needs_to_diagnose(
     assert validated["detail"] == "records"
     assert validated["record_count"] == 50
     # Summary stays the default, so an ordinary question does not pay for records.
-    assert (
-        tool.parameters({"scope_kind": "group", "scope_target": "KIDS"})["detail"]
-        == "summary"
-    )
+    assert tool.parameters({"group_name": "KIDS"})["detail"] == "summary"
 
     # The description is the model's only cue that records carry the rule.
     description = tool.description.lower()

@@ -495,7 +495,9 @@ Reads that explain what the network is doing and how it is performing.
 - **Narrow it:** every section is returned by default, so pass `sections` (and
   `app_ids` when only some apps matter) to keep the report to what the question
   needs.
-- **Inputs:** `scope_kind` (`host`/`tag`/…), `scope_target`, `begin`/`end` (or a
+- **Inputs:** exactly one scope selector — `host_mac` or `host_name` for a host,
+  `group_id` or `group_name` for a group, `user_id` or `user_name` for a user; plus
+  `begin`/`end` (or a
   period), `granularity` (`day`/`hour`), `sections` (`internet`, `app_totals`, `apps`,
   `categories`), `app_ids`, `include` (`['intervals']`), `detail` (`summary` |
   `standard`).
@@ -523,10 +525,11 @@ Reads that explain what the network is doing and how it is performing.
   is not there. Add `include: ['host_detail']` only when the question is *which*
   device — the per-device member ranking, the devices behind a destination, and
   each record's device — because that adds the household's device inventory.
-- **Inputs:** `scope_kind` (`device` | `group` | `user`), `scope_target` (a MAC, id,
-  or name for a device; a name, user id, or affiliated tag for a user; a name or id
-  for a group), `window_hours` (default 24), `detail` (`summary` | `records`),
-  `record_count`, `include` (`['host_detail']`).
+- **Inputs:** exactly one scope selector — `host_mac` or `host_name` for a host,
+  `group_id` or `group_name` for a group, `user_id` or `user_name` for a user
+  (`user_id` also accepts the affiliated tag the response reports as
+  `query.resolved_target`); plus `window_hours` (default 24), `detail` (`summary` |
+  `records`), `record_count`, `include` (`['host_detail']`).
 - **Returns:** read envelope — `result` with `summary` (window, totals, counts),
   `sections` (`top_download`, `top_upload`, `blocked`, `local_peers`,
   `rollup_families`, plus `blocked_records` / `flow_records` at records detail), and

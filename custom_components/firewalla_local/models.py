@@ -454,11 +454,13 @@ class FirewallaReportWarning:
 class FirewallaFlowReportTarget:
     """One resolved flow-report scope, carrying **two** identities on purpose.
 
-    ``scope_kind`` / ``identity_id`` / ``identity_name`` are the caller-facing
-    identity, and they follow the integration's identity contract: a device is
-    keyed by MAC, a group by its group id, and a **user by its user id** -- the
-    same key the watched-user entities use in their unique ids and the same value
-    ``get_time_usage_report`` reports as ``target_id``.
+    ``kind`` / ``identity_id`` / ``identity_name`` are the caller-facing identity,
+    and they follow the integration's identity contract: a device is keyed by MAC, a
+    group by its group id, and a **user by its user id** -- the same key the
+    watched-user entities use in their unique ids and the same value
+    ``get_time_usage_report`` reports as ``target_id``. ``kind`` is the same machine
+    vocabulary every other published target uses, because it is read from
+    :data:`SCOPE_SELECTOR_FIELDS`' kind rather than from a request enum.
 
     ``request_type`` / ``request_target`` are what the flow queries are actually
     asked, which is not always the identity. The box keys flow data by the
@@ -473,7 +475,7 @@ class FirewallaFlowReportTarget:
     without anyone having to treat it as the answer to "who is this?".
     """
 
-    scope_kind: str
+    kind: str
     identity_id: str
     identity_name: str | None
     request_type: str
@@ -956,9 +958,16 @@ class FirewallaWatchedUser:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaUsageHistoryTarget:
-    """Resolved usage-history target metadata for one scoped query."""
+    """Resolved usage-history target metadata for one scoped query.
 
-    scope_kind: str
+    ``kind`` and ``selector_field`` are the machine vocabulary values: the resolved
+    scope's kind, and the selector field the caller actually wrote (``host_mac``,
+    ``group_name``, ...). The field is carried because a caller who asked by name
+    and got a MAC back benefits from reading which of their inputs was used.
+    """
+
+    kind: str
+    selector_field: str
     target_id: str
     target_name: str | None
     request_scope_type: str
