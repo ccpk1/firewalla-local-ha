@@ -34,9 +34,10 @@ from .const import (
     DEFAULT_NETWORK_USAGE_WINDOW,
     DEFAULT_WAN_EVENT_WINDOW_DAYS,
     DEFAULT_WAN_USAGE_CURRENT_PERIODS,
+    DETAIL_FULL,
+    DETAIL_LEVELS,
+    DETAIL_SUMMARY,
     DOMAIN,
-    FLOW_REPORT_DETAIL_RECORDS,
-    FLOW_REPORT_DETAIL_SUMMARY,
     FLOW_REPORT_INCLUDE_HOST_DETAIL,
     HIDDEN_RULE_PURPOSES,
     HOST_DEVICE_TYPE_OPTIONS,
@@ -407,8 +408,8 @@ GET_FLOW_REPORT_SCHEMA = vol.Schema(
         vol.Optional(
             SERVICE_FIELD_WINDOW_HOURS, default=DEFAULT_FLOW_REPORT_WINDOW_HOURS
         ): vol.All(vol.Coerce(int), vol.Range(min=1)),
-        vol.Optional(SERVICE_FIELD_DETAIL, default=FLOW_REPORT_DETAIL_SUMMARY): vol.In(
-            (FLOW_REPORT_DETAIL_SUMMARY, FLOW_REPORT_DETAIL_RECORDS)
+        vol.Optional(SERVICE_FIELD_DETAIL, default=DETAIL_SUMMARY): vol.In(
+            DETAIL_LEVELS
         ),
         vol.Optional(
             SERVICE_FIELD_RECORD_COUNT, default=DEFAULT_FLOW_REPORT_RECORD_COUNT
@@ -465,7 +466,9 @@ GET_ALARMS_SCHEMA = vol.Schema(
         ),
         vol.Optional(SERVICE_FIELD_INCLUDE_ARCHIVED, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_ALARM_TYPE): cv.string,
-        vol.Optional(SERVICE_FIELD_DETAIL, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_DETAIL, default=DETAIL_SUMMARY): vol.In(
+            DETAIL_LEVELS
+        ),
         vol.Optional(SERVICE_FIELD_INCLUDE_EXCEPTIONS, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
@@ -539,8 +542,8 @@ DELETE_RULE_SCHEMA = vol.Schema(
 
 GET_HOST_NAME_MAPPING_SCHEMA = vol.Schema(
     {
-        vol.Optional(SERVICE_FIELD_DETAIL, default="summary"): vol.In(
-            ("summary", "full")
+        vol.Optional(SERVICE_FIELD_DETAIL, default=DETAIL_SUMMARY): vol.In(
+            DETAIL_LEVELS
         ),
         vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
@@ -762,9 +765,7 @@ GET_TIME_USAGE_REPORT_SCHEMA = vol.Schema(
             cv.ensure_list_csv,
             [vol.In(("intervals",))],
         ),
-        vol.Optional(SERVICE_FIELD_DETAIL, default="standard"): vol.In(
-            ("summary", "standard")
-        ),
+        vol.Optional(SERVICE_FIELD_DETAIL, default=DETAIL_FULL): vol.In(DETAIL_LEVELS),
         vol.Optional(SERVICE_FIELD_USAGE_HISTORY_APP_IDS): vol.All(
             cv.ensure_list_csv,
             [cv.string],
@@ -791,8 +792,8 @@ GET_WAN_DATA_USAGE_SCHEMA = vol.Schema(
             SERVICE_FIELD_HISTORY_COUNT,
             default=0,
         ): vol.All(vol.Coerce(int), vol.Range(min=0, max=366)),
-        vol.Optional(SERVICE_FIELD_DETAIL, default="summary"): vol.In(
-            ("summary", "full")
+        vol.Optional(SERVICE_FIELD_DETAIL, default=DETAIL_SUMMARY): vol.In(
+            DETAIL_LEVELS
         ),
         vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
@@ -3115,7 +3116,7 @@ def _serialize_flow_report(
             # section, because when there are members to rank they are returned.
             unavailable_sections.append("member_ranking")
 
-    if detail == FLOW_REPORT_DETAIL_RECORDS:
+    if detail == DETAIL_FULL:
         for section, record_view in (
             ("blocked_records", view.blocked_records),
             ("flow_records", view.flow_records),
@@ -3185,7 +3186,7 @@ def _serialize_flow_report(
             if summary is not None and include_host_detail
             else None
         ),
-        "includes_records": detail == FLOW_REPORT_DETAIL_RECORDS,
+        "includes_records": detail == DETAIL_FULL,
     }
 
     return {
@@ -4625,7 +4626,7 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     limit = cast(int, call.data[SERVICE_FIELD_LIMIT])
     include_archived = cast(bool, call.data[SERVICE_FIELD_INCLUDE_ARCHIVED])
     alarm_type = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_TYPE))
-    detail = cast(bool, call.data[SERVICE_FIELD_DETAIL])
+    detail = cast(str, call.data[SERVICE_FIELD_DETAIL]) == DETAIL_FULL
     include_exceptions = cast(
         bool, call.data.get(SERVICE_FIELD_INCLUDE_EXCEPTIONS, False)
     )
@@ -5042,7 +5043,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
-    detail = cast(str, call.data.get(SERVICE_FIELD_DETAIL, "summary"))
+    detail = cast(str, call.data.get(SERVICE_FIELD_DETAIL, DETAIL_SUMMARY))
     raw_host_lookup = _build_raw_host_lookup(entry)
     # One online definition for the whole surface: the same activity-window rule
     # the system-status counts and the overview's vpn_devices use. The filter and
@@ -6322,7 +6323,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
     target = _resolve_flow_report_target(entry, selection=selection)
 
     detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
-    include_records = detail == FLOW_REPORT_DETAIL_RECORDS
+    include_records = detail == DETAIL_FULL
     time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
 
     try:

@@ -224,10 +224,10 @@ get_flow_report:
           options:
             - value: "summary"
               label: Summary only
-            - value: "records"
+            - value: "full"
               label: Summary and flow records
       name: Detail (Optional)
-      description: Optional. Defaults to summary, which is one request. Records adds the blocked and regular flow records, which are separate reads of several thousand rows on a busy target.
+      description: Optional. Defaults to summary, which is one request. Full adds the blocked and regular flow records, which are separate reads of several thousand rows on a busy target.
     record_count:
       required: false
       example: 300
@@ -1158,16 +1158,16 @@ get_time_usage_report:
       description: Optional. Add per-device interval detail when Firewalla returns it for the selected scope and apps.
     detail:
       required: false
-      example: "standard"
+      example: "full"
       selector:
         select:
           options:
             - value: "summary"
               label: Summary
-            - value: "standard"
-              label: Standard
+            - value: "full"
+              label: Full
       name: Detail
-      description: Optional. Defaults to standard. Summary returns the smallest default section set, while standard returns the normal report depth.
+      description: Optional. Defaults to full. Summary returns the smallest default section set, while full returns the normal report depth.
     app_ids:
       required: false
       example: "internet,facebook"

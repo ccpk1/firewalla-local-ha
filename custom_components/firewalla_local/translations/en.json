@@ -2254,7 +2254,7 @@
         },
         "sections": {
           "name": "Sections (Optional)",
-          "description": "Limit the report to the named major sections. When omitted, standard returns all major sections and summary returns internet plus app totals. A non-empty app filter also keeps the apps section visible."
+          "description": "Limit the report to the named major sections. When omitted, full returns all major sections and summary returns internet plus app totals. A non-empty app filter also keeps the apps section visible."
         },
         "include": {
           "name": "Include detail (Optional)",

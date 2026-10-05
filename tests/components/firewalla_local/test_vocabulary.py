@@ -30,6 +30,10 @@ PACKAGE_ROOT = (
 )
 CONST_PATH: Final = PACKAGE_ROOT / "const.py"
 SERVICES_PATH: Final = PACKAGE_ROOT / "services.py"
+# The read tools declare their own copies of several service schemas, so a vocabulary
+# can drift there while the service side stays correct. Scanning both is what makes
+# the check about the published surface rather than about one file.
+TOOLS_READ_PATH: Final = PACKAGE_ROOT / "llm_tools_read.py"
 
 # A target object is a payload dict carrying both a `kind` and an `id` key, which is
 # the shape `_serialize_report_target` publishes and the control tools mirror. The
@@ -629,3 +633,64 @@ def test_the_canonical_set_matches_the_documented_one() -> None:
     # rule reads as "never say device" rather than "say device in prose".
     assert "Register boundary" in architecture
     assert "human" in architecture.lower()
+
+
+def _detail_enum_by_schema() -> dict[str, list[str] | None]:
+    """Return each `detail` field's values, keyed by where it is declared.
+
+    Read from the service schemas and the tool schemas both, because the tools
+    redeclare several of these and a vocabulary can drift in one and not the other.
+
+    The key carries the line number because it has to be unique. Every tool declares
+    its schema as a class attribute literally named `parameters`, so keying on the
+    schema name alone made the last tool in the file overwrite every earlier one --
+    and the result was a guard that passed while an earlier tool still held the old
+    vocabulary. Found by injecting that drift and watching the check pass.
+    """
+    constants = _string_constants()
+    sequences = _sequence_constants(constants)
+    found: dict[str, list[str] | None] = {}
+    for path in (SERVICES_PATH, TOOLS_READ_PATH):
+        tree = _module_tree(path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values, strict=True):
+                if _declared_field_name(key) != "SERVICE_FIELD_DETAIL":  # type: ignore[arg-type]
+                    continue
+                schema = _enclosing_schema_name(tree, node)
+                found[f"{path.name}:{schema}:{node.lineno}"] = _enum_strings(
+                    value, constants, sequences
+                )
+    return found
+
+
+def test_detail_uses_one_vocabulary() -> None:
+    """Test every `detail` field offers the same two levels.
+
+    `detail` had five treatments: `summary|records`, a bare boolean, two
+    `summary|full`, and `summary|standard`. A boolean whose *name* is a level, and two
+    different words for "everything", are how a caller learns one service's vocabulary
+    and finds it wrong on the next -- and it was the boolean that was worst, because
+    `detail=False` says nothing about what the other level adds.
+
+    What differs between services stays in the description: for some services "full" is
+    extra fields, for others an extra request, and for the flow report it is the raw
+    record log. None of that justifies a second set of value names.
+    """
+    levels = _sequence_constants(_string_constants()).get("DETAIL_LEVELS")
+
+    assert levels == ["summary", "full"], (
+        "the shared detail vocabulary is no longer `summary|full`; every service's "
+        f"`detail` field is checked against it, so this is the definition to change: "
+        f"{levels}"
+    )
+
+    enums = _detail_enum_by_schema()
+    assert enums, "no `detail` field was found; the scan is looking in the wrong place"
+
+    offenders = {schema: values for schema, values in enums.items() if values != levels}
+    assert offenders == {}, (
+        "these `detail` fields do not use the shared vocabulary, so a caller who "
+        f"learns one service is wrong on the next: {offenders}"
+    )

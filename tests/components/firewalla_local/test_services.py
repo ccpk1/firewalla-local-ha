@@ -5676,7 +5676,7 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
         "network_kind": None,
     }
     assert response["query"] == {
-        "detail": "standard",
+        "detail": "full",
         "sections": [],
         "include": [],
         "time_zone": "America/New_York",
@@ -5709,7 +5709,7 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
         "period_count": 2,
     }
     assert response["metadata"]["applied"] == {
-        "detail": "standard",
+        "detail": "full",
         "sections": ["internet", "app_totals", "apps", "categories"],
         "include": [],
         "request_scope_type": "host",
@@ -5819,11 +5819,11 @@ async def test_get_time_usage_report_service_detail_intervals_keeps_intervals(
         )
 
     assert response is not None
-    assert response["query"]["detail"] == "standard"
+    assert response["query"]["detail"] == "full"
     assert response["query"]["sections"] == []
     assert response["query"]["include"] == ["intervals"]
     assert response["metadata"]["applied"] == {
-        "detail": "standard",
+        "detail": "full",
         "sections": ["internet", "app_totals", "apps", "categories"],
         "include": ["intervals"],
         "request_scope_type": "host",
@@ -9045,7 +9045,7 @@ async def test_flow_report_records_detail_reads_both_record_families(
     walk from an instant rather than the windowed aggregate the rollup is.
     """
     response, client, _entry = await _flow_report_response(
-        hass, extra={SERVICE_FIELD_DETAIL: "records"}
+        hass, extra={SERVICE_FIELD_DETAIL: "full"}
     )
 
     assert client["block_log"].await_count == 1
@@ -9080,7 +9080,7 @@ async def test_flow_report_withholds_host_detail_by_default_on_a_group(
     false statement about the box.
     """
     response, _client, _entry = await _flow_report_response(
-        hass, extra={SERVICE_FIELD_DETAIL: "records"}
+        hass, extra={SERVICE_FIELD_DETAIL: "full"}
     )
 
     assert response is not None
@@ -9103,7 +9103,7 @@ async def test_flow_report_returns_host_detail_when_it_is_asked_for(
     response, _client, _entry = await _flow_report_response(
         hass,
         extra={
-            SERVICE_FIELD_DETAIL: "records",
+            SERVICE_FIELD_DETAIL: "full",
             SERVICE_FIELD_INCLUDE: ["host_detail"],
         },
     )
@@ -9133,7 +9133,7 @@ async def test_flow_report_needs_no_flag_to_name_the_device_it_was_asked_about(
         scope={
             SERVICE_FIELD_HOST_NAME: "Kaden Phone",
         },
-        extra={SERVICE_FIELD_DETAIL: "records"},
+        extra={SERVICE_FIELD_DETAIL: "full"},
     )
 
     assert response is not None
@@ -9206,7 +9206,7 @@ async def test_flow_report_stops_a_record_walk_that_cannot_advance(
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_GROUP_NAME: "Quarantine",
-                SERVICE_FIELD_DETAIL: "records",
+                SERVICE_FIELD_DETAIL: "full",
                 SERVICE_FIELD_RECORD_COUNT: 500,
                 SERVICE_FIELD_FETCH_ALL_RECORDS: True,
                 SERVICE_FIELD_REFRESH: False,

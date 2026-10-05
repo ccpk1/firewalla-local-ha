@@ -346,8 +346,15 @@ FLOW_DIRECTION_LOCAL: Final = "local"
 # The flow report's two depth levels. A summary is one rollup request and carries
 # no records; records adds the flow log and the block log, which are separate
 # reads and are only made when asked for.
-FLOW_REPORT_DETAIL_SUMMARY: Final = "summary"
-FLOW_REPORT_DETAIL_RECORDS: Final = "records"
+# The one `detail` vocabulary. A service returns either its summary or everything it
+# can, and that is the same question everywhere it is asked -- so one pair of values,
+# not the boolean, `standard` and `records` this replaces. What differs between
+# services is what "everything" costs: for some it is extra fields, for others an extra
+# request, and for the flow report it is the raw record log. That belongs in the field's
+# description, not in a second set of value names.
+DETAIL_SUMMARY: Final = "summary"
+DETAIL_FULL: Final = "full"
+DETAIL_LEVELS: Final = (DETAIL_SUMMARY, DETAIL_FULL)
 
 # The one include that widens a report: it adds the host identifiers the caller did
 # not itself name (member ranking, a destination's host ids, a record's host id and

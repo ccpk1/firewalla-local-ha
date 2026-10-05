@@ -22,9 +22,10 @@ from .const import (
     DEFAULT_FLOW_REPORT_RECORD_COUNT,
     DEFAULT_FLOW_REPORT_WINDOW_HOURS,
     DEFAULT_NETWORK_USAGE_WINDOW,
+    DETAIL_FULL,
+    DETAIL_LEVELS,
+    DETAIL_SUMMARY,
     DOMAIN,
-    FLOW_REPORT_DETAIL_RECORDS,
-    FLOW_REPORT_DETAIL_SUMMARY,
     FLOW_REPORT_INCLUDE_HOST_DETAIL,
     MAX_FLOW_LOG_PAGE_SIZE,
     MIN_FLOW_LOG_PAGE_SIZE,
@@ -226,14 +227,14 @@ class ListHostsTool(_FirewallaReadTool):
         {
             vol.Optional(
                 SERVICE_FIELD_DETAIL,
-                default="summary",
+                default=DETAIL_SUMMARY,
                 description=(
                     "Optional. 'summary' omits the derivable `dns_fqdn`, the "
                     "unreliable `dhcp_name`, and the nested `ip_assignment` "
                     "(its useful parts are flattened to `ip_assignment_mode` "
                     "and `reserved_ipv4`). Use 'full' for the complete record."
                 ),
-            ): vol.In(("summary", "full")),
+            ): vol.In(DETAIL_LEVELS),
             vol.Optional(
                 SERVICE_FIELD_HOST_NAME,
                 description=(
@@ -672,8 +673,12 @@ class GetUserUsageTool(_FirewallaReadTool):
             ): vol.All(cv.ensure_list, [vol.In(("intervals",))]),
             vol.Optional(
                 SERVICE_FIELD_DETAIL,
-                description="Optional. Level of detail. Defaults to 'standard'.",
-            ): vol.In(("summary", "standard")),
+                default=DETAIL_FULL,
+                description=(
+                    "Optional. 'full' (default) is the normal report depth; "
+                    "'summary' returns the smallest default section set."
+                ),
+            ): vol.In(DETAIL_LEVELS),
             vol.Optional(
                 SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
                 description="Optional. Limit app usage to these app ids.",
@@ -703,7 +708,7 @@ class GetFlowReportTool(_FirewallaReadTool):
         "one, and do not present this as history.\n"
         "\n"
         "Two levels. `detail: summary` (the default) is one request and answers "
-        "*how much* and *to where*. `detail: records` adds the individual blocked "
+        "*how much* and *to where*. `detail: full` adds the individual blocked "
         "and regular flow records, and it is the level to use when diagnosing — a "
         "record names the rule that blocked it, so 'which rule stopped this' is "
         "only answerable there. Records are large (one page is hundreds of rows), "
@@ -768,18 +773,18 @@ class GetFlowReportTool(_FirewallaReadTool):
             ): vol.All(vol.Coerce(int), vol.Range(min=1)),
             vol.Optional(
                 SERVICE_FIELD_DETAIL,
-                default=FLOW_REPORT_DETAIL_SUMMARY,
+                default=DETAIL_SUMMARY,
                 description=(
                     "Optional. 'summary' (default) is totals and rankings. "
-                    "'records' adds the individual flow records, which carry the "
+                    "'full' adds the individual flow records, which carry the "
                     "blocking rule — use it to diagnose why traffic was stopped."
                 ),
-            ): vol.In((FLOW_REPORT_DETAIL_SUMMARY, FLOW_REPORT_DETAIL_RECORDS)),
+            ): vol.In(DETAIL_LEVELS),
             vol.Optional(
                 SERVICE_FIELD_RECORD_COUNT,
                 default=DEFAULT_FLOW_REPORT_RECORD_COUNT,
                 description=(
-                    "Optional. How many records 'records' detail returns. Defaults "
+                    "Optional. How many records 'full' detail returns. Defaults "
                     f"to {DEFAULT_FLOW_REPORT_RECORD_COUNT}. Records are large, so "
                     "ask for a small page first and only widen if the answer is "
                     "not there."
@@ -1010,11 +1015,12 @@ class GetAlarmsTool(_FirewallaReadTool):
             ): str,
             vol.Optional(
                 SERVICE_FIELD_DETAIL,
+                default=DETAIL_SUMMARY,
                 description=(
-                    "Optional. Fetch extended detail with one extra request per "
-                    "returned alarm. Defaults to false."
+                    "Optional. 'full' fetches extended detail with one extra "
+                    "request per returned alarm. Defaults to 'summary'."
                 ),
-            ): bool,
+            ): vol.In(DETAIL_LEVELS),
             vol.Optional(
                 SERVICE_FIELD_INCLUDE_EXCEPTIONS,
                 description=(

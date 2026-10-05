@@ -452,7 +452,7 @@ async def test_flow_report_tool_can_reach_the_records_it_needs_to_diagnose(
     A record names the rule that blocked it; the rollup's blocked families carry no
     rule reference at all -- verified by dumping every key of a live rollup, where
     the only `policy` key is the target's own policy block. So "which rule stopped
-    this" is answerable *only* at records detail, and a tool that could ask for the
+    this" is answerable *only* at full detail, and a tool that could ask for the
     summary alone could not diagnose anything. The description has to say so, or
     the model will not know the level exists.
     """
@@ -470,16 +470,16 @@ async def test_flow_report_tool_can_reach_the_records_it_needs_to_diagnose(
     validated = tool.parameters(
         {
             "group_name": "KIDS",
-            "detail": "records",
+            "detail": "full",
             "record_count": 50,
         }
     )
-    assert validated["detail"] == "records"
+    assert validated["detail"] == "full"
     assert validated["record_count"] == 50
     # Summary stays the default, so an ordinary question does not pay for records.
     assert tool.parameters({"group_name": "KIDS"})["detail"] == "summary"
 
-    # The description is the model's only cue that records carry the rule.
+    # The description is the model's only cue that full detail carries the rule.
     description = tool.description.lower()
     assert "rule" in description
     assert "diagnos" in description
