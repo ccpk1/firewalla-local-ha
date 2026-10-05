@@ -859,3 +859,56 @@ selector."* Rules violated it: `get_rules` reports `tag_refs` (`tag:17`) and
 `applies_to_kind` (`group`/`user`/`network`), while `create_rule` could write only a
 host MAC and silently discarded everything else. You could read what a rule applies
 to and not create a rule that applies to it.
+---
+
+## 12. Capture request — the rule scope write forms
+
+**What is implemented, and how strong the evidence is.** Two write forms are built
+to match the *read* side rather than a captured *write*:
+
+| Scope | Written as | Evidence |
+| --- | --- | --- |
+| host | `scope: [<mac>]` | `FirewallaRuleTemplate.scope` is a tuple of MACs and the payload builder already sent it. Strong. |
+| group | `tag: ["tag:<group_id>"]` | Group rules are documented in the reverse-engineering note and `get_rules` reports the same shape back. Strong. |
+| **user** | `tag: ["tag:<affiliated_tag_id>"]` | **Read side only.** The client's reader reconciles a `tag:` reference to a *user* when the id is an affiliated tag. No create capture. |
+| **network** | `tag: ["intf:<network_uuid>"]` | **Read side only.** `_resolve_tag_reference_name` handles an `intf:` prefix; no create capture. |
+| all hosts | both lists empty | `block_alarm_target` already relies on this, and it is exercised in tests. Strong. |
+
+The repo's own note lists this as an open question: *"whether all internet-block
+rules share the same `target: TAG` and `type: mac` contract across other scopes such
+as users, networks, and other groups."*
+
+**Why it matters that this is captured rather than assumed.** A user id is
+*accepted and answered* by the flow queries while returning nothing (measured: 0 rows
+for all 10 users, 398-578 for the affiliated tag). So an incorrect reference here
+would not error — it would create a rule that appears to exist and silently does not
+apply. `create_rule`'s previous network path is the same shape of failure.
+
+**What to capture, precisely.** On the Firewalla app, create three internet-block
+rules and capture the `policy:create` / `set item:policy` request for each:
+
+1. **one user** — pick a user with a known `uid` and `affiliatedTag` (the dev box has
+   `KADENS_DEVICES`, uid `…`, affiliated tag `…`), and note both ids
+2. **one network** — pick VLAN10 CORE and note its `uuid`
+3. **one group** — as a control, since that form is already trusted
+
+What the capture confirms, in order of importance:
+
+- whether a **user** rule sends `tag: ["tag:<affiliated_tag>"]` (our implementation)
+  or something else — `utag:`, a bare id, or a separate key
+- whether a **network** rule sends `tag: ["intf:<uuid>"]`, and whether that uuid is
+  the `networkProfiles` uuid or a different interface id
+- whether `scope` stays empty on all three, or whether a tag rule also populates it
+
+**Until then**, the tests pin the exact payload strings, so a capture that disagrees
+corrects one resolver and one set of expectations rather than requiring the design to
+be re-derived. The forms are not claimed as verified anywhere in the code or docs.
+
+### 12a. A second, smaller capture — the alarm mute network scope
+
+`_get_scope_payload` sends `p.intf.id` for a network scope. The reverse-engineering
+note documents it as a network ID and a captured flow record carries an `intf` UUID of
+the same shape, so this is better than a guess — but no mute capture with a network
+scope exists. Capturing one mute with `scope_kind: network` (before the rename) or
+`network_uuid` (after) would close it. Lower priority than 12, because that path
+already existed and is not newly written.

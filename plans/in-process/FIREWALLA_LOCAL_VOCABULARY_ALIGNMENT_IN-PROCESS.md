@@ -348,64 +348,37 @@ set, which Phase 1 fixed.
 
 ### Phase 3 — Inputs: one selector vocabulary
 
-**IN PROGRESS — 3.1, 3.3, 3.4 and most of 3.5 are done** (`1ba58eb`, and the rule
-unification after it). 739 tests pass. Remaining: 3.2, and the rest of 3.5/3.6.
+**COMPLETE.** 755 tests pass. `ruff check`, `ruff format`, and `mypy` clean. The
+guard's enum work list is **empty**; the 12 remaining entries are entity attribute
+keys, which are Phase 4's.
 
 Purpose: every service that takes a scope takes it the same way, the two name
 collisions are gone, and one shared helper replaces the per-service conflict rules.
 
-- [x] **3.1 Define the canonical selector set and the conflict rule.** Done, in
-      `utils/selectors.py` rather than a new module — it is the selector module, and
-      the alternative was a second one holding half the vocabulary.
-      `SCOPE_SELECTOR_FIELDS` states which field belongs to which scope and
-      `select_scope` enforces exactly one. It returns the outcome and leaves the error
-      mapping to the service layer, the division `match_selector` already used.
-      `TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT` and `_REQUIRED` are the one message
-      each. They replace the report services' own keys; `host_selector_conflict` and
-      the membership/network ones can adopt the same helper later, which is recorded
-      rather than done, because changing eleven services' error keys is a separate
-      risk from changing two.
-- [ ] **3.2 Resolve the colliding and near-duplicate field names.**
-- [x] **3.3 Migrate the report services to typed pairs.** Done. Both take
-      `host_mac`/`host_name`, `group_id`/`group_name`, `user_id`/`user_name`. An
-      identifier field matches identifiers only and a label field matches labels only,
-      which is the defect the free-text field had — **asserted**, not assumed: a
-      `group_name` holding another group's id now resolves to nothing rather than to
-      that group. The affiliated tag is accepted through `user_id`, because it is an
-      identifier the response hands out and `ARCHITECTURE.md` requires a reported id
-      to be acceptable back as a selector.
-- [x] **3.4 Unify the rule selector.** Done, on **one field, `rule_id`** rather than a
-      pair. Checking first showed there was no pair to make: `rule_target` already
-      held a rule id — its own `services.yaml` description said "the Rule ID shown on a
-      Firewalla rule switch" — and the resolver's other accepted form,
-      `get_selected_rule_view`, takes a *source rule id* too. So the two names were one
-      value under a name that also meant "the thing a rule blocks", which is what
-      `target_type`/`target_value` describe. Renamed to `rule_id` on all three
-      services; both paths accept exactly what they accepted before, because the
-      resolution is untouched.
-      **Also collapsed two not-found keys into one.** `rule_not_found` (delete) and
-      `rule_target_not_found` (pause/resume) were the same failure, and the second
-      named the value while the first did not. One key now names it:
-      `No live Firewalla rule matched "{rule_id}".`
-- [ ] **3.5 Update `services.yaml`, translations and tool parameters.** Reports and
-      the rule services done: the services, their translation entries, the LLM tool
-      schemas, the MCP reference, and the tests. The duplicate `scope_kind` constant
-      the audit found was deleted outright rather than documented, and the rule
-      selector's duplicate not-found key likewise.
-- [ ] **3.6 Shrink the allowlist and validate.**
+**What the phase delivered beyond the plan:**
 
-**Three findings the migration produced, all fixed rather than carried:**
+| Change | Why it was needed |
+| --- | --- |
+| Rule scope: host, group, user, network, or every host | `create_rule` could not express three of the four, and a network scope **silently became a box-wide rule** |
+| `all_hosts` flag | The wide case was reachable by omission, both on the wire and through a dropped selector |
+| One `_resolve_scope_identity` | A user is written as its **affiliated tag** under the group prefix; a second copy of that rule is how the services would drift |
+| `get_rules` validated | A typo returned an empty list that looked like "no such rules" |
+| `applies_to_kind` publishes `host` | A vendor word was reaching a live entity attribute as a machine value |
+| One `detail` vocabulary | Five treatments, one of them a boolean named `detail` |
+| Two guards | The scope rules and the detail vocabulary now fail the build when broken |
 
-1. `_serialize_usage_history_target` was **dead code** — defined, never called.
-   Deleted. It was a response serializer, so had it been wired up later it would have
-   published the old shape.
-2. `SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND` and `SERVICE_FIELD_SCOPE_KIND` both
-   published `"scope_kind"`, which Phase 1 recorded as a finding. The migration left
-   the first unused, so the duplication is gone rather than documented.
-3. Once the selection kind *is* the machine vocabulary, `TARGET_KIND_BY_REPORT_SCOPE`
-   became an identity map. Deleted instead of kept for appearance, which is why the
-   target models' `scope_kind` is now `kind` — a relay of a declared field rather than
-   a translation of one.
+**Commits, in order:** `eb247f8` (silence fields), `83b3aa2` (scope), `0e3aff3`
+(detail), `5920c7f` (docs).
+
+**One item carried forward as an unresolved protocol question, with a capture
+request — see inventory §12.** The rule write forms are implemented to match the
+read side, which is the strongest available evidence and the only form that makes
+the round-trip work, but they are not capture-verified.
+
+**Superseded plan text.** 3.2 described "the `target_type` treatment that loses" and
+a "`mode` near-duplicate". Measurement corrected both: `target_type` was one
+vocabulary with a validation gap rather than three treatments, and `mode` was three
+unrelated uses. The decisions actually taken are recorded in inventory §9-§12.
 
 ### Phase 4 — Entities, residual findings, and the absolute guard
 
