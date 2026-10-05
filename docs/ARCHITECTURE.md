@@ -82,6 +82,42 @@ Critical rule:
 - never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
 - never use `device` for Firewalla endpoint inventory, naming fields, or selector behavior unless the code is explicitly referring to a Home Assistant device registry concept
 
+### Register boundary
+
+The vocabulary has two registers, and the same concept is named differently in each.
+This is deliberate, not drift. It must be stated because it was violated three times
+before it was written down.
+
+| Register | Reader | Word |
+| --- | --- | --- |
+| **Machine** | automations, models, code | **`host`** |
+| **Human** | people | `device` |
+
+Machine surfaces are **always `host`**:
+
+- service field names and their enum values
+- `target.kind` and every other published discriminator
+- `include` / `exclude` values
+- entity attribute keys
+- LLM tool parameter names and their enum values
+
+Human surfaces are **`device`** where it reads better:
+
+- service `name:` and `description:` values
+- LLM tool descriptions and the shared prompt
+- documentation prose
+
+The test that classifies a new field: **a value inside an enum, or a key inside a
+payload, is machine. A sentence explaining it is human.** A field named as a key is
+machine even when the reader is a person, because it is also the name an automation
+writes.
+
+Measured support for `host` being the machine word: all 15 device selector fields in
+the service surface are `host_*`, every device-facing service name uses `host`
+(`get_hosts`, `wake_host`, `set_host_membership`), and no service is named
+`*device*`. The machine register already is `host`; a new field that departs from it
+is the deviation, and must say what forced it.
+
 Identity presentation rule:
 
 - when Firewalla exposes both an app-visible user identity and a backing group or tag used only to model assignment, Home Assistant-facing surfaces must prefer the user-facing identity
@@ -137,13 +173,14 @@ This rule keeps registry identity independent from mutable connection details.
 ### Scoped identity
 
 A scope is a device, a group, or a user. Each has exactly one caller-facing
-identity, and every surface must use it.
+identity, and every surface must use it. The published `kind` is a machine value, so
+per the register boundary it is `host` for a device.
 
-| Scope | Published identity |
-| --- | --- |
-| device | the MAC |
-| group | the group id |
-| user | **the user id** |
+| Scope | Published `kind` | Published identity |
+| --- | --- | --- |
+| device | `host` | the MAC |
+| group | `group` | the group id |
+| user | `user` | **the user id** |
 
 Rules:
 
@@ -155,9 +192,10 @@ Rules:
   device MAC, the group id, or the user id. A protocol target that differs from the
   identity is reported **separately and explicitly** as a resolution, never as the
   target.
-- **`target.kind` uses the caller's vocabulary** — `device`, `group`, `user`. The
-  protocol's own words (`host`, `tag`) must not appear as a target kind; they are
-  an internal detail a caller should never need to know.
+- **`target.kind` uses the machine register** — `host`, `group`, `user`, `network`.
+  The protocol's own word (`tag`) must not appear as a target kind, and neither must
+  the human word `device`; one is an internal detail, the other is prose. This is the
+  register boundary applied to `kind`.
 - **Anything a service reports as an id, it must also accept as a selector.** A
   report that hands out an id its own resolver rejects is a defect, not a
   limitation. Where a protocol target is remapped (a user), the resolver accepts the
@@ -167,12 +205,18 @@ Rules:
   backing object plus metadata (a user's affiliated tag, a host's watched state),
   the association is surfaced as an attribute describing a relationship, never
   promoted to the identity.
+- **A network reports `kind: network` and carries its own type separately.** The
+  box's `lan` / `vlan` / `vpn` / `wan` distinction is real information, so
+  collapsing it into the kind loses it; it belongs on a `network_kind` field.
 
-These rules exist because they were broken once: a new service published a user by
-its affiliated tag and used the protocol vocabulary for its target kind, which made
-it the only surface in the integration to disagree with the watched-user entities
-and `get_time_usage_report` about how a user is named. Consistency here is a
-correctness property, not a style preference.
+These rules exist because they were broken twice, in opposite directions. A service
+published a user by its affiliated tag and used the protocol vocabulary for its
+target kind, making it the only surface to disagree with the watched-user entities
+and `get_time_usage_report` about how a user is named. The correction then set the
+kind to `device` — fixing the protocol leak and introducing a lexicon violation,
+because the register boundary was not consulted. Both are recorded here so the next
+change has a rule rather than a precedent. Consistency here is a correctness
+property, not a style preference.
 
 ## Layered architecture
 

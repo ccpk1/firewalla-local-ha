@@ -51,6 +51,17 @@ Normalized host identity rule:
 - do not collapse `host_name`, `dns_hostname`, `dns_domain`, `dns_fqdn`, and `dhcp_name` into one convenience field
 - do not add compatibility aliases such as duplicate `display_name` or `fallback_name` fields once a normalized host contract exists
 
+Register boundary rule:
+
+- the vocabulary has two registers and the same concept is named differently in each: **machine** surfaces use `host`, **human** surfaces use `device`
+- machine surfaces are service field names and enum values, `target.kind` and other published discriminators, `include`/`exclude` values, entity attribute keys, and LLM tool parameter names and enum values
+- human surfaces are service `name:`/`description:` values, LLM tool descriptions and the shared prompt, and documentation prose
+- the test is positional, not reader-based: **a value inside an enum, or a key inside a payload, is machine; a sentence explaining it is human**. A key is machine even when a person reads it, because it is also the name an automation writes
+- `host` is the established machine word: every device selector field in the service surface is `host_*`, every device-facing service name uses `host`, and no service is named `*device*`
+- `target.kind` is a machine value, so it is `host` / `group` / `user`; never the protocol's `tag` and never the human word `device`
+- a network reports `kind: network` and carries the box's `lan`/`vlan`/`vpn`/`wan` distinction on a separate `network_kind` field rather than in the kind, because collapsing it would lose real information
+- **a published value must be accepted back as a selector.** A service that reports an id its own resolver rejects is a defect, not a limitation
+
 User-facing identity rule:
 
 - when local payloads expose both a user-facing identity and an affiliated backing group or tag, prefer the user-facing identity for Home Assistant names and attributes
@@ -384,6 +395,9 @@ Review changes against these questions:
 - does the change keep entity identity stable?
 - does the change reuse the shared registry pipeline instead of introducing another ad hoc lookup path?
 - does the change introduce orphan-prone lifecycle behavior without an explicit reconciliation policy?
+- **does every new user-visible field, enum value, attribute key or tool parameter state which register it is in, and does a deviation from the established word name what forced it?**
+- **can a value this change publishes be passed back in as a selector?**
+- **is every value this change requests or accepts actually consumed, or is some of it accepted and then discarded?**
 
 ## Boundary enforcement
 
@@ -391,6 +405,7 @@ Review changes against these questions:
 - boundary checks should reject Home Assistant imports in `utils/`
 - boundary checks should reject duplicated business logic or write paths in services, flows, and platform files
 - boundary checks should reject unowned specialized root modules when the code clearly belongs under `managers/`, `helpers/`, or `utils/`
+- boundary checks should reject published values outside the register boundary, because a rule that is only prose is not enforced — the register rule was documented and violated three times before a test was added for it
 
 ## Validation workflow
 

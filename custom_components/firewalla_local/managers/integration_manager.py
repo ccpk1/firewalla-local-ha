@@ -528,9 +528,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         probe fires roughly every three minutes and would drown both, so it is
         opt-in via ``include_dns`` and the window is the primary selector.
         """
-        filters = list(_WAN_EVENT_LINK_STATE_FILTERS) + list(
-            _WAN_EVENT_QUALITY_FILTERS
-        )
+        filters = list(_WAN_EVENT_LINK_STATE_FILTERS) + list(_WAN_EVENT_QUALITY_FILTERS)
         if include_dns:
             filters.append(dict(_WAN_EVENT_DNS_FILTER))
 
@@ -2009,9 +2007,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             # single equality would classify every family beyond ping_RTT as a
             # loss rate, which is wrong for dns_RTT and http_RTT and would have
             # shipped the moment the filter set was widened.
-            measurement_kind = (
-                "rtt" if family.endswith("_RTT") else "lossrate"
-            )
+            measurement_kind = "rtt" if family.endswith("_RTT") else "lossrate"
             return FirewallaWanEvent(
                 family=family,
                 event_type=event_type,
