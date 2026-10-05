@@ -87,7 +87,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
-    SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
@@ -1333,7 +1332,7 @@ async def test_pause_rule_service_updates_matching_rule_optimistically(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_ID: "744",
                 SERVICE_FIELD_RULE_DURATION: "30m",
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -1420,7 +1419,7 @@ async def test_pause_rule_service_refreshes_runtime_before_target_lookup(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "999",
+                SERVICE_FIELD_RULE_ID: "999",
                 SERVICE_FIELD_RULE_DURATION: "30m",
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -1489,7 +1488,7 @@ async def test_pause_rule_service_rejects_invalid_duration(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_ID: "744",
                 SERVICE_FIELD_RULE_DURATION: "later",
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -1553,7 +1552,7 @@ async def test_pause_rule_service_supports_indefinite_pause(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_ID: "744",
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
             blocking=True,
@@ -1622,7 +1621,7 @@ async def test_pause_rule_service_supports_resume_at(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_ID: "744",
                 SERVICE_FIELD_RULE_RESUME_AT: resume_at,
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -1694,7 +1693,7 @@ async def test_pause_rule_service_rejects_duration_and_resume_at(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_ID: "744",
                 SERVICE_FIELD_RULE_DURATION: "30m",
                 SERVICE_FIELD_RULE_RESUME_AT: datetime(2099, 1, 1, 12, 0, tzinfo=UTC),
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
@@ -1788,7 +1787,7 @@ async def test_pause_rule_service_accepts_config_entry_name(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_ID: "744",
                 SERVICE_FIELD_RULE_DURATION: "30m",
                 SERVICE_FIELD_CONFIG_ENTRY_NAME: entry.title,
             },
@@ -1940,7 +1939,7 @@ async def test_pause_rule_service_routes_to_requested_config_entry_id(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "888",
+                SERVICE_FIELD_RULE_ID: "888",
                 SERVICE_FIELD_RULE_DURATION: "30m",
                 SERVICE_FIELD_CONFIG_ENTRY_ID: second_entry.entry_id,
             },
@@ -2050,7 +2049,7 @@ async def test_pause_rule_service_requires_selector_with_multiple_entries(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "888",
+                SERVICE_FIELD_RULE_ID: "888",
                 SERVICE_FIELD_RULE_DURATION: "30m",
             },
             blocking=True,
@@ -2107,13 +2106,13 @@ async def test_pause_rule_service_rejects_unknown_rule_target(
 
     with pytest.raises(
         ServiceValidationError,
-        match=r'rule target ".*" does not match a managed live rule',
+        match=r'No live Firewalla rule matched ".*"',
     ):
         await hass.services.async_call(
             DOMAIN,
             SERVICE_PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "999",
+                SERVICE_FIELD_RULE_ID: "999",
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
             blocking=True,
@@ -2176,7 +2175,7 @@ async def test_resume_rule_service_reenables_matching_rule(
             DOMAIN,
             SERVICE_RESUME_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "744",
+                SERVICE_FIELD_RULE_ID: "744",
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
             blocking=True,

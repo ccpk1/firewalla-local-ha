@@ -30,7 +30,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
-    SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TARGET_VALUE,
 )
@@ -53,8 +52,8 @@ def _assert_clean_error(exc: BaseException) -> None:
 
 # Tools whose required parameters must be validated before use.
 _TOOLS_REQUIRING_ARGS: tuple[tuple[str, dict[str, object]], ...] = (
-    ("firewalla_local__pause_rule", {SERVICE_FIELD_RULE_TARGET: "761"}),
-    ("firewalla_local__resume_rule", {SERVICE_FIELD_RULE_TARGET: "761"}),
+    ("firewalla_local__pause_rule", {SERVICE_FIELD_RULE_ID: "761"}),
+    ("firewalla_local__resume_rule", {SERVICE_FIELD_RULE_ID: "761"}),
     ("firewalla_local__set_ssid_paused", {SERVICE_FIELD_ENABLED: True}),
     ("firewalla_local__set_host_name", {SERVICE_FIELD_NEW_NAME: "x"}),
     ("firewalla_local__set_alarm_muted", {SERVICE_FIELD_TARGET_TYPE: "domain"}),
@@ -224,7 +223,7 @@ async def test_pause_rule_rejects_invalid_duration(hass: HomeAssistant) -> None:
             llm.ToolInput(
                 tool_name="firewalla_local__pause_rule",
                 tool_args={
-                    SERVICE_FIELD_RULE_TARGET: "761",
+                    SERVICE_FIELD_RULE_ID: "761",
                     SERVICE_FIELD_RULE_DURATION: "not-a-duration",
                 },
             )
@@ -367,7 +366,7 @@ async def test_unknown_argument_is_rejected(hass: HomeAssistant) -> None:
         await api_instance.async_call_tool(
             llm.ToolInput(
                 tool_name="firewalla_local__pause_rule",
-                tool_args={SERVICE_FIELD_RULE_TARGET: "761", "unexpected": 1},
+                tool_args={SERVICE_FIELD_RULE_ID: "761", "unexpected": 1},
             )
         )
 

@@ -689,7 +689,7 @@ async def test_action_result_envelope_is_json_serializable(
         result = await api_instance.async_call_tool(
             llm.ToolInput(
                 tool_name="firewalla_local__pause_rule",
-                tool_args={"rule_target": "761"},
+                tool_args={"rule_id": "761"},
             )
         )
 

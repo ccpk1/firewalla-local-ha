@@ -1367,13 +1367,13 @@ pause_rule:
   name: Pause rule
   description: Pause a managed Firewalla rule. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.
   fields:
-    rule_target:
+    rule_id:
       required: true
       example: "100"
       selector:
         text:
-      name: Rule target
-      description: Use the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
+      name: Rule ID
+      description: Use the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
     duration:
       required: false
       example: "30m"
@@ -1407,13 +1407,13 @@ resume_rule:
   name: Resume rule
   description: Resume a managed Firewalla rule immediately.
   fields:
-    rule_target:
+    rule_id:
       required: true
       example: "100"
       selector:
         text:
-      name: Rule target
-      description: Use the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
+      name: Rule ID
+      description: Use the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

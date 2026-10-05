@@ -95,7 +95,6 @@ from .const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
-    SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SECTIONS,
@@ -192,7 +191,6 @@ from .const import (
     TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT,
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
     TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
-    TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
     TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_REQUIRED,
@@ -224,7 +222,7 @@ from .const import (
     TRANS_PLACEHOLDER_NETWORK_NAME,
     TRANS_PLACEHOLDER_NETWORK_UUID,
     TRANS_PLACEHOLDER_RESERVED_IPV4,
-    TRANS_PLACEHOLDER_RULE_TARGET,
+    TRANS_PLACEHOLDER_RULE_ID,
     TRANS_PLACEHOLDER_SCOPE_KIND,
     TRANS_PLACEHOLDER_SCOPE_TARGET,
     TRANS_PLACEHOLDER_SSID_PROFILE_ID,
@@ -547,7 +545,7 @@ GET_NETWORK_SEGMENT_USAGE_SCHEMA = vol.Schema(
 
 PAUSE_RULE_SCHEMA = vol.Schema(
     {
-        vol.Required(SERVICE_FIELD_RULE_TARGET): cv.string,
+        vol.Required(SERVICE_FIELD_RULE_ID): cv.string,
         vol.Optional(SERVICE_FIELD_RULE_DURATION): cv.string,
         vol.Optional(SERVICE_FIELD_RULE_RESUME_AT): cv.datetime,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
@@ -557,7 +555,7 @@ PAUSE_RULE_SCHEMA = vol.Schema(
 
 RESUME_RULE_SCHEMA = vol.Schema(
     {
-        vol.Required(SERVICE_FIELD_RULE_TARGET): cv.string,
+        vol.Required(SERVICE_FIELD_RULE_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -4793,7 +4791,12 @@ async def _async_handle_delete_rule(call: ServiceCall) -> None:
             cast(str, call.data[SERVICE_FIELD_RULE_ID])
         ):
             raise _service_validation_error(
-                translation_key=TRANS_KEY_EXCEPTION_RULE_NOT_FOUND
+                translation_key=TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_RULE_ID: cast(
+                        str, call.data[SERVICE_FIELD_RULE_ID]
+                    )
+                },
             )
     except FirewallaApiError as err:
         _raise_runtime_service_error(
@@ -6368,14 +6371,14 @@ async def _async_handle_pause_rule(call: ServiceCall) -> None:
     )
     await _async_refresh_runtime_state(entry)
 
-    rule_target = call.data[SERVICE_FIELD_RULE_TARGET]
+    rule_id = call.data[SERVICE_FIELD_RULE_ID]
     duration = call.data.get(SERVICE_FIELD_RULE_DURATION)
     resume_at = call.data.get(SERVICE_FIELD_RULE_RESUME_AT)
 
-    if not entry.runtime_data.rule_manager.has_rule_target(rule_target):
+    if not entry.runtime_data.rule_manager.has_rule_target(rule_id):
         raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
-            translation_placeholders={TRANS_PLACEHOLDER_RULE_TARGET: rule_target},
+            translation_key=TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
+            translation_placeholders={TRANS_PLACEHOLDER_RULE_ID: rule_id},
         )
 
     if duration is not None and resume_at is not None:
@@ -6404,7 +6407,7 @@ async def _async_handle_pause_rule(call: ServiceCall) -> None:
             )
         resume_ts = int(resume_at_utc.timestamp())
 
-    await entry.runtime_data.rule_manager.async_pause_rule(rule_target, resume_ts)
+    await entry.runtime_data.rule_manager.async_pause_rule(rule_id, resume_ts)
 
 
 async def _async_handle_resume_rule(call: ServiceCall) -> None:
@@ -6416,15 +6419,15 @@ async def _async_handle_resume_rule(call: ServiceCall) -> None:
     )
     await _async_refresh_runtime_state(entry)
 
-    rule_target = call.data[SERVICE_FIELD_RULE_TARGET]
+    rule_id = call.data[SERVICE_FIELD_RULE_ID]
 
-    if not entry.runtime_data.rule_manager.has_rule_target(rule_target):
+    if not entry.runtime_data.rule_manager.has_rule_target(rule_id):
         raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND,
-            translation_placeholders={TRANS_PLACEHOLDER_RULE_TARGET: rule_target},
+            translation_key=TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
+            translation_placeholders={TRANS_PLACEHOLDER_RULE_ID: rule_id},
         )
 
-    await entry.runtime_data.rule_manager.async_resume_rule(rule_target)
+    await entry.runtime_data.rule_manager.async_resume_rule(rule_id)
 
 
 async def _async_handle_set_ssid_paused(call: ServiceCall) -> None:

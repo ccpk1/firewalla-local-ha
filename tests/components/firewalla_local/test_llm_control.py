@@ -34,7 +34,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_RULE_DURATION,
-    SERVICE_FIELD_RULE_TARGET,
+    SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SSID_PROFILE_ID,
@@ -252,7 +252,7 @@ async def test_pause_rule_applies_and_reports_undo(hass: HomeAssistant) -> None:
             api_instance,
             PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "761",
+                SERVICE_FIELD_RULE_ID: "761",
                 SERVICE_FIELD_RULE_DURATION: "30m",
             },
         )
@@ -264,7 +264,7 @@ async def test_pause_rule_applies_and_reports_undo(hass: HomeAssistant) -> None:
     assert result.data["target"] == {"kind": "rule", "id": "761"}
     assert result.data["before"] == {"enabled": True, "is_paused": False}
     assert result.data["after"] == {"enabled": False, "is_paused": True}
-    assert 'resume_rule(rule_target="761")' in result.data["undo"]
+    assert 'resume_rule(rule_id="761")' in result.data["undo"]
 
 
 async def test_run_internet_speed_test_reports_a_network_target(
@@ -304,9 +304,7 @@ async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
         new=AsyncMock(),
     ) as update_rule:
         api_instance = await _setup(hass, rule_enabled=False)
-        result = await _call(
-            api_instance, PAUSE_RULE, {SERVICE_FIELD_RULE_TARGET: "761"}
-        )
+        result = await _call(api_instance, PAUSE_RULE, {SERVICE_FIELD_RULE_ID: "761"})
 
     assert update_rule.await_count == 0
     assert result.data["status"] == "already_in_state"
@@ -323,9 +321,7 @@ async def test_resume_rule_reports_already_in_state(hass: HomeAssistant) -> None
         new=AsyncMock(),
     ) as update_rule:
         api_instance = await _setup(hass)
-        result = await _call(
-            api_instance, RESUME_RULE, {SERVICE_FIELD_RULE_TARGET: "761"}
-        )
+        result = await _call(api_instance, RESUME_RULE, {SERVICE_FIELD_RULE_ID: "761"})
 
     assert update_rule.await_count == 0
     assert result.data["status"] == "already_in_state"

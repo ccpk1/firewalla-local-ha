@@ -47,7 +47,6 @@ from .const import (
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
-    SERVICE_FIELD_RULE_TARGET,
     SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SSID_PROFILE_ID,
@@ -214,14 +213,14 @@ class PauseRuleTool(_FirewallaControlTool):
     name = format_tool_name("pause_rule")
     title = "Pause rule"
     description = (
-        "Temporarily disable one firewall rule. Resolve rule_target from "
+        "Temporarily disable one firewall rule. Resolve rule_id from "
         "list_rules. Fully reversible: undo with resume_rule. Pausing an "
         "already-paused rule is a no-op."
     )
     parameters = vol.Schema(
         {
             vol.Required(
-                SERVICE_FIELD_RULE_TARGET,
+                SERVICE_FIELD_RULE_ID,
                 description="Required. The rule id from list_rules.",
             ): str,
             vol.Optional(
@@ -251,7 +250,7 @@ class PauseRuleTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Pause one rule, reporting a no-op when it is already paused."""
         args = self._args(tool_input)
-        rule_id = args[SERVICE_FIELD_RULE_TARGET]
+        rule_id = args[SERVICE_FIELD_RULE_ID]
         target = {"kind": TARGET_KIND_RULE, "id": rule_id}
         before: dict[str, Any] | None = None
         after = {"enabled": False, "is_paused": True}
@@ -275,7 +274,7 @@ class PauseRuleTool(_FirewallaControlTool):
             target=target,
             before=before,
             after=after,
-            undo=f'firewalla_local__resume_rule(rule_target="{rule_id}")',
+            undo=f'firewalla_local__resume_rule(rule_id="{rule_id}")',
         )
 
 
@@ -291,7 +290,7 @@ class ResumeRuleTool(_FirewallaControlTool):
     parameters = vol.Schema(
         {
             vol.Required(
-                SERVICE_FIELD_RULE_TARGET,
+                SERVICE_FIELD_RULE_ID,
                 description="Required. The rule id from list_rules.",
             ): str,
         }
@@ -307,7 +306,7 @@ class ResumeRuleTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Resume one rule, reporting a no-op when it is already enabled."""
         args = self._args(tool_input)
-        rule_id = args[SERVICE_FIELD_RULE_TARGET]
+        rule_id = args[SERVICE_FIELD_RULE_ID]
         target = {"kind": TARGET_KIND_RULE, "id": rule_id}
         before: dict[str, Any] | None = None
         after = {"enabled": True, "is_paused": False}
@@ -331,7 +330,7 @@ class ResumeRuleTool(_FirewallaControlTool):
             target=target,
             before=before,
             after=after,
-            undo=f'firewalla_local__pause_rule(rule_target="{rule_id}")',
+            undo=f'firewalla_local__pause_rule(rule_id="{rule_id}")',
         )
 
 

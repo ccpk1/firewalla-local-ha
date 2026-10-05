@@ -348,51 +348,64 @@ set, which Phase 1 fixed.
 
 ### Phase 3 — Inputs: one selector vocabulary
 
+**IN PROGRESS — 3.1, 3.3, 3.4 and most of 3.5 are done** (`1ba58eb`, and the rule
+unification after it). 739 tests pass. Remaining: 3.2, and the rest of 3.5/3.6.
+
 Purpose: every service that takes a scope takes it the same way, the two name
 collisions are gone, and one shared helper replaces the per-service conflict rules.
 
-- [ ] **3.1 Define the canonical selector set and the conflict rule.** In the same
-      vocabulary module: the typed pairs, and one helper that enforces "exactly one
-      pair, never both members of a pair" and returns the resolved target. This
-      replaces the existing per-service `*_selector_conflict` translation keys with
-      one, so the error is identical everywhere and translations shrink.
-- [ ] **3.2 Resolve the colliding and near-duplicate field names.** Read the
-      `mute_alarm`, `create_rule`, `get_rules` and `archive_alarms`/`delete_alarms`
-      handlers, then:
-      - **rename the `target_type` treatment that loses** (Q5). The audit found
-        **three**: a validated `dns|ip|mac` enum on `create_rule`, an **unvalidated
-        `cv.string`** on `get_rules`, and `alarm_type|domain|ip` on `mute_alarm`.
-        Give `get_rules` real validation against the vocabulary it actually filters,
-        because today a typo returns an empty list indistinguishable from "no such
-        rules" — the same defect class as 4.2.
-      - **resolve the `mode` near-duplicate.** `archive_alarms` accepts
-        `this|all_active` and `delete_alarms` accepts `this|all_active|all_archived`
-        under the same field name, so a caller reading one and passing it to the
-        other is rejected for a value it was told was valid. Either converge the
-        sets or give the fields distinguishable names.
-      Record the chosen names and the reason in the plan. **Also decide Q8 while
-      here**: if the handler presents the rule target type as an identity rather than
-      as a matcher, that becomes a step; if not, record that it was checked and left
-      as the wire says. `get_hosts`'s `kind` (`mac_host|pseudo_host`) and `detail`'s
-      two types (boolean on `get_alarms`, enum elsewhere) are assessed here and
-      **either fixed or recorded as accepted** — not silently passed over.
-- [ ] **3.3 Migrate the report services to typed pairs.** `get_flow_report` and
-      `get_time_usage_report` lose `scope_kind`/`scope_target` and gain the pairs
-      their scope supports; the resolvers take a resolved pair instead of a kind and
-      a free string. A group and a user sharing a name must resolve correctly, which
-      is the defect the free-text field has today — assert it.
-- [ ] **3.4 Unify the rule selector.** `rule_target` (pause/resume) and `rule_id`
-      (delete) become one pair; verify both paths still accept what they accept
-      today. Update the rule-switch surfaces if they consume either name.
-- [ ] **3.5 Update `services.yaml`, translations and tool parameters.** Field names,
-      `name:` values, `description:` values and selectors; regenerate
-      `translations/en.json` with
-      `python3 -m script.translations develop --integration firewalla_local`; update
-      the LLM tool schemas and the contract test's `_INTENTIONAL_OMISSIONS`, whose
-      entries name fields that are changing.
-- [ ] **3.6 Shrink the allowlist and validate.** Remove the input-side entries, add
-      one test per migrated service proving the exactly-one rule and the conflict
-      path, and run the full chain.
+- [x] **3.1 Define the canonical selector set and the conflict rule.** Done, in
+      `utils/selectors.py` rather than a new module — it is the selector module, and
+      the alternative was a second one holding half the vocabulary.
+      `SCOPE_SELECTOR_FIELDS` states which field belongs to which scope and
+      `select_scope` enforces exactly one. It returns the outcome and leaves the error
+      mapping to the service layer, the division `match_selector` already used.
+      `TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT` and `_REQUIRED` are the one message
+      each. They replace the report services' own keys; `host_selector_conflict` and
+      the membership/network ones can adopt the same helper later, which is recorded
+      rather than done, because changing eleven services' error keys is a separate
+      risk from changing two.
+- [ ] **3.2 Resolve the colliding and near-duplicate field names.**
+- [x] **3.3 Migrate the report services to typed pairs.** Done. Both take
+      `host_mac`/`host_name`, `group_id`/`group_name`, `user_id`/`user_name`. An
+      identifier field matches identifiers only and a label field matches labels only,
+      which is the defect the free-text field had — **asserted**, not assumed: a
+      `group_name` holding another group's id now resolves to nothing rather than to
+      that group. The affiliated tag is accepted through `user_id`, because it is an
+      identifier the response hands out and `ARCHITECTURE.md` requires a reported id
+      to be acceptable back as a selector.
+- [x] **3.4 Unify the rule selector.** Done, on **one field, `rule_id`** rather than a
+      pair. Checking first showed there was no pair to make: `rule_target` already
+      held a rule id — its own `services.yaml` description said "the Rule ID shown on a
+      Firewalla rule switch" — and the resolver's other accepted form,
+      `get_selected_rule_view`, takes a *source rule id* too. So the two names were one
+      value under a name that also meant "the thing a rule blocks", which is what
+      `target_type`/`target_value` describe. Renamed to `rule_id` on all three
+      services; both paths accept exactly what they accepted before, because the
+      resolution is untouched.
+      **Also collapsed two not-found keys into one.** `rule_not_found` (delete) and
+      `rule_target_not_found` (pause/resume) were the same failure, and the second
+      named the value while the first did not. One key now names it:
+      `No live Firewalla rule matched "{rule_id}".`
+- [ ] **3.5 Update `services.yaml`, translations and tool parameters.** Reports and
+      the rule services done: the services, their translation entries, the LLM tool
+      schemas, the MCP reference, and the tests. The duplicate `scope_kind` constant
+      the audit found was deleted outright rather than documented, and the rule
+      selector's duplicate not-found key likewise.
+- [ ] **3.6 Shrink the allowlist and validate.**
+
+**Three findings the migration produced, all fixed rather than carried:**
+
+1. `_serialize_usage_history_target` was **dead code** — defined, never called.
+   Deleted. It was a response serializer, so had it been wired up later it would have
+   published the old shape.
+2. `SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND` and `SERVICE_FIELD_SCOPE_KIND` both
+   published `"scope_kind"`, which Phase 1 recorded as a finding. The migration left
+   the first unused, so the duplication is gone rather than documented.
+3. Once the selection kind *is* the machine vocabulary, `TARGET_KIND_BY_REPORT_SCOPE`
+   became an identity map. Deleted instead of kept for appearance, which is why the
+   target models' `scope_kind` is now `kind` — a relay of a declared field rather than
+   a translation of one.
 
 ### Phase 4 — Entities, residual findings, and the absolute guard
 

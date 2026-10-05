@@ -123,7 +123,7 @@ nothing, so the tool reports the outcome):
   "target": { "id": "0C:85:E1:B0:1D:1C", "name": "Kids-iPad" },
   "before": { "enabled": true },
   "after": { "enabled": false },
-  "undo": "firewalla_local__resume_rule(rule_target=\"761\")",
+  "undo": "firewalla_local__resume_rule(rule_id=\"761\")",
   "warnings": []
 }
 ```
@@ -369,7 +369,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Answers:** "What firewall rules exist?" / "Which rule controls this person or
   device?" / "Is this rule paused?" — the discovery feed for `pause_rule` /
   `resume_rule` / `block_alarm_target` target resolution and scope composition.
-- **When to use / not:** use to resolve a `rule_target` before any rule action and to
+- **When to use / not:** use to resolve a `rule_id` before any rule action and to
   resolve scope targets (person → device-group, valid app ids, network). Not for host
   traffic (`get_network_usage`).
 - **Narrow it:** filters are applied server-side. Pass `enabled`, `action`,
@@ -677,8 +677,8 @@ Broad access control. Read the blast radius carefully.
 ### `firewalla_local__pause_rule`
 
 - **Answers:** "Pause the rule blocking X." / "Temporarily disable this rule."
-- **When to use / not:** temporary, reversible rule disable. Resolve `rule_target` via `list_rules`. For a permanent change use a rule switch / `delete_rule` (not exposed here). Idempotent — pausing an already-paused rule reports `already_in_state`.
-- **Inputs:** `rule_target` (rule id), `duration` (e.g. `30m`, `4h`, `2d 4h 30m`) **or** `resume_at` (local datetime) — omit both to pause until resumed.
+- **When to use / not:** temporary, reversible rule disable. Resolve `rule_id` via `list_rules`. For a permanent change use a rule switch / `delete_rule` (not exposed here). Idempotent — pausing an already-paused rule reports `already_in_state`.
+- **Inputs:** `rule_id` (rule id), `duration` (e.g. `30m`, `4h`, `2d 4h 30m`) **or** `resume_at` (local datetime) — omit both to pause until resumed.
 - **Returns:** action-result (`before`/`after.enabled`, `undo` = `resume_rule`).
 - **Reversibility & undo:** fully reversible — `firewalla_local__resume_rule`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -687,7 +687,7 @@ Broad access control. Read the blast radius carefully.
 
 - **Answers:** "Resume the paused rule." / "Undo a pause."
 - **When to use / not:** the `undo` of `pause_rule`. Idempotent — resuming a running rule reports `already_in_state`.
-- **Inputs:** `rule_target`.
+- **Inputs:** `rule_id`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible (`pause_rule`).
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.

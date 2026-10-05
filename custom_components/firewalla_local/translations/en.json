@@ -1214,8 +1214,8 @@
     "run_internet_speed_test_failed": {
       "message": "The integration could not start the internet speed test. Check the Firewalla connection and try again."
     },
-    "rule_target_not_found": {
-      "message": "The rule target \"{rule_target}\" does not match a managed live rule."
+    "rule_not_found": {
+      "message": "No live Firewalla rule matched \"{rule_id}\". Refresh the runtime inventory and try again."
     },
     "ssid_profile_not_found": {
       "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network. Provide the profile UUID or the SSID name."
@@ -1279,9 +1279,6 @@
     },
     "delete_rule_failed": {
       "message": "The integration could not delete the rule. Check the Firewalla connection and try again."
-    },
-    "rule_not_found": {
-      "message": "No live Firewalla rule matched that rule ID. Refresh the runtime inventory and try again."
     },
     "alarm_not_found": {
       "message": "No active or archived alarm matched that alarm ID."
@@ -2307,9 +2304,9 @@
       "name": "Pause rule",
       "description": "Pause one managed Firewalla rule. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.",
       "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        "rule_id": {
+          "name": "Rule ID",
+          "description": "Enter the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
         },
         "duration": {
           "name": "Duration",
@@ -2355,9 +2352,9 @@
       "name": "Resume rule",
       "description": "Resume one managed Firewalla rule immediately.",
       "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        "rule_id": {
+          "name": "Rule ID",
+          "description": "Enter the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
