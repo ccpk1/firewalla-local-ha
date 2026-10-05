@@ -6221,6 +6221,7 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
     )
     limit = cast(int, call.data[SERVICE_FIELD_LIMIT])
     offset = cast(int, call.data[SERVICE_FIELD_OFFSET])
+    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
 
     try:
         events = await entry.runtime_data.integration_manager.async_get_wan_events(
@@ -6241,17 +6242,67 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
         _serialize_wan_event(event) for event in events
     ]
 
+    window_days = cast(int, call.data[SERVICE_FIELD_WINDOW_DAYS])
     return {
         "config_entry_id": entry.entry_id,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "query": {
             "limit": limit,
             "offset": offset,
-            "window_days": cast(int, call.data[SERVICE_FIELD_WINDOW_DAYS]),
+            "window_days": window_days,
             "include_dns": cast(bool, call.data[SERVICE_FIELD_INCLUDE_DNS]),
         },
         "count": len(serialized_events),
         "results": serialized_events,
+        # Every sibling report carries these. Without them an empty result is
+        # indistinguishable from a failed or bounded read, and this service can
+        # legitimately return nothing -- a quiet week is a real answer, not an
+        # error -- so the caller has to be able to tell the two apart.
+        "time_basis": _serialize_report_time_basis(
+            FirewallaReportTimeBasis(
+                kind="event_window",
+                label=f"WAN events in the last {window_days} days",
+                boundary_source="query_window",
+                is_partial=True,
+                time_zone=time_zone_name,
+            ),
+            time_zone=time_zone,
+        ),
+        "metadata": _serialize_report_metadata(
+            applied={
+                "limit": limit,
+                "offset": offset,
+                "window_days": window_days,
+                "include_dns": cast(bool, call.data[SERVICE_FIELD_INCLUDE_DNS]),
+            },
+            warnings=(
+                (
+                    FirewallaReportWarning(
+                        code="no_wan_events",
+                        message=(
+                            "No WAN link-state or quality events were recorded in "
+                            f"the last {window_days} days. This is a quiet period, "
+                            "not a failed read: the window was searched and the box "
+                            "returned nothing."
+                        ),
+                    ),
+                )
+                if not serialized_events
+                else ()
+            ),
+            provenance=(
+                FirewallaReportProvenance(
+                    section="events",
+                    source="direct",
+                    source_field="item=events",
+                    note=(
+                        "Link-state and quality events come from the box's event "
+                        "timeline; its DNS health probe is excluded unless "
+                        "include_dns is set"
+                    ),
+                ),
+            ),
+        ),
     }
 
 

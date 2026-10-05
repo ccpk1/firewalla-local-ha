@@ -7755,14 +7755,29 @@ async def test_get_wan_events_service_returns_normalized_timeline(
     call_kwargs = mock_get_events.await_args.kwargs
     assert call_kwargs["limit_count"] == 100
     assert call_kwargs["limit_offset"] == 10
-    # The read is filtered to real link-state events; without filters it returns
-    # a DNS-probe firehose instead of WAN events.
+    # Transcribed from the app's own decoded request. A three-entry link-state
+    # set was here before and excluded every quality event -- the latency and
+    # packet-loss faults that "why did my internet drop" mostly means -- which is
+    # why a real 2026-09-30 ping_RTT event was invisible.
     assert call_kwargs["filters"] == [
         {"event_type": "action", "sub_type": "system_reboot"},
         {"event_type": "state", "sub_type": "dualwan_state"},
+        {"event_type": "state", "sub_type": "ethernet_state"},
         {"event_type": "state", "sub_type": "wan_state"},
+        {"event_type": "state", "sub_type": "overall_wan_state"},
+        {"event_type": "state", "sub_type": "ap_ethernet_state"},
+        {"event_type": "state", "sub_type": "ap_ethernet_speed_change"},
+        {"event_type": "action", "sub_type": "wpa_connection"},
+        {"event_type": "action", "sub_type": "ping_RTT"},
+        {"event_type": "action", "sub_type": "ping_lossrate"},
+        {"event_type": "action", "sub_type": "dns_RTT"},
+        {"event_type": "action", "sub_type": "dns_lossrate"},
+        {"event_type": "action", "sub_type": "http_RTT"},
+        {"event_type": "action", "sub_type": "http_lossrate"},
     ]
-    assert "dns" not in json.dumps(call_kwargs["filters"])
+    # The box's own DNS health probe fires every ~3 minutes and stays opt-in; the
+    # quality families above are a different thing that merely share the word.
+    assert "dns" not in {entry["sub_type"] for entry in call_kwargs["filters"]}
     assert response is not None
     assert response["config_entry_id"] == entry.entry_id
     assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
@@ -7772,19 +7787,38 @@ async def test_get_wan_events_service_returns_normalized_timeline(
         "window_days": 7,
         "include_dns": False,
     }
-    assert response["count"] == 1
-    assert response["results"][0]["family"] == "dualwan_state"
-    # The fixture also carries a `ping_RTT` alert and a `dns` health probe.
-    # Neither is a WAN link event: latency alerts live in get_internet_quality
-    # and DNS probes are health checks, so both are excluded by default.
-    assert all(
-        item["family"] not in {"ping_RTT", "ping_lossrate", "dns"}
-        for item in response["results"]
+    assert response["count"] == 2
+    families = {item["family"] for item in response["results"]}
+    # Both are WAN events and both are needed. This assertion previously required
+    # `ping_RTT` to be *excluded*, on the reasoning that latency lives in
+    # get_internet_quality -- which conflated two different things. That service
+    # reports latency *samples* (the link's current state); this one reports
+    # discrete events, and a threshold breach is an event: it has a time, a
+    # measurement, and the limit it crossed. The app treats it as one, and without
+    # it "why did my internet drop" cannot be answered at all.
+    assert families == {"dualwan_state", "ping_RTT"}
+    # The DNS health probe is a different thing that merely shares the word.
+    assert "dns" not in families
+
+    threshold_event = next(
+        item for item in response["results"] if item["family"] == "ping_RTT"
     )
-    assert response["results"][0]["family"] == "dualwan_state"
-    assert response["results"][0]["wan_uuid"] == "wan-1"
-    assert response["results"][0]["changed_interface"] == "eth0"
-    assert response["results"][0]["wan_statuses"] == [
+    # A quality event is only meaningful with its measurement *and* its limit.
+    assert threshold_event["measurement_kind"] == "rtt"
+    assert threshold_event["measurement_value"] is not None
+    assert threshold_event["threshold_value"] is not None
+    assert threshold_event["target"] is not None
+
+    link_event = next(
+        item for item in response["results"] if item["family"] == "dualwan_state"
+    )
+    assert link_event["wan_uuid"] == "wan-1"
+    # Empty results explain themselves rather than reading as a failure.
+    assert response["metadata"]["warnings"] == []
+    assert response["time_basis"]["kind"] == "event_window"
+    assert response["time_basis"]["boundary_source"] == "query_window"
+    assert link_event["changed_interface"] == "eth0"
+    assert link_event["wan_statuses"] == [
         {
             "interface_key": "eth0",
             "wan_uuid": "wan-1",
@@ -7857,8 +7891,14 @@ async def test_get_wan_events_service_includes_dns_when_requested(
     filters = mock_get_events.await_args.kwargs["filters"]
     assert {"event_type": "state", "sub_type": "dns"} in filters
     assert response is not None
-    assert response["count"] == 2
+    # The fixture carries dualwan_state, ping_RTT and dns. The default read
+    # returns the first two and never the dns probe; opting in adds only the
+    # probe, which is why the count grows by exactly one.
+    assert response["count"] == 3
     assert any(item["family"] == "dns" for item in response["results"])
+    assert {"dualwan_state", "ping_RTT"} <= {
+        item["family"] for item in response["results"]
+    }
 
 
 def _wan_events_service_payload(
@@ -9188,3 +9228,65 @@ async def test_network_segment_usage_stays_silent_when_rankings_are_present(
     assert response is not None
     assert response["summary"]["top_download_count"] > 0
     assert response["metadata"]["warnings"] == []
+
+
+@pytest.mark.asyncio
+async def test_wan_events_empty_result_explains_itself(
+    hass: HomeAssistant,
+) -> None:
+    """Test no events is reported as a quiet period, not a failed read.
+
+    This service can legitimately return nothing, and it was the only report
+    without a `time_basis` or `metadata`, so an empty result was indistinguishable
+    from a bounded or failed one. A caller must be able to tell "we searched and
+    found nothing" from "we could not search".
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_wan_events_payload",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_WAN_EVENTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["count"] == 0
+    assert response["results"] == []
+    assert response["time_basis"]["kind"] == "event_window"
+    assert response["time_basis"]["time_zone"]
+    assert [w["code"] for w in response["metadata"]["warnings"]] == ["no_wan_events"]
+    assert "quiet period" in response["metadata"]["warnings"][0]["message"]
+    assert response["metadata"]["provenance"]["events"]["source_field"] == "item=events"

@@ -110,14 +110,48 @@ _SUPPORTED_WAN_EVENT_STATE_FAMILIES: Final = frozenset(
     {"wan_state", "overall_wan_state", "dualwan_state", "dns"}
 )
 _SUPPORTED_WAN_EVENT_ACTION_FAMILIES: Final = frozenset(
-    {"ping_RTT", "ping_lossrate", "system_reboot"}
+    {
+        "ping_RTT",
+        "ping_lossrate",
+        "dns_RTT",
+        "dns_lossrate",
+        "http_RTT",
+        "http_lossrate",
+        "system_reboot",
+    }
 )
 
-# The app's WAN events view reads this exact filter set. See Finding 40.
+# The app's WAN events view reads **fourteen** filters, taken from its own decoded
+# request. An earlier revision of this constant carried only the three link-state
+# entries and a comment claiming it was "this exact filter set"; it was not, and
+# the effect was that every quality event -- latency and packet-loss faults, which
+# is what "why did my internet drop" mostly means -- was excluded before the box
+# ever answered. Measured: with these filters a 30-day window returns the
+# 2026-09-30 ping_RTT event; with the three-entry set it returns nothing.
+#
+# `event_type` and `sub_type` are the **filter** names. The matching field on a
+# returned event is `state_type` for state events and `action_type` for action
+# events, which the normalizer already reads. The box ignores an unknown filter
+# silently, so a stale entry here degrades to "fewer results" rather than an
+# error -- which is why the set is now transcribed from the capture rather than
+# inferred.
+_WAN_EVENT_QUALITY_FILTERS: Final = (
+    {"event_type": "action", "sub_type": "ping_RTT"},
+    {"event_type": "action", "sub_type": "ping_lossrate"},
+    {"event_type": "action", "sub_type": "dns_RTT"},
+    {"event_type": "action", "sub_type": "dns_lossrate"},
+    {"event_type": "action", "sub_type": "http_RTT"},
+    {"event_type": "action", "sub_type": "http_lossrate"},
+)
 _WAN_EVENT_LINK_STATE_FILTERS: Final = (
     {"event_type": "action", "sub_type": "system_reboot"},
     {"event_type": "state", "sub_type": "dualwan_state"},
+    {"event_type": "state", "sub_type": "ethernet_state"},
     {"event_type": "state", "sub_type": "wan_state"},
+    {"event_type": "state", "sub_type": "overall_wan_state"},
+    {"event_type": "state", "sub_type": "ap_ethernet_state"},
+    {"event_type": "state", "sub_type": "ap_ethernet_speed_change"},
+    {"event_type": "action", "sub_type": "wpa_connection"},
 )
 _WAN_EVENT_DNS_FILTER: Final[dict[str, str]] = {
     "event_type": "state",
@@ -489,11 +523,14 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
     ) -> tuple[FirewallaWanEvent, ...]:
         """Return normalized WAN health events from the local runtime.
 
-        The read is filtered to real link-state events over a bounded window.
-        An unfiltered `item=events` read is dominated by the box's own DNS health
-        probes, so `dns` is opt-in and the window is the primary selector.
+        The read covers link-state changes **and** the quality events -- latency
+        and packet-loss faults -- over a bounded window. The box's own DNS health
+        probe fires roughly every three minutes and would drown both, so it is
+        opt-in via ``include_dns`` and the window is the primary selector.
         """
-        filters = list(_WAN_EVENT_LINK_STATE_FILTERS)
+        filters = list(_WAN_EVENT_LINK_STATE_FILTERS) + list(
+            _WAN_EVENT_QUALITY_FILTERS
+        )
         if include_dns:
             filters.append(dict(_WAN_EVENT_DNS_FILTER))
 
@@ -1968,7 +2005,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             ):
                 return None
 
-            measurement_kind = "rtt" if family == "ping_RTT" else "lossrate"
+            # Derived from the name rather than compared against one family: a
+            # single equality would classify every family beyond ping_RTT as a
+            # loss rate, which is wrong for dns_RTT and http_RTT and would have
+            # shipped the moment the filter set was widened.
+            measurement_kind = (
+                "rtt" if family.endswith("_RTT") else "lossrate"
+            )
             return FirewallaWanEvent(
                 family=family,
                 event_type=event_type,
