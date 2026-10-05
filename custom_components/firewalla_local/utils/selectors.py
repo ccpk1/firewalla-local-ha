@@ -67,13 +67,17 @@ SCOPE_IDENTIFIER_FIELDS: Final[frozenset[str]] = frozenset(
 
 
 @dataclass(slots=True, frozen=True)
-class ScopeSelection:
-    """The one scope a call selected, or why it did not select exactly one.
+class SelectorSelection:
+    """The one selector a call supplied, or why it did not supply exactly one.
 
-    ``is_selected`` is true only when exactly one selector field was supplied, which
-    is the whole contract: no scope and two scopes are both errors, and a caller that
-    supplies two fields of the *same* scope has still made an ambiguous request
-    rather than stated a preference.
+    ``is_selected`` is true only when exactly one field was supplied, which is the
+    whole contract: none and two are both errors, and a caller that supplies two
+    fields of the *same* pair has still made an ambiguous request rather than stated
+    a preference.
+
+    ``kind`` is filled in only where a vocabulary of field kinds exists — the scopes
+    do, the alarm selectors do not — so a caller that has no kinds to report sees
+    ``None`` rather than a value invented to fill the field.
     """
 
     kind: str | None = None
@@ -84,7 +88,7 @@ class ScopeSelection:
     @property
     def is_selected(self) -> bool:
         """Return whether exactly one selector field was supplied."""
-        return self.kind is not None
+        return self.field is not None
 
     @property
     def is_identified(self) -> bool:
@@ -92,11 +96,36 @@ class ScopeSelection:
         return self.field in SCOPE_IDENTIFIER_FIELDS
 
 
+def select_exclusive(
+    values: Mapping[str, object],
+    *,
+    fields: Sequence[str],
+) -> SelectorSelection:
+    """Return the one field selected out of ``fields``, if exactly one was.
+
+    The rule every selecting service shares, kept in one place so the services raise
+    one message for one mistake rather than each phrasing it differently. It is the
+    same rule the scopes use, which is why :func:`select_scope` is this function with
+    a vocabulary attached rather than a second implementation.
+    """
+    supplied: list[tuple[str, str]] = []
+    for field in fields:
+        value = normalized_string(values.get(field))
+        if value is not None:
+            supplied.append((field, value))
+
+    if len(supplied) == 1:
+        field, value = supplied[0]
+        return SelectorSelection(field=field, value=value)
+
+    return SelectorSelection(supplied=tuple(field for field, _value in supplied))
+
+
 def select_scope(
     values: Mapping[str, object],
     *,
     fields: Sequence[str] = (),
-) -> ScopeSelection:
+) -> SelectorSelection:
     """Return the scope one call selected from its typed selector fields.
 
     ``fields`` narrows the vocabulary to the selector fields this service actually
@@ -113,20 +142,24 @@ def select_scope(
             field for names in SCOPE_SELECTOR_FIELDS.values() for field in names
         )
     )
-    supplied: list[tuple[str, str, str]] = []
+    ordered = [
+        field
+        for names in SCOPE_SELECTOR_FIELDS.values()
+        for field in names
+        if field in permitted
+    ]
+    selection = select_exclusive(values, fields=ordered)
+    if not selection.is_selected:
+        return selection
+
     for kind, names in SCOPE_SELECTOR_FIELDS.items():
-        for field in names:
-            if field not in permitted:
-                continue
-            value = normalized_string(values.get(field))
-            if value is not None:
-                supplied.append((kind, field, value))
-
-    if len(supplied) == 1:
-        kind, field, value = supplied[0]
-        return ScopeSelection(kind=kind, field=field, value=value)
-
-    return ScopeSelection(supplied=tuple(field for _kind, field, _value in supplied))
+        if selection.field in names:
+            return SelectorSelection(
+                kind=kind,
+                field=selection.field,
+                value=selection.value,
+            )
+    return selection
 
 
 @dataclass(slots=True, frozen=True)

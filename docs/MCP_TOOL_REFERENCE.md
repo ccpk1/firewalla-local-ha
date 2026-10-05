@@ -729,7 +729,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Stop alerting me about this." / "Silence this alarm type / domain / IP."
 - **When to use / not:** creates a **silence** (an exception) so future matching alarms stop alerting — it does **not** block traffic and does **not** remove the alarm. For blocking traffic use `block_alarm_target`; for clearing one alarm use `archive_alarm`. Idempotent (`already_in_state`).
-- **Inputs (flat):** `alarm_id` (optional — derive target from it), `target_type` (`alarm_type` | `domain` | `ip`), `target_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`).
+- **Inputs (flat):** `alarm_id` (optional — derive target from it), `alarm_match_type` (`alarm_type` | `domain` | `ip`), `alarm_match_value`, `scope_kind` (**required** — `device`/`group`/`user`/`network`/`all`), `scope_target`, `duration` (**required**, enum `1h`|`today`|`always`).
 - **Returns:** action-result (`target`, `undo`).
 - **Reversibility & undo:** reversible — `undo` unmutes (removes the silence).
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -774,7 +774,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 
 - **Answers:** "Dismiss this alarm." / "Clear it from the active list."
 - **When to use / not:** archives **one** alarm — dismisses it but keeps the record (unlike delete, which is not exposed). It does **not** stop future matching alarms (that is `set_alarm_muted`). Normal dismiss operation; there is no un-archive if you change your mind.
-- **Inputs:** `alarm_id` (single only — bulk archive is a Full-mode tool).
+- **Inputs:** `alarm_id` — the single-alarm selector. To archive the whole active set use `archive_all_alarms`.
 - **Returns:** action-result.
 - **Reversibility & undo:** the archive itself cannot be undone, but the record is kept. No `undo`.
 - **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
@@ -790,7 +790,7 @@ taken back — enable Full only when prepared to monitor closely.
 
 - `delete_host` — permanently delete a device record (identity, reservations, history).
 - `delete_alarm` — permanently delete one alarm record.
-- `delete_all_alarms` — permanently delete every active or every archived alarm (bulk).
+- `delete_all_alarms` — permanently delete the active or the archived set, named explicitly by `alarm_status` (bulk).
 - `archive_all_alarms` — archive every active alarm at once (bulk).
 - `delete_rule` — permanently delete a firewall rule. Prefer `pause_rule` to
 disable a rule reversibly.

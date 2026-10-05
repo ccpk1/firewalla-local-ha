@@ -10,6 +10,12 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..api import FirewallaApiClient
+from ..const import (
+    ALARM_STATUS_ARCHIVED,
+    MATCH_TYPE_ALARM_TYPE,
+    MATCH_TYPE_DOMAIN,
+    MATCH_TYPE_IP,
+)
 from ..models import FirewallaAlarm, FirewallaAlarmException, FirewallaRuntimeSnapshot
 from ..utils.duration import parse_duration_to_seconds
 from .base_manager import FirewallaBaseManager
@@ -150,30 +156,35 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             severity=severity.strip() if isinstance(severity, str) else alarm.severity,
         )
 
-    async def async_archive_alarms(self, *, mode: str, alarm_id: str | None) -> None:
-        """Archive one active alarm or the complete active set."""
-        if mode == "this":
-            if alarm_id is None:
-                return
+    async def async_archive_alarms(self, *, alarm_id: str | None) -> None:
+        """Archive one alarm, or the active set when no id is given.
+
+        No set parameter: archiving is only meaningful for an active alarm, so the
+        bulk case is always the active set and a status argument would be a value the
+        caller supplies and this method ignores.
+        """
+        if alarm_id is not None:
             await self.client.async_archive_alarm(alarm_id)
             return
         await self.client.async_archive_all_alarms()
 
-    async def async_delete_alarms(self, *, mode: str, alarm_id: str | None) -> None:
-        """Permanently delete one alarm or a selected complete set."""
-        if mode == "this":
-            if alarm_id is None:
-                return
+    async def async_delete_alarms(
+        self, *, alarm_id: str | None, alarm_status: str | None
+    ) -> None:
+        """Permanently delete one alarm, or every alarm in the named set."""
+        if alarm_id is not None:
             await self.client.async_delete_alarm(alarm_id)
             return
-        await self.client.async_delete_all_alarms(archived=mode == "all_archived")
+        await self.client.async_delete_all_alarms(
+            archived=alarm_status == ALARM_STATUS_ARCHIVED
+        )
 
     async def async_mute_alarm(
         self,
         *,
         alarm_id: str | None,
-        target_type: str,
-        target_value: str | None,
+        match_type: str,
+        match_value: str | None,
         scope_kind: str,
         scope_target: str | None,
         duration: str,
@@ -185,8 +196,8 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             raise ValueError("Alarm was not found in the active or archived set")
         scope = self._get_scope_payload(scope_kind, scope_target)
 
-        if target_type == "alarm_type":
-            muted_alarm_type = target_value or (
+        if match_type == MATCH_TYPE_ALARM_TYPE:
+            muted_alarm_type = match_value or (
                 alarm.alarm_type if alarm is not None else None
             )
             if muted_alarm_type is None:
@@ -197,10 +208,15 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             await self.client.async_create_alarm_exception(value)
             return
 
-        match_type, match_target = self._get_match(target_type, target_value)
+        # The caller's match vocabulary and the wire's are different words for the
+        # same three things, so the translation is named for what it produces rather
+        # than reusing `match_*`, which the caller's values already mean here.
+        wire_key, match_target = self._get_match(match_type, match_value)
         if match_target is None and alarm is not None:
             match_target = (
-                alarm.remote_host if target_type == "domain" else alarm.remote_ip
+                alarm.remote_host
+                if match_type == MATCH_TYPE_DOMAIN
+                else alarm.remote_ip
             )
         if match_target is None:
             raise ValueError("A domain or IP target is required for this mute")
@@ -210,7 +226,7 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             and not alarm.is_archived
             and scope_kind in ("device", "all")
         ):
-            info: dict[str, object] = {"type": match_type, "target": match_target}
+            info: dict[str, object] = {"type": wire_key, "target": match_target}
             if scope_kind == "device":
                 info["device"] = scope_target or ""
             if expiry is not None:
@@ -225,10 +241,10 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             value["type"] = alarm.alarm_type
         value.update(
             {
-                "if.type": match_type,
+                "if.type": wire_key,
                 "if.target": match_target,
                 "target_name": match_target,
-                "p.dest.name" if match_type == "dns" else "p.dest.ip": match_target,
+                "p.dest.name" if wire_key == "dns" else "p.dest.ip": match_target,
             }
         )
         if expiry is not None:
@@ -262,17 +278,15 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         return None
 
     @staticmethod
-    def _get_match(
-        target_type: str, target_value: str | None
-    ) -> tuple[str, str | None]:
-        """Map service target kinds to the app's alarm match types."""
-        if target_type == "alarm_type":
-            return "alarmType", target_value
-        if target_type == "domain":
-            return "dns", target_value
-        if target_type == "ip":
-            return "ip", target_value
-        raise ValueError(f"Unsupported alarm mute target type: {target_type}")
+    def _get_match(match_type: str, match_value: str | None) -> tuple[str, str | None]:
+        """Return the wire key and target for one caller-side match selection."""
+        if match_type == MATCH_TYPE_ALARM_TYPE:
+            return "alarmType", match_value
+        if match_type == MATCH_TYPE_DOMAIN:
+            return "dns", match_value
+        if match_type == MATCH_TYPE_IP:
+            return "ip", match_value
+        raise ValueError(f"Unsupported alarm match type: {match_type}")
 
     @staticmethod
     def _get_scope_payload(

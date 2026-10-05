@@ -29,6 +29,8 @@ from custom_components.firewalla_local.api import FirewallaApiClient, FirewallaA
 from custom_components.firewalla_local.api.exceptions import FirewallaProtocolError
 from custom_components.firewalla_local.api.models import FlowLogPage
 from custom_components.firewalla_local.const import (
+    ALARM_STATUS_ACTIVE,
+    ALARM_STATUS_ARCHIVED,
     CONF_AID,
     CONF_EID,
     CONF_GID,
@@ -43,12 +45,17 @@ from custom_components.firewalla_local.const import (
     LLM_TOOL_MODE_READ_AND_CONTROL,
     LLM_TOOL_MODE_READ_ONLY,
     LLM_TOOL_MODE_SUMMARY_ONLY,
+    MATCH_TYPE_ALARM_TYPE,
     RULE_PURPOSE_DAP,
     RULE_TARGET_TYPE_MAC,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_DELETE_ALARMS,
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
+    SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_MATCH_TYPE,
+    SERVICE_FIELD_ALARM_MATCH_VALUE,
+    SERVICE_FIELD_ALARM_STATUS,
     SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
@@ -90,8 +97,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
-    SERVICE_FIELD_TARGET_TYPE,
-    SERVICE_FIELD_TARGET_VALUE,
     SERVICE_FIELD_TOP_N,
     SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
     SERVICE_FIELD_USAGE_HISTORY_BEGIN,
@@ -5992,10 +5997,10 @@ async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
                 SERVICE_FIELD_GROUP_NAME: "Quarantine",
                 SERVICE_FIELD_USER_NAME: "KADEN",
             },
-            "scope_selector_conflict",
+            "selector_conflict",
             id="two-selectors",
         ),
-        pytest.param({}, "scope_selector_required", id="no-selector"),
+        pytest.param({}, "selector_required", id="no-selector"),
     ],
 )
 @pytest.mark.asyncio
@@ -8376,12 +8381,15 @@ async def test_admin_service_allows_automation_call(hass: HomeAssistant) -> None
     (
         pytest.param(
             SERVICE_ARCHIVE_ALARMS,
-            {SERVICE_FIELD_MODE: "all_active"},
+            {SERVICE_FIELD_ALARM_STATUS: ALARM_STATUS_ACTIVE},
             id="archive-alarms",
         ),
         pytest.param(
             SERVICE_DELETE_ALARMS,
-            {SERVICE_FIELD_MODE: "all_active", SERVICE_FIELD_CONFIRM: True},
+            {
+                SERVICE_FIELD_ALARM_STATUS: ALARM_STATUS_ACTIVE,
+                SERVICE_FIELD_CONFIRM: True,
+            },
             id="delete-alarms",
         ),
         pytest.param(
@@ -8389,8 +8397,8 @@ async def test_admin_service_allows_automation_call(hass: HomeAssistant) -> None
             {
                 SERVICE_FIELD_DURATION: "always",
                 SERVICE_FIELD_SCOPE_KIND: "all",
-                SERVICE_FIELD_TARGET_TYPE: "alarm_type",
-                SERVICE_FIELD_TARGET_VALUE: "ALARM_GAME",
+                SERVICE_FIELD_ALARM_MATCH_TYPE: MATCH_TYPE_ALARM_TYPE,
+                SERVICE_FIELD_ALARM_MATCH_VALUE: "ALARM_GAME",
             },
             id="mute-alarm",
         ),
@@ -8542,7 +8550,10 @@ async def test_get_alarms_returns_normalized_data_and_report_metadata(
     (
         pytest.param(
             SERVICE_DELETE_ALARMS,
-            {SERVICE_FIELD_MODE: "all_active", SERVICE_FIELD_CONFIRM: False},
+            {
+                SERVICE_FIELD_ALARM_STATUS: ALARM_STATUS_ACTIVE,
+                SERVICE_FIELD_CONFIRM: False,
+            },
             "delete_alarms_confirm_required",
             id="alarm-delete",
         ),
@@ -8567,6 +8578,64 @@ async def test_destructive_delete_services_require_confirmation(
         await hass.services.async_call(DOMAIN, service, service_data, blocking=True)
 
     assert err.value.translation_key == translation_key
+
+
+@pytest.mark.parametrize(
+    ("service", "service_data", "expected_key"),
+    (
+        pytest.param(
+            SERVICE_ARCHIVE_ALARMS,
+            {},
+            "selector_required",
+            id="archive-nothing-selected",
+        ),
+        pytest.param(
+            SERVICE_ARCHIVE_ALARMS,
+            {
+                SERVICE_FIELD_ALARM_ID: "1728",
+                SERVICE_FIELD_ALARM_STATUS: ALARM_STATUS_ACTIVE,
+            },
+            "selector_conflict",
+            id="archive-both-selected",
+        ),
+        pytest.param(
+            SERVICE_DELETE_ALARMS,
+            {SERVICE_FIELD_CONFIRM: True},
+            "selector_required",
+            id="delete-nothing-selected",
+        ),
+        pytest.param(
+            SERVICE_DELETE_ALARMS,
+            {
+                SERVICE_FIELD_ALARM_ID: "1728",
+                SERVICE_FIELD_ALARM_STATUS: ALARM_STATUS_ARCHIVED,
+                SERVICE_FIELD_CONFIRM: True,
+            },
+            "selector_conflict",
+            id="delete-both-selected",
+        ),
+    ),
+)
+async def test_alarm_services_require_exactly_one_selector(
+    hass: HomeAssistant,
+    service: str,
+    service_data: dict[str, object],
+    expected_key: str,
+) -> None:
+    """Test a bulk alarm operation cannot be wide by accident or by ambiguity.
+
+    This is what the explicit selector buys. The old contract took a required `mode`
+    whose `this` value needed a separate `alarm_id`, so `mode: this` with no alarm
+    was a runtime error and `mode` also had to be kept in step with `alarm_id` by
+    the caller. Now the wide case is stated by naming a set, and the narrow case by
+    naming an alarm, so neither can be reached by forgetting a field.
+    """
+    await async_setup_services(hass)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(DOMAIN, service, service_data, blocking=True)
+
+    assert err.value.translation_key == expected_key
 
 
 _FLOW_WINDOW_BEGIN = 1_790_948_400
@@ -9016,15 +9085,15 @@ async def test_flow_report_rejects_a_group_that_does_not_exist(
                 SERVICE_FIELD_GROUP_NAME: "Quarantine",
                 SERVICE_FIELD_USER_NAME: "KADEN",
             },
-            "scope_selector_conflict",
+            "selector_conflict",
             id="two-selectors",
         ),
         pytest.param(
             {SERVICE_FIELD_GROUP_NAME: "Quarantine", SERVICE_FIELD_GROUP_ID: "12"},
-            "scope_selector_conflict",
+            "selector_conflict",
             id="both-fields-of-one-pair",
         ),
-        pytest.param({}, "scope_selector_required", id="no-selector"),
+        pytest.param({}, "selector_required", id="no-selector"),
     ],
 )
 @pytest.mark.asyncio

@@ -1718,27 +1718,25 @@ create_rule:
 
 archive_alarms:
   name: Archive alarms
-  description: Archive one active alarm or all active alarms. Archived alarms remain retrievable.
+  description: Archive one alarm or the whole active set. Archived alarms remain retrievable.
   fields:
-    mode:
-      required: true
-      example: "this"
-      selector:
-        select:
-          options:
-            - value: "this"
-              label: One alarm
-            - value: "all_active"
-              label: All active alarms
-      name: Mode
-      description: Choose one alarm or the entire active set.
     alarm_id:
       required: false
       example: "1001"
       selector:
         text:
-      name: Alarm ID
-      description: Required when mode is this.
+      name: Alarm ID (Optional)
+      description: Archive one alarm. Provide exactly one of Alarm ID or Alarm status.
+    alarm_status:
+      required: false
+      example: "active"
+      selector:
+        select:
+          options:
+            - value: "active"
+              label: The active set
+      name: Alarm status (Optional)
+      description: Archive the whole set. Only active, since an already-archived alarm has nothing left to archive. Provide exactly one of Alarm ID or Alarm status.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1756,29 +1754,27 @@ archive_alarms:
 
 delete_alarms:
   name: Delete alarms
-  description: Permanently delete one alarm or a selected active/archive set. This cannot be undone.
+  description: Permanently delete one alarm or a whole set. This cannot be undone.
   fields:
-    mode:
-      required: true
-      example: "this"
-      selector:
-        select:
-          options:
-            - value: "this"
-              label: One alarm
-            - value: "all_active"
-              label: All active alarms
-            - value: "all_archived"
-              label: All archived alarms
-      name: Mode
-      description: Select which alarm set to permanently delete.
     alarm_id:
       required: false
       example: "1001"
       selector:
         text:
-      name: Alarm ID
-      description: Required when mode is this.
+      name: Alarm ID (Optional)
+      description: Delete one alarm. Provide exactly one of Alarm ID or Alarm status.
+    alarm_status:
+      required: false
+      example: "active"
+      selector:
+        select:
+          options:
+            - value: "active"
+              label: The active set
+            - value: "archived"
+              label: The archived set
+      name: Alarm status (Optional)
+      description: Delete the active or archived set. Provide exactly one of Alarm ID or Alarm status.
     confirm:
       required: true
       example: true
@@ -1812,7 +1808,7 @@ mute_alarm:
         text:
       name: Alarm ID (Optional)
       description: Use an alarm to infer an omitted target value where available.
-    target_type:
+    alarm_match_type:
       required: true
       example: "domain"
       selector:
@@ -1824,14 +1820,14 @@ mute_alarm:
               label: DNS domain
             - value: "ip"
               label: IP address
-      name: Target type
-      description: Choose the type of silence to create.
-    target_value:
+      name: Alarm match type
+      description: Choose what the silence matches on.
+    alarm_match_value:
       required: false
       example: "example.com"
       selector:
         text:
-      name: Target value
+      name: Alarm match value
       description: Raw ALARM_* type, domain, or IP. May be inferred from alarm_id where available.
     scope_kind:
       required: true

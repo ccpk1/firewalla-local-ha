@@ -26,6 +26,8 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     DOMAIN,
     SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_MATCH_TYPE,
+    SERVICE_FIELD_ALARM_MATCH_VALUE,
     SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
@@ -38,8 +40,6 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_SCOPE_KIND,
     SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SSID_PROFILE_ID,
-    SERVICE_FIELD_TARGET_TYPE,
-    SERVICE_FIELD_TARGET_VALUE,
     SERVICE_FIELD_USER_NAME,
     SERVICE_FIELD_WAN_NAME,
     SERVICE_FIELD_WAN_UUID,
@@ -419,7 +419,7 @@ async def test_wake_host_calls_manager(hass: HomeAssistant) -> None:
 
 
 async def test_archive_alarm_uses_single_mode(hass: HomeAssistant) -> None:
-    """archive_alarm archives exactly one alarm (mode=this)."""
+    """archive_alarm archives exactly one alarm, by id."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
         "FirewallaAlarmManager.async_archive_alarms",
@@ -431,7 +431,7 @@ async def test_archive_alarm_uses_single_mode(hass: HomeAssistant) -> None:
         )
 
     assert archive.await_args is not None
-    assert archive.await_args.kwargs == {"mode": "this", "alarm_id": "1728"}
+    assert archive.await_args.kwargs == {"alarm_id": "1728"}
     assert result.data["status"] == "applied"
     assert result.data["warnings"] == ["no un-archive"]
 
@@ -449,8 +449,8 @@ async def test_set_alarm_muted_calls_alarm_manager(hass: HomeAssistant) -> None:
             SET_ALARM_MUTED,
             {
                 SERVICE_FIELD_ALARM_ID: "1728",
-                SERVICE_FIELD_TARGET_TYPE: "domain",
-                SERVICE_FIELD_TARGET_VALUE: "vimeo.com",
+                SERVICE_FIELD_ALARM_MATCH_TYPE: "domain",
+                SERVICE_FIELD_ALARM_MATCH_VALUE: "vimeo.com",
                 SERVICE_FIELD_SCOPE_KIND: "device",
                 SERVICE_FIELD_SCOPE_TARGET: _HOST_MAC,
                 SERVICE_FIELD_DURATION: "always",
@@ -495,7 +495,7 @@ async def test_block_requires_alarm_or_target(
 
 
 async def test_archive_all_alarms_is_bulk(hass: HomeAssistant) -> None:
-    """archive_all_alarms uses the bulk all_active mode with warnings."""
+    """archive_all_alarms names the active set explicitly."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
         "FirewallaAlarmManager.async_archive_alarms",
@@ -505,7 +505,7 @@ async def test_archive_all_alarms_is_bulk(hass: HomeAssistant) -> None:
         result = await _call(api_instance, ARCHIVE_ALL_ALARMS, {})
 
     assert archive.await_args is not None
-    assert archive.await_args.kwargs == {"mode": "all_active", "alarm_id": None}
+    assert archive.await_args.kwargs == {"alarm_id": None}
     assert "bulk action" in result.data["warnings"]
 
 
@@ -524,20 +524,21 @@ async def test_delete_alarm_uses_single_mode(hass: HomeAssistant) -> None:
         )
 
     assert delete.await_args is not None
-    assert delete.await_args.kwargs["mode"] == "this"
     assert delete.await_args.kwargs["alarm_id"] == "1728"
     assert result.data["status"] == "applied"
     assert result.data["target"] == {"kind": "alarm", "id": "1728"}
 
 
 @pytest.mark.parametrize(
-    "mode",
+    "alarm_status",
     [
-        pytest.param("all_active", id="all_active"),
-        pytest.param("all_archived", id="all_archived"),
+        pytest.param("active", id="active"),
+        pytest.param("archived", id="archived"),
     ],
 )
-async def test_delete_all_alarms_uses_bulk_mode(hass: HomeAssistant, mode: str) -> None:
+async def test_delete_all_alarms_uses_bulk_mode(
+    hass: HomeAssistant, alarm_status: str
+) -> None:
     """delete_all_alarms deletes the requested set with a bulk warning."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
@@ -546,11 +547,13 @@ async def test_delete_all_alarms_uses_bulk_mode(hass: HomeAssistant, mode: str) 
     ) as delete:
         api_instance = await _setup(hass, mode="full")
         result = await _call(
-            api_instance, DELETE_ALL_ALARMS, {"mode": mode, SERVICE_FIELD_CONFIRM: True}
+            api_instance,
+            DELETE_ALL_ALARMS,
+            {"alarm_status": alarm_status, SERVICE_FIELD_CONFIRM: True},
         )
 
     assert delete.await_args is not None
-    assert delete.await_args.kwargs["mode"] == mode
+    assert delete.await_args.kwargs["alarm_status"] == alarm_status
     assert "irreversible" in result.data["warnings"]
 
 

@@ -1289,6 +1289,12 @@
     "alarm_selector_required": {
       "message": "Provide the required alarm target or identifier for this operation."
     },
+    "selector_conflict": {
+      "message": "Provide only one of {selector_fields}."
+    },
+    "selector_required": {
+      "message": "Provide exactly one of {selector_fields}."
+    },
     "alarm_operation_failed": {
       "message": "The integration could not complete the alarm operation. Check the Firewalla connection and try again."
     },
@@ -1446,15 +1452,15 @@
     },
     "archive_alarms": {
       "name": "Archive alarms",
-      "description": "Move one or all active alarms to the archive. Archived alarms remain retrievable.",
+      "description": "Move one alarm or the whole active set to the archive. Archived alarms remain retrievable.",
       "fields": {
-        "mode": {
-          "name": "Mode",
-          "description": "Choose this alarm or all active alarms."
-        },
         "alarm_id": {
-          "name": "Alarm ID",
-          "description": "Required when mode is this."
+          "name": "Alarm ID (Optional)",
+          "description": "Archive one alarm. Provide either this or Alarm status."
+        },
+        "alarm_status": {
+          "name": "Alarm status (Optional)",
+          "description": "Archive the whole set. Only active, since an already-archived alarm has nothing left to archive. Provide either this or Alarm ID."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -1468,15 +1474,15 @@
     },
     "delete_alarms": {
       "name": "Delete alarms",
-      "description": "Permanently delete one alarm or all active/archived alarms. This cannot be undone.",
+      "description": "Permanently delete one alarm or a whole set. This cannot be undone.",
       "fields": {
-        "mode": {
-          "name": "Mode",
-          "description": "Choose this, all_active, or all_archived."
-        },
         "alarm_id": {
-          "name": "Alarm ID",
-          "description": "Required when mode is this."
+          "name": "Alarm ID (Optional)",
+          "description": "Delete one alarm. Provide exactly one of Alarm ID or Alarm status."
+        },
+        "alarm_status": {
+          "name": "Alarm status (Optional)",
+          "description": "Delete the active or archived set. Provide exactly one of Alarm ID or Alarm status."
         },
         "confirm": {
           "name": "Confirm permanent deletion",
@@ -1500,12 +1506,12 @@
           "name": "Alarm ID (Optional)",
           "description": "Use an active or archived alarm to resolve an omitted domain/IP target."
         },
-        "target_type": {
-          "name": "Target type",
+        "alarm_match_type": {
+          "name": "Alarm match type",
           "description": "Choose alarm_type, domain, or ip."
         },
-        "target_value": {
-          "name": "Target value (Optional)",
+        "alarm_match_value": {
+          "name": "Alarm match value (Optional)",
           "description": "Raw ALARM_* identifier, domain, or IP. May be resolved from alarm_id where available."
         },
         "scope_kind": {

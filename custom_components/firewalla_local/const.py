@@ -485,6 +485,9 @@ SERVICE_MUTE_ALARM: Final = "mute_alarm"
 SERVICE_UNMUTE_ALARM: Final = "unmute_alarm"
 SERVICE_DELETE_RULE: Final = "delete_rule"
 SERVICE_FIELD_ALARM_ID: Final = "alarm_id"
+SERVICE_FIELD_ALARM_MATCH_TYPE: Final = "alarm_match_type"
+SERVICE_FIELD_ALARM_MATCH_VALUE: Final = "alarm_match_value"
+SERVICE_FIELD_ALARM_STATUS: Final = "alarm_status"
 SERVICE_FIELD_ALARM_TYPE: Final = "alarm_type"
 SERVICE_FIELD_DURATION: Final = "duration"
 SERVICE_FIELD_EXCEPTION_ID: Final = "exception_id"
@@ -496,6 +499,30 @@ SERVICE_FIELD_INCLUDE_ARCHIVED: Final = "include_archived"
 SERVICE_FIELD_INCLUDE_EXCEPTIONS: Final = "include_exceptions"
 SERVICE_FIELD_RULE_ID: Final = "rule_id"
 ALARM_SERVICE_MAX_LIMIT: Final = 500
+
+# Which alarms one bulk operation acts on. The box populates three sets -- its
+# snapshot reports active, archived and pending counts -- but only these two are
+# reachable through the alarm commands, so the vocabulary names what the operation
+# can actually select rather than everything the box models.
+ALARM_STATUS_ACTIVE: Final = "active"
+ALARM_STATUS_ARCHIVED: Final = "archived"
+
+# What an alarm silence matches on. The caller's vocabulary, deliberately distinct
+# from the wire's (`alarmType` / `dns` / `ip`), because the alarm's own `alarm_type`
+# value is what `alarm_match_value` carries -- naming both the same thing would make
+# "match the alarm type ALARM_INTEL" read as a contradiction.
+MATCH_TYPE_ALARM_TYPE: Final = "alarm_type"
+MATCH_TYPE_DOMAIN: Final = "domain"
+MATCH_TYPE_IP: Final = "ip"
+ALARM_MATCH_TYPES: Final = (MATCH_TYPE_ALARM_TYPE, MATCH_TYPE_DOMAIN, MATCH_TYPE_IP)
+
+# The selector field sets the alarm services enforce "exactly one of" against.
+# Naming them in one place is what lets the archive, delete and silence services
+# raise the same message for the same mistake.
+ALARM_SET_SELECTOR_FIELDS: Final = (
+    SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_STATUS,
+)
 HOST_DEVICE_TYPE_OPTIONS: Final = (
     "desktop",
     "phone",
@@ -572,11 +599,13 @@ TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS: Final = "network_name_ambiguous"
 TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND: Final = "network_not_found"
 TRANS_KEY_EXCEPTION_NETWORK_REQUIRED: Final = "network_required"
 TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT: Final = "network_selector_conflict"
-# One message for one rule. Every service that selects a scope enforces the same
-# thing -- exactly one selector field, never two -- so it raises the same key and the
-# caller reads the same sentence wherever they meet it.
-TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT: Final = "scope_selector_conflict"
-TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_REQUIRED: Final = "scope_selector_required"
+# One message for one rule. Every service that selects something enforces the same
+# thing -- exactly one selector field, never two and never none -- so it raises the
+# same key and the caller reads the same sentence wherever they meet it. Named for
+# the rule rather than for the scopes that first needed it, because the alarm
+# services enforce it too.
+TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT: Final = "selector_conflict"
+TRANS_KEY_EXCEPTION_SELECTOR_REQUIRED: Final = "selector_required"
 TRANS_KEY_ENTITY_BUTTON_SYNC_RUNTIME: Final = "sync_runtime"
 TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT: Final = "pause_rule_timing_conflict"
 TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST: Final = "resume_at_in_past"
@@ -685,6 +714,7 @@ TRANS_PLACEHOLDER_RULE_ID: Final = "rule_id"
 TRANS_PLACEHOLDER_SSID_PROFILE_ID: Final = "ssid_profile_id"
 TRANS_PLACEHOLDER_SCOPE_KIND: Final = "scope_kind"
 TRANS_PLACEHOLDER_SCOPE_TARGET: Final = "scope_target"
+TRANS_PLACEHOLDER_SELECTOR_FIELDS: Final = "selector_fields"
 TRANS_PLACEHOLDER_WAN_NAME: Final = "wan_name"
 TRANS_PLACEHOLDER_WAN_UUID: Final = "wan_uuid"
 TRANS_PLACEHOLDER_NETWORK_KIND: Final = "network_kind"

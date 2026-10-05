@@ -626,3 +626,109 @@ user-visible, so it is noted rather than sequenced.)
 first. 9f-1's rules half is independent. 9f-3's **network** form is the only part
 gated on a capture, and 9f-4 is the only part that subtracts information — so both
 are worth confirming before they are built rather than after.
+
+---
+
+## 10. Phase 3.2 — decisions taken, and what landed
+
+### 10a. The owner's three answers
+
+| Question | Answer | Consequence |
+| --- | --- | --- |
+| Silence match fields | **`alarm_match_type` / `alarm_match_value`** | Chosen over `match_*` for explicitness. It also avoids a second meaning of `match` in the same signature, since the manager already had a local `match_type` for the *wire* key |
+| Alarm population field | **`alarm_status`** (`active`/`archived`) | Checked for collision — see 10b |
+| `detail: full` | **Accepted** if consistent elsewhere | `full` is already the word on two services; 9f-4 not yet built |
+
+### 10b. `alarm_status` — checked, and it does not collide
+
+Measured: **no service field is named `status` anywhere.** The word appears in
+`get_wireless_status` (a service *name*), in entity translation keys
+(`system_status`, `ap_status`), in `FirewallaWanEventStatus` (a nested model), and in
+`_STATUS_ENABLED` / `_STATUS_DISABLED`, which are a **rule's** enabled state inside a
+display string.
+
+The one adjacency worth stating: an alarm carries its own `state` string, normalized
+from the wire with no constants and **compared nowhere** — it is never published as
+an attribute and never branched on. So `alarm_status` cannot be confused with
+anything the integration acts on, and the two words describe different things (a
+population the operation selects, versus an uninterpreted wire string).
+
+**Limitation to carry:** the box's snapshot reports a **third** population,
+`pending_alarm_count`, which the alarm commands cannot select. `alarm_status` names
+only the two that are reachable, and the vocabulary comment says so rather than
+implying the enum is the whole model.
+
+### 10c. The network scope is no longer gated — evidence found
+
+9c said `p.intf.id` was unverified. It is verified, by the reverse-engineering note
+this repository already keeps:
+
+- `docs/REVERSE_ENGINEERING_WORKFLOW.md` documents `| p.intf.id | a network |` and
+  cross-references the MSP model, where `network` → `scope.value` = **network ID** →
+  local `p.intf.id`.
+- A captured flow record carries `"intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2"` — a
+  UUID, the same shape as `FirewallaNetwork.uuid`.
+
+So a network scope is a network id, and `network_uuid` / `network_name` are the
+correct field names. **The gate is lifted**, though the migration is still not built
+(see 10e).
+
+### 10d. What landed in this step
+
+**Silences.** `target_type`/`target_value` → `alarm_match_type`/`alarm_match_value`,
+with `MATCH_TYPE_ALARM_TYPE / _DOMAIN / _IP` as the vocabulary and the wire
+translation (`alarmType` / `dns` / `ip`) left in the manager. Naming the caller's
+values and the wire's the same thing was also actively confusing, because
+`alarm_match_value` carries the alarm's own `alarm_type` value — "match the alarm
+type ALARM_INTEL" reads as a contradiction when both are called `target`.
+
+**The alarm `mode` axis is gone.** `alarm_id` XOR `alarm_status`, both optional,
+exactly one required. `this` disappears because naming an alarm *is* selecting one.
+**The failure mode is now unrepresentable rather than caught:** `mode: "this"` with
+no `alarm_id` used to be a runtime error, and is now impossible.
+
+**Archive takes no set parameter.** `ARCHIVE_ALARMS_SCHEMA` offers only
+`alarm_status: active`, because archiving is meaningful only for an active alarm, and
+the manager method takes just an `alarm_id` — a status argument the method would
+ignore is exactly the "requested then discarded" smell this initiative removes. The
+enum keeps one value deliberately: it is the explicit statement of intent that stops
+a forgotten field archiving the whole set.
+
+**Six conflict keys → two.** `TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT` /
+`_REQUIRED`, carrying `{selector_fields}`, so each service names the fields it
+actually accepts and no service needs its own key. `select_exclusive` is the one
+implementation, and `select_scope` is now that function with the scope vocabulary
+attached rather than a second copy of the rule.
+
+**Validation before I/O.** Selecting the alarm set now happens before the config
+entry is resolved, so an invalid call fails on its own terms rather than on entry
+state. Found by the new test: with no entry loaded the handler raised
+`multiple_entries_loaded` instead.
+
+### 10e. Still open from 9f
+
+- **9f-3, the `scope_kind` migration** — and the network evidence changes its shape.
+- **9f-4, `detail` unification.**
+- **9f-1's rules half** — `create_rule` / `get_rules` onto `RULE_TARGET_TYPE_*`.
+
+### 10f. A safety tension 9f-3 has to resolve, surfaced while building this
+
+The reverse-engineering note records **why** the alarm services required an explicit
+`scope_kind`: locally, "all devices" is reached by *omitting* every scope key, so
+"an accidental global mute is what a caller gets by forgetting a field. Requiring the
+value makes it a deliberate choice."
+
+That argues against the "omit → all" form 9f-3 proposes for `create_rule`, and it is
+the same hazard the new alarm design just closed by requiring exactly one selector.
+Two consistent options:
+
+1. **Scope pairs XOR an explicit wide marker**, mirroring `set_host_group`'s
+   `clear: true` — which is already this integration's precedent for "the
+   no-specific-target case, chosen deliberately". The marker needs a name that does
+   not collide with `scope`, which elsewhere means the flat rule identifier list.
+2. **Require a scope on `mute_alarm`**, dropping the box-wide case. Simplest and
+   safest, but removes a real capability (silence an alarm type everywhere).
+
+Option 1 preserves both the capability and the safety property, and matches an
+existing pattern, so it is the recommendation — but it is a design choice about a
+mutating service, so it is being put back rather than taken unilaterally.

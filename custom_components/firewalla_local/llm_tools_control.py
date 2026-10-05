@@ -20,6 +20,9 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
 
 from .const import (
+    ALARM_MATCH_TYPES,
+    ALARM_STATUS_ACTIVE,
+    ALARM_STATUS_ARCHIVED,
     DOMAIN,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_CREATE_RULE,
@@ -27,6 +30,9 @@ from .const import (
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
     SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_MATCH_TYPE,
+    SERVICE_FIELD_ALARM_MATCH_VALUE,
+    SERVICE_FIELD_ALARM_STATUS,
     SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIRM,
@@ -969,11 +975,11 @@ class SetAlarmMutedTool(_FirewallaControlTool):
                 ),
             ): str,
             vol.Required(
-                SERVICE_FIELD_TARGET_TYPE,
+                SERVICE_FIELD_ALARM_MATCH_TYPE,
                 description="Required. What to silence.",
-            ): vol.In(("alarm_type", "domain", "ip")),
+            ): vol.In(ALARM_MATCH_TYPES),
             vol.Optional(
-                SERVICE_FIELD_TARGET_VALUE,
+                SERVICE_FIELD_ALARM_MATCH_VALUE,
                 description=(
                     "Optional. The domain or IP to silence (required unless "
                     "alarm_id supplies it)."
@@ -1014,7 +1020,7 @@ class SetAlarmMutedTool(_FirewallaControlTool):
         target = {
             "kind": TARGET_KIND_SILENCE,
             "id": alarm_id,
-            "name": args.get(SERVICE_FIELD_TARGET_VALUE),
+            "name": args.get(SERVICE_FIELD_ALARM_MATCH_VALUE),
         }
         await self._call_service(hass, llm_context, args)
         undo = (
@@ -1227,7 +1233,7 @@ class ArchiveAlarmTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Archive a single alarm."""
         alarm_id = self._args(tool_input)[SERVICE_FIELD_ALARM_ID]
-        data = {SERVICE_FIELD_MODE: "this", SERVICE_FIELD_ALARM_ID: alarm_id}
+        data = {SERVICE_FIELD_ALARM_ID: alarm_id}
         await self._call_service(hass, llm_context, data)
         target = {"kind": TARGET_KIND_ALARM, "id": alarm_id}
         return self._result(
@@ -1261,12 +1267,18 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Archive every active alarm."""
-        await self._call_service(hass, llm_context, {SERVICE_FIELD_MODE: "all_active"})
+        await self._call_service(
+            hass,
+            llm_context,
+            {SERVICE_FIELD_ALARM_STATUS: ALARM_STATUS_ACTIVE},
+        )
         return self._result(
             status="applied",
             changed=True,
-            target={"kind": TARGET_KIND_ALARM, "id": "all_active"},
-            after={"archived": "all_active"},
+            # No single alarm identity, so the set is named in `after` rather than
+            # invented as a target id.
+            target={"kind": TARGET_KIND_ALARM, "id": None},
+            after={"archived": ALARM_STATUS_ACTIVE},
             warnings=["bulk action", "no un-archive"],
         )
 
@@ -1307,7 +1319,6 @@ class DeleteAlarmTool(_FirewallaControlTool):
         args = self._args(tool_input)
         alarm_id = args[SERVICE_FIELD_ALARM_ID]
         data = {
-            SERVICE_FIELD_MODE: "this",
             SERVICE_FIELD_ALARM_ID: alarm_id,
             SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
         }
@@ -1335,9 +1346,11 @@ class DeleteAlarmsTool(_FirewallaControlTool):
     parameters = vol.Schema(
         {
             vol.Required(
-                SERVICE_FIELD_MODE,
-                description="Required. Which set to delete permanently.",
-            ): vol.In(("all_active", "all_archived")),
+                SERVICE_FIELD_ALARM_STATUS,
+                description=(
+                    "Required. Which set to delete permanently: 'active' or 'archived'."
+                ),
+            ): vol.In((ALARM_STATUS_ACTIVE, ALARM_STATUS_ARCHIVED)),
             vol.Required(
                 SERVICE_FIELD_CONFIRM,
                 description="Required. Set true to confirm the bulk delete.",
@@ -1356,17 +1369,17 @@ class DeleteAlarmsTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Delete all alarms in the chosen set."""
         args = self._args(tool_input)
-        mode = args[SERVICE_FIELD_MODE]
+        alarm_status = args[SERVICE_FIELD_ALARM_STATUS]
         data = {
-            SERVICE_FIELD_MODE: mode,
+            SERVICE_FIELD_ALARM_STATUS: alarm_status,
             SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
         }
         await self._call_service(hass, llm_context, data)
         return self._result(
             status="applied",
             changed=True,
-            target={"kind": TARGET_KIND_ALARM, "id": mode},
-            after={"deleted": mode},
+            target={"kind": TARGET_KIND_ALARM, "id": None},
+            after={"deleted": alarm_status},
             warnings=["bulk action", "irreversible"],
         )
 

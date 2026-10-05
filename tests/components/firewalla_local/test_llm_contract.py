@@ -457,15 +457,16 @@ _INTENTIONAL_OMISSIONS: Final = frozenset(
         # defaults it to true, which is what the tool wants, so omitting it
         # avoids a lever the model would have no reason to move.
         ("get_flow_report", "refresh"),
-        # Bulk tools act on a fixed mode; single-alarm tools act on an alarm id.
-        # Splitting them means neither tool exposes the other's selector, and
-        # `mode` is never taken from the model because "all_active" is the bulk
-        # archive the destructive tier gates separately.
-        ("archive_alarm", "mode"),
-        ("archive_all_alarms", "mode"),
+        # Bulk tools act on the set they name; single-alarm tools act on an
+        # alarm id. Splitting them means neither tool exposes the other's
+        # selector: `archive_all_alarms` acts on the active set, which its own
+        # name already states, and `archive_alarm`/`delete_alarm` act on one
+        # alarm, so a status would be a second selector for a call that has
+        # already made its choice.
+        ("archive_alarm", "alarm_status"),
         ("archive_all_alarms", "alarm_id"),
-        ("delete_alarm", "mode"),
-        ("delete_all_alarms", "mode"),
+        ("archive_all_alarms", "alarm_status"),
+        ("delete_alarm", "alarm_status"),
         ("delete_all_alarms", "alarm_id"),
         # `detail` and `include: ['subperiods']` both select the nested
         # breakdown, so the tool offers one lever rather than two.

@@ -23,7 +23,11 @@ from homeassistant.util.json import JsonObjectType, JsonValueType
 
 from .api import FirewallaApiError
 from .const import (
+    ALARM_MATCH_TYPES,
     ALARM_SERVICE_MAX_LIMIT,
+    ALARM_SET_SELECTOR_FIELDS,
+    ALARM_STATUS_ACTIVE,
+    ALARM_STATUS_ARCHIVED,
     DEFAULT_FLOW_REPORT_RECORD_COUNT,
     DEFAULT_FLOW_REPORT_WINDOW_HOURS,
     DEFAULT_INIT_TARGET,
@@ -54,6 +58,9 @@ from .const import (
     SERVICE_DELETE_RULE,
     SERVICE_FIELD_ACTION,
     SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_MATCH_TYPE,
+    SERVICE_FIELD_ALARM_MATCH_VALUE,
+    SERVICE_FIELD_ALARM_STATUS,
     SERVICE_FIELD_ALARM_TYPE,
     SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CLEAR,
@@ -192,8 +199,8 @@ from .const import (
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
     TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED,
-    TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT,
-    TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_REQUIRED,
+    TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT,
+    TRANS_KEY_EXCEPTION_SELECTOR_REQUIRED,
     TRANS_KEY_EXCEPTION_SET_HOST_DEVICE_TYPE_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DHCP_RESERVATION_FAILED,
     TRANS_KEY_EXCEPTION_SET_HOST_DNS_HOSTNAME_FAILED,
@@ -225,6 +232,7 @@ from .const import (
     TRANS_PLACEHOLDER_RULE_ID,
     TRANS_PLACEHOLDER_SCOPE_KIND,
     TRANS_PLACEHOLDER_SCOPE_TARGET,
+    TRANS_PLACEHOLDER_SELECTOR_FIELDS,
     TRANS_PLACEHOLDER_SSID_PROFILE_ID,
     TRANS_PLACEHOLDER_WAN_NAME,
     TRANS_PLACEHOLDER_WAN_UUID,
@@ -295,10 +303,11 @@ from .utils.duration import parse_duration_to_seconds
 from .utils.host_activity import is_host_online, reference_last_active
 from .utils.mac import normalize_mac_address
 from .utils.selectors import (
-    ScopeSelection,
     SelectorMatch,
+    SelectorSelection,
     match_names,
     match_selector,
+    select_exclusive,
     select_scope,
 )
 from .utils.values import normalized_bool, normalized_int, normalized_string
@@ -430,8 +439,10 @@ GET_ALARMS_SCHEMA = vol.Schema(
 
 ARCHIVE_ALARMS_SCHEMA = vol.Schema(
     {
-        vol.Required(SERVICE_FIELD_MODE): vol.In(("this", "all_active")),
         vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        # Only the active set: an alarm that is already archived has nothing left
+        # to archive, so offering `archived` here would advertise a no-op.
+        vol.Optional(SERVICE_FIELD_ALARM_STATUS): vol.In((ALARM_STATUS_ACTIVE,)),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -439,10 +450,10 @@ ARCHIVE_ALARMS_SCHEMA = vol.Schema(
 
 DELETE_ALARMS_SCHEMA = vol.Schema(
     {
-        vol.Required(SERVICE_FIELD_MODE): vol.In(
-            ("this", "all_active", "all_archived")
-        ),
         vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_ALARM_STATUS): vol.In(
+            (ALARM_STATUS_ACTIVE, ALARM_STATUS_ARCHIVED)
+        ),
         vol.Required(SERVICE_FIELD_CONFIRM): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
@@ -459,8 +470,8 @@ _ALARM_SCOPE_SCHEMA_FIELDS: dict[object, object] = {
 MUTE_ALARM_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
-        vol.Required(SERVICE_FIELD_TARGET_TYPE): vol.In(("alarm_type", "domain", "ip")),
-        vol.Optional(SERVICE_FIELD_TARGET_VALUE): cv.string,
+        vol.Required(SERVICE_FIELD_ALARM_MATCH_TYPE): vol.In(ALARM_MATCH_TYPES),
+        vol.Optional(SERVICE_FIELD_ALARM_MATCH_VALUE): cv.string,
         **_ALARM_SCOPE_SCHEMA_FIELDS,
         vol.Required(SERVICE_FIELD_DURATION): vol.In(("1h", "today", "always")),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
@@ -2985,7 +2996,7 @@ def _serialize_flow_report(
     *,
     view: FirewallaFlowReportView,
     target: FirewallaFlowReportTarget,
-    selection: ScopeSelection,
+    selection: SelectorSelection,
     detail: str,
     window_hours: int,
     record_count: int,
@@ -3782,7 +3793,7 @@ def _resolve_requested_network(
     return None
 
 
-def _select_report_scope(call: ServiceCall) -> ScopeSelection:
+def _select_report_scope(call: ServiceCall) -> SelectorSelection:
     """Return the one scope a report call selected, or raise.
 
     Both report services select a scope the same way, so they enforce the same rule
@@ -3795,15 +3806,23 @@ def _select_report_scope(call: ServiceCall) -> ScopeSelection:
         return selection
     if selection.supplied:
         raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_CONFLICT,
+            translation_key=TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT,
+            translation_placeholders={
+                TRANS_PLACEHOLDER_SELECTOR_FIELDS: ", ".join(
+                    REPORT_SCOPE_SELECTOR_FIELDS
+                )
+            },
         )
     raise _service_validation_error(
-        translation_key=TRANS_KEY_EXCEPTION_SCOPE_SELECTOR_REQUIRED,
+        translation_key=TRANS_KEY_EXCEPTION_SELECTOR_REQUIRED,
+        translation_placeholders={
+            TRANS_PLACEHOLDER_SELECTOR_FIELDS: ", ".join(REPORT_SCOPE_SELECTOR_FIELDS)
+        },
     )
 
 
 def _match_scope_selection(
-    selection: ScopeSelection,
+    selection: SelectorSelection,
     candidates: Iterable[tuple[str, Sequence[str | None]]],
     *,
     normalize_identifier: Callable[[str], str | None] | None = None,
@@ -3828,7 +3847,7 @@ def _match_scope_selection(
 def _resolve_usage_history_target(
     entry: FirewallaConfigEntry,
     *,
-    selection: ScopeSelection,
+    selection: SelectorSelection,
 ) -> FirewallaUsageHistoryTarget:
     """Resolve one usage-history target against normalized runtime metadata.
 
@@ -3911,7 +3930,7 @@ def _resolve_usage_history_target(
 def _usage_history_scope_error(
     match: SelectorMatch,
     *,
-    selection: ScopeSelection,
+    selection: SelectorSelection,
 ) -> ServiceValidationError:
     """Build the usage-report error for a selector that did not resolve."""
     return _service_validation_error(
@@ -3930,7 +3949,7 @@ def _usage_history_scope_error(
 def _resolve_flow_report_target(
     entry: FirewallaConfigEntry,
     *,
-    selection: ScopeSelection,
+    selection: SelectorSelection,
 ) -> FirewallaFlowReportTarget:
     """Resolve one flow-report scope to its identity **and** its protocol target.
 
@@ -4039,7 +4058,7 @@ def _resolve_flow_report_target(
 def _flow_report_scope_error(
     match: SelectorMatch,
     *,
-    selection: ScopeSelection,
+    selection: SelectorSelection,
 ) -> ServiceValidationError:
     """Build the flow-report error for a selector that did not resolve."""
     return _service_validation_error(
@@ -4660,22 +4679,43 @@ def _get_alarm_scope_target(call: ServiceCall) -> tuple[str, str | None]:
     return scope_kind, scope_target
 
 
+def _select_alarm_set(call: ServiceCall) -> SelectorSelection:
+    """Return the one alarm set a bulk operation named, or raise.
+
+    Exactly one of `alarm_id` (a single alarm) and `alarm_status` (a whole set) is
+    required, which is the rule every selecting service shares and therefore the
+    same message. Requiring one also removes the old failure mode where `mode` said
+    "this" but no alarm was named -- the mistake is now unrepresentable rather than
+    caught.
+    """
+    selection = select_exclusive(call.data, fields=ALARM_SET_SELECTOR_FIELDS)
+    if selection.is_selected:
+        return selection
+    raise _service_validation_error(
+        translation_key=(
+            TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT
+            if selection.supplied
+            else TRANS_KEY_EXCEPTION_SELECTOR_REQUIRED
+        ),
+        translation_placeholders={
+            TRANS_PLACEHOLDER_SELECTOR_FIELDS: ", ".join(ALARM_SET_SELECTOR_FIELDS)
+        },
+    )
+
+
 async def _async_handle_archive_alarms(call: ServiceCall) -> None:
     """Archive one alarm or the complete active set."""
+    selection = _select_alarm_set(call)
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
-    mode = cast(str, call.data[SERVICE_FIELD_MODE])
-    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
-    if mode == "this" and alarm_id is None:
-        raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
-        )
     try:
         await entry.runtime_data.alarm_manager.async_archive_alarms(
-            mode=mode, alarm_id=alarm_id
+            alarm_id=cast(str, selection.value)
+            if selection.field == SERVICE_FIELD_ALARM_ID
+            else None
         )
     except FirewallaApiError as err:
         _raise_runtime_service_error(
@@ -4691,20 +4731,22 @@ async def _async_handle_delete_alarms(call: ServiceCall) -> None:
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_DELETE_ALARMS_CONFIRM_REQUIRED
         )
+    selection = _select_alarm_set(call)
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
-    mode = cast(str, call.data[SERVICE_FIELD_MODE])
-    alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
-    if mode == "this" and alarm_id is None:
-        raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
-        )
     try:
         await entry.runtime_data.alarm_manager.async_delete_alarms(
-            mode=mode, alarm_id=alarm_id
+            alarm_id=cast(str, selection.value)
+            if selection.field == SERVICE_FIELD_ALARM_ID
+            else None,
+            alarm_status=(
+                cast(str, selection.value)
+                if selection.field == SERVICE_FIELD_ALARM_STATUS
+                else None
+            ),
         )
     except FirewallaApiError as err:
         _raise_runtime_service_error(
@@ -4723,17 +4765,17 @@ async def _async_handle_mute_alarm(call: ServiceCall) -> None:
     )
     scope_kind, scope_target = _get_alarm_scope_target(call)
     alarm_id = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_ID))
-    target_type = cast(str, call.data[SERVICE_FIELD_TARGET_TYPE])
-    target_value = cast(str | None, call.data.get(SERVICE_FIELD_TARGET_VALUE))
-    if target_value is None and alarm_id is None:
+    match_type = cast(str, call.data[SERVICE_FIELD_ALARM_MATCH_TYPE])
+    match_value = cast(str | None, call.data.get(SERVICE_FIELD_ALARM_MATCH_VALUE))
+    if match_value is None and alarm_id is None:
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED
         )
     try:
         await entry.runtime_data.alarm_manager.async_mute_alarm(
             alarm_id=alarm_id,
-            target_type=target_type,
-            target_value=target_value,
+            match_type=match_type,
+            match_value=match_value,
             scope_kind=scope_kind,
             scope_target=scope_target,
             duration=cast(str, call.data[SERVICE_FIELD_DURATION]),
