@@ -515,13 +515,17 @@ and `alarm_type`→`alarmType`. So renaming them is free of protocol consequence
 | Service | Values | Wire form (verified in `alarm_manager._get_scope_payload`) |
 | --- | --- | --- |
 | `create_rule` | `device\|network\|all` | MAC tuple / network |
-| `mute_alarm`, `unmute_alarm` | `device\|group\|user\|network\|all` | `p.device.mac` / `p.tag.ids` / **`p.intf.id`** |
+| `mute_alarm` | `device\|group\|user\|network\|all` | `p.device.mac` / `p.tag.ids` / **`p.intf.id`** |
 
-Verified: device scope is a **MAC**; group and user scopes are **tag ids**. **Not
-verified: the network scope's `p.intf.id`** — it has no test and no capture, and it is
-not established that a network's `uuid` is that interface id. That is a protocol
-unknown of the same class as Q8, and it must be resolved before the network field is
-named.
+**`unmute_alarm` takes no scope** — checked, because an earlier version of this table
+said it did. It identifies the silence by `exception_id` or `alarm_id`, and
+`_ALARM_SCOPE_SCHEMA_FIELDS` has exactly one consumer. So the remaining scope work
+touches **two** services, not three.
+
+Verified: device scope is a **MAC**; group and user scopes are **tag ids**. The
+network scope's `p.intf.id` is **verified as of 10c** — the reverse-engineering note
+documents it as a network ID, and a captured flow record carries a UUID of the same
+shape as `FirewallaNetwork.uuid`.
 
 ### 9d. Q8 — answered, and the answer is "leave it"
 
@@ -616,10 +620,10 @@ user-visible, so it is noted rather than sequenced.)
 
 | Surface | Count |
 | --- | --- |
-| Services with a selector to change | 6 (`create_rule`, `get_rules`, `mute_alarm`, `unmute_alarm`, `archive_alarms`, `delete_alarms`) |
+| Services with a selector to change | 4 (`create_rule`, `get_rules`, `mute_alarm`, plus the two alarm bulk services already migrated) |
 | Services changing `detail` | 3 (`get_alarms`, `get_time_usage_report`, `get_flow_report`) |
 | Translation keys removed / added | 6 removed · 2 added · 3 added (`match_*`, `alarm_set`) |
-| LLM tools touched | 6 (`create_rule`, `get_rules`, `mute_alarm`, `unmute_alarm`, `archive_alarm`, `delete_alarm`) plus their `_INTENTIONAL_OMISSIONS` entries |
+| LLM tools touched | 6 (`create_rule`, `get_rules`, `mute_alarm`, plus `archive_alarm`/`archive_all_alarms`/`delete_alarm`/`delete_all_alarms` already migrated) plus their `_INTENTIONAL_OMISSIONS` entries |
 | Guard work-list entries cleared | 3 (both remaining `scope_kind`s and the unvalidated `target_type`) |
 
 **Sequencing.** 9f-2 and 9f-5 are independent of the protocol question and can land
