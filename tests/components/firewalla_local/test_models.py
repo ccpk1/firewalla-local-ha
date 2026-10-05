@@ -107,6 +107,45 @@ def test_rule_template_create_value_includes_alarm_id_when_set() -> None:
     assert payload["aid"] == "1728"
 
 
+def test_rule_template_create_value_carries_the_captured_scope_forms() -> None:
+    """Test the create payload matches what the box was captured accepting.
+
+    Captured on 2026-10-05 by creating one rule per scope in the Firewalla app
+    (`policy:create` on port 8833). Each `tag` array below is the captured value
+    verbatim, so this pins the wire form against measurement rather than against the
+    read side's shape.
+
+    The user case is the one that matters. The app was used to select the **user**
+    `KADENS_DEVICES` (uid 32) and the box received `tag:31` -- the user's *affiliated
+    tag*, under the `tag:` prefix, and not the user id and not `utag:32`. The read side
+    resolves that same reference back to a user, so the round-trip closes.
+    """
+    cases = (
+        ("group", ["tag:27"]),
+        ("user", ["tag:31"]),
+        ("network", ["intf:95169e6a-a7c9-4d6a-8e83-6061b4812bf2"]),
+    )
+
+    for label, captured_refs in cases:
+        payload = FirewallaRuleTemplate(
+            source_rule_id="",
+            name="block example.com",
+            action="block",
+            target="example.com",
+            target_type="dns",
+            scope=(),
+            tag_refs=tuple(captured_refs),
+            dnsmasq_only=True,
+        ).build_create_value(updated_time=0)
+
+        assert payload["tag"] == captured_refs, f"{label} tag reference drifted"
+        # Captured as an empty scope on all three: a tag reference is the whole scope
+        # when one is present.
+        assert payload["scope"] == [], f"{label} should carry no MAC scope"
+        assert payload["type"] == "dns"
+        assert payload["dnsmasq_only"] is True
+
+
 def test_network_kind_display_name_uses_acronyms() -> None:
     """Test the network-kind display name uses acronyms, not lowercased values."""
     assert FirewallaNetworkKind.LAN.display_name == "LAN"

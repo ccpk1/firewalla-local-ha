@@ -2831,6 +2831,43 @@ Implementation note:
 
 ## Next capture targets
 
+### Rule scope — how a rule names what it applies to
+
+**Resolved (2026-10-05).** Lane B capture (`port 8833`, phone client), one
+internet-block rule created per scope in the app, then the pushed runtime diffed
+against a pre-action pull (325 → 328 rules).
+
+The `policy:create` `value` carries the scope twice, and only one of them holds
+anything for a tag-scoped rule:
+
+| Created as | `scope` | `tag` |
+| --- | --- | --- |
+| group `AV_AUDIO` | `""` | `["tag:27"]` |
+| **user `KADENS_DEVICES` (uid 32)** | `""` | **`["tag:31"]`** |
+| network `VLAN10 CORE` | `""` | `["intf:95169e6a-a7c9-4d6a-8e83-6061b4812bf2"]` |
+
+Findings:
+
+- **A user is written as its affiliated tag under the group prefix.** Selecting the
+  *user* `KADENS_DEVICES` (uid 32) produced `tag:31` — the affiliated backing tag —
+  and **not** the user id and **not** the unused `utag:` prefix. This is the same
+  substitution the flow queries require, now confirmed on the rule path.
+- **A network is `intf:` plus the network's `uuid`** from `networkConfig.interface`,
+  which is the same id the flow records carry in their `intf` field.
+- **`scope` is empty for a tag-scoped rule.** It is not a second copy of the
+  reference and not a MAC list.
+- The pushed rule echoes the reference in `tag` (singular), and omits `scope`
+  entirely. The read side already keys on `tag`, so a tag-scoped rule resolves back
+  to its group, user, or network label and kind — measured end to end by running the
+  real normalizer over the captured payload, which returned
+  `applies_to_kind = ("group",) / ("user",) / ("network",)` respectively.
+
+**Still open, and cheap to settle:** the app sent `scope` as the empty *string*
+`""`, while this integration's payload builder sends the empty *list* `[]`. Both are
+an empty scope, and nothing here shows whether the box is strict about the type —
+our create path has never been captured. One device-scoped rule create would settle
+it *and* capture the non-empty `scope` form, which is also uncaptured.
+
 ### Internet quality (ping latency / packet loss)
 
 **Resolved (2026-09-10):** The read contract is confirmed from a live pull. See
@@ -2906,9 +2943,6 @@ window is not reachable through the UI.
 
 These items remain unconfirmed and should stay visible.
 
-- whether all internet-block rules share the same `target: TAG` and
-  `type: mac` contract across other scopes such as users, networks, and other
-  groups
 - confirm the full persistent category-rule lifecycle for `Always block`,
   especially whether later off uses `policy:update`, `policy:delete`, or a mixed
   contract depending on the UI path

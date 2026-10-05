@@ -861,54 +861,55 @@ host MAC and silently discarded everything else. You could read what a rule appl
 to and not create a rule that applies to it.
 ---
 
-## 12. Capture request — the rule scope write forms
+## 12. Capture request — the rule scope write forms — **RESOLVED 2026-10-05**
 
-**What is implemented, and how strong the evidence is.** Two write forms are built
-to match the *read* side rather than a captured *write*:
+Captured (Lane B, `port 8833`, phone client). One internet-block rule created per
+scope in the app, pre-action pull diffed against the pushed runtime (325 → 328 rules).
 
-| Scope | Written as | Evidence |
-| --- | --- | --- |
-| host | `scope: [<mac>]` | `FirewallaRuleTemplate.scope` is a tuple of MACs and the payload builder already sent it. Strong. |
-| group | `tag: ["tag:<group_id>"]` | Group rules are documented in the reverse-engineering note and `get_rules` reports the same shape back. Strong. |
-| **user** | `tag: ["tag:<affiliated_tag_id>"]` | **Read side only.** The client's reader reconciles a `tag:` reference to a *user* when the id is an affiliated tag. No create capture. |
-| **network** | `tag: ["intf:<network_uuid>"]` | **Read side only.** `_resolve_tag_reference_name` handles an `intf:` prefix; no create capture. |
-| all hosts | both lists empty | `block_alarm_target` already relies on this, and it is exercised in tests. Strong. |
+| Created as | `scope` sent | `tag` sent | Read back as |
+| --- | --- | --- | --- |
+| group `AV_AUDIO` | `""` | `["tag:27"]` | `tag_refs=('tag:27',)` `applies_to_kind=('group',)` |
+| **user `KADENS_DEVICES` (uid 32)** | `""` | **`["tag:31"]`** | `tag_refs=('tag:31',)` `applies_to_kind=('user',)` |
+| network `VLAN10 CORE` | `""` | `["intf:95169e6a-…"]` | `tag_refs=('intf:…',)` `applies_to_kind=('network',)` |
 
-The repo's own note lists this as an open question: *"whether all internet-block
-rules share the same `target: TAG` and `type: mac` contract across other scopes such
-as users, networks, and other groups."*
+**Every form the implementation writes was confirmed, including the one that
+mattered.** Selecting the *user* in the app produced `tag:31` — the affiliated
+backing tag, under the `tag:` prefix — and not the user id and not `utag:32`. That
+is exactly what `_resolve_scope_identity` produces, and the read side resolves it
+back to `applies_to_kind=('user',)`, so the round-trip closes in both directions.
 
-**Why it matters that this is captured rather than assumed.** A user id is
-*accepted and answered* by the flow queries while returning nothing (measured: 0 rows
-for all 10 users, 398-578 for the affiliated tag). So an incorrect reference here
-would not error — it would create a rule that appears to exist and silently does not
-apply. `create_rule`'s previous network path is the same shape of failure.
+Two things the capture added beyond the original request:
 
-**What to capture, precisely.** On the Firewalla app, create three internet-block
-rules and capture the `policy:create` / `set item:policy` request for each:
+- **`scope` is empty for a tag-scoped rule** and the pushed rule omits it entirely,
+  echoing the reference in `tag` (singular). The read side already keys on `tag`, so
+  nothing there needed changing — verified by running the real normalizer over the
+  captured payload rather than by inspection.
+- **A discrepancy worth knowing:** the app sends the empty scope as the *string*
+  `""`, while this integration's builder sends the empty *list* `[]`. Both mean "no
+  MAC scope" and the box accepted `""`; whether it is strict about the type is
+  unknown, because **our create path has never been captured**. One device-scoped
+  rule create would settle it and capture the non-empty `scope` form, which is also
+  unseen.
 
-1. **one user** — pick a user with a known `uid` and `affiliatedTag` (the dev box has
-   `KADENS_DEVICES`, uid `…`, affiliated tag `…`), and note both ids
-2. **one network** — pick VLAN10 CORE and note its `uuid`
-3. **one group** — as a control, since that form is already trusted
+**A note on the app's own vocabulary, from the owner:** the app only offers the
+*user* `KADENS_DEVICES` for selection, never the group `KADEN's Devices`. The tag
+collection carries both — id `31` is the affiliated backing group for user uid `32` —
+which is why the write is `tag:31`. This is the same "a user is backed by a tag"
+relationship the flow work established.
 
-What the capture confirms, in order of importance:
+The test `test_rule_template_create_value_carries_the_captured_scope_forms` pins all
+three captured `tag` arrays verbatim, so the wire form is now guarded by measurement
+rather than by the read side's shape. The finding is recorded in
+`docs/REVERSE_ENGINEERING_WORKFLOW.md`, and the open question it answered is removed
+from that document's list.
 
-- whether a **user** rule sends `tag: ["tag:<affiliated_tag>"]` (our implementation)
-  or something else — `utag:`, a bare id, or a separate key
-- whether a **network** rule sends `tag: ["intf:<uuid>"]`, and whether that uuid is
-  the `networkProfiles` uuid or a different interface id
-- whether `scope` stays empty on all three, or whether a tag rule also populates it
-
-**Until then**, the tests pin the exact payload strings, so a capture that disagrees
-corrects one resolver and one set of expectations rather than requiring the design to
-be re-derived. The forms are not claimed as verified anywhere in the code or docs.
-
-### 12a. A second, smaller capture — the alarm mute network scope
+### 12b. The alarm mute network scope — still open, lower priority
 
 `_get_scope_payload` sends `p.intf.id` for a network scope. The reverse-engineering
-note documents it as a network ID and a captured flow record carries an `intf` UUID of
-the same shape, so this is better than a guess — but no mute capture with a network
-scope exists. Capturing one mute with `scope_kind: network` (before the rename) or
-`network_uuid` (after) would close it. Lower priority than 12, because that path
-already existed and is not newly written.
+note documents it as a network ID, and the rule capture above confirmed a network's
+`uuid` **is** that identifier (`intf:95169e6a-…` is VLAN10 CORE) — so the value is
+right. What is still uncaptured is the *key*: `p.intf.id` has never been seen in a
+live mute, only documented and matched by shape.
+
+One mute with a network scope would close it. Lower priority than the rule path was,
+because that code already existed and is not newly written.
