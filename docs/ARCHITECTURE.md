@@ -213,6 +213,31 @@ Rules:
   box's `lan` / `vlan` / `vpn` / `wan` distinction is real information, so
   collapsing it into the kind loses it; it belongs on a `network_kind` field.
 
+### Selecting a scope
+
+Every service that takes a scope takes it the same way, and the shape is not a matter
+of taste — it is what makes the mistakes impossible rather than merely detectable.
+
+- **Typed pairs, never a kind plus free text.** A scope is selected by `host_mac` or
+  `host_name`, `group_id` or `group_name`, `user_id` or `user_name`, `network_uuid`
+  or `network_name`. An identifier field matches identifiers and a label field matches
+  labels, which is the point: one free-text field cannot make that distinction, so it
+  will match a group id against a user's *name* and return the wrong scope's data.
+- **Exactly one, and nothing else.** None is an error and two is an error. Two fields
+  of the *same* pair is also an error, because supplying both is an ambiguous request
+  rather than a preference. One shared helper enforces it and one pair of translation
+  keys reports it, so the caller reads one sentence wherever they meet it.
+- **The wide scope is a flag, not an omission.** `all_hosts: true`. On the wire the
+  wide scope *is* an empty selection, so a selector that gets dropped by mistake would
+  silently widen a rule or a silence instead of failing. The flag means an accidental
+  global change has no representation.
+- **A user is addressed by its affiliated tag, and selected by its own id.** The tag
+  collection holds groups and users together, and a user entry's `group_id` is its
+  affiliated backing tag. A rule's user attachment is therefore written as a
+  *group-prefixed* reference to that tag — not as the user id, and not under a `utag:`
+  prefix. A group and a user are never interchangeable, so the substitution lives in
+  one resolver rather than in each service.
+
 These rules exist because they were broken twice, in opposite directions. A service
 published a user by its affiliated tag and used the protocol vocabulary for its
 target kind, making it the only surface to disagree with the watched-user entities

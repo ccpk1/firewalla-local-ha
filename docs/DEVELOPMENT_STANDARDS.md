@@ -62,6 +62,19 @@ Register boundary rule:
 - a network reports `kind: network` and carries the box's `lan`/`vlan`/`vpn`/`wan` distinction on a separate `network_kind` field rather than in the kind, because collapsing it would lose real information
 - **a published value must be accepted back as a selector.** A service that reports an id its own resolver rejects is a defect, not a limitation
 
+Scope selection rule:
+
+- every service that takes a scope takes it as a **typed pair**: `host_mac`/`host_name`, `group_id`/`group_name`, `user_id`/`user_name`, `network_uuid`/`network_name`. Never a kind enum plus a free-text target — one free-text field cannot tell an identifier from a label, so it will match a group id against a user's name
+- **exactly one** selector is required. None is an error, two is an error, and two fields of the same pair is also an error, because supplying both is ambiguous rather than a preference
+- the wide scope is a **flag**: `all_hosts: true`. Never an omission. On the wire the wide scope is an empty selection, so a dropped selector would silently widen the change instead of failing
+- **a group and a user are not interchangeable.** A user entry's `group_id` is its affiliated backing tag, and a rule addresses a user as a `tag:`-prefixed reference to that tag — not as the user id and not under a `utag:` prefix. Select a user by its own id or name; write it as its affiliated tag. Keep that substitution in one resolver rather than per service
+- enforce the rule in one shared helper so every service raises the same translation key, and validate the selection **before** resolving the config entry, so a caller mistake is reported without I/O
+
+Detail level rule:
+
+- `detail` is one vocabulary everywhere: `summary` or `full`. Not a boolean, and not `standard` or `records` alongside it
+- what "full" costs differs per service — extra fields, an extra request, or the raw record log — and that belongs in the field's description, never in a second set of value names
+
 User-facing identity rule:
 
 - when local payloads expose both a user-facing identity and an affiliated backing group or tag, prefer the user-facing identity for Home Assistant names and attributes
@@ -395,6 +408,10 @@ Review changes against these questions:
 - does the change keep entity identity stable?
 - does the change reuse the shared registry pipeline instead of introducing another ad hoc lookup path?
 - does the change introduce orphan-prone lifecycle behavior without an explicit reconciliation policy?
+- does a new service that takes a scope use the typed pairs with an explicit `all_hosts`, rather than a kind enum plus free text?
+- does a new `detail` field use the shared `summary`/`full` vocabulary?
+- is the selection validated before the config entry is resolved, so a caller mistake does not depend on loaded state?
+- does the change keep a group and a user distinguishable, given a user entry's `group_id` is its affiliated tag?
 - **does every new user-visible field, enum value, attribute key or tool parameter state which register it is in, and does a deviation from the established word name what forced it?**
 - **can a value this change publishes be passed back in as a selector?**
 - **is every value this change requests or accepts actually consumed, or is some of it accepted and then discarded?**

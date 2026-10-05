@@ -972,12 +972,12 @@ internet-quality samples (ping latency and packet loss) for one or all WANs.
 Use `firewalla_local.get_time_usage_report` to read scoped historical usage for
 one device, group, or user.
 
-- set `scope_kind` to `device`, `group`, or `user`
-- set `scope_target` to a stable id or current display label
+- select the scope with **exactly one** field: `host_mac` or `host_name`,
+  `group_id` or `group_name`, or `user_id` or `user_name`
 - provide explicit `begin`, `end`, and `granularity`
 - uses the shared report envelope
 - supports `sections`, `include=intervals`, `detail=summary`, and
-  `detail=standard`
+  `detail=full`
 
 #### Get flow report
 
@@ -986,10 +986,11 @@ actually do, and what was blocked?"* — a question neither of the other report
 services can answer, because one is scoped to a network and the other measures
 time rather than traffic.
 
-- set `scope_kind` to `device`, `group`, or `user`, and `scope_target` to a MAC,
-  id, or name for a device, a name or id for a group, or a name, user id, or
-  affiliated device-group tag for a user
+- select the scope with **exactly one** field: `host_mac` or `host_name`,
+  `group_id` or `group_name`, or `user_id` or `user_name`
 - `window_hours` defaults to 24
+- `detail=full` adds the individual flow records, which are the only place the
+  blocking rule is named; `detail=summary` returns totals and rankings
 
 **How the target is named.** The response reports the scope in the same terms the
 rest of the integration uses, so a user appears by its **user id** — matching the
@@ -1325,20 +1326,21 @@ it directly.
 
 #### Mute alarm
 
-Use `firewalla_local.mute_alarm` to create an alarm silence. The required
-`scope_kind` prevents an omitted scope from silently becoming a box-wide mute.
+Use `firewalla_local.mute_alarm` to create an alarm silence. An explicit scope
+prevents an omitted selector from silently becoming a box-wide mute.
 
 **Requires an administrator.** This action is registered as an admin-only
 service. Automations and scripts are unaffected — Home Assistant only enforces
 the check for calls made by a signed-in user, so a non-admin user cannot invoke
 it directly.
 
-- `target_type` is `alarm_type`, `domain`, or `ip`
-- for `alarm_type`, set `target_value` to the raw alarm type such as
+- `alarm_target_type` is `alarm_type`, `domain`, or `ip`
+- for `alarm_type`, set `alarm_target_value` to the raw alarm type such as
   `ALARM_GAME`; for `domain` or `ip`, provide the matching destination value or
   an `alarm_id` from which it can be resolved
-- choose `scope_kind` from `device`, `group`, `user`, `network`, or `all`; all
-  but `all` require `scope_target`
+- select the scope with **exactly one** field: `host_mac` or `host_name`,
+  `group_id` or `group_name`, `user_id` or `user_name`, `network_uuid` or
+  `network_name`, or `all_hosts: true` for every host
 - `duration` is `1h`, `today` in the Firewalla box's timezone, or `always`
 - standalone mutes can be removed by the `exception_id` returned by
   `get_alarms`; mutes created from an active alarm may also be located by its
@@ -1366,8 +1368,8 @@ service. Automations and scripts are unaffected — Home Assistant only enforces
 the check for calls made by a signed-in user, so a non-admin user cannot invoke
 it directly.
 
-- set `mode` to `this` and provide `alarm_id` to archive one alarm
-- set `mode` to `all_active` to archive every active alarm
+- provide exactly one of `alarm_id` (that alarm) or `alarm_status: active` (the
+  whole active set)
 
 #### Delete alarms
 
@@ -1379,8 +1381,8 @@ service. Automations and scripts are unaffected — Home Assistant only enforces
 the check for calls made by a signed-in user, so a non-admin user cannot invoke
 it directly.
 
-- `mode` is `this`, `all_active`, or `all_archived`; `alarm_id` is required for
-  `this`
+- provide exactly one of `alarm_id` (one alarm) or `alarm_status` (`active` or
+  `archived`)
 - set `confirm: true` to acknowledge permanent deletion
 
 ### Rule services
@@ -1417,12 +1419,18 @@ it directly.
 - provide `alarm_id` to build the block from that alarm's target and device
   scope, which records the alarm id on the new rule (this is what the assistant's
   `block_alarm_target` tool does)
-- or provide `target_type` and `target_value` explicitly, with optional
-  `scope_kind` and `scope_target` to narrow where the rule applies
+- or provide `target_type` and `target_value` explicitly, with **exactly one**
+  scope selector: `host_mac`/`host_name`, `group_id`/`group_name`,
+  `user_id`/`user_name`, `network_uuid`/`network_name`, or `all_hosts: true`
 - returns the created rule's id, which is what `delete_rule` needs to undo it
 
-This is a wide-reaching action: a rule created without a scope applies
-everywhere. Blocking a specific alarm target is the bounded case.
+This is a wide-reaching action, so the wide scope has to be asked for: there is no
+form of this call that applies everywhere by accident. Blocking a specific alarm
+target is the bounded case.
+
+A user scope is written as the user's **affiliated tag**, which the box uses to
+address a user. You still select the user by its own id or name, and `get_rules`
+reports the resulting `tag_refs` so the two round-trip.
 
 #### Pause rule
 
@@ -1434,7 +1442,7 @@ the check for calls made by a signed-in user, so a non-admin user cannot invoke
 it directly.
 
 - intended for an existing persistent rule that already exists on the box
-- provide `rule_target`
+- provide `rule_id`, which `get_rules` resolves
 - optionally provide `duration` or `resume_at`
 - if you provide neither, the rule remains paused until resumed
 
