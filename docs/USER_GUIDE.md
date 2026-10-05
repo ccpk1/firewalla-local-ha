@@ -1237,6 +1237,10 @@ it directly.
 - assign to a group with `group_name` or `group_id`, **or** to a user with
   `user_name` or `user_id`, **or** pass `clear: true` to remove the current
   assignment — provide exactly one of those
+- for `user_id`, either of a user's two ids works: the user's own id (the same one
+  the watched-user entities and the usage reports use) or its affiliated backing tag
+  (what a rule's `tag_refs` reports). Both select the same user; the write is always
+  the affiliated tag, because that is how the box addresses a user
 - **this service is destructive: your rules on that device are deleted.** This is
   the one irreversible part of the call. Assigning a device to a group or a user
   **permanently deletes the rules attached to that device**, including **enabled

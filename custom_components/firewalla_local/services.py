@@ -2441,6 +2441,29 @@ def _build_host_ip_allocation_policy_value(
     }
 
 
+def identity_aliases(user: FirewallaGroupRuntime) -> tuple[str, ...]:
+    """Return every id that addresses one user, for matching an identifier.
+
+    A user entry in the tag collection carries two ids and the box uses both for
+    different things, so a selector has to accept both:
+
+    - **`user_id`** is the user's identity -- what the watched-user entities key on
+      and what every report publishes as the user's id. This is the one a caller
+      should have.
+    - **`group_id`** is the user's *affiliated backing tag*, which is how the box
+      addresses the user on the wire. It is not the user's identity, but it is
+      reported back by the services that write it, so a caller echoing a reported
+      value needs it accepted.
+
+    Both are matched exactly, as identifiers. A name is matched separately and
+    case-folded, because a name is typed by a human rather than assigned by the box.
+    """
+    identifiers = [user.group_id]
+    if user.user_id is not None:
+        identifiers.append(user.user_id)
+    return tuple(identifiers)
+
+
 def _build_host_membership_policy_value(tag_id: str | None) -> dict[str, object]:
     """Build the membership policy payload for one host.
 
@@ -2502,8 +2525,13 @@ def _resolve_membership_target(
     is_group_target = bool(group_selectors)
     wanted_kind = _MEMBERSHIP_KIND_GROUP if is_group_target else _MEMBERSHIP_KIND_USER
     wanted_value = cast(str, group_name or group_id or user_name or user_id)
-    wanted_id = group_id if is_group_target else user_id
     wanted_name = group_name if is_group_target else user_name
+    # The identifier means something different by kind. A group is addressed by its own
+    # tag id. A user carries two ids -- `user_id` is the user's identity, `group_id` is
+    # its affiliated backing tag -- so both are accepted. Matching `user_id` against
+    # `group_id` alone, as this did, rejected the user's own id and accepted only the
+    # tag, which is the opposite of what every other surface publishes as a user's id.
+    wanted_id = group_id if is_group_target else user_id
 
     candidates = [
         group
@@ -2513,11 +2541,13 @@ def _resolve_membership_target(
 
     if wanted_id is not None:
         exact = next(
-            (group for group in candidates if group.group_id == wanted_id), None
+            (group for group in candidates if wanted_id in identity_aliases(group)),
+            None,
         )
         if exact is not None:
             return exact
-    elif wanted_name is not None:
+
+    if wanted_name is not None:
         matches = list(
             match_names(
                 wanted_name, ((group.group_id, (group.name,)) for group in candidates)
@@ -4758,8 +4788,11 @@ def _resolve_scope_identity(
     **A group and a user are not interchangeable.** The tag collection holds both, and
     a user entry's `group_id` is its *affiliated backing tag* rather than a group. The
     box addresses a user by that affiliated tag, not by the user id, so the id returned
-    here for a user is deliberately the affiliated tag. Matching is still on the user's
-    own id or name, because that is what a caller has.
+    here for a user is deliberately the affiliated tag. Matching is on the user's own
+    id or name -- what a caller has -- **and** on the affiliated tag, because that is
+    what the services which write a tag-scoped rule report back. Accepting it is the
+    round-trip rule, not a convenience: a caller echoing `tag_refs` from `get_rules`
+    must be able to select what it was told.
     """
     if selection.field == SERVICE_FIELD_ALL_HOSTS:
         return FirewallaScopeIdentity(kind="all")
@@ -4788,18 +4821,24 @@ def _resolve_scope_identity(
         raise _rule_scope_error(match, selection=selection)
 
     if selection.kind == "user":
+        users = [
+            group
+            for group in entry.runtime_data.integration_manager.get_groups()
+            if group.kind == _MEMBERSHIP_KIND_USER and group.user_id is not None
+        ]
         match = _match_scope_selection(
             selection,
             (
-                (group.user_id, (group.name,))
-                for group in entry.runtime_data.integration_manager.get_groups()
-                if group.kind == _MEMBERSHIP_KIND_USER and group.user_id is not None
+                # The user's own name, plus its affiliated tag as an identifier the
+                # caller may be echoing from a rule this service previously created.
+                (cast(str, group.user_id), (group.name, group.group_id))
+                for group in users
             ),
         )
-        if (user_id := match.resolved) is None:
+        if (resolved := match.resolved) is None:
             raise _rule_scope_error(match, selection=selection)
-        for group in entry.runtime_data.integration_manager.get_groups():
-            if group.kind == _MEMBERSHIP_KIND_USER and group.user_id == user_id:
+        for group in users:
+            if group.user_id == resolved or group.group_id == resolved:
                 return FirewallaScopeIdentity(kind="user", identifier=group.group_id)
         raise _rule_scope_error(match, selection=selection)
 

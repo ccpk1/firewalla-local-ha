@@ -68,6 +68,7 @@ Scope selection rule:
 - **exactly one** selector is required. None is an error, two is an error, and two fields of the same pair is also an error, because supplying both is ambiguous rather than a preference
 - the wide scope is a **flag**: `all_hosts: true`. Never an omission. On the wire the wide scope is an empty selection, so a dropped selector would silently widen the change instead of failing
 - **a group and a user are not interchangeable.** A user entry's `group_id` is its affiliated backing tag, and a rule addresses a user as a `tag:`-prefixed reference to that tag — not as the user id and not under a `utag:` prefix. Select a user by its own id or name; write it as its affiliated tag. Keep that substitution in one resolver rather than per service
+- **a user selector accepts both of a user's ids.** The user id is the identity; the affiliated tag is what the box is addressed by and what services report back. A selector that accepts only one of them is a defect either way: accepting only the tag rejects the id this integration publishes, and accepting only the id rejects the value it reports
 - enforce the rule in one shared helper so every service raises the same translation key, and validate the selection **before** resolving the config entry, so a caller mistake is reported without I/O
 
 Detail level rule:

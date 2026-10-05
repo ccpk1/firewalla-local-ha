@@ -231,12 +231,15 @@ of taste — it is what makes the mistakes impossible rather than merely detecta
   wide scope *is* an empty selection, so a selector that gets dropped by mistake would
   silently widen a rule or a silence instead of failing. The flag means an accidental
   global change has no representation.
-- **A user is addressed by its affiliated tag, and selected by its own id.** The tag
-  collection holds groups and users together, and a user entry's `group_id` is its
+- **A user is addressed by its affiliated tag, and selected by either of its ids.** The
+  tag collection holds groups and users together, and a user entry's `group_id` is its
   affiliated backing tag. A rule's user attachment is therefore written as a
   *group-prefixed* reference to that tag — not as the user id, and not under a `utag:`
   prefix. A group and a user are never interchangeable, so the substitution lives in
-  one resolver rather than in each service.
+  one resolver rather than in each service. **A user selector accepts both ids**: the
+  user id, because that is the identity every surface publishes, and the affiliated
+  tag, because that is what the services which write it report back. A selector that
+  accepts only one of the two is broken in one direction or the other.
 
 These rules exist because they were broken twice, in opposite directions. A service
 published a user by its affiliated tag and used the protocol vocabulary for its

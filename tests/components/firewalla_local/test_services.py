@@ -4828,6 +4828,28 @@ async def _call_set_host_membership(
             False,
             id="user_by_name_writes_the_backing_tag",
         ),
+        pytest.param(
+            # The user's own id, which is what every other surface publishes as a
+            # user's identity -- the watched-user entity unique id, the usage report's
+            # `target_id`, and the flow report's `target.id`. It has to select the user
+            # here too, and the write is still the affiliated tag.
+            {SERVICE_FIELD_USER_ID: "21"},
+            "10",
+            "user",
+            "KADEN",
+            False,
+            id="user_by_its_own_id_writes_the_backing_tag",
+        ),
+        pytest.param(
+            # The affiliated tag, accepted because it is a value the caller may be
+            # echoing from a rule this integration created or from `tag_refs`.
+            {SERVICE_FIELD_USER_ID: "10"},
+            "10",
+            "user",
+            "KADEN",
+            False,
+            id="user_by_its_affiliated_tag",
+        ),
     ],
 )
 async def test_set_host_membership_writes_the_resolved_tag(
@@ -8721,13 +8743,23 @@ async def _create_rule_template(
             id="group-by-name",
         ),
         pytest.param(
-            # The affiliated tag `10`, NOT the user id `21`. The box addresses a user
-            # by its affiliated tag, so writing the user id would scope the rule to
-            # nothing while looking correct.
+            # The user's own id, which is its identity everywhere else. The *write* is
+            # the affiliated tag `10`, not `21`, because that is how the box addresses
+            # a user -- so this asserts both halves: the id a caller supplies, and the
+            # reference the box receives.
             {SERVICE_FIELD_USER_ID: "21"},
             (),
             ("tag:10",),
             id="user-by-id-writes-the-affiliated-tag",
+        ),
+        pytest.param(
+            # The affiliated tag itself, accepted because it is what `get_rules`
+            # reports as `tag_refs`, so a caller echoing it back must be able to select
+            # it. Rejecting it would break the round-trip this integration requires.
+            {SERVICE_FIELD_USER_ID: "10"},
+            (),
+            ("tag:10",),
+            id="user-by-affiliated-tag",
         ),
         pytest.param(
             {SERVICE_FIELD_USER_NAME: "KADEN"},
@@ -8811,6 +8843,38 @@ async def test_create_rule_requires_exactly_one_scope(
             blocking=True,
             return_response=True,
         )
+
+    assert err.value.translation_key == expected_key
+
+
+@pytest.mark.parametrize(
+    ("data", "expected_key"),
+    [
+        # `12` is a plain group's tag, so a user selector naming it must fail.
+        # Accepting the affiliated tag must not open the door to accepting a group tag
+        # as a user -- the candidate list is still filtered to users.
+        pytest.param(
+            {SERVICE_FIELD_USER_ID: "12"}, "rule_scope_not_found", id="group-tag"
+        ),
+        pytest.param(
+            {SERVICE_FIELD_USER_ID: "9999"}, "rule_scope_not_found", id="unknown-id"
+        ),
+    ],
+)
+async def test_create_rule_rejects_a_user_id_that_is_not_a_user(
+    hass: HomeAssistant,
+    data: dict[str, object],
+    expected_key: str,
+) -> None:
+    """Test the user selector stays scoped to users while accepting its two ids.
+
+    Widening the user branch to accept the affiliated tag is safe only because the
+    candidates are still filtered to `kind == "user"`. Without that filter a group tag
+    would resolve as a user, which is the cross-kind mistake the selector split exists
+    to prevent.
+    """
+    with pytest.raises(ServiceValidationError) as err:
+        await _create_rule_template(hass, **data)
 
     assert err.value.translation_key == expected_key
 
