@@ -70,13 +70,11 @@ _RULE_MATCH_KIND_CATEGORY: Final = "category"
 _RULE_MATCH_KIND_OTHER: Final = "other"
 
 _RULE_TARGET_LIST_PREFIX: Final = "TL-"
-_RULE_TARGET_TAG: Final = "TAG"
 _RULE_TARGET_TYPE_CATEGORY: Final = "category"
 _RULE_TARGET_TYPE_COUNTRY: Final = "country"
 _RULE_TARGET_TYPE_DNS: Final = "dns"
 _RULE_TARGET_TYPE_IP: Final = "ip"
 _RULE_TARGET_TYPE_LOCAL_PORT: Final = "localPort"
-_RULE_TARGET_TYPE_MAC: Final = "mac"
 _RULE_TARGET_TYPE_NETWORK: Final = "network"
 _RULE_TARGET_TYPE_REMOTE_PORT: Final = "remotePort"
 
@@ -476,7 +474,7 @@ def _build_group_policy_controls(
 
 def _build_rule_matching_info(rule: FirewallaPolicyRule) -> RuleMatchingInfo:
     """Classify the matching object shape for one rule."""
-    if rule.target_type == _RULE_TARGET_TYPE_MAC and rule.target == _RULE_TARGET_TAG:
+    if rule.is_tag_scoped:
         kind = _RULE_MATCH_KIND_INTERNET_SCOPE
     elif rule.target.startswith(_RULE_TARGET_LIST_PREFIX):
         kind = _RULE_MATCH_KIND_TARGET_LIST

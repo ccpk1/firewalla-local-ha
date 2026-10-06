@@ -1539,6 +1539,21 @@ class FirewallaPolicyRule:
         return stripped_notes or None
 
     @property
+    def is_tag_scoped(self) -> bool:
+        """Return whether this rule's scope is a group or user rather than a target.
+
+        The box signals this by putting the literal ``TAG`` in ``target`` with a
+        ``mac`` target type, so the field holds either a real target or the
+        protocol's own sentinel word. Keeping the test in one place matters
+        because it was written three times in two different forms, and the
+        published payload has to distinguish the two cases rather than pass the
+        sentinel through as if it were a target.
+        """
+        return (
+            self.target_type == RULE_TARGET_TYPE_MAC and self.target == RULE_TARGET_TAG
+        )
+
+    @property
     def alarm_id(self) -> str | None:
         """Return the alarm that created this rule, if it was created from one.
 
@@ -2022,7 +2037,7 @@ def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:
 
     applicability = f" for {', '.join(rule.applies_to)}" if rule.applies_to else ""
 
-    if rule.target_type == RULE_TARGET_TYPE_MAC and rule.target == RULE_TARGET_TAG:
+    if rule.is_tag_scoped:
         if rule.target_name:
             return f"{rule.action} internet for {rule.target_name}"
         return f"{rule.action} internet{applicability}"

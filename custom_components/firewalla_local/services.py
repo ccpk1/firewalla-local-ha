@@ -933,11 +933,18 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
         "action": rule.action,
         "enabled": rule.enabled,
         "is_paused": rule.is_paused,
-        "target": rule.target,
+        # A rule either targets a value or is scoped by a group/user, never both.
+        # The box signals the second case with the literal `TAG` in `target`,
+        # which is its own word and must not be published as if it were a target
+        # -- a caller cannot tell a sentinel from a host or label named `TAG`.
+        # The scope is fully described by `applies_to` / `applies_to_kind` /
+        # `tag_refs`, so `target` is absent rather than sentinel-bearing.
+        "target": None if rule.is_tag_scoped else rule.target,
         "target_name": rule.target_name,
         "target_type": rule.target_type,
         "scope": list(rule.scope),
         "applies_to": list(rule.applies_to),
+        "applies_to_kind": list(rule.applies_to_kind),
         "tag_refs": list(rule.tag_refs),
         "purpose": rule.purpose,
         "alarm_id": rule.alarm_id,

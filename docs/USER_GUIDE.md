@@ -307,6 +307,8 @@ service responses and tool results:
 | host records in `get_hosts`, the network `hosts` include, `get_network_segment_usage` and `get_time_usage_report` | `ip_address` | `host_ip` |
 | `get_network_segment_report` `sections.configuration` | `kind` | `network_kind` |
 | `get_network_segment_report` `sections.configuration` | `type` | `interface_type` |
+| `get_rules` (tag-scoped rules only) | `target: "TAG"` | `target: null` — read `applies_to` / `applies_to_kind` / `tag_refs` instead |
+| `get_rules` | *(absent)* | `applies_to_kind` added — names what each `applies_to` entry is (`group` / `user` / `network`) |
 | `set_host_group` / `set_host_user` and the group/journal variant | `device_rules.removed` | `host_rules.removed` |
 
 **The watched-device `ip_address` attribute is now `host_ip`** on the entity as well

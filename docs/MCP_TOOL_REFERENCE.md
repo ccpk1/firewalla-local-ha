@@ -442,8 +442,18 @@ Reads that tell you what exists — the first step before any control action.
   reveal what the default hides.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
   `action`, `is_paused`/`enabled`, `target`/`target_type`/`target_name`, `scope`,
-  `applies_to`/`tag_refs`, `purpose`, `hit_count`/`last_hit`, and the `aid` alarm
-  back-reference when the rule was created by an alarm block.
+  `applies_to`/`applies_to_kind`/`tag_refs`, `purpose`, `hit_count`/`last_hit`, and
+  the `alarm_id` back-reference when the rule was created by an alarm block.
+  `target` is **`null` for a tag-scoped rule** rather than the box's `TAG`
+  sentinel: such a rule has no target, and its scope is fully described by
+  `applies_to` + `applies_to_kind` + `tag_refs`. Publishing the sentinel put the
+  protocol's own word where a caller expects a host, label or address it can
+  match on. For every other rule `target` is the real value — often the only
+  place it appears, since 94 of 127 rules on the dev box carry a `target` that
+  differs from `target_name` and many have no `target_name` at all.
+  `applies_to_kind` names what each `applies_to` entry is (`group`, `user`,
+  `network`), which is the field to read to tell a group rule from a user rule;
+  it is also published on the rule switch entity.
 - **Availability:** read, default-on (backed by the non-admin `get_rules` service).
 - **A rule id is not durable across a delete and re-create.** Firewalla issues a
   new `rule_id` when a rule is deleted and created again, even if the new rule is

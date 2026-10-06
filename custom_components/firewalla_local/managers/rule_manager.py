@@ -13,7 +13,6 @@ from ..const import (
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
     HIDDEN_RULE_PURPOSES,
-    RULE_TARGET_TAG,
 )
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from ..models import (
@@ -252,13 +251,13 @@ def build_rule_review_reasons(
         and rule.target_name is None
     ):
         reasons.append(_RULE_REVIEW_REASON_MISSING_READABLE_TARGET_NAME)
-    if rule.target == RULE_TARGET_TAG and rule.target_name is None:
+    if rule.is_tag_scoped and rule.target_name is None:
         reasons.append(_RULE_REVIEW_REASON_MISSING_TAG_TARGET_RESOLUTION)
     if (
         isinstance(raw_tags, list)
         and raw_tags
         and not rule.applies_to
-        and not (rule.target == RULE_TARGET_TAG and rule.target_name)
+        and not (rule.is_tag_scoped and rule.target_name)
     ):
         reasons.append(_RULE_REVIEW_REASON_MISSING_SCOPE_RESOLUTION)
     if rule.target.startswith(_RULE_TARGET_LIST_PREFIX):

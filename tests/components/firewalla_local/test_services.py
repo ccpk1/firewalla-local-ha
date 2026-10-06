@@ -189,6 +189,7 @@ def _snapshot(
     target_type: str = "category",
     target_name: str | None = "social",
     alarm_id: str | None = None,
+    applies_to_kind: tuple[str, ...] = ("user",),
 ) -> FirewallaRuntimeSnapshot:
     """Return one selected rule snapshot."""
     return FirewallaRuntimeSnapshot(
@@ -216,6 +217,7 @@ def _snapshot(
                 tag_refs=("tag:17",),
                 target_name=target_name,
                 applies_to=("AV_SMART_TV",),
+                applies_to_kind=applies_to_kind,
                 dnsmasq_only=True,
                 raw_update_payload={
                     "pid": rule_id,
@@ -9934,3 +9936,124 @@ async def test_network_segment_configuration_names_its_three_facets(
     # than a silent second vocabulary.
     assert "kind" not in configuration
     assert "type" not in configuration
+
+
+async def test_get_rules_names_a_tag_scoped_rule_without_the_protocol_sentinel(
+    hass: HomeAssistant,
+) -> None:
+    """Test a tag-scoped rule reports no target rather than the box's `TAG` word.
+
+    The box signals "this rule is scoped by a group or user" by putting the
+    literal `TAG` in `target` with a `mac` target type, so one field held either
+    a real target or the protocol's own sentinel. Measured on the live box: 14 of
+    127 rules are tag-scoped, and 94 carry a target that differs from
+    `target_name` -- often with no `target_name` at all -- so `target` is real
+    data that must stay. Only the sentinel is the problem, because a caller
+    cannot tell it from a host named `TAG`.
+
+    A tag-scoped rule's scope is fully described by `applies_to`,
+    `applies_to_kind` and `tag_refs`, so `target` is absent instead.
+    `applies_to_kind` is the field that was already parsed and already published
+    on the rule switch entity, but missing here.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(
+                target="TAG", target_type="mac", target_name="Quarantine"
+            ),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    rule = response["rules"][0]
+
+    assert rule["target"] is None
+    assert "TAG" not in json.dumps(rule)
+    assert rule["applies_to"] == ["AV_SMART_TV"]
+    assert rule["applies_to_kind"] == ["user"]
+    assert rule["tag_refs"] == ["tag:17"]
+    # The readable name still resolves through the tag's label.
+    assert rule["name"] == "block internet for Quarantine"
+
+
+async def test_get_rules_keeps_the_target_of_a_targeted_rule(
+    hass: HomeAssistant,
+) -> None:
+    """Test an ordinary rule still publishes its target value.
+
+    The counterpart to the sentinel case: `target` is real data for most rules, so
+    suppressing the sentinel must not suppress the field.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(target="TLX-fw-tiktok", target_name="Tiktok"),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    rule = response["rules"][0]
+
+    # `TLX-fw-tiktok` is the box's internal category id, and it is the only place
+    # that value appears -- `target_name` holds the label instead.
+    assert rule["target"] == "TLX-fw-tiktok"
+    assert rule["target_name"] == "Tiktok"
