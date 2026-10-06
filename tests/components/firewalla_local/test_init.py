@@ -1561,7 +1561,6 @@ async def test_get_runtime_inventory_service_returns_markdown(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert "# Firewalla runtime inventory" in response["markdown"]
     # Tag 10 is a user's affiliated backing tag, so it is not a plain group.
     assert response["inventory"]["summary"]["group_count"] == 0
@@ -1621,7 +1620,6 @@ async def test_get_runtime_inventory_service_uses_single_loaded_entry(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
 
 
 async def test_get_runtime_inventory_service_accepts_entry_name(
@@ -1677,7 +1675,6 @@ async def test_get_runtime_inventory_service_accepts_entry_name(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
 
 
 async def test_setup_populates_raw_payload_for_live_rule_filtering(

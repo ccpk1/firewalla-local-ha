@@ -2251,7 +2251,6 @@ async def test_run_internet_speed_test_service_returns_acknowledgement(
     assert mock_run_speed_test.await_args is not None
     assert mock_run_speed_test.await_args.args == ("wan-1",)
     assert response == {
-        "config_entry_id": entry.entry_id,
         "wan": {"uuid": "wan-1", "name": "WAN-ONE"},
         "command": {
             "item": "runInternetSpeedtest",
@@ -2304,7 +2303,6 @@ async def test_get_speed_test_results_service_defaults_to_latest_result(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is True
     assert response["count"] == 1
     assert response["wan"] is None
@@ -2427,7 +2425,6 @@ async def test_get_internet_quality_report_service_returns_latest_sample(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is True
     assert response["count"] == 1
     assert response["wan"] is None
@@ -2619,7 +2616,6 @@ async def test_wake_host_service_returns_acknowledgement_for_host_mac(
     assert mock_wake_host.await_args.args == ("00:AA:BB:CC:DD:26",)
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "target": {
             "kind": "host",
@@ -3010,7 +3006,6 @@ async def test_delete_host_service_deletes_single_host_and_returns_success(
     assert mock_delete_host.await_args.args == ("00:AA:BB:CC:DD:26",)
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "command": {"item": "host:delete"},
         "results": [{"host_mac": "00:aa:bb:cc:dd:26", "status": "success"}],
@@ -3070,7 +3065,6 @@ async def test_delete_host_service_handles_multi_host_and_skips_unmatched(
     assert mock_delete_host.await_args.args == ("00:AA:BB:CC:DD:26",)
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "command": {"item": "host:delete"},
         "results": [
@@ -3140,7 +3134,6 @@ async def test_set_host_notify_when_next_online_returns_acknowledgement(
     )
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "target": {
             "kind": "host",
@@ -3287,7 +3280,6 @@ async def test_set_host_name_returns_acknowledgement_for_host_mac(
     )
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "target": {
             "kind": "host",
@@ -3426,7 +3418,6 @@ async def test_set_host_dns_hostname_returns_acknowledgement_for_host_mac(
     )
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "target": {
             "kind": "host",
@@ -3509,7 +3500,6 @@ async def test_set_host_device_type_returns_acknowledgement_for_host_mac(
     )
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "target": {
             "kind": "host",
@@ -3585,10 +3575,8 @@ async def test_sync_runtime_reports_snapshot_time(hass: HomeAssistant) -> None:
 
     assert mock_refresh.await_count == 1
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert response["synced"] is True
     assert set(response) == {
-        "config_entry_id",
         "synced",
         "synced_at",
         "synced_at_timestamp",
@@ -5316,7 +5304,6 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
     )
     assert response is not None
     assert response == {
-        "config_entry_id": entry.entry_id,
         "refreshed": False,
         "target": {
             "kind": "host",
@@ -6497,7 +6484,6 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_when_req
 
     assert mock_get_monthly.await_count == 1
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is True
     assert response["target"] == {
         "kind": "network",
@@ -6875,7 +6861,6 @@ async def test_get_network_segment_report_service_returns_configuration_report(
         "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204"
     }
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is False
     assert response["target"] == {
         "kind": "network",
@@ -7189,7 +7174,6 @@ async def test_get_network_segment_usage_service_returns_summary_report(
         "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204"
     }
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert response["refreshed"] is False
     assert response["target"] == {
         "kind": "network",
@@ -7239,12 +7223,12 @@ async def test_get_network_segment_usage_service_returns_summary_report(
                 "host_id": "00:AA:BB:CC:DD:26",
                 "host_name": "Plex Server",
                 "ip_address": "192.168.10.10",
-                "conn": 0,
-                "dns": None,
-                "dns_blocked": None,
-                "ip_blocked": None,
-                "ip_denied": None,
-                "ntp": None,
+                "connection_count": 0,
+                "dns_count": None,
+                "blocked_dns_count": None,
+                "blocked_ip_count": None,
+                "denied_ip_count": None,
+                "ntp_count": None,
                 "download_bytes": 406504404,
                 "upload_bytes": 0,
             },
@@ -7252,12 +7236,12 @@ async def test_get_network_segment_usage_service_returns_summary_report(
                 "host_id": "0C:85:E1:B0:1D:1C",
                 "host_name": "Office Phone",
                 "ip_address": "192.168.10.44",
-                "conn": 0,
-                "dns": None,
-                "dns_blocked": None,
-                "ip_blocked": None,
-                "ip_denied": None,
-                "ntp": None,
+                "connection_count": 0,
+                "dns_count": None,
+                "blocked_dns_count": None,
+                "blocked_ip_count": None,
+                "denied_ip_count": None,
+                "ntp_count": None,
                 "download_bytes": 0,
                 "upload_bytes": 133546109,
             },
@@ -7431,12 +7415,12 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
                 "host_id": "00:AA:BB:CC:DD:26",
                 "host_name": "Plex Server",
                 "ip_address": "192.168.10.10",
-                "conn": 4,
-                "dns": None,
-                "dns_blocked": None,
-                "ip_blocked": None,
-                "ip_denied": None,
-                "ntp": None,
+                "connection_count": 4,
+                "dns_count": None,
+                "blocked_dns_count": None,
+                "blocked_ip_count": None,
+                "denied_ip_count": None,
+                "ntp_count": None,
                 "download_bytes": 406504404,
                 "upload_bytes": 40,
             },
@@ -7444,12 +7428,12 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
                 "host_id": "0C:85:E1:B0:1D:1C",
                 "host_name": "Office Phone",
                 "ip_address": "192.168.10.44",
-                "conn": 2,
-                "dns": None,
-                "dns_blocked": None,
-                "ip_blocked": None,
-                "ip_denied": None,
-                "ntp": None,
+                "connection_count": 2,
+                "dns_count": None,
+                "blocked_dns_count": None,
+                "blocked_ip_count": None,
+                "denied_ip_count": None,
+                "ntp_count": None,
                 "download_bytes": 200,
                 "upload_bytes": 133546109,
             },
@@ -7968,7 +7952,6 @@ async def test_get_wan_events_service_returns_normalized_timeline(
     # quality families above are a different thing that merely share the word.
     assert "dns" not in {entry["sub_type"] for entry in call_kwargs["filters"]}
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
     assert response["query"] == {
         "limit": 100,

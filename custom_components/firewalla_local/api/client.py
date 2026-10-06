@@ -61,7 +61,12 @@ from ..models import (
 )
 from ..utils.flow import build_flow_record
 from ..utils.network import build_network_inventory
-from ..utils.values import normalized_bool, normalized_float, normalized_int
+from ..utils.values import (
+    normalized_bool,
+    normalized_float,
+    normalized_int,
+    normalized_packet_loss_percent,
+)
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
     FirewallaApiError,
@@ -1632,7 +1637,7 @@ class FirewallaApiClient:
                     jitter_ms=self._coerce_float(
                         measurement.get(_RAW_SPEED_TEST_JITTER_KEY)
                     ),
-                    packet_loss_percent=self._coerce_float(
+                    packet_loss_percent=normalized_packet_loss_percent(
                         measurement.get(_RAW_SPEED_TEST_PACKET_LOSS_KEY)
                     ),
                     download_megabytes=self._coerce_float(
@@ -1808,7 +1813,9 @@ class FirewallaApiClient:
                         ping_latency_median_ms=median_latency,
                         ping_latency_min_ms=min_latency,
                         ping_packet_loss_percent=(
-                            round(lossrate * 100, 2) if lossrate is not None else None
+                            normalized_packet_loss_percent(round(lossrate * 100, 2))
+                            if lossrate is not None
+                            else None
                         ),
                         wan_uuid=wan_uuid if wan_uuid else None,
                     )

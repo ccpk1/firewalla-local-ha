@@ -114,6 +114,21 @@ def normalized_float(value: object) -> float | None:
     return None
 
 
+def normalized_packet_loss_percent(value: object) -> float | None:
+    """Return a packet-loss percentage, treating the box's negative sentinel as absent.
+
+    Firewalla reports ``-1`` (and ``-0.01`` as a rate) for "not measured", so a
+    live box published ``packet_loss_percent: -1.0``. A negative loss is
+    impossible, and a reader takes the number at face value -- which is how a
+    measurement that was never taken becomes a reported one. Absent is ``None``,
+    the same representation every other unmeasured value here uses.
+    """
+    percentage = normalized_float(value)
+    if percentage is None or percentage < 0:
+        return None
+    return percentage
+
+
 def normalized_string(value: object) -> str | None:
     """Return a non-empty stripped string when one is present.
 

@@ -460,6 +460,12 @@ Reads that tell you what exists — the first step before any control action.
   resolve from `get_system_overview`); `include` (`['hosts']` to add the per-network
   host list, which is absent by default); `refresh`.
 - **Returns:** read envelope — `result.networks[]` with interface, subnet, DHCP range, VLAN, `block_icmp`, host counts, and the network-level `policy` block (settings, not rules — see [Policy controls](#policy-controls)); the `hosts` section only when requested.
+  `summary.host_count` and `summary.returned_host_count` can differ, and they come
+  from **two different sources**: `host_count` is derived from this integration's
+  host inventory by interface, while the returned rows are the box's own
+  per-interface host list. The box's list omits hosts it has not seen on that
+  interface for a long time, so a quiet network reports fewer rows than its
+  inventory count.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true.
 
@@ -507,6 +513,12 @@ Reads that explain what the network is doing and how it is performing.
 - **Returns:** read envelope — `result.events[]` with type, `*_timestamp`, duration. Real
   link events only by default: the app's filter set (`wan_state`, `dualwan_state`,
   `system_reboot`), with DNS excluded and latency/loss absent entirely.
+  Two event families share this row shape, and a family fills only its own
+  fields: an interface event (`wan_state`) carries `active`/`ready`, while the
+  aggregate (`overall_wan_state`) carries `wan_type`/`wan_statuses` and leaves
+  those two null. Both carry `value`/`previous_value`/`ok_value`, where
+  `value != ok_value` is the abnormal reading — `value: 0` means down. The
+  top-level `wan` is `null` unless a single WAN was selected.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
@@ -524,7 +536,7 @@ Reads that explain what the network is doing and how it is performing.
   `begin`/`end` (or a
   period), `granularity` (`day`/`hour`), `sections` (`internet`, `app_totals`, `apps`,
   `categories`), `app_ids`, `include` (`['intervals']`), `detail` (`summary` |
-  `standard`).
+  `full`).
 - **Returns:** read envelope — `result` with internet/app/category time summaries and periods.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
@@ -583,6 +595,10 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
   raise for more stored results); `refresh`.
 - **Returns:** read envelope — `result.results[]` with `download_mbps`, `upload_mbps`, `latency_ms`, `*_timestamp`.
+  The top-level `wan` is `null` unless a single WAN was selected, because the
+  report then covers every WAN; each row names its own `wan_uuid`/`wan_name`.
+  A packet loss the box did not measure is **absent, not negative** — the box
+  sends `-1`, which is discarded rather than published as a measurement.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 

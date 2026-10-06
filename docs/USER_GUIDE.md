@@ -303,7 +303,13 @@ service responses and tool results:
 | `get_network_segment_usage` summary | `active_device_count` | `active_host_count` |
 | `get_time_usage_report` app and category rows | `devices` | `hosts` |
 | `get_time_usage_report` provenance | `apps.devices.intervals` | `apps.hosts.intervals` |
+| `get_network_segment_usage` host rows | `conn` / `dns` / `dns_blocked` / `ip_blocked` / `ip_denied` / `ntp` | `connection_count` / `dns_count` / `blocked_dns_count` / `blocked_ip_count` / `denied_ip_count` / `ntp_count` |
 | `set_host_group` / `set_host_user` and the group/journal variant | `device_rules.removed` | `host_rules.removed` |
+
+**Every response dropped its `config_entry_id` echo.** The integration instance is
+already bound to one Firewalla setup, and the value was only ever the id the caller
+passed in — so it was noise in 21 of 22 responses and absent from the 22nd. Nothing
+replaces it, because nothing can vary: a tool call reaches exactly one setup.
 
 In a flow record, `port` is the destination's port and `host_port` is the port on the
 host. `host_id` is not always a MAC: a VPN peer's id is not one. `destination_kind`

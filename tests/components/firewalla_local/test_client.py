@@ -566,7 +566,9 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
         upload_mbps=49.001976013183594,
         latency_ms=29.107863,
         jitter_ms=1.703425,
-        packet_loss_percent=-1,
+        # The box sends -1 for "not measured", so the model holds absent rather
+        # than an impossible negative loss.
+        packet_loss_percent=None,
         download_megabytes=276.21396827697754,
         upload_megabytes=60.733930587768555,
         isp="Atlantic Broadband",

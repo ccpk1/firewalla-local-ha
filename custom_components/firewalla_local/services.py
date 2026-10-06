@@ -1852,17 +1852,24 @@ def _serialize_network_metric_series(
 def _serialize_network_host_totals(
     host: FirewallaNetworkHostTotals,
 ) -> JsonObjectType:
-    """Serialize one per-host network totals row."""
+    """Serialize one per-host network totals row.
+
+    The counters are spelled out rather than carried as the rollup's own
+    abbreviations (`conn`, `dns`, `ntp`), because the same measurements are
+    published by the flow report under the descriptive names and one concept
+    must not have two names. `conn` in particular reads as either connections or
+    connected.
+    """
     return {
         "host_id": host.host_id,
         "host_name": host.host_name,
         "ip_address": host.ip_address,
-        "conn": host.conn,
-        "dns": host.dns,
-        "dns_blocked": host.dns_blocked,
-        "ip_blocked": host.ip_blocked,
-        "ip_denied": host.ip_denied,
-        "ntp": host.ntp,
+        "connection_count": host.conn,
+        "dns_count": host.dns,
+        "blocked_dns_count": host.dns_blocked,
+        "blocked_ip_count": host.ip_blocked,
+        "denied_ip_count": host.ip_denied,
+        "ntp_count": host.ntp,
         "download_bytes": host.download_bytes,
         "upload_bytes": host.upload_bytes,
     }
@@ -3223,7 +3230,6 @@ def _serialize_flow_report(
     }
 
     return {
-        "config_entry_id": entry.entry_id,
         "target": _serialize_report_target(
             FirewallaReportTarget(
                 # The caller-facing identity, in the caller's own vocabulary, so a
@@ -3313,7 +3319,6 @@ def _serialize_network_segment_report(
     host_details = _build_network_host_detail_rows(entry, view) if include_hosts else []
     dhcp_config = _build_network_dhcp_config(entry, interface_name=view.interface_name)
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -3647,7 +3652,6 @@ def _serialize_network_segment_usage(
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -4158,7 +4162,6 @@ async def _async_handle_get_runtime_inventory(call: ServiceCall) -> JsonObjectTy
     )
     LOGGER.info("Generated runtime inventory for config entry %s", entry.entry_id)
     return {
-        "config_entry_id": entry.entry_id,
         "inventory": cast(JsonObjectType, response["inventory"]),
         "markdown": cast(str, response["markdown"]),
     }
@@ -4197,7 +4200,6 @@ async def _async_handle_get_rules(call: ServiceCall) -> JsonObjectType:
         )
     ]
     return {
-        "config_entry_id": entry.entry_id,
         "rules": [_serialize_rule_summary(rule) for rule in rules],
     }
 
@@ -4492,7 +4494,6 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
     wan_entries = _build_wan_overview_entries(entry)
     mode = get_llm_tool_mode(entry.options)
     return {
-        "config_entry_id": entry.entry_id,
         "llm_access": {
             "mode": mode,
             "note": _build_llm_access_note(mode),
@@ -4574,7 +4575,6 @@ async def _async_handle_sync_runtime(call: ServiceCall) -> JsonObjectType:
     await _async_refresh_runtime_state(entry)
     updated_at = entry.runtime_data.coordinator.last_runtime_data_updated_at
     return {
-        "config_entry_id": entry.entry_id,
         "synced": True,
         "synced_at": (
             datetime.fromtimestamp(updated_at.timestamp(), UTC).isoformat()
@@ -4647,7 +4647,6 @@ async def _async_handle_create_rule(call: ServiceCall) -> JsonObjectType:
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "rule_id": new_rule_id,
         "action": template.action,
         "target": template.target,
@@ -4703,7 +4702,6 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
         ),
     )
     result: JsonObjectType = {
-        "config_entry_id": entry.entry_id,
         "alarms": [
             _serialize_alarm(
                 alarm,
@@ -5282,7 +5280,6 @@ async def _async_handle_run_internet_speed_test(call: ServiceCall) -> JsonObject
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "wan": _serialize_wan_interface(wan),
         "command": {
             "item": "runInternetSpeedtest",
@@ -5330,7 +5327,6 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -5404,7 +5400,6 @@ async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "command": {
             "item": "host:delete",
@@ -5516,7 +5511,6 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -5597,7 +5591,6 @@ async def _async_handle_set_host_notification(
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -5777,7 +5770,6 @@ async def _async_handle_host_string_mutation(
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -5893,7 +5885,6 @@ async def _async_handle_set_host_dhcp_reservation(
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -5954,7 +5945,6 @@ async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectT
     ]
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "count": len(serialized_results),
@@ -5994,7 +5984,6 @@ async def _async_handle_get_internet_quality_report(
     ]
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "count": len(serialized_samples),
@@ -6077,7 +6066,6 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
         )
 
     return {
-        "config_entry_id": entry.entry_id,
         **_serialize_usage_history_view(
             usage_history,
             time_zone=time_zone,
@@ -6313,7 +6301,6 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
     )
 
     return {
-        "config_entry_id": entry.entry_id,
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
             FirewallaReportTarget(
@@ -6567,7 +6554,6 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
 
     window_days = cast(int, call.data[SERVICE_FIELD_WINDOW_DAYS])
     return {
-        "config_entry_id": entry.entry_id,
         "wan": _serialize_wan_interface(wan) if wan is not None else None,
         "query": {
             "limit": limit,
