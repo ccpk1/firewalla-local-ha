@@ -444,6 +444,13 @@ Reads that tell you what exists — the first step before any control action.
   `action`, `is_paused`/`enabled`, `target`/`target_type`/`target_name`, `scope`,
   `applies_to`/`applies_to_kind`/`tag_refs`, `purpose`, `hit_count`/`last_hit`, and
   the `alarm_id` back-reference when the rule was created by an alarm block.
+  `is_paused` says a rule is not running; **`pause_until` says whether it will come
+  back on its own** — a timestamp means the box resumes it, `null` means it stays
+  paused until `resume_rule`. `pause_remaining_seconds` counts down the timed case.
+  Without those two, one `is_paused: true` is not actionable: a caller cannot tell
+  a self-resuming pause from an indefinite one. An indefinite pause and a rule
+  switched off in the Firewalla app are the same state, because the box keeps only
+  enabled/disabled and puts the boundary in `idleTs`.
   `target` is **`null` for a tag-scoped rule** rather than the box's `TAG`
   sentinel: such a rule has no target, and its scope is fully described by
   `applies_to` + `applies_to_kind` + `tag_refs`. Publishing the sentinel put the

@@ -190,6 +190,7 @@ def _snapshot(
     target_name: str | None = "social",
     alarm_id: str | None = None,
     applies_to_kind: tuple[str, ...] = ("user",),
+    idle_ts: object = None,
 ) -> FirewallaRuntimeSnapshot:
     """Return one selected rule snapshot."""
     return FirewallaRuntimeSnapshot(
@@ -230,6 +231,9 @@ def _snapshot(
                     # `alarm_id` is a property over this raw payload, so an
                     # alarm-created rule is one that carries `aid`.
                     **({"aid": alarm_id} if alarm_id else {}),
+                    # The resume boundary for a timed pause. Absent means the
+                    # rule is off indefinitely.
+                    **({"idleTs": idle_ts} if idle_ts is not None else {}),
                 },
             ),
         ),
@@ -10057,3 +10061,115 @@ async def test_get_rules_keeps_the_target_of_a_targeted_rule(
     # that value appears -- `target_name` holds the label instead.
     assert rule["target"] == "TLX-fw-tiktok"
     assert rule["target_name"] == "Tiktok"
+
+
+async def test_get_rules_says_whether_a_pause_will_resume_itself(
+    hass: HomeAssistant,
+) -> None:
+    """Test `get_rules` tells a timed pause apart from an indefinite one.
+
+    `is_paused` says a rule is not running; it does not say whether the box will
+    bring it back. Only the resume boundary does, and without it a caller reading
+    one `is_paused: true` cannot know whether to wait or to call `resume_rule`.
+
+    This is also what `pause_rule`'s own description points the model at, so the
+    two have to agree: the field it names has to exist.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    boundary = 4102444800.0  # 2100-01-01, so the countdown never reaches zero.
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(enabled=False, idle_ts=boundary),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        timed = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert timed is not None
+    rule = timed["rules"][0]
+
+    assert rule["enabled"] is False
+    assert rule["is_paused"] is True
+    assert rule["pause_until"] == datetime.fromtimestamp(boundary, UTC).isoformat()
+    assert rule["pause_remaining_seconds"] is not None
+
+
+async def test_get_rules_reports_no_resume_boundary_for_an_indefinite_pause(
+    hass: HomeAssistant,
+) -> None:
+    """Test an indefinite pause reports no boundary, which is what makes it indefinite.
+
+    The same state the app's plain "off" produces: the box keeps enabled/disabled
+    and only a timed pause populates the resume boundary.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(enabled=False, idle_ts=""),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        indefinite = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert indefinite is not None
+    rule = indefinite["rules"][0]
+
+    assert rule["enabled"] is False
+    assert rule["is_paused"] is True
+    assert rule["pause_until"] is None
+    assert rule["pause_remaining_seconds"] is None

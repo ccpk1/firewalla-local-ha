@@ -1,5 +1,7 @@
 """Tests for Firewalla Local model helpers."""
 
+import pytest
+
 from custom_components.firewalla_local.models import (
     FirewallaAlarm,
     FirewallaNetworkKind,
@@ -452,3 +454,61 @@ def test_supports_rule_switch_excludes_firewall_rules() -> None:
     )
 
     assert supports_rule_switch(rule) is False
+
+
+@pytest.mark.parametrize(
+    (
+        "enabled",
+        "idle_ts",
+        "expected_paused",
+        "expected_pause_until",
+        "expects_countdown",
+    ),
+    [
+        pytest.param(True, None, False, None, False, id="enabled"),
+        pytest.param(False, "", True, None, False, id="indefinite_pause"),
+        pytest.param(False, 4102444800.0, True, 4102444800.0, True, id="timed_pause"),
+    ],
+)
+def test_is_paused_covers_timed_and_indefinite_pauses(
+    enabled: bool,
+    idle_ts: object,
+    expected_paused: bool,
+    expected_pause_until: float | None,
+    expects_countdown: bool,
+) -> None:
+    """Test a disabled rule reports paused, boundary or not.
+
+    Firewalla keeps one underlying pair of states -- a rule is enabled or it is
+    disabled -- and `idleTs` carries the boundary at which a disabled rule should
+    resume. A timed pause sets that boundary; an indefinite pause carries none,
+    which is also the shape the app's plain "off" sends.
+
+    So `is_paused` is true for both pause kinds, and `pause_until` is what
+    separates "the box will resume this" from "this stays off until resumed".
+    Before this, only a timed pause reported paused, so an indefinite pause was
+    indistinguishable from a rule that was simply off -- which is why
+    `pause_rule` had no honest way to report what it had done.
+
+    `pause_remaining_seconds` is None whenever there is no boundary, including
+    the indefinite case, where it previously asserted its way to a crash.
+    """
+    payload: dict[str, object] = {}
+    if idle_ts is not None:
+        payload["idleTs"] = idle_ts
+
+    rule = FirewallaPolicyRule(
+        rule_id="516",
+        action="block",
+        target="TLX-fw-youtube",
+        target_type="category",
+        direction="bidirection",
+        enabled=enabled,
+        purpose="firewall",
+        scope=(),
+        raw_update_payload=payload,
+    )
+
+    assert rule.is_paused is expected_paused
+    assert rule.pause_until == expected_pause_until
+    assert (rule.pause_remaining_seconds is not None) is expects_countdown

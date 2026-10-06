@@ -221,9 +221,27 @@ class PauseRuleTool(_FirewallaControlTool):
     name = format_tool_name("pause_rule")
     title = "Pause rule"
     description = (
-        "Temporarily disable one firewall rule. Resolve rule_id from "
-        "list_rules. Fully reversible: undo with resume_rule. Pausing an "
-        "already-paused rule is a no-op."
+        "Pause one firewall rule, either for a set time or until it is resumed. "
+        "Resolve rule_id from list_rules. Fully reversible: `undo` is "
+        "resume_rule.\n"
+        "\n"
+        "The rule is not deleted. Firewalla disables it in place and keeps its "
+        "id, so resuming restores the same rule. Two modes:\n"
+        "- **timed** -- pass `duration` or `resume_at`. The box stores a resume "
+        "boundary and brings the rule back on its own.\n"
+        "- **indefinite** -- pass neither. The rule stays off until "
+        "resume_rule.\n"
+        "\n"
+        "Indefinite is the *same underlying state* as switching the rule off in "
+        "the Firewalla app: one disabled rule with no resume boundary. The two "
+        "are interchangeable and cannot be told apart afterwards. "
+        "`list_rules` reports both as `is_paused: true`; its `pause_until` is "
+        "what separates them -- a timestamp means the box will resume it, "
+        "`null` means it will not.\n"
+        "\n"
+        "A rule pause applies to every host the rule governs, so pausing a "
+        "group or user rule pauses it for all of that group's or user's hosts. "
+        "Allow a short delay before the change takes effect on the wire."
     )
     parameters = vol.Schema(
         {
@@ -266,7 +284,7 @@ class PauseRuleTool(_FirewallaControlTool):
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
             if rule is not None:
                 before = {"enabled": rule.enabled, "is_paused": rule.is_paused}
-                if rule.is_paused or not rule.enabled:
+                if rule.is_paused:
                     return self._result(
                         status="already_in_state",
                         changed=False,
@@ -292,8 +310,19 @@ class ResumeRuleTool(_FirewallaControlTool):
     name = format_tool_name("resume_rule")
     title = "Resume rule"
     description = (
-        "Resume (re-enable) one firewall rule. This is the undo for pause_rule. "
-        "Resuming an already-running rule is a no-op."
+        "Resume one paused rule, clearing any resume boundary. This is the undo "
+        "for pause_rule, and it works for both a timed pause and an indefinite "
+        "one -- including a rule switched off in the Firewalla app, which is the "
+        "same state.\n"
+        "\n"
+        "Firewalla re-enables the existing rule in place rather than creating a "
+        "new one, so a rule id survives a pause/resume cycle and anything "
+        "referencing it stays valid. Resuming an already-enabled rule is a "
+        "no-op.\n"
+        "\n"
+        "After resuming, `list_rules` reports `enabled: true`, `is_paused: "
+        "false` and `pause_until: null`. Allow a short delay before the change "
+        "takes effect on the wire."
     )
     parameters = vol.Schema(
         {

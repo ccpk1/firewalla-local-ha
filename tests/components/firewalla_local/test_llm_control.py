@@ -295,7 +295,12 @@ async def test_run_internet_speed_test_reports_a_network_target(
 
 
 async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
-    """pause_rule on an already-paused rule is a no-op with no service call."""
+    """pause_rule on an already-paused rule is a no-op with no service call.
+
+    A disabled rule *is* paused -- Firewalla has one pair of states, enabled or
+    disabled, and a resume boundary is what makes a pause timed rather than
+    indefinite. So a disabled rule with no boundary reports `is_paused: true`.
+    """
     with patch(
         "custom_components.firewalla_local.api.client.FirewallaApiClient."
         "async_update_rule_control_only",
@@ -307,7 +312,7 @@ async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
     assert update_rule.await_count == 0
     assert result.data["status"] == "already_in_state"
     assert result.data["changed"] is False
-    assert result.data["before"] == {"enabled": False, "is_paused": False}
+    assert result.data["before"] == {"enabled": False, "is_paused": True}
     assert result.data["after"] == result.data["before"]
 
 

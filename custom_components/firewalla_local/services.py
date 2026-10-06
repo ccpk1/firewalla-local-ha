@@ -933,6 +933,19 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
         "action": rule.action,
         "enabled": rule.enabled,
         "is_paused": rule.is_paused,
+        # `is_paused` says a rule is not running, but not whether it will come back
+        # on its own. These two say that: a rule paused for a set time carries a
+        # boundary, and one paused indefinitely does not -- which is the same
+        # state a rule switched off in the app has, since the box keeps only
+        # enabled/disabled and puts the resume boundary in `idleTs`. Without them
+        # a caller cannot tell a self-resuming pause from one that needs
+        # `resume_rule`, so `is_paused` alone is not actionable.
+        "pause_until": (
+            datetime.fromtimestamp(rule.pause_until, UTC).isoformat()
+            if rule.pause_until is not None
+            else None
+        ),
+        "pause_remaining_seconds": rule.pause_remaining_seconds,
         # A rule either targets a value or is scoped by a group/user, never both.
         # The box signals the second case with the literal `TAG` in `target`,
         # which is its own word and must not be published as if it were a target

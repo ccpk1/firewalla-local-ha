@@ -1586,23 +1586,31 @@ class FirewallaPolicyRule:
 
     @property
     def is_paused(self) -> bool:
-        """Return whether the rule is currently in a timed paused state."""
-        if self.enabled:
-            return False
+        """Return whether the rule is paused, whether for a set time or indefinitely.
 
-        if (pause_until := self.pause_until) is None:
-            return False
+        Firewalla keeps one underlying pair of states: a rule is enabled or it is
+        disabled, and ``idleTs`` carries the boundary at which a disabled rule
+        should resume. A timed pause sets that boundary; an indefinite pause
+        carries none, which is also the shape the app's plain "off" sends -- so a
+        rule turned off in the app and a rule paused indefinitely are the same
+        state and cannot be told apart afterwards.
 
-        return pause_until > time.time()
+        So a disabled rule is paused, and :attr:`pause_until` is what separates
+        "resumes on its own" from "stays off until resumed".
+        """
+        return not self.enabled
 
     @property
     def pause_remaining_seconds(self) -> int | None:
-        """Return remaining seconds for a timed pause, if the rule is paused."""
-        if not self.is_paused:
-            return None
+        """Return seconds until an automatic resume, or ``None`` when none is set.
 
-        assert self.pause_until is not None
-        return max(0, int(self.pause_until - time.time()))
+        ``None`` covers the enabled case and the indefinite pause, where there is
+        no boundary to count down to.
+        """
+        pause_until = self.pause_until
+        if not self.is_paused or pause_until is None:
+            return None
+        return max(0, int(pause_until - time.time()))
 
     @property
     def active_time_schedule(self) -> str | None:
