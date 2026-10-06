@@ -573,7 +573,7 @@ def build_runtime_inventory_report(
     """Build a mapping report for groups, users, and normalized rules.
 
     ``hosts`` is the normalized host inventory and ``online_window_seconds`` is
-    the configured activity window, so the device counts reported here use the
+    the configured activity window, so the host counts reported here use the
     exact same online definition as the entities rather than a second one.
     """
     raw_policy_rules = payload.get(_RAW_POLICY_RULES_KEY)

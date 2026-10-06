@@ -44,7 +44,7 @@ Home Assistant entity, so the rest comes for free:
 - **Dashboards and cards.** Put box health, per-network usage, or your top
   talkers on a wall display or a phone dashboard.
 - **Automations.** React to a state or an attribute. Notify on a new alarm,
-  alert when a WAN drops, or flag a device that has gone quiet.
+  alert when a WAN drops, or flag a host that has gone quiet.
 - **History and statistics.** Entities are recorded automatically, so trends and
   charts come with them.
 - **Assist and voice.** Expose what you want and ask about it.
@@ -57,9 +57,9 @@ Home Assistant entity, so the rest comes for free:
 
 No paid service or separate app is needed to reach any of this.
 
-### Example: read the online device count over REST
+### Example: read the online host count over REST
 
-The system-status entity reports how many devices are currently online in its
+The system-status entity reports how many hosts are currently online in its
 `hosts_online` attribute. To read it from anywhere on your network, create a
 token under **Profile → Security → Long-lived access tokens**, then:
 
@@ -83,7 +83,7 @@ Open **Developer Tools → States** to copy the exact one.
 
 Services work over REST too, which is handy when you want a set of values rather
 than a single state. `get_runtime_inventory` returns a summary that includes the
-same device counts the entity reports:
+same host counts the entity reports:
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer $HA_TOKEN" -H "Content-Type: application/json" \
@@ -176,7 +176,7 @@ when either box could answer it, and with **Read and control** enabled a wrong
 guess is a real change on the wrong box. Say which box you mean, keep the tier no
 higher than your question needs, and prefer a per-box URL when you only ever ask
 about one. This is a limitation of asking one assistant to reason across two
-devices, not something the integration can resolve for you.
+hosts, not something the integration can resolve for you.
 
 Five settings are available. The default is the least disclosing option that still
 answers ordinary questions:
@@ -192,19 +192,19 @@ answers ordinary questions:
 **Why the default is Summary only.** A firewall assistant that cannot see IP
 addresses cannot answer firewall questions, so the useful tiers send real network
 detail. Summary only is the one that answers the common questions while sending
-**no device identity at all** — which makes it a defensible starting point.
+**no host identity at all** — which makes it a defensible starting point.
 
 **Be deliberate about raising it.** Anything above Summary only sends that detail
 to whichever LLM provider your assistant is connected to — a third party. That
-includes device names, IP and MAC addresses, rule and alarm detail, and your
+includes host names, IP and MAC addresses, rule and alarm detail, and your
 public IP. The higher tiers are genuinely more useful; they also hand a model a
 lot of information about your household. Use the lowest tier that answers your
 question, and lower it again when you are done.
 
-Some fields are more sensitive than a device name on your LAN:
+Some fields are more sensitive than a host name on your LAN:
 
 - **Your public IP** (`get_speed_tests`, `get_wan_events`) identifies your
-  household on the internet, not just a device on your network.
+  household on the internet, not just a host on your network.
 - **External endpoint detail** (`get_alarms`) can include a remote IP address and
   approximate location for the third party involved in an alarm.
 
@@ -297,10 +297,18 @@ service responses and tool results:
 | `get_network_segment_report` host rows | `device_type` | `host_device_type` |
 | `get_network_segment_report` summary | `device_host_count` | *(removed — it duplicated `host_count`)* |
 | `get_flow_report` member and record rows | `device_id` / `device_name` / `device_ip` / `device_ids` | `host_id` / `host_name` / `host_ip` / `host_ids` |
+| `get_flow_report` `destination_kind` | `"device"` (a LAN peer) | `"peer"` |
+| `get_system_overview` sections | `devices` / `vpn_devices` | `hosts` / `vpn_hosts` |
+| `get_network_segment_usage` section and provenance | `devices` | `hosts` |
+| `get_network_segment_usage` summary | `active_device_count` | `active_host_count` |
+| `get_time_usage_report` app and category rows | `devices` | `hosts` |
+| `get_time_usage_report` provenance | `apps.devices.intervals` | `apps.hosts.intervals` |
 | `set_host_group` / `set_host_user` and the group/journal variant | `device_rules.removed` | `host_rules.removed` |
 
 In a flow record, `port` is the destination's port and `host_port` is the port on the
-host. `host_id` is not always a MAC: a VPN peer's id is not one.
+host. `host_id` is not always a MAC: a VPN peer's id is not one. `destination_kind`
+is `domain` / `host` / `ip` / `peer`, where `peer` is a LAN peer named by its id
+rather than by a name or an address.
 
 Firewalla's own payloads call these `device` (`deviceIP`, `devicePort`, `deviceTags`).
 That word is not echoed here, because in Home Assistant a *device* is a device-registry
@@ -524,7 +532,7 @@ The system-status entity exposes stable attributes such as:
 - firmware release type and DDNS
 - WAN IP summary
 - current WAN usage summary
-- total, online, and offline device counts
+- total, online, and offline host counts
 - CPU, memory, and disk summary values
 - `ports` with per-port link state, speed (Mbps), and MAC address
 - `bluetooth_mac` for the box's Bluetooth radio
@@ -590,7 +598,7 @@ The per-network attributes include:
 - VLAN ID and ethernet ports when applicable
 - IPv4/IPv6 addresses and subnets, gateway, and DNS servers
 - DHCP configuration
-- device count
+- host count
 - advanced options such as mDNS/SSDP Relay and Block ICMP
 - a compact usage summary, including current-month WAN usage where available
 - `top_talkers`: the top 5 hosts on that network ranked by combined download
@@ -608,7 +616,7 @@ dashboards. For a deeper configuration or usage drill-down, use the
 When Firewalla AP7 access points are present, the integration creates one
 status binary sensor and one toggle switch per wireless network (SSID),
 mirroring the wireless network list in the Firewalla app. Both entities attach
-to the main Firewalla box device, which is the controller of the SSIDs.
+to the main Firewalla box host, which is the controller of the SSIDs.
 
 **Control: turn a full SSID network on or off**
 
@@ -641,11 +649,11 @@ your dashboards. For a structured read of the full wireless configuration, use
 the `get_wireless_status` service; to pause or resume one SSID from an
 automation, use the `set_ssid_paused` service.
 
-## Per-AP device monitoring (AP7)
+## Per-AP host monitoring (AP7)
 
 When Firewalla AP7 access points are present, the integration creates one Home
-Assistant device per access point, linked to the main Firewalla box device as
-its parent. Each AP device carries a system-status binary sensor that reflects
+Assistant host per access point, linked to the main Firewalla box host as
+its parent. Each AP host carries a system-status binary sensor that reflects
 whether the access point is currently present in the runtime payload.
 
 The per-AP status attributes include:
@@ -658,8 +666,8 @@ The per-AP status attributes include:
 - live client count (from the switch topology)
 
 Use these entities for a per-access-point health and coverage view on your
-dashboards. The AP device name follows the Firewalla app (the source of record);
-entity IDs stay stable until you regenerate them from the Home Assistant device
+dashboards. The AP host name follows the Firewalla app (the source of record);
+entity IDs stay stable until you regenerate them from the Home Assistant host
 management screen.
 
 > Note: per-AP `pauseWifi` is surfaced as a read-only attribute today. It is
@@ -667,9 +675,9 @@ management screen.
 > separate, deferred surface. The per-SSID toggle switches (documented in the
 > previous section) provide global wireless control across all APs.
 
-## Watched-device monitoring
+## Watched-host monitoring
 
-Watched devices are opt-in. After selecting devices in the options flow, the
+Watched hosts are opt-in. After selecting hosts in the options flow, the
 integration creates one watched-device binary sensor per selected Firewalla
 host identity.
 
@@ -679,18 +687,18 @@ host identity.
 
 - each watched-device entity exposes a connectivity-style online or offline
   state
-- attributes include local IP address, device group, network name, connection
+- attributes include local IP address, host group, network name, connection
   type when available, upload and download totals, and last activity time
-- when the current switch topology places the device on an AP7 access point,
+- when the current switch topology places the host on an AP7 access point,
   the entity also exposes conditional WiFi attributes:
   - `topology_connection_type` — `wired` or `wireless`
   - for wireless connections only: `wifi_ssid`, `wifi_band`, `wifi_rssi`, and
     `wifi_ap` (the access-point name it is attached to)
-- if a selected device disappears from the current Firewalla payload, the
+- if a selected host disappears from the current Firewalla payload, the
   entity remains in Home Assistant and becomes unavailable instead of being
   silently removed
 
-The integration always requests the full host inventory, including devices the
+The integration always requests the full host inventory, including hosts the
 Firewalla app would only show with its "Show past devices" setting enabled
 (devices that have not been online in the past 7 days). A watched device that
 is present but inactive is therefore reported as offline rather than removed
@@ -708,8 +716,8 @@ integration creates one watched-user sensor per selected Firewalla user.
   `internetTimeUsageToday.totalMins` field when the local payload exposes it
 - if the payload omits a total counter, the integration falls back to the
   available per-app totals instead of inventing a separate value
-- attributes include associated device group when present, associated device
-  names, associated device count, unique usage minutes today, per-app usage
+- attributes include associated host group when present, associated host
+  names, associated host count, unique usage minutes today, per-app usage
   totals, and a manager-derived `last_active` value based on associated hosts
 - `unique_usage_today` remains separate because Firewalla exposes it as a
   distinct raw field and it is not guaranteed to equal the primary total
@@ -719,7 +727,7 @@ integration creates one watched-user sensor per selected Firewalla user.
   remains in Home Assistant and becomes unavailable instead of being silently
   removed
 
-## Device-tracker monitoring
+## Host-tracker monitoring
 
 Device trackers are opt-in. After selecting eligible devices in the options
 flow, the integration creates one Home Assistant `device_tracker` entity per
@@ -727,14 +735,14 @@ selected MAC-backed LAN client.
 
 - each selected device tracker creates a distinct tracked-client device in Home
   Assistant and links it back to the primary Firewalla router device
-- the tracker entity is attached to that tracked-client device and uses the
+- the tracker entity is attached to that tracked-client host and uses the
   standard router-tracker states `home`, `not_home`, or unavailable
 - the tracker friendly name follows Home Assistant's translated sub-entity
-  pattern as `<device name> Presence`
+  pattern as `<host name> Presence`
 - entity IDs are stable at creation and are not auto-regenerated when the
-  device is renamed; if you want an entity ID to reflect a new device name,
-  regenerate it manually from the Home Assistant device management screen
-- attributes include IP address, device group, network name, connection type,
+  host is renamed; if you want an entity ID to reflect a new host name,
+  regenerate it manually from the Home Assistant host management screen
+- attributes include IP address, host group, network name, connection type,
   and last-active time when those values are available in the current runtime
   snapshot
 - only MAC-backed LAN clients are eligible for device trackers
@@ -744,32 +752,32 @@ selected MAC-backed LAN client.
   the tracker remains in Home Assistant and becomes unavailable instead of
   being silently removed
 
-### Device-tracker timing behavior
+### Host-tracker timing behavior
 
 - device trackers use their own away window setting in the options flow
 - this away window answers **presence** — "is it home" — and is separate from
   the watched-device online window, which answers **connectivity** — "is it
-  connected". A device can be connected while nobody is home, so the two are
+  connected". A host can be connected while nobody is home, so the two are
   deliberately different tolerances
-- the online window is the one behind the device counters, the VPN peer counts,
+- the online window is the one behind the host counters, the VPN peer counts,
   and the device list, not only the watched-device sensors
 - the integration does not invent richer presence states beyond `home`,
   `not_home`, and unavailable
 
-The integration always requests the full host inventory, including devices the
+The integration always requests the full host inventory, including hosts the
 Firewalla app would only show with its "Show past devices" setting enabled
-(devices that have not been online in the past 7 days). A tracked client that is
+(hosts that have not been online in the past 7 days). A tracked client that is
 present but inactive is still classified by the away window, so it reports
 `not_home` rather than unavailable. Because the host remains in the inventory,
-its tracker stays associated with the client device and keeps its name.
+its tracker stays associated with the client host and keeps its name.
 
-### Device-tracker lifecycle behavior
+### Host-tracker lifecycle behavior
 
 - deselecting a device tracker removes the integration-managed tracker entity
-  and tracked-client device for that config entry
+  and tracked-client host for that config entry
 - reloading or temporarily unloading the config entry preserves the registry
-  identity so the tracker and tracked-client device come back with the same
-  entity and device identity on setup
+  identity so the tracker and tracked-client host come back with the same
+  entity and host identity on setup
 
 ## Rule-backed switches
 
@@ -819,15 +827,15 @@ returned by the `firewalla_local.get_rules` service and the AI assistant's
 
 - **`hit_count`** — how many times the rule has matched since it was created.
   Always a number: a rule with no recorded matches reads `0`
-- **`last_hit`** — the **most recent single match**: the device involved, the
+- **`last_hit`** — the **most recent single match**: the host involved, the
   destination, the port and protocol, and when it happened. `null` when there is
   no match to describe
 
 They answer two questions the integration could not answer before:
 
-- **"Why can't this device reach something?"** Find the rules governing the
-  device, then read each one's `last_hit` — you can see which rule last matched,
-  which device it was, and what it was reaching for.
+- **"Why can't this host reach something?"** Find the rules governing the
+  host, then read each one's `last_hit` — you can see which rule last matched,
+  which host it was, and what it was reaching for.
 - **"Which of my rules can I clean up?"** An enabled rule with a `hit_count` of
   `0` has no recorded matches.
 
@@ -898,15 +906,15 @@ access the exposed entity.
 #### Get system overview
 
 Use `firewalla_local.get_system_overview` for one concise, high-level summary of
-the box in a single call: appliance health, the networks with their device
-counts, counts for devices, VPN peers, groups, users, rules, and alarms, and
+the box in a single call: appliance health, the networks with their host
+counts, counts for hosts, VPN peers, groups, users, rules, and alarms, and
 per-WAN speed-test and quality metrics.
 
-- **counts and identifiers only** — no device or rule records, so the payload
+- **counts and identifiers only** — no host or rule records, so the payload
   cannot grow with the size of the network
-- `devices` and `vpn_devices` each report `total`, `online`, and `offline`;
+- `hosts` and `vpn_hosts` each report `total`, `online`, and `offline`;
   `total` is everything the box knows about, not the connected count, and
-  `vpn_devices` is a breakdown of `devices` rather than a separate population
+  `vpn_hosts` is a breakdown of `hosts` rather than a separate population
 - `include: ["identifiers"]` adds the group and user names and ids that
   `get_time_usage_report` and the rule services accept as selectors. They are
   omitted by default so the summary carries no person-level data
@@ -940,15 +948,15 @@ snapshot was taken.
   `config_entry_id`
 - requests within the coordinator's ~10 second debounce window are coalesced, so
   calling it alongside other work still costs at most one poll
-- the `Sync runtime` button on the appliance device does the same thing
+- the `Sync runtime` button on the appliance host does the same thing
 
 #### Get hosts
 
-Use `firewalla_local.get_hosts` to read the Firewalla host (device)
+Use `firewalla_local.get_hosts` to read the Firewalla host (host)
 records: identity, IP, device type, kind, group membership, and connectivity.
 
 - **Filters run on the box**, so narrow the result instead of listing every
-  device: `host_name` (substring), `host_mac`, `group_name`, `kind`,
+  host: `host_name` (substring), `host_mac`, `group_name`, `kind`,
   `network_uuid`, `online`, and `user`
 - `detail` defaults to `summary`, which omits the derivable `dns_fqdn`, the
   unreliable `dhcp_name`, and the nested `ip_assignment` (its useful parts are
@@ -958,10 +966,10 @@ records: identity, IP, device type, kind, group membership, and connectivity.
 - MAC-backed hosts appear as `kind=mac_host`; non-MAC pseudo-hosts (VPN peers)
   appear as `kind=pseudo_host` and have no MAC, so they cannot be passed to host
   actions that take one
-- `online` uses the same activity-window definition as the device counts on the
+- `online` uses the same activity-window definition as the host counts on the
   system-status sensor, so the two never disagree
 - `group_name` is the key for rule lookup: pass it to
-  `get_rules` as `applies_to` to find the rules that govern a device
+  `get_rules` as `applies_to` to find the rules that govern a host
 
 Non-admin. For the full runtime inventory (admin-gated, much larger) use
 `get_runtime_inventory`.
@@ -974,11 +982,11 @@ oriented report for a single network segment.
 - use `network_uuid` for deterministic automations or `network_name` for
   interactive use
 - returns the full network detail in one call: kind, VLAN ID, ethernet ports,
-  IPv4/IPv6 + DHCP, DNS, advanced options (mDNS/SSDP Relay, Block ICMP), device
+  IPv4/IPv6 + DHCP, DNS, advanced options (mDNS/SSDP Relay, Block ICMP), host
   count, per-host configuration, and a compact windowed usage summary
 - uses the shared report envelope with `target`, `query`, `time_basis`,
   `summary`, `sections`, and `metadata`
-- for a deep per-device/app/series drill-down use
+- for a deep per-host/app/series drill-down use
   `firewalla_local.get_network_segment_usage` instead
 
 #### Get network segment usage
@@ -1017,7 +1025,7 @@ internet-quality samples (ping latency and packet loss) for one or all WANs.
 #### Get time usage report
 
 Use `firewalla_local.get_time_usage_report` to read scoped historical usage for
-one device, group, or user.
+one host, group, or user.
 
 - select the scope with **exactly one** field: `host_mac` or `host_name`,
   `group_id` or `group_name`, or `user_id` or `user_name`
@@ -1028,7 +1036,7 @@ one device, group, or user.
 
 #### Get flow report
 
-Use `firewalla_local.get_flow_report` to answer *"what did this device or group
+Use `firewalla_local.get_flow_report` to answer *"what did this host or group
 actually do, and what was blocked?"* — a question neither of the other report
 services can answer, because one is scoped to a network and the other measures
 time rather than traffic.
@@ -1048,7 +1056,7 @@ box happens to key its flow data with:
 - `target.id` is the MAC, the group id, or the user id
 
 A user is the one scope where the box needs something other than the identity: the
-flow queries key a user by the **affiliated device-group tag**, not the user id.
+flow queries key a user by the **affiliated host-group tag**, not the user id.
 That is reported honestly rather than hidden, as a resolution rather than as the
 target:
 
@@ -1099,19 +1107,19 @@ thousand rows on a busy target, so it is opt-in and paginated:
   keeps its row with no rule name and is counted in `unattributed_blocks` — an
   unattributable block is the interesting one, not one to drop
 
-**What is withheld, and why.** A group or user report can name every device in the
-group. That is not in an ordinary report by default, so per-device attribution sits
+**What is withheld, and why.** A group or user report can name every host in the
+group. That is not in an ordinary report by default, so per-host attribution sits
 behind an explicit ask:
 
 - `include: ["host_detail"]` adds the member ranking, each destination's host
-  ids, and each record's device id and address
+  ids, and each record's host id and address
 - destination hostnames and addresses are always returned — they are the report's
   subject, not identity
 - a **device** scope needs no flag, because it names nothing beyond the device you
   asked for; `metadata.applied.host_detail` is `true` either way
 - this is a **default, not a permission**. The service is non-admin, so anything it
   can return, a caller can ask for in one request; the flag keeps the household's
-  device inventory out of an ordinary report rather than restricting access
+  host inventory out of an ordinary report rather than restricting access
 
 #### Get WAN data usage
 
@@ -1219,7 +1227,7 @@ it directly.
 
 #### Set host device type
 
-Use `firewalla_local.set_host_device_type` to set one Firewalla host device
+Use `firewalla_local.set_host_device_type` to set one Firewalla host host
 type through the captured `feedback.device.detect` path.
 
 **Requires an administrator.** This action is registered as an admin-only
@@ -1272,7 +1280,7 @@ it directly.
 
 #### Set host membership
 
-Use `firewalla_local.set_host_membership` to move a device into a Firewalla
+Use `firewalla_local.set_host_membership` to move a host into a Firewalla
 group or assign it to a Firewalla user, or to clear that assignment.
 
 **Requires an administrator.** This action is registered as an admin-only
@@ -1319,7 +1327,7 @@ it directly.
 #### Delete host
 
 Use `firewalla_local.delete_host` to permanently remove one or more host
-devices from the Firewalla box. It is a destructive action and requires
+hosts from the Firewalla box. It is a destructive action and requires
 explicit acknowledgement.
 **Requires an administrator.** This action is registered as an admin-only
 service. Automations and scripts are unaffected — Home Assistant only enforces
@@ -1327,7 +1335,7 @@ the check for calls made by a signed-in user, so a non-admin user cannot invoke
 it directly.
 
 - **destructive confirmation:** you must set `confirm: true`; without it the
-  service aborts. There is no undo — the device is permanently removed and
+  service aborts. There is no undo — the host is permanently removed and
   re-adding requires it coming back online
 - **one or many hosts:** provide `host_mac` as a comma-separated list of MAC
   addresses
@@ -1452,7 +1460,7 @@ and any originating alarm.
 - optional filters: `enabled`, `action`, `target_type`, and `applies_to` (the
   group, user, or network name a rule governs)
 - `applies_to` is the value from a host's `group_name`, which is how you go from
-  a device to the rules that govern it
+  a host to the rules that govern it
 
 Non-admin.
 
@@ -1466,7 +1474,7 @@ service. Automations and scripts are unaffected — Home Assistant only enforces
 the check for calls made by a signed-in user, so a non-admin user cannot invoke
 it directly.
 
-- provide `alarm_id` to build the block from that alarm's target and device
+- provide `alarm_id` to build the block from that alarm's target and host
   scope, which records the alarm id on the new rule (this is what the assistant's
   `block_alarm_target` tool does)
 - or provide `target_type` and `target_value` explicitly, with **exactly one**
@@ -1533,7 +1541,7 @@ permanently remove a rule from Home Assistant.
 - if credentials stop working, Home Assistant can trigger reauthentication with
   a fresh QR payload
 - if the local host changes, use the integration reconfigure flow instead of
-  deleting and re-adding the device
+  deleting and re-adding the host
 
 ## Known limitations
 
@@ -1541,7 +1549,7 @@ permanently remove a rule from Home Assistant.
 - only the currently supported rule subset is exposed as switches
 - watched-device VPN state is intentionally deferred until the host-to-VPN
   mapping is proven
-- system-level online and offline device counts may use integration-derived
+- system-level online and offline host counts may use integration-derived
   aggregation when the raw payload does not expose a trustworthy aggregate
   online flag
 - watched-user totals currently rely on the proven `internetTimeUsageToday` and

@@ -1033,7 +1033,7 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 | IPv6 subnet | `item=intf` → `ipv6Subnets` | `FirewallaNetwork.ipv6_subnets` | `ipv6_subnets` |
 | Gateway | `networkProfiles[uuid].gateway`, falls back to `networkConfig.dhcp[<intf>].gateway` | `FirewallaNetwork.gateway` | `gateway` |
 | DHCP | `networkConfig.dhcp[<intf>]` (gateway, subnetMask, lease, range, nameservers, searchDomain) | `FirewallaNetwork.dhcp` | `dhcp` |
-| Device count | `hosts[]` with `host.intf == <network uuid>`, excluding the Firewalla box (`macVendor` contains `firewalla`) | `FirewallaNetwork.device_host_count` | `device_count` |
+| Device count | `hosts[]` with `host.intf == <network uuid>`, excluding the Firewalla box (`macVendor` contains `firewalla`) | `FirewallaNetwork.device_host_count` | `host_count` |
 
 ### Advanced options
 
@@ -1399,13 +1399,15 @@ no host-inventory entry at all.
 
 1. **A flow or rule-hit `device` may not resolve to the host inventory.** The join
    must tolerate that and report the id rather than dropping the record.
-2. **The rule-hit field is called `device_id`, not `device_mac`** (renamed
-   2026-10-04). On the dev box **3 of 48** rule hits (6%) held a prefixed id rather
+2. **The rule-hit field is published as `host_id`, not `device_mac`** (renamed
+   2026-10-04, then renamed again to `host_id` on 2026-10-06). On the dev box **3 of 48** rule hits (6%) held a prefixed id rather
    than a MAC, so the previous name reported
    `device_mac: "wg_peer:wWDLO7..."`. The vendor calls this a **Device ID**, and
    the field and its attribute key now match. **This renames a shipped attribute**
-   (`last_hit.device_mac` → `last_hit.device_id`, and on the rule switch
+   (`last_hit.device_mac` → `last_hit.device_id` → `last_hit.host_id`, and on the rule switch
    attributes) — a breaking change accepted while the surface is still beta.
+   The *model* field keeps the vendor's name (`FirewallaFlowRecord.device_id`); only
+   the published key says `host`, because Home Assistant already owns `device`.
 
 `is_vpn_peer` checks for `wg_peer`/`awg_peer` prefixes, which matches how peers
 are actually synthesized locally (from `wgPeers`/`awgPeers`). The published `ovpn:`
@@ -1816,10 +1818,10 @@ the field:**
 **Local findings that the published model actively misled on**, now corrected:
 
 1. **The rule-hit device field was named from an assumption, and is now
-   `device_id`.** Local measurement shows 3 of 48 live rule hits carry `wg_peer:` /
+   `host_id`** (model field `device_id`). Local measurement shows 3 of 48 live rule hits carry `wg_peer:` /
    `awg_peer:` / `if:`. The published term "Device ID" is a better description of
    the same thing, but the *finding* is local — the published model does not
-   establish it. Renamed 2026-10-04.
+   establish it. Renamed 2026-10-04, published as `host_id` 2026-10-06.
 2. **The published `hit` object is not our `lastHitFlow`.** MSP publishes
    `{count, lastHitTs, statsResetTs}`; the box stores a full 35-field flow record.
    So the published model is not evidence about the local shape, and the

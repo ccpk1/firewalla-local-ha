@@ -172,50 +172,51 @@ class _FirewallaReadTool(llm.Tool):
 
 
 class ListHostsTool(_FirewallaReadTool):
-    """List Firewalla hosts (devices) with identity and IP assignment."""
+    """List Firewalla hosts with identity and IP assignment."""
 
     name = format_tool_name("list_hosts")
     title = "List hosts"
     description = (
-        "List the devices on your Firewalla network with their name, device "
-        "type, IP address, and DNS/DHCP identity. Use it to find a host before "
+        "List the hosts on your Firewalla network with their name, host "
+        "device type (`host_device_type`), IP address, and DNS/DHCP identity. "
+        "Use it to find a host before "
         "renaming it or setting a DHCP reservation. Refreshing first polls the "
         "box and is slower than reading the last snapshot.\n"
         "\n"
         "Naming: `host_name` is the primary human-facing label and the one to "
         "match a user's words against. `dns_hostname`/`dns_domain`/`dns_fqdn` "
-        "are the DNS-facing names. `dhcp_name` is device-supplied and "
+        "are the DNS-facing names. `dhcp_name` is host-supplied and "
         "unreliable (`nvidia-shield` carries `android-66fc79bd9bb55411`) — "
-        "never use it to identify a device.\n"
+        "never use it to identify a host.\n"
         "\n"
-        "`group_name` is the device's group or user membership, and it is the "
+        "`group_name` is the host's group or user membership, and it is the "
         "key for rule lookup: pass it to `list_rules` as `applies_to` to find "
-        "the rules that govern this device. It can hold several names separated "
-        'by ", ". A device follows only the group it belongs to, so assigning '
+        "the rules that govern this host. It can hold several names separated "
+        'by ", ". A host follows only the group it belongs to, so assigning '
         "it to a group removes its own rules.\n"
         "\n"
         "Which network: every record carries `network_uuid` and `network_name`, "
-        "so a device's segment is stated rather than inferred from its IP. "
-        "`network_uuid` is also a filter if you only want one segment's devices."
+        "so a host's segment is stated rather than inferred from its IP. "
+        "`network_uuid` is also a filter if you only want one segment's hosts."
         "\n"
         "\n"
-        'VPN peers: a device with `kind: "pseudo_host"` is a VPN peer. Those '
+        'VPN peers: a host with `kind: "pseudo_host"` is a VPN peer. Those '
         "have NO MAC address (`mac` is null and `host_id` is a `wg_peer:`/"
         "`awg_peer:` identifier), so they cannot be passed to any host tool "
         "that takes a MAC. `ip_assignment` is also null for them; do not assume "
         "it is always an object.\n"
         "\n"
-        "Connectivity: `online` is whether the device is active now, and "
+        "Connectivity: `online` is whether the host is active now, and "
         "`last_active` is its last activity (epoch seconds). A peer in this list "
         "is a *configured* peer, not necessarily a connected one — several may be "
         "idle for weeks. When asked how many are connected, count `online: true` "
         "(or filter `online=true`), never the length of the list.\n"
         "\n"
-        "Past devices are included. The init request asks the box for inactive "
+        "Past hosts are included. The init request asks the box for inactive "
         "hosts (`includeInactiveHosts`), which is the same data behind the app's "
-        '"Show past devices" toggle, so a device that has not been online for '
+        '"Show past devices" toggle, so a host that has not been online for '
         "weeks still appears here with `online: false` and an old `last_active`. "
-        "A group's membership here is therefore the group's full device list, "
+        "A group's membership here is therefore the group's full host list, "
         "not just the active ones — use `online` to separate the two.\n"
         "\n"
         "This lists every host by default. Pass the filters to narrow it — a "
@@ -239,7 +240,7 @@ class ListHostsTool(_FirewallaReadTool):
                 SERVICE_FIELD_HOST_NAME,
                 description=(
                     "Optional. Substring match on the host name. Use it to find "
-                    "one device instead of listing every host."
+                    "a single host rather than listing them all."
                 ),
             ): str,
             vol.Optional(
@@ -251,13 +252,13 @@ class ListHostsTool(_FirewallaReadTool):
                 description=(
                     "Optional. Exact group name to filter by. Groups and users "
                     "are separate collections, so a user's name does not match "
-                    "here even when a device is assigned to that user."
+                    "here even when a host is assigned to that user."
                 ),
             ): str,
             vol.Optional(
                 SERVICE_FIELD_KIND,
                 description=(
-                    "Optional. 'mac_host' for a normal device, 'pseudo_host' to "
+                    "Optional. 'mac_host' for a normal host, 'pseudo_host' to "
                     "return only VPN peers."
                 ),
             ): vol.In(("mac_host", "pseudo_host")),
@@ -304,14 +305,14 @@ class ListRulesTool(_FirewallaReadTool):
         "\n"
         "`applies_to` names the groups, users or networks a rule governs, and "
         "`tag_refs` carries the matching ids. A rule with neither applies "
-        "globally. Rules do not stack by scope: once a device belongs to a group "
-        "or user, its rules come from that group or user and its device-level "
-        "rules no longer apply, so check a device's membership before concluding "
+        "globally. Rules do not stack by scope: once a host belongs to a group "
+        "or user, its rules come from that group or user and its host-level "
+        "rules no longer apply, so check a host's membership before concluding "
         "which rules cover it.\n"
         "\n"
         "`hit_count` is how many times a rule has matched and `last_hit` is its "
-        "most recent single match, with the device and destination involved. Two "
-        "uses: to troubleshoot connectivity, read the rules governing the device "
+        "most recent single match, with the host and destination involved. Two "
+        "uses: to troubleshoot connectivity, read the rules governing the host "
         "and see which one last matched it and what it was reaching for; to find "
         "cleanup candidates, look for enabled rules with a `hit_count` of 0. "
         "`hit_count` is always a number; `last_hit` is null when there is no match "
@@ -351,7 +352,7 @@ class ListRulesTool(_FirewallaReadTool):
                     "Optional. Filter to rules governing one group, user or "
                     "network name. A host's `group_name` (from list_hosts) is "
                     "the value to pass here to find the rules that govern that "
-                    "device. Matches exactly, so filter one name at a time."
+                    "host. Matches exactly, so filter one name at a time."
                 ),
             ): str,
             vol.Optional(
@@ -384,7 +385,7 @@ class GetNetworkConfigTool(_FirewallaReadTool):
     title = "Get network config"
     description = (
         "Show how a network (LAN/VLAN) is configured: addressing, gateway, DNS, "
-        "DHCP range, and ports. Use it for network structure. For per-device "
+        "DHCP range, and ports. Use it for network structure. For per-host "
         "traffic use get_network_usage.\n"
         "\n"
         "The `policy` block holds network-level Firewalla settings (`adblock`, "
@@ -393,13 +394,13 @@ class GetNetworkConfigTool(_FirewallaReadTool):
         "a `family` setting here has nothing to do with a `family` rule purpose "
         "in list_rules.\n"
         "\n"
-        "The network's device list is not included by default. Ask for it with "
-        "`include: ['hosts']` only when the user wants the devices on that "
-        "network; use list_hosts for device questions.\n"
+        "The network's host list is not included by default. Ask for it with "
+        "`include: ['hosts']` only when the user wants the hosts on that "
+        "network; use list_hosts for host questions.\n"
         "\n"
-        "Reading the counts: `summary.host_count` is the network's device count "
+        "Reading the counts: `summary.host_count` is the network's host count "
         "from the host inventory, and it is the same whether or not you ask for "
-        "the device list — it is the number to quote. `summary."
+        "the host list — it is the number to quote. `summary."
         "returned_host_count` is only present when `include: ['hosts']` is set "
         "and reports how many rows that section actually returned, which can be "
         "fewer than `host_count`."
@@ -415,10 +416,10 @@ class GetNetworkConfigTool(_FirewallaReadTool):
             vol.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
-                    "Optional. Add the network's device list with "
+                    "Optional. Add the network's host list with "
                     "`include: ['hosts']`. Those rows carry MAC addresses, "
                     "hostnames, IPs, and reservations, so ask for them only "
-                    "when the devices themselves are wanted."
+                    "when the hosts themselves are wanted."
                 ),
             ): vol.All(cv.ensure_list, [vol.In(("hosts",))]),
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
@@ -467,7 +468,7 @@ class GetNetworkUsageTool(_FirewallaReadTool):
             vol.Optional(
                 SERVICE_FIELD_TOP_N,
                 description=(
-                    "Optional. Limit how many top device/app/category ranking "
+                    "Optional. Limit how many top host/app/category ranking "
                     "rows are returned. Defaults to 5."
                 ),
             ): int,
@@ -494,7 +495,7 @@ class GetWanUsageTool(_FirewallaReadTool):
         "Answer 'how much internet data have I used?' with WAN download/upload "
         "totals. Defaults to the day and week periods, which is what this "
         "question usually means; add history only when a trend is wanted, since "
-        "it is roughly 12x the size. This is WAN totals, not per-device usage "
+        "it is roughly 12x the size. This is WAN totals, not per-host usage "
         "(see get_network_usage)."
     )
     parameters = vol.Schema(
@@ -588,15 +589,15 @@ class GetWanEventsTool(_FirewallaReadTool):
 
 
 class GetUserUsageTool(_FirewallaReadTool):
-    """Return time-based usage for one person, group, or device."""
+    """Return time-based usage for one person, group, or host."""
 
     name = format_tool_name("get_user_usage")
     title = "Get user usage"
     description = (
-        "Answer 'how much time did a person/device spend online?' with a "
+        "Answer 'how much time did a person/host spend online?' with a "
         "time-based usage report over a begin/end range. This is time (minutes), "
         "not bandwidth volume (see get_network_usage). Resolve scope from "
-        "list_hosts (for a device) or the watched-user surfaces.\n"
+        "list_hosts (for a host) or the watched-user surfaces.\n"
         "\n"
         "Every section is returned by default; pass `sections` to keep only what "
         "the question needs."
@@ -690,14 +691,14 @@ class GetUserUsageTool(_FirewallaReadTool):
 
 
 class GetFlowReportTool(_FirewallaReadTool):
-    """Return what one device, group, or user did, and what was blocked."""
+    """Return what one host, group, or user did, and what was blocked."""
 
     name = format_tool_name("get_flow_report")
     title = "Get flow report"
     description = (
-        "Answer 'what did this device or group do, and what was blocked?' with "
+        "Answer 'what did this host or group do, and what was blocked?' with "
         "traffic totals, the destinations it reached, the blocked breakdown, and "
-        "its LAN peers. Resolve scope from list_hosts (for a device) or the "
+        "its LAN peers. Resolve scope from list_hosts (for a host) or the "
         "watched-user surfaces.\n"
         "\n"
         "Coverage: this is the box's own flow data, and the box retains roughly "
@@ -897,21 +898,21 @@ class GetSystemOverviewTool(_FirewallaReadTool):
     description = (
         "Start here. Call this once at the beginning of a session for any "
         "general question about the network. It returns appliance health, the "
-        "networks with their device counts, and counts for devices, VPN peers, "
+        "networks with their host counts, and counts for hosts, VPN peers, "
         "groups, users, rules, and alarms, plus the network, group and user "
         "identifiers the other tools accept as selectors.\n"
         "\n"
-        "It returns counts and identifiers only — never device or rule records. "
-        "Use list_hosts for devices and list_rules for rules; do not answer a "
-        "per-device question from this summary. Call it once per session unless "
+        "It returns counts and identifiers only — never host or rule records. "
+        "Use list_hosts for hosts and list_rules for rules; do not answer a "
+        "per-host question from this summary. Call it once per session unless "
         "the network has changed.\n"
         "\n"
-        "Reading the counts: `devices` and `vpn_devices` each report `total` "
+        "Reading the counts: `hosts` and `vpn_hosts` each report `total` "
         "(everything known), `online` (active now), and `offline`. `total` is "
         "not the connected count — a VPN peer is *configured*, and may have been "
         'idle for weeks, so answer "how many are connected?" from `online`, '
         "never from `total`. The two sections overlap: peers are already inside "
-        "`devices`, so `vpn_devices` is a breakdown of it, not a group to add."
+        "`hosts`, so `vpn_hosts` is a breakdown of it, not a group to add."
     )
     parameters = vol.Schema(
         {
@@ -941,19 +942,19 @@ class GetSystemOverviewSummaryTool(GetSystemOverviewTool):
 
     description = (
         "Answer general questions about this Firewalla network: appliance "
-        "health, the networks with their device counts, and counts for devices, "
+        "health, the networks with their host counts, and counts for hosts, "
         "VPN peers, and alarms.\n"
         "\n"
-        "Reading the counts: `devices` and `vpn_devices` each report `total` "
+        "Reading the counts: `hosts` and `vpn_hosts` each report `total` "
         "(everything known), `online` (active now), and `offline`. `total` is "
         "not the connected count — a VPN peer is *configured*, and may have been "
         'idle for weeks, so answer "how many are connected?" from `online`, '
         "never from `total`. The two sections overlap: peers are already inside "
-        "`devices`, so `vpn_devices` is a breakdown of it, not a group to add.\n"
+        "`hosts`, so `vpn_hosts` is a breakdown of it, not a group to add.\n"
         "\n"
         "This report is intentionally limited to counts, network names, and "
-        "performance metrics — it carries no device addresses, no hardware "
-        "identifiers, and no group or user names. For device names and "
+        "performance metrics — it carries no host addresses, no hardware "
+        "identifiers, and no group or user names. For host names and "
         "addresses, rules, alarms, or usage detail, the user must raise "
         "Firewalla's AI access level in the integration options."
     )

@@ -324,7 +324,7 @@ def test_blockedness_is_tri_state_when_ltype_is_absent(
         ),
         pytest.param({"domain": "b.example"}, "domain", id="dns_match"),
         pytest.param({"ip": "1.2.3.4"}, "ip", id="ip_only"),
-        pytest.param({"dstMac": "F8:0F:F9:3B:22:2E"}, "device", id="lan_peer"),
+        pytest.param({"dstMac": "F8:0F:F9:3B:22:2E"}, "peer", id="lan_peer"),
         pytest.param({}, None, id="no_destination_at_all"),
     ],
 )
@@ -332,9 +332,9 @@ def test_a_destination_is_classified_by_the_name_it_resolved_to(
     raw_row: dict[str, object],
     expected_kind: str | None,
 ) -> None:
-    """Test host, domain, ip and a LAN peer's device id are told apart.
+    """Test host, domain, ip and a LAN peer's id are told apart.
 
-    A LAN peer is a **device id** rather than a MAC: measured, 20 of 21 live local
+    A LAN peer is a **peer id** rather than a MAC: measured, 20 of 21 live local
     records held a MAC and 1 held an `awg_peer:` id, and that id can appear in
     either `device` or `dstMac`, so the field says nothing about which side is the
     peer.
@@ -434,8 +434,8 @@ def test_an_explicit_zero_byte_total_is_kept_as_zero_not_absent() -> None:
     assert absent.total_bytes is None
 
 
-def test_a_peer_id_in_dst_mac_is_still_a_device_not_a_mac() -> None:
-    """Test an `awg_peer:` value in `dstMac` is read as a device id.
+def test_a_peer_id_in_dst_mac_is_still_a_peer_not_a_mac() -> None:
+    """Test an `awg_peer:` value in `dstMac` is read as a peer id.
 
     Measured: 1 of 21 live local records held a peer id there while the other 20
     held a MAC, and that record carried the MAC in `device` instead. So neither
@@ -451,7 +451,7 @@ def test_a_peer_id_in_dst_mac_is_still_a_device_not_a_mac() -> None:
         }
     )
 
-    assert record.destination_kind == "device"
+    assert record.destination_kind == "peer"
     assert record.destination is not None
     assert record.destination.startswith("awg_peer:")
     assert record.device_id == "02:42:0B:C8:00:28"

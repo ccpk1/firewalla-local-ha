@@ -344,7 +344,7 @@ def flow_family_direction(family: str) -> str | None:
     Only a name that actually carries a direction is answered. ``download`` /
     ``upload`` and an ``:in`` / ``:out`` suffix do; **``dnsB`` does not**, and
     returns ``None`` rather than being inferred as inbound. A DNS block is a
-    query the device made being refused, so neither reading is obviously right,
+    query the host made being refused, so neither reading is obviously right,
     and inventing one would be a guess presented as a measurement.
 
     A ``local:`` family is ``local`` even when it also carries an ``:in`` /
@@ -370,10 +370,10 @@ def _flow_record_destination(
     only an identifier and no address, which is a fourth kind rather than a
     missing name.
 
-    The kind is ``device`` and not ``mac`` because that identifier is a Firewalla
-    **device id**, and measured it is not always a MAC: of 21 live local records,
+    The kind is ``peer`` and not ``mac`` because that identifier is a Firewalla
+    **host id**, and measured it is not always a MAC: of 21 live local records,
     20 held a MAC and 1 held an ``awg_peer:`` id. ``device`` and ``dstMac`` are
-    both device ids and either can be the peer, so the field position says nothing
+    both host ids and either can be the peer, so the field position says nothing
     about which side is the peer.
     """
     host = normalized_string(raw_row.get(_RAW_FLOW_HOSTNAME_KEYS[0]))
@@ -387,7 +387,7 @@ def _flow_record_destination(
         return ip_address, "ip"
     peer_id = normalized_string(raw_row.get(_RAW_RECORD_DSTMAC_KEY))
     if peer_id is not None:
-        return peer_id, "device"
+        return peer_id, "peer"
     return None, None
 
 

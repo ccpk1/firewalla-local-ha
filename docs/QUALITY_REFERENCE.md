@@ -50,7 +50,7 @@ It is a compact reference for review and maintenance. It should stay focused on 
 ### Multi-instance contract
 
 - entity unique IDs include entry scope plus immutable object identity plus stable suffix
-- device identity remains license-anchored
+- host identity remains license-anchored
 - cleanup and signaling remain entry-scoped
 
 ### Mutation contract

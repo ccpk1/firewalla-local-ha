@@ -1157,3 +1157,77 @@ fail; restored, 761 pass.
 **Measured end state:** `grep` for a literal `device_` key in the package returns only
 `device_tracker` / `device_trackers` / `device_tracker_away_window` — the Home Assistant
 platform names, which must not move.
+
+## 16. The instructions, and four more key classes the first sweep could not see
+
+Asked to confirm whether the flow reports now return `host_name` / `host_id` or still
+say `device`. They return `host_*` — verified by running the service and searching the
+serialized response, not by reading the serializer. Measuring it also found that the
+*instructions* still said `device` 97 times against 35 `host`, while the payloads they
+describe said `host` throughout. That gap is the answer to "would the agent have to
+guess": the response was clean, and the description of the response was not.
+
+### 16a. The key inventory was incomplete, in three ways
+
+The `device_` scan that closed §15 looked for keys **starting** with `device_`. Three
+shapes slipped past it, and each was found only by asking what a *published key*
+actually is:
+
+| Shape | Missed keys |
+| --- | --- |
+| a bare word, no underscore | `devices`, `vpn_devices` on `get_system_overview`; `devices` on the network-segment usage section and its provenance; `devices` on the time-usage app and category rows |
+| a `device` prefix on a count | `active_device_count` |
+| a published **value** | `destination_kind: "device"` |
+
+So the honest count was **eight more published names**, not the eight §15 renamed. Two
+of these were internally contradictory on their own terms: `active_host_count`'s site
+sat in a summary that already had `host_count` and `known_host_count`, and
+`destination_kind` offered `host` *and* `device` as two kinds of host-shaped
+destination. The second one is why the LAN-peer kind is now `peer` — a word the record
+layer had already chosen everywhere else (`peer_id`, `local_peers`,
+`_serialize_local_peer`). The vendor never said `device` for that value; we did.
+
+### 16b. Why three sweeps produced three different classes of bug
+
+Worth recording, because each one passed a green suite before being caught:
+
+1. **The line rule rewrote code.** `for device in metric.devices` became
+   `for host in metric.hosts` — a rename of the model's field, not of prose. Fixed by
+   scoping the sweep to `tokenize` COMMENT and STRING tokens, which makes identifiers
+   untouchable by construction.
+2. **The offset math was wrong for multi-line tokens.** Slicing within the start line
+   duplicated the tail of every multi-line docstring. Fixed by splicing the whole
+   source by absolute token offsets.
+3. **Markdown has no tokenizer, so the protections have to carry it** — and they did
+   not, twice. "Settings → Devices & Services" became "Hosts & Services"; "two other
+   meanings of `device`" became "two other meanings of host"; "Device Active Protect"
+   wrapped across lines and became "Host Active Protect". Every one of those is a
+   phrase about Home Assistant's or Firewalla's own concept, and every one was fixed by
+   naming the phrase rather than the word. A prose sweep of user documentation is not
+   the same operation as a key rename, and it should not have been attempted with the
+   same tool.
+
+The lesson that generalises: **a vocabulary rule stated as "one word" still needs the
+exceptions enumerated, because the exceptions are all cases where the word belongs to
+someone else.** Home Assistant owns `device` (the registry), the vendor owns
+`device`/`deviceIP`/`deviceTags` (its wire), and the app owns "Show past devices" (its
+UI). None of those are drift.
+
+### 16c. What holds it now — a guard that reads keys, not values
+
+The §15 guard reads constant *values*, which is exactly why it could not see a literal
+key. `test_no_published_key_names_a_host_as_a_device` closes that: it walks the
+publishing modules for **dict keys and subscripts by position in the syntax**, and
+fails on any literal containing `device` that does not start with `host`. One survivor
+is allowed and asserted: `host_device_type`, which carries the prefix. A second test
+proves the scanner found real keys, so a pass cannot mean "the scanner walked nothing".
+
+Verified non-vacuous by injecting `"device_name": member.device_name` back into the
+flow member row: the guard fails naming the key, and 763 pass when it is restored.
+
+**Measured end state:** the only `device_*` literals left in the package are
+`device_tracker`, `device_trackers`, `device_tracker_away_window` — the Home Assistant
+platform names, which must not move. The tool layer reads `device` 13 times against
+`host` 216, and every one of the 13 is a named exception: `host_device_type` (5),
+Firewalla's `Device Active Protect` (1), the app's "Show past devices" (1), the
+vocabulary sections that name the word on purpose (6).

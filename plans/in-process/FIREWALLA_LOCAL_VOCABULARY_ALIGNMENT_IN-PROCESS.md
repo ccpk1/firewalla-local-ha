@@ -220,7 +220,7 @@ allowlist at the end is a failed phase, not a passing one.
 | **1** | The rule, and the machinery that enforces it | The register rule stated once in `ARCHITECTURE.md` and `DEVELOPMENT_STANDARDS.md`, the wrong `Scoped identity` section corrected, the audit published as a reference note, and a guard test whose allowlist names every current violation | Guard test added and proven to fail on a deliberately introduced violation; every current violation is in the allowlist; **no production behaviour changed** |
 | **2** | Responses: one canonical `target` | One vocabulary module; every serializer emits `kind` from it; `network_segment` retired; the network sub-kind carried as `network_kind` rather than as the kind; tool descriptions aligned | Full suite green; each service's `target` asserted against the canonical set; allowlist shrinks by the response-side entries |
 | **3** | Inputs: one selector vocabulary | Typed selector pairs everywhere; `scope_kind` removed; the `target_type` collision resolved; one shared conflict rule replacing the per-service ones; `services.yaml`, translations and tool parameters aligned | Full suite green; one test per service proving exactly-one-selector and the conflict path; allowlist shrinks by the input-side entries |
-| **4** | Entities, residual findings, and the absolute guard | Entity attribute keys and labels on the rule; the eight `device_*` payload keys removed; 4.2 closed by measurement; docs swept; **the allowlist deleted** | Full suite green with **no allowlist**; a deliberately introduced violation fails; no published key contains `device_` except the `device_tracker` platform name; `ARCHITECTURE.md` states the rule as one word plus the Home Assistant exception |
+| **4** | Entities, residual findings, and the absolute guard | Entity attribute keys and labels on the rule; every `device`-named published key and value removed; the LLM tool instructions swept; 4.2 closed by measurement; docs swept; **the allowlist deleted** | Full suite green with **no allowlist**; a deliberately introduced violation fails; no published key or value contains `device` except the `device_tracker` platform name and the host-prefixed `host_device_type`; `ARCHITECTURE.md` states the rule as one word plus the Home Assistant exception |
 
 Phases are sequential. **Phase 1 is not optional and is not documentation busywork.**
 It is the phase that makes the other three mechanical: without a written register
@@ -400,8 +400,16 @@ rule absolute.
       vendor's keys in that same row (`dstMac` → `destination_mac`, `pid` →
       `blocked_by_rule_id`). So `device_id`/`device_ip`/`device_port`, `device_name`,
       `device_ids`, `device_type`, `device_host_count` and `device_rules` were renamed
-      too, and the duplicate `device_host_count` deleted. `device_*` no longer appears in
-      any published key. Full record in the inventory note §15.
+      too, and the duplicate `device_host_count` deleted. Full record in the inventory
+      note §15.
+- [x] **4.1c Eight more published names, and the instructions.** Confirming the flow
+      reports end to end showed the payloads were clean and the *instructions describing
+      them* were not: the tool descriptions said `device` 97 times against 35 `host`
+      while the keys they describe said `host` throughout. Sweeping them found three more
+      shapes the `device_` scan had missed — the bare `devices` / `vpn_devices` sections,
+      `active_device_count`, and the `destination_kind` **value** `device`, now `peer`.
+      A new guard reads published keys by syntax position rather than by constant value,
+      which is what let all of these through. Full record in the inventory note §16.
 - [x] **4.2 Closable only by measurement, and measurement closed it.** Probed live: the
       four filters (`ethernet_state`, `ap_ethernet_state`, `ap_ethernet_speed_change`,
       `wpa_connection`) returned **zero** events over 400 days, and the unfiltered

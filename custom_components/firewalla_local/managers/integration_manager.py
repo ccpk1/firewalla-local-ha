@@ -336,7 +336,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         return await self.client.async_wake_host(host_mac)
 
     async def async_delete_host(self, host_mac: str) -> dict[str, object]:
-        """Delete one MAC-identified host device from the Firewalla inventory."""
+        """Delete one MAC-identified host from the Firewalla inventory."""
         await self.client.async_delete_host(host_mac)
         if host_manager := getattr(self.coordinator, "host_manager", None):
             host_manager.remove_host_from_index(host_mac)
@@ -369,7 +369,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         host_mac: str,
         device_type: str,
     ) -> dict[str, object]:
-        """Write one host-scoped device type through the feedback path."""
+        """Write one host device type through the feedback path."""
         return await self.client.async_set_host_device_type(host_mac, device_type)
 
     async def async_get_usage_history(
@@ -2281,7 +2281,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         *,
         include_intervals: bool,
     ) -> tuple[FirewallaUsageHistoryDeviceUsage, ...]:
-        """Build normalized device interval breakdowns from a raw mapping."""
+        """Build normalized host interval breakdowns from a raw mapping."""
         if not isinstance(raw_devices, dict):
             return ()
 

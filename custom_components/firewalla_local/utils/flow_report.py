@@ -131,7 +131,7 @@ def summarise_rollup(
 
     ``device_names`` / ``device_addresses`` are optional host-inventory lookups;
     a member whose id has no inventory entry keeps ``None``, which is the honest
-    answer for a device id that is not a host.
+    answer for an id that is not a host.
     """
     names = device_names or {}
     addresses = device_addresses or {}
@@ -262,7 +262,7 @@ def _aggregate_destinations(
 ) -> tuple[FirewallaFlowDestination, ...]:
     """Merge one byte family's rows into a destination per remote endpoint.
 
-    The same destination appears once per device **and once per address**, so the
+    The same destination appears once per host **and once per address**, so the
     rows are summed rather than deduplicated. Keying on the address would list one
     hostname several times over -- measured, 43 of 116 hosts in a single window
     resolved to more than one address -- so the hostname is the key and its
@@ -311,7 +311,7 @@ def _aggregate_blocked(
     """Merge the blocked families into one row per destination, kind and direction.
 
     Kind, direction **and address-kind** are part of the key rather than folded
-    away: "what did this device try to reach" and "what tried to reach it" are
+    away: "what did this host try to reach" and "what tried to reach it" are
     different questions, a DNS block is a different thing from an IP block, and a
     named destination is a different answer from a bare address.
     """
@@ -330,12 +330,12 @@ def _aggregate_blocked(
             remote_ip = flow_row_remote_ip(row)
             kind = _destination_kind(destination, remote_ip)
             if destination is None and remote_ip is None:
-                # A LAN peer is identified by a device id, which is not always a
+                # A LAN peer is identified by a host id, which is not always a
                 # MAC -- see `_flow_record_destination` in `utils/flow.py`.
                 peer_id = normalized_string(row.get(_RAW_ROW_DST_MAC_KEY))
                 if peer_id is None:
                     continue
-                destination, kind = peer_id, "device"
+                destination, kind = peer_id, "peer"
 
             key = (destination, kind, block_type, direction)
             entry = merged.setdefault(key, _BlockedAccumulator())
@@ -396,7 +396,7 @@ def _summarise_members(
     names: Mapping[str, str],
     addresses: Mapping[str, str],
 ) -> tuple[FirewallaFlowMember, ...]:
-    """Build the per-device ranking from the rollup's ``hosts`` block."""
+    """Build the per-host ranking from the rollup's ``hosts`` block."""
     members: list[FirewallaFlowMember] = []
     for device_id, counters in hosts.items():
         fields = {
@@ -503,12 +503,12 @@ def _counter(counters: Mapping[str, object], key: str) -> int:
 def resolve_member_devices(
     members: Iterable[FirewallaFlowMember],
 ) -> tuple[tuple[str, ...], int]:
-    """Return the device ids in a member list and how many had no name.
+    """Return the host ids in a member list and how many had no name.
 
-    A device id is not always a host: a VPN peer carries a ``wg_peer:`` prefix and
+    A host id is not always a MAC: a VPN peer carries a ``wg_peer:`` prefix and
     an interface an ``if:`` one, and neither resolves in the host inventory. The
     unresolvable count is returned so a caller can say so rather than presenting a
-    nameless device as a normal one.
+    nameless host as a normal one.
     """
     device_ids: list[str] = []
     unresolved = 0

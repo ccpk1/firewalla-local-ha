@@ -125,6 +125,14 @@ are already exact and are not the host concept — `port`, `protocol`, `apid`, `
 `app`. `device` was the one vendor word that could not be kept, so it becomes `host`
 everywhere it is published.
 
+**A published *value* follows the same rule as a published key.** `destination_kind` is
+`host` / `domain` / `ip` / `peer`; it was `host` / `domain` / `ip` / `device`, and that
+fourth one was ours rather than the vendor's — it meant a destination named by a LAN
+peer's id. `peer` is what the record layer already called it everywhere else
+(`peer_id`, `local_peers`, `_serialize_local_peer`), so the value now matches the
+vocabulary the code had already chosen, and no published value names a host as a
+`device`.
+
 Two published keys are still easy to misread once the prefix is gone, and are documented
 at their source: `host_port` is a **port on** that host rather than a host, and `host_id`
 is **not always a MAC** — a VPN peer's id is not one.

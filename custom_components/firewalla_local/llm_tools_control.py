@@ -107,19 +107,18 @@ _NON_IDEMPOTENT_ANNOTATIONS: Final = llm.ToolAnnotations(
 )
 
 _HOST_MAC_DESCRIPTION: Final = (
-    "Optional. The device's MAC address (from list_hosts). Provide this or host_name."
+    "Optional. The host's MAC address (from list_hosts). Provide this or host_name."
 )
 
 _HOST_NAME_DESCRIPTION: Final = (
-    "Optional. The device's host name. Provide this or host_mac; names must be "
-    "unique among hosts."
+    "Optional. The host's name. Provide this or host_mac; names must be "
 )
 
 # Every membership tool carries this. A membership change deletes the rules
-# attached to the device -- confirmed by two captures, for both a group and a user
+# attached to the host -- confirmed by two captures, for both a group and a user
 # target -- while leaving rules attached to a group or user untouched.
 _MEMBERSHIP_RULE_WARNING: Final = (
-    "DELETES the rules attached to this device, including rules you created, and "
+    "DELETES the rules attached to this host, including rules you created, and "
     "they cannot be restored. Rules attached to groups or users are NOT affected."
 )
 
@@ -395,7 +394,7 @@ class SetHostNameTool(_FirewallaControlTool):
     name = format_tool_name("set_host_name")
     title = "Set host name"
     description = (
-        "Rename a device. Cosmetic and fully reversible. For a DNS name use "
+        "Rename a host. Cosmetic and fully reversible. For a DNS name use "
         "set_host_dns_hostname instead."
     )
     parameters = vol.Schema(
@@ -408,7 +407,7 @@ class SetHostNameTool(_FirewallaControlTool):
             ): str,
             vol.Required(
                 SERVICE_FIELD_NEW_NAME,
-                description="Required. The new display name for the device.",
+                description="Required. The new display name for the host.",
             ): str,
         }
     )
@@ -483,12 +482,12 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
 
 
 class SetHostDeviceTypeTool(_FirewallaControlTool):
-    """Set the device-type classification for one Firewalla host."""
+    """Set the Firewalla host device type."""
 
     name = format_tool_name("set_host_device_type")
     title = "Set host device type"
     description = (
-        "Classify a device (desktop, phone, tablet, tv, …) so reports and "
+        "Classify a host (desktop, phone, tablet, tv, …) so reports and "
         "summaries make sense. Cosmetic and reversible."
     )
     parameters = vol.Schema(
@@ -501,7 +500,7 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
             ): str,
             vol.Required(
                 SERVICE_FIELD_HOST_DEVICE_TYPE,
-                description="Required. The device type to assign.",
+                description="Required. The host device type to assign.",
             ): str,
         }
     )
@@ -534,8 +533,8 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
     name = format_tool_name("set_host_dhcp_reservation")
     title = "Set host DHCP reservation"
     description = (
-        "Give a device a fixed IP address (or return it to dynamic). Pair with "
-        "list_hosts to find devices without a reservation. Strong built-in "
+        "Give a host a fixed IP address (or return it to dynamic). Pair with "
+        "list_hosts to find hosts without a reservation. Strong built-in "
         "validation rejects conflicting, in-use, or out-of-range addresses. "
         "Reversible by setting mode back to 'dynamic'."
     )
@@ -602,14 +601,14 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
 
 
 class _SetHostMembershipTool(_FirewallaControlTool):
-    """Base for the four device-membership tools.
+    """Base for the four host-membership tools.
 
-    A device holds exactly one membership, so each tool either sets that slot to
+    A host holds exactly one membership, so each tool either sets that slot to
     a group or a user, or clears it. All four are destructive, because a
-    membership change deletes the rules attached to the device: two captures on
-    the dev box show the app sending `policy:delete` for every rule the device
+    membership change deletes the rules attached to the host: two captures on
+    the dev box show the app sending `policy:delete` for every rule the host
     owned, then the tags write, in one batch. Rules attached to a group or a user
-    are not affected, including the user the device is leaving.
+    are not affected, including the user the host is leaving.
     """
 
     annotations = _DESTRUCTIVE_ANNOTATIONS
@@ -622,7 +621,7 @@ class _SetHostMembershipTool(_FirewallaControlTool):
         tool_input: llm.ToolInput,
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
-        """Set or clear one device's membership."""
+        """Set or clear one host's membership."""
         args = self._args(tool_input)
         target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, args)
@@ -646,7 +645,7 @@ class _SetHostMembershipTool(_FirewallaControlTool):
         count = len(removed)
         noun = "rule" if count == 1 else "rules"
         return [
-            f"Deleted {count} {noun} attached to this device (ids: "
+            f"Deleted {count} {noun} attached to this host (ids: "
             f"{', '.join(str(rule_id) for rule_id in removed)}). "
             "They cannot be restored."
         ]
@@ -657,13 +656,13 @@ class _SetHostMembershipTool(_FirewallaControlTool):
 
 
 class SetHostGroupTool(_SetHostMembershipTool):
-    """Assign a device to one Firewalla group."""
+    """Assign a host to one Firewalla group."""
 
     name = format_tool_name("set_host_group")
     title = "Set host group"
     description = (
-        "Put a device in one Firewalla group, so it follows that group's rules. "
-        "A device has exactly one membership, so this replaces any group or user "
+        "Put a host in one Firewalla group, so it follows that group's rules. "
+        "A host has exactly one membership, so this replaces any group or user "
         "it currently belongs to, as the app does. Resolve the group from "
         "get_system_overview (include 'identifiers') first; group and user names "
         "are separate, and a user's name is never a valid group. "
@@ -700,15 +699,14 @@ class SetHostGroupTool(_SetHostMembershipTool):
 
 
 class ClearHostGroupTool(_SetHostMembershipTool):
-    """Remove a device's group or user membership."""
+    """Remove a host's group or user membership."""
 
     name = format_tool_name("clear_host_group")
     title = "Clear host group"
     description = (
-        "Remove a device's group or user membership so it belongs to neither and "
+        "Remove a host's group or user membership so it belongs to neither and "
         "no longer inherits that group's or user's rules. Use it to release a "
-        "device, or to undo set_host_group or set_host_user. "
-        + _MEMBERSHIP_RULE_WARNING
+        "host, or to undo set_host_group or set_host_user. " + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
 
@@ -730,13 +728,13 @@ class ClearHostGroupTool(_SetHostMembershipTool):
 
 
 class SetHostUserTool(_SetHostMembershipTool):
-    """Assign a device to one Firewalla user."""
+    """Assign a host to one Firewalla user."""
 
     name = format_tool_name("set_host_user")
     title = "Set host user"
     description = (
-        "Assign a device to one Firewalla user, so it follows that user's rules. "
-        "A device has exactly one membership, so this replaces any group or user "
+        "Assign a host to one Firewalla user, so it follows that user's rules. "
+        "A host has exactly one membership, so this replaces any group or user "
         "it currently belongs to. Resolve the user from get_system_overview "
         "(include 'identifiers') first; users and groups are separate collections "
         "and a group's name is never a valid user. " + _MEMBERSHIP_RULE_WARNING
@@ -772,15 +770,15 @@ class SetHostUserTool(_SetHostMembershipTool):
 
 
 class ClearHostUserTool(_SetHostMembershipTool):
-    """Remove a device's user or group membership."""
+    """Remove a host's user or group membership."""
 
     name = format_tool_name("clear_host_user")
     title = "Clear host user"
     description = (
-        "Remove a device's user or group membership so it belongs to neither and "
+        "Remove a host's user or group membership so it belongs to neither and "
         "no longer inherits that user's rules. The user and their rules are left "
-        "untouched and keep covering their other devices; only this device leaves. "
-        "Use it to release a device, or to undo set_host_user or set_host_group. "
+        "untouched and keep covering their other hosts; only this host leaves. "
+        "Use it to release a host, or to undo set_host_user or set_host_group. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
@@ -850,7 +848,7 @@ class SetHostNotifyWhenNextOnlineTool(_SetHostNotifyTool):
     name = format_tool_name("set_host_notify_when_next_online")
     title = "Set host notify when next online"
     description = (
-        "Turn the 'notify when this device comes online' preference on or off. "
+        "Turn the 'notify when this host comes online' preference on or off. "
         "Notification preference only, no network effect. Reversible."
     )
     _service = SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE
@@ -862,7 +860,7 @@ class SetHostNotifyWhenNextOfflineTool(_SetHostNotifyTool):
     name = format_tool_name("set_host_notify_when_next_offline")
     title = "Set host notify when next offline"
     description = (
-        "Turn the 'notify when this device drops offline' preference on or off. "
+        "Turn the 'notify when this host drops offline' preference on or off. "
         "Notification preference only, no network effect. Reversible."
     )
     _service = SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE
@@ -874,7 +872,7 @@ class WakeHostTool(_FirewallaControlTool):
     name = format_tool_name("wake_host")
     title = "Wake host"
     description = (
-        "Send a Wake-on-LAN packet to wake a device. Sends one packet and makes "
+        "Send a Wake-on-LAN packet to wake a host. Sends one packet and makes "
         "no persistent change; not idempotent, since each call sends a packet."
     )
     parameters = vol.Schema(
@@ -962,7 +960,7 @@ class SetAlarmMutedTool(_FirewallaControlTool):
         "Create or remove a silence so matching alarms stop alerting. This does "
         "NOT block traffic (use block_alarm_target) and does not clear the alarm "
         "(use archive_alarm). Scope is required: an 'all' scope silences the "
-        "target for every device. Reversible."
+        "target for every host. Reversible."
     )
     parameters = vol.Schema(
         {
@@ -1129,7 +1127,7 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
             vol.Optional(
                 SERVICE_FIELD_ALARM_ID,
                 description=(
-                    "Optional. Derive the blocked target and device scope from "
+                    "Optional. Derive the blocked target and host scope from "
                     "this alarm. Provide this or target_type and target_value."
                 ),
             ): str,
@@ -1447,9 +1445,9 @@ class DeleteHostTool(_FirewallaControlTool):
     name = format_tool_name("delete_host")
     title = "Delete host"
     description = (
-        "Destructive: permanently delete a device record from Firewalla. This "
+        "Destructive: permanently delete a host record from Firewalla. This "
         "is irreversible. It removes the host's identity, reservations, and "
-        "history; the device reappears as a new host if it rejoins the network."
+        "history; the host reappears as a new host if it rejoins the network."
     )
     parameters = vol.Schema(
         {
@@ -1565,7 +1563,7 @@ _CONTROL_TOOL_CLASSES: Final = (
 # irreversible (no undo) or bulk, so they require an explicit, informed opt-in.
 #
 # The four membership tools are here because a membership change deletes the rules
-# attached to the device and nothing can restore them. The membership slot itself
+# attached to the host and nothing can restore them. The membership slot itself
 # is reversible, which is why each set tool names its clear tool as `undo`, but the
 # deleted rules are gone.
 _DESTRUCTIVE_TOOL_CLASSES: Final = (

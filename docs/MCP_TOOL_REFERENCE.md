@@ -287,10 +287,10 @@ Reads that tell you what exists — the first step before any control action.
 - **Inputs:** `include` (optional list — `"identifiers"` adds the group and user
   names and ids that `get_user_usage` and the rule tools accept as selectors).
 - **Returns:** read envelope — `result` with `appliance` (model, software version,
-  firmware, uptime, CPU/memory/disk), `devices` and `vpn_devices` counts (each
+  firmware, uptime, CPU/memory/disk), `hosts` and `vpn_hosts` counts (each
   `total`/`online`/`offline` — **`total` is not the connected count**; peers are
-  configured, so answer "connected" from `online`, and `vpn_devices` is a break-down
-  of `devices`, not an additional population),
+  configured, so answer "connected" from `online`, and `vpn_hosts` is a break-down
+  of `hosts`, not an additional population),
   `networks[]` (uuid, name, kind, `ipv4_subnets`, host/online/offline counts),
   `groups` and `users` counts, `rules` counts, `alarms` counts, per-WAN `items[]`
   with nested `latest_speed_test` and `internet_quality`, and `llm_access`
@@ -344,7 +344,7 @@ Reads that tell you what exists — the first step before any control action.
   `host_mac`, `group_name`, `user`, `network_uuid`, `online` or `kind` rather than
   listing everything and filtering in context. `online` uses the same
   activity-window definition as the system-status counts and the summary's
-  `vpn_devices`, so "how many are connected?" cannot be answered two ways.
+  `vpn_hosts`, so "how many are connected?" cannot be answered two ways.
   `detail` defaults to `summary`; ask for `full` only when a field that `summary`
   omits is actually needed.
 - **Past hosts are included — this is the group's full membership.** The init
@@ -426,7 +426,7 @@ Reads that tell you what exists — the first step before any control action.
   and for which host), and cleanup (enabled rules with `hit_count: 0` are
   candidates for removal).
   `last_hit` carries `host_id`/`host_ip`, a single resolved `destination`
-  with its `destination_kind` (`domain`/`host`/`ip`), `destination_ip` when known,
+  with its `destination_kind` (`domain`/`host`/`ip`/`peer`), `destination_ip` when known,
   `port`, `protocol`, and `app`/`category` when the box identified them.
   `host_id` is a Firewalla host id, which is **not always a MAC**: a VPN peer
   carries a `wg_peer:`/`awg_peer:` prefix and an interface an `if:` prefix, and an

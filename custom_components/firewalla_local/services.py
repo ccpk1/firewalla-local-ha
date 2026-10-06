@@ -709,7 +709,7 @@ SET_HOST_DHCP_RESERVATION_SCHEMA = vol.Schema(
     }
 )
 
-# A device holds exactly one membership, so a call either sets that one slot to a
+# A host holds exactly one membership, so a call either sets that one slot to a
 # group or a user, or clears it. The four target fields are mutually exclusive and
 # one of them (or ``clear``) is required; the handler enforces that because
 # voluptuous cannot express "exactly one of".
@@ -917,7 +917,7 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
 
     `applies_to` and `tag_refs` carry a rule's group/user and network
     attachments, which are otherwise invisible: the scope-based `scope` field
-    only covers device-scoped rules, so without these an agent cannot tell that
+    only covers host-scoped rules, so without these an agent cannot tell that
     a rule governs a group or a whole network.
 
     `hit_count` and `last_hit` report whether a rule ever fires and what it last
@@ -1074,7 +1074,7 @@ def _serialize_usage_history_device_usage(
     time_zone: tzinfo,
     include_intervals: bool,
 ) -> JsonObjectType:
-    """Serialize one device-level usage-history breakdown."""
+    """Serialize one host-level usage-history breakdown."""
     payload: JsonObjectType = {
         "host_id": device_usage.device_id,
         "host_name": device_usage.device_name,
@@ -1182,7 +1182,7 @@ def _serialize_usage_history_metric(
             )
             for slot in metric.slots
         ],
-        "devices": [
+        "hosts": [
             _serialize_usage_history_device_usage(
                 device,
                 time_zone=time_zone,
@@ -1191,8 +1191,8 @@ def _serialize_usage_history_metric(
             for device in metric.devices
         ],
     }
-    if not payload["devices"]:
-        payload.pop("devices")
+    if not payload["hosts"]:
+        payload.pop("hosts")
     return payload
 
 
@@ -1487,12 +1487,12 @@ def _serialize_usage_history_view(
     if include_intervals and "apps" in applied_sections:
         provenance.append(
             FirewallaReportProvenance(
-                section="apps.devices.intervals",
+                section="apps.hosts.intervals",
                 source="direct",
                 source_field="appTimeUsage.*.devices.*.intervals",
                 note=(
                     "Interval detail appears only when requested and when "
-                    "Firewalla returns device intervals"
+                    "Firewalla returns host intervals"
                 ),
             )
         )
@@ -1894,7 +1894,7 @@ def _serialize_network_usage_bucket(
         "total_bytes": bucket.download_bytes + bucket.upload_bytes,
         "duration_seconds": round(bucket.duration_seconds, 3),
         "session_count": bucket.session_count,
-        "active_device_count": bucket.active_device_count,
+        "active_host_count": bucket.active_device_count,
         "latest_timestamp": bucket.latest_timestamp,
         "latest": _serialize_local_timestamp(
             bucket.latest_timestamp,
@@ -2304,7 +2304,7 @@ def _build_raw_host_lookup(entry: FirewallaConfigEntry) -> dict[str, dict[str, o
 
 
 def _build_device_tag_lookup(entry: FirewallaConfigEntry) -> dict[str, str]:
-    """Build a device-tag ID to readable name lookup from the init payload."""
+    """Build a host-tag ID to readable name lookup from the init payload."""
     raw_device_tags = (entry.runtime_data.coordinator.last_init_payload or {}).get(
         "deviceTags"
     )
@@ -2326,7 +2326,7 @@ def _resolve_host_device_type(
     *,
     device_tag_lookup: dict[str, str],
 ) -> str | None:
-    """Resolve one host device type from feedback, detect, or device tags."""
+    """Resolve one host device type from feedback, detect, or host tag names."""
     if raw_host is None:
         return None
 
@@ -3089,7 +3089,7 @@ def _serialize_flow_report(
     the box never returned.
     """
     summary = view.summary
-    # A device target names nothing the caller did not itself name, so it needs no
+    # A host target names nothing the caller did not itself name, so it needs no
     # flag: this is a property of the data, not a special case for one scope.
     include_host_detail = (
         FLOW_REPORT_INCLUDE_HOST_DETAIL in requested_include
@@ -3142,7 +3142,7 @@ def _serialize_flow_report(
             ]
         elif not summary.top_members:
             # An empty member list on a tag request cannot be told apart from a
-            # device request, where member ranking does not apply at all. Reporting
+            # host request, where member ranking does not apply at all. Reporting
             # the section as empty would state "this group has no members", so it
             # is reported as unavailable instead -- and it is not a withheld
             # section, because when there are members to rank they are returned.
@@ -3261,7 +3261,7 @@ def _serialize_flow_report(
                 "detail": detail,
                 "include": list(requested_include),
                 # Reported separately from `include` because it is true for a
-                # device target whether or not the flag was passed. A caller who
+                # host target whether or not the flag was passed. A caller who
                 # sees no member ranking on a group report can read this to learn
                 # that the include is what widens it -- the gate is a default, not
                 # a limit on what can be retrieved, and not an access control: the
@@ -3522,7 +3522,7 @@ def _serialize_network_segment_usage(
         time_zone=time_zone,
     )
     sections: JsonObjectType = {
-        "devices": {
+        "hosts": {
             "count": len(serialized_devices),
             "items": serialized_devices,
         },
@@ -3556,13 +3556,13 @@ def _serialize_network_segment_usage(
         if view.activity_hosts:
             provenance_items.append(
                 FirewallaReportProvenance(
-                    section="devices",
+                    section="hosts",
                     source="derived",
                     source_field=(
                         "flows.appDetails|flows.recent|flows.download|flows.upload"
                     ),
                     note=(
-                        "Per-device activity is derived from richer flow "
+                        "Per-host activity is derived from richer flow "
                         "families when raw host counters are sparse"
                     ),
                 )
@@ -3570,12 +3570,11 @@ def _serialize_network_segment_usage(
         else:
             provenance_items.append(
                 FirewallaReportProvenance(
-                    section="devices",
+                    section="hosts",
                     source="direct",
                     source_field="hosts",
                     note=(
-                        "Per-device totals come from the direct network "
-                        "interface payload"
+                        "Per-host totals come from the direct network interface payload"
                     ),
                 )
             )
@@ -3625,7 +3624,7 @@ def _serialize_network_segment_usage(
             )
         )
 
-    # An empty ranking has two very different causes: no device transferred
+    # An empty ranking has two very different causes: no host transferred
     # anything, or the box did not return the ranking families at all. The second
     # is what a bare `item=intf` produces, and without a warning the empty list
     # reads as the first. The families are reported alongside so a caller can see
@@ -3638,7 +3637,7 @@ def _serialize_network_segment_usage(
             FirewallaReportWarning(
                 code="ranking_families_unavailable",
                 message=(
-                    "The box did not return the per-device ranking families for "
+                    "The box did not return the per-host ranking families for "
                     "this network, so the top talker lists are empty because "
                     "nothing was measured, not because nothing was transferred. "
                     f"Families returned: {', '.join(families)}."
@@ -3676,7 +3675,7 @@ def _serialize_network_segment_usage(
         "summary": {
             "host_count": len(serialized_devices),
             "known_host_count": len(view.hosts),
-            "active_device_count": len(serialized_devices),
+            "active_host_count": len(serialized_devices),
             "metric_count": len(series_list),
             "sample_count": sum(len(series.samples) for series in series_list),
             "top_download_count": len(serialized_top_download_hosts),
@@ -4254,13 +4253,13 @@ def _build_llm_access_note(mode: str) -> str:
     if mode == LLM_TOOL_MODE_SUMMARY_ONLY:
         return (
             "This report is intentionally limited to counts, network names, and "
-            "performance metrics. For device names and addresses, rules, alarms, "
+            "performance metrics. For host names and addresses, rules, alarms, "
             "or usage detail, the user must raise Firewalla's AI access level to "
             "Read only in the integration options."
         )
     if mode == LLM_TOOL_MODE_READ_ONLY:
         return (
-            "Read-only access. Device names, addresses, rules, alarms, and usage "
+            "Read-only access. Host names, addresses, rules, alarms, and usage "
             "detail are available. To change anything, the user must raise access "
             "to Read and control; Full additionally allows destructive actions."
         )
@@ -4279,9 +4278,9 @@ def _build_llm_access_note(mode: str) -> str:
 def _build_network_overview_entries(
     entry: FirewallaConfigEntry,
 ) -> list[JsonObjectType]:
-    """Return one entry per network with its device counts.
+    """Return one entry per network with its host counts.
 
-    Device counts are computed from the same host inventory and online
+    Host counts are computed from the same host inventory and online
     definition the system-status attributes use, so a network's total plus the
     global total can never disagree about the same box.
     """
@@ -4521,12 +4520,12 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
                 else None
             ),
         },
-        "devices": {
+        "hosts": {
             "total": runtime_data.host_manager.count_total_devices(),
             "online": runtime_data.host_manager.count_online_devices(),
             "offline": runtime_data.host_manager.count_offline_devices(),
         },
-        "vpn_devices": {
+        "vpn_hosts": {
             "total": runtime_data.host_manager.count_vpn_total_devices(),
             "online": runtime_data.host_manager.count_vpn_online_devices(),
             "offline": runtime_data.host_manager.count_vpn_offline_devices(),
@@ -5071,7 +5070,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
 
     `summary` drops derivable and provenance-only fields (`dns_fqdn`,
     `dhcp_name`, nested `ip_assignment`); `full` returns the complete shape.
-    Filters narrow the result server-side so "find one device" does not require
+    Filters narrow the result server-side so "find one host" does not require
     pulling every host.
     """
     entry = _get_loaded_entry(
@@ -5087,7 +5086,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
     detail = cast(str, call.data.get(SERVICE_FIELD_DETAIL, DETAIL_SUMMARY))
     raw_host_lookup = _build_raw_host_lookup(entry)
     # One online definition for the whole surface: the same activity-window rule
-    # the system-status counts and the overview's vpn_devices use. The filter and
+    # the system-status counts and the overview's vpn_hosts use. The filter and
     # the exposed `online` field both read from it, so "how many are connected?"
     # cannot be answered two different ways depending on which tool was asked.
     all_hosts = entry.runtime_data.host_manager.get_hosts()
@@ -5236,7 +5235,7 @@ def _host_matches_filters(
     user_filter = cast(str | None, data.get(SERVICE_FIELD_USER))
     if user_filter is None or user_filter in host.user_ids:
         return True
-    # A device assigned to a user carries the user's affiliated backing tag in
+    # A host assigned to a user carries the user's affiliated backing tag in
     # `group_ids`. The host-level `userTags` array that feeds `user_ids` is always
     # empty on a real box, so matching on `user_ids` alone never matches anything.
     return any(tag_id in user_tag_ids for tag_id in host.group_ids)
@@ -5344,7 +5343,7 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
 
 
 async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
-    """Delete one or more MAC-identified host devices from the Firewalla box."""
+    """Delete one or more MAC-identified hosts from the Firewalla box."""
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
@@ -5404,17 +5403,17 @@ async def _async_handle_delete_host(call: ServiceCall) -> JsonObjectType:
 
 
 def _find_device_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> list[str]:
-    """Return the ids of a device's own device-scoped rules.
+    """Return the ids of a host's own host-scoped rules.
 
-    The app deletes all of these when the device's membership changes, so the
-    device follows only its group's rules from then on. Confirmed by capture on
-    2026-10-02: assigning an unassigned device to a group produced
+    The app deletes all of these when the host's membership changes, so the
+    host follows only its group's rules from then on. Confirmed by capture on
+    2026-10-02: assigning an unassigned host to a group produced
     ``policy:delete`` for all four of its rules -- two enabled user rules and two
     disabled Active Protect rules -- followed by the tags write, in one batch.
 
-    A rule belongs to the device when the device's MAC is the ``target`` or
+    A rule belongs to the host when the host's MAC is the ``target`` or
     appears in ``scope``. That is deliberately broader than ``purpose == "dap"``:
-    an earlier version keyed on ``dap`` and would have left the device's enabled
+    an earlier version keyed on ``dap`` and would have left the host's enabled
     user rules behind, which is the opposite of what the app does.
     """
     snapshot = entry.runtime_data.coordinator.data
@@ -5431,10 +5430,10 @@ def _find_device_rule_ids(entry: FirewallaConfigEntry, host_mac: str) -> list[st
 
 
 async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType:
-    """Set or clear the single group or user membership of one device.
+    """Set or clear the single group or user membership of one host.
 
-    A device holds exactly one membership, so this replaces whatever was there.
-    Assigning a group to a device that is currently assigned to a user therefore
+    A host holds exactly one membership, so this replaces whatever was there.
+    Assigning a group to a host that is currently assigned to a user therefore
     removes the user assignment rather than adding alongside it.
     """
     entry = _get_loaded_entry(
@@ -5477,8 +5476,8 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
         target.group_id if target is not None else None
     )
 
-    # The app deletes the device's own rules as the first step of the same batch,
-    # before the tags write, so the device follows only its group's rules from then
+    # The app deletes the host's own rules as the first step of the same batch,
+    # before the tags write, so the host follows only its group's rules from then
     # on. Order matters: the capture shows the deletes ahead of the policy write.
     device_rule_ids = _find_device_rule_ids(entry, host.mac)
     for rule_id in device_rule_ids:
@@ -5487,7 +5486,7 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
         except FirewallaApiError as err:
             _raise_runtime_service_error(
                 err,
-                log_message="Failed to clear device rules",
+                log_message="Failed to clear host rules",
                 translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
             )
 
@@ -6349,7 +6348,7 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
 
 
 async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
-    """Return one flow report for the requested device, group, or user."""
+    """Return one flow report for the requested host, group, or user."""
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),

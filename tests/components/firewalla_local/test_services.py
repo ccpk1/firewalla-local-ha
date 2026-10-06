@@ -4113,8 +4113,8 @@ async def test_get_system_overview_reports_counts_without_identities(
         )
 
     assert overview is not None
-    assert overview["devices"]["total"] == 1
-    assert overview["vpn_devices"] == {"total": 0, "online": 0, "offline": 0}
+    assert overview["hosts"]["total"] == 1
+    assert overview["vpn_hosts"] == {"total": 0, "online": 0, "offline": 0}
     assert overview["rules"]["total"] == 1
     assert overview["alarms"] == {"active": 0, "archived": 0}
     assert overview["networks"]["count"] == len(overview["networks"]["items"])
@@ -4407,8 +4407,8 @@ async def test_connectivity_is_one_definition_across_every_surface(
 
     # And the summary counts agree with the list.
     assert overview is not None
-    assert overview["devices"]["total"] == 4
-    assert overview["devices"]["online"] == sum(1 for v in online.values() if v)
+    assert overview["hosts"]["total"] == 4
+    assert overview["hosts"]["online"] == sum(1 for v in online.values() if v)
 
     # The watched-device sensor reads the same state, because it now shares the
     # one online window rather than keeping its own.
@@ -4493,8 +4493,8 @@ async def test_get_system_overview_counts_vpn_peers_separately(
         )
 
     assert overview is not None
-    assert overview["devices"]["total"] == 3
-    assert overview["vpn_devices"] == {"total": 2, "online": 1, "offline": 1}
+    assert overview["hosts"]["total"] == 3
+    assert overview["vpn_hosts"] == {"total": 2, "online": 1, "offline": 1}
 
     # The list agrees with the summary. Answering "how many are connected?"
     # from the length of this list is the bug the smoke test found: both peers
@@ -5746,7 +5746,7 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
         "source_field": "categoryTimeUsage",
         "note": "Per-category usage sections are ranked by returned usage totals",
     }
-    assert "apps.devices.intervals" not in response["metadata"]["provenance"]
+    assert "apps.hosts.intervals" not in response["metadata"]["provenance"]
     assert response["query"]["app_ids"] is None
     assert response["sections"]["internet"]["summary"] == {
         "total_minutes": 596,
@@ -5773,7 +5773,7 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
         "total_minutes": 121,
         "unique_minutes": 120,
     }
-    assert response["sections"]["apps"][0]["devices"][0] == {
+    assert response["sections"]["apps"][0]["hosts"][0] == {
         "host_id": "EC:0D:51:CC:BA:BC",
         "host_name": "Kaden Phone",
         "summary": {
@@ -5850,15 +5850,15 @@ async def test_get_time_usage_report_service_detail_intervals_keeps_intervals(
         "include": ["intervals"],
         "request_scope_type": "host",
     }
-    assert response["metadata"]["provenance"]["apps.devices.intervals"] == {
+    assert response["metadata"]["provenance"]["apps.hosts.intervals"] == {
         "source": "direct",
         "source_field": "appTimeUsage.*.devices.*.intervals",
         "note": (
             "Interval detail appears only when requested and when Firewalla "
-            "returns device intervals"
+            "returns host intervals"
         ),
     }
-    assert response["sections"]["apps"][0]["devices"][0]["intervals"] == [
+    assert response["sections"]["apps"][0]["hosts"][0]["intervals"] == [
         {
             "time_period": {
                 "kind": "interval",
@@ -7149,7 +7149,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
     assert response["summary"] == {
         "host_count": 2,
         "known_host_count": 2,
-        "active_device_count": 2,
+        "active_host_count": 2,
         "metric_count": 2,
         "sample_count": 4,
         "top_download_count": 1,
@@ -7161,7 +7161,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
         "includes_series": False,
         "flow_families": ["download", "upload"],
     }
-    assert response["sections"]["devices"] == {
+    assert response["sections"]["hosts"] == {
         "count": 2,
         "items": [
             {
@@ -7251,13 +7251,13 @@ async def test_get_network_segment_usage_service_returns_summary_report(
         "warnings": [],
         "unavailable_sections": [],
         "provenance": {
-            "devices": {
+            "hosts": {
                 "source": "derived",
                 "source_field": (
                     "flows.appDetails|flows.recent|flows.download|flows.upload"
                 ),
                 "note": (
-                    "Per-device activity is derived from richer flow families "
+                    "Per-host activity is derived from richer flow families "
                     "when raw host counters are sparse"
                 ),
             },
@@ -7335,7 +7335,7 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
     assert response["summary"] == {
         "host_count": 2,
         "known_host_count": 2,
-        "active_device_count": 2,
+        "active_host_count": 2,
         "metric_count": 2,
         "sample_count": 4,
         "top_download_count": 1,
@@ -7353,7 +7353,7 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
             "upload",
         ],
     }
-    assert response["sections"]["devices"] == {
+    assert response["sections"]["hosts"] == {
         "count": 2,
         "items": [
             {
@@ -7394,7 +7394,7 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
                 "total_bytes": 550,
                 "duration_seconds": 180.0,
                 "session_count": 2,
-                "active_device_count": 2,
+                "active_host_count": 2,
                 "latest_timestamp": 1_774_641_120,
                 "latest": "2026-03-27T15:52:00-04:00",
             }
@@ -7410,17 +7410,17 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
                 "total_bytes": 660,
                 "duration_seconds": 210.0,
                 "session_count": 2,
-                "active_device_count": 2,
+                "active_host_count": 2,
                 "latest_timestamp": 1_774_641_180,
                 "latest": "2026-03-27T15:53:00-04:00",
             }
         ],
     }
-    assert response["metadata"]["provenance"]["devices"] == {
+    assert response["metadata"]["provenance"]["hosts"] == {
         "source": "derived",
         "source_field": "flows.appDetails|flows.recent|flows.download|flows.upload",
         "note": (
-            "Per-device activity is derived from richer flow families when raw "
+            "Per-host activity is derived from richer flow families when raw "
             "host counters are sparse"
         ),
     }

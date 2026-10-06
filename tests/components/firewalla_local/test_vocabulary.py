@@ -29,6 +29,20 @@ PACKAGE_ROOT = (
 )
 CONST_PATH: Final = PACKAGE_ROOT / "const.py"
 SERVICES_PATH: Final = PACKAGE_ROOT / "services.py"
+# Modules whose dict keys are part of the published payload contract. The record
+# layer, the API client and the managers are excluded on purpose: they read and write
+# the vendor's own `device` keys, which must keep the vendor's spelling.
+PUBLISHING_MODULES: Final = (
+    "services.py",
+    "models.py",
+    "binary_sensor.py",
+    "sensor.py",
+    "switch.py",
+    "device_tracker.py",
+    "diagnostics.py",
+    "button.py",
+    "entity.py",
+)
 # The read tools declare their own copies of several service schemas, so a vocabulary
 # can drift there while the service side stays correct. Scanning both is what makes
 # the check about the published surface rather than about one file.
@@ -666,4 +680,75 @@ def test_detail_uses_one_vocabulary() -> None:
     assert offenders == {}, (
         "these `detail` fields do not use the shared vocabulary, so a caller who "
         f"learns one service is wrong on the next: {offenders}"
+    )
+
+
+def _published_key_literals() -> dict[str, list[str]]:
+    """Return every dict key or subscript literal in the modules that publish payloads.
+
+    The value-keyed checks above cannot see a key written directly as `"device_id":
+    ...`, which is how the last eight `device_*` keys and the `devices` /
+    `vpn_devices` sections survived several waves of renaming. This reads the keys
+    themselves, by their position in the syntax rather than by their value, so a
+    literal key is held to the same rule as a constant's value.
+    """
+    found: dict[str, list[str]] = {}
+    for path in PUBLISHING_MODULES:
+        module = PACKAGE_ROOT / path
+        if not module.exists():
+            continue
+        for node in ast.walk(_module_tree(module)):
+            keys: list[ast.expr] = []
+            if isinstance(node, ast.Dict):
+                keys = [key for key in node.keys if key is not None]
+            elif isinstance(node, ast.Subscript):
+                keys = [node.slice]
+            for key in keys:
+                if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                    found.setdefault(key.value, []).append(
+                        f"{module.name}:{key.lineno}"
+                    )
+    return found
+
+
+def test_no_published_key_names_a_host_as_a_device() -> None:
+    """Test no published payload key says `device`, except the host-scoped name.
+
+    `host_device_type` is the one survivor and it is allowed because it carries the
+    host prefix, so the concept stays unambiguous. Anything else fails: a published
+    key is the machine register, and the machine register says `host` everywhere.
+
+    A literal key is invisible to the value-keyed checks above -- that is how
+    `device_id`, `device_port`, `device_type`, `device_rules`, `active_device_count`
+    and the `devices` / `vpn_devices` sections each outlived a renaming wave. This
+    is the check that would have caught them.
+    """
+    offenders = {
+        value: sites
+        for value, sites in _published_key_literals().items()
+        if _uses_human_word(value) and not value.startswith("host")
+    }
+    assert offenders == {}, (
+        "these published keys name a host as `device`; rename them to `host`, or "
+        f"prefix the name with `host` if the concept needs the vendor's word: "
+        f"{offenders}"
+    )
+
+
+def test_the_published_key_check_reads_real_keys() -> None:
+    """Test the key scan found the payload keys, so a pass above means something.
+
+    Without this, a scan that silently walked nothing -- a renamed module, a
+    changed import -- would report zero offenders and look identical to a clean
+    package.
+    """
+    keys = _published_key_literals()
+
+    assert "host_device_type" in keys, (
+        "the key scan did not find a known published key, so it is not reading the "
+        f"payload modules: {sorted(keys)[:20]}"
+    )
+    assert len(keys) > 50, (
+        f"the key scan found only {len(keys)} keys, far fewer than the payload "
+        "modules define; it is not reading them"
     )
