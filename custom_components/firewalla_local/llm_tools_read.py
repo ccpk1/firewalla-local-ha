@@ -30,6 +30,7 @@ from .const import (
     MAX_FLOW_LOG_PAGE_SIZE,
     MIN_FLOW_LOG_PAGE_SIZE,
     SERVICE_FIELD_ACTION,
+    SERVICE_FIELD_ALARM_ID,
     SERVICE_FIELD_ALARM_TYPE,
     SERVICE_FIELD_APPLIES_TO,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
@@ -88,12 +89,15 @@ from .const import (
 )
 from .llm_tools_common import format_tool_name
 
-# Every read tool is a bounded, read-only query against the user's own box.
+# Every read tool is a bounded, read-only query against the user's own box,
+# which is outside Home Assistant -- so `open_world` is true even though nothing
+# is written. The flag describes where the data comes from, not whether the call
+# changes anything.
 _READ_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=True,
     destructive=False,
     idempotent=True,
-    open_world=False,
+    open_world=True,
 )
 
 _REFRESH_DESCRIPTION: Final = (
@@ -326,8 +330,11 @@ class ListRulesTool(_FirewallaReadTool):
         "requested via include_purpose or include_system_managed.\n"
         "\n"
         "Filters narrow the result on the box. Pass `enabled`, `action`, "
-        "`target_type` or `applies_to` to answer a question about specific "
-        "rules rather than listing every one."
+        "`target_type`, `applies_to` or `alarm_id` to answer a question about "
+        "specific rules rather than listing every one. `alarm_id` finds the "
+        "auto-block rule an alarm created, which is what `unblock_alarm_target` "
+        "needs; those rules are system-managed, so pass "
+        "`include_system_managed: true` with it."
     )
     parameters = vol.Schema(
         {
@@ -353,6 +360,16 @@ class ListRulesTool(_FirewallaReadTool):
                     "network name. A host's `group_name` (from list_hosts) is "
                     "the value to pass here to find the rules that govern that "
                     "host. Matches exactly, so filter one name at a time."
+                ),
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_ALARM_ID,
+                description=(
+                    "Optional. Filter to the rule an alarm created, by alarm "
+                    "id. Use it to find the rule to pass to "
+                    "`unblock_alarm_target`; also pass "
+                    "`include_system_managed: true`, since those rules are "
+                    "hidden by default."
                 ),
             ): str,
             vol.Optional(
@@ -719,7 +736,11 @@ class GetFlowReportTool(_FirewallaReadTool):
         "Per-host detail is not included by default. Add "
         '`include: ["host_detail"]` when the question needs to know which host '
         "was behind a member row, a destination, or a record. A host scope always "
-        "names its own host whether or not the flag is set."
+        "names its own host whether or not the flag is set.\n"
+        "\n"
+        "`refresh` defaults to true, because the rollup is a live request against "
+        "the box rather than a cached report. Set it false only to reuse the last "
+        "runtime snapshot."
     )
     parameters = vol.Schema(
         {
@@ -794,6 +815,16 @@ class GetFlowReportTool(_FirewallaReadTool):
                 vol.Coerce(int),
                 vol.Range(min=MIN_FLOW_LOG_PAGE_SIZE, max=MAX_FLOW_LOG_PAGE_SIZE),
             ),
+            vol.Optional(
+                SERVICE_FIELD_REFRESH,
+                default=True,
+                description=(
+                    "Optional. Defaults to true. The rollup is a live request "
+                    "against the box rather than a cached report, so the "
+                    "report polls by default; set false only to reuse the last "
+                    "runtime snapshot."
+                ),
+            ): bool,
             vol.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
@@ -969,7 +1000,13 @@ class GetWirelessStatusTool(_FirewallaReadTool):
     description = (
         "Show WiFi state: SSID profiles (with paused state), access points, and "
         "connected clients. Use it to resolve the ssid_profile_id that "
-        "set_ssid_paused requires."
+        "set_ssid_paused requires.\n"
+        "\n"
+        "This is empty when the box manages no Firewalla access points: an empty "
+        "`ssid_profiles` means there is no SSID to pause, not that the read "
+        "failed. `get_system_overview` reports whether the box has access "
+        "points at all, so check there before concluding anything from an empty "
+        "result here."
     )
     parameters = vol.Schema({})
     _service = SERVICE_GET_WIRELESS_STATUS

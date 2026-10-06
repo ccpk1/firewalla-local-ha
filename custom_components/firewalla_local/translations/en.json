@@ -1381,6 +1381,10 @@
         "include_system_managed": {
           "name": "Include system-managed",
           "description": "Optional. Include rules owned by a Firewalla subsystem, such as alarm-intel auto-blocks. Hidden by default."
+        },
+        "alarm_id": {
+          "name": "Alarm ID",
+          "description": "Optional. Filter to the rule an alarm created, by alarm id. Pair it with include_system_managed, since those rules are hidden by default. Use it to find the rule to unblock."
         }
       }
     },

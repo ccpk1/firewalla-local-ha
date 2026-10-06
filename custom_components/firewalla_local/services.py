@@ -347,6 +347,7 @@ GET_RULES_SCHEMA = vol.Schema(
         ),
         vol.Optional(SERVICE_FIELD_TARGET_TYPE): vol.In(RULE_TARGET_TYPES),
         vol.Optional(SERVICE_FIELD_APPLIES_TO): cv.string,
+        vol.Optional(SERVICE_FIELD_ALARM_ID): cv.string,
         vol.Optional(SERVICE_FIELD_INCLUDE_PURPOSE): vol.All(
             cv.ensure_list_csv,
             [vol.In(HIDDEN_RULE_PURPOSES)],
@@ -4231,9 +4232,14 @@ def _rule_matches_filters(
         return False
 
     applies_to_filter = cast(str | None, data.get(SERVICE_FIELD_APPLIES_TO))
-    return not (
-        applies_to_filter is not None and applies_to_filter not in rule.applies_to
-    )
+    if applies_to_filter is not None and applies_to_filter not in rule.applies_to:
+        return False
+
+    # A filter rather than a default, because the alarm-created rules are also the
+    # ones hidden by `is_user_visible_rule`. Finding one to unblock therefore needs
+    # both this filter and `include_system_managed`.
+    alarm_id_filter = cast(str | None, data.get(SERVICE_FIELD_ALARM_ID))
+    return alarm_id_filter is None or rule.alarm_id == alarm_id_filter
 
 
 def _build_llm_access_note(mode: str) -> str:
@@ -4302,7 +4308,12 @@ def _build_network_overview_entries(
 
     entries: list[JsonObjectType] = []
     for network in entry.runtime_data.integration_manager.get_networks():
-        network_hosts = [host for host in hosts if host.network_uuid == network.uuid]
+        # A host carries the box's interface id in `network_uuid`, and for a VPN
+        # peer that is the network's interface name (``wg0``, ``awg0``) rather
+        # than its uuid. Matching on the uuid alone counted every VPN network as
+        # empty, while the peers were listed under it by `list_hosts`.
+        network_keys = {network.uuid, network.interface_name}
+        network_hosts = [host for host in hosts if host.network_uuid in network_keys]
         online = sum(1 for host in network_hosts if host.mac in online_macs)
         entries.append(
             {

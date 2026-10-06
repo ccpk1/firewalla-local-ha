@@ -1564,6 +1564,13 @@ get_rules:
         text:
       name: Applies to
       description: Optional. Filter to rules governing one group, user or network name.
+    alarm_id:
+      required: false
+      example: "1765"
+      selector:
+        text:
+      name: Alarm ID
+      description: Optional. Filter to the rule an alarm created, by alarm id. Pair it with include_system_managed, since those rules are hidden by default. Use it to find the rule to unblock.
     include_purpose:
       required: false
       example: "dap"

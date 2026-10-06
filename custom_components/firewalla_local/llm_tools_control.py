@@ -85,25 +85,29 @@ from .const import (
 from .llm_tools_common import format_tool_name
 from .models import FirewallaNetworkKind
 
+# Every tool here acts on the user's Firewalla box, not on Home Assistant, so
+# `open_world` is true for all of them: the server the data comes from and the
+# thing a control tool changes are both outside Home Assistant. A caller that
+# treats these as closed-world would under-warn about what a call reaches.
 _CONTROL_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=False,
     destructive=False,
     idempotent=True,
-    open_world=False,
+    open_world=True,
 )
 
 _DESTRUCTIVE_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=False,
     destructive=True,
     idempotent=True,
-    open_world=False,
+    open_world=True,
 )
 
 _NON_IDEMPOTENT_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=False,
     destructive=False,
     idempotent=False,
-    open_world=False,
+    open_world=True,
 )
 
 _HOST_MAC_DESCRIPTION: Final = (
@@ -978,8 +982,10 @@ class SetAlarmMutedTool(_FirewallaControlTool):
             vol.Optional(
                 SERVICE_FIELD_ALARM_TARGET_VALUE,
                 description=(
-                    "Optional. The domain or IP to silence (required unless "
-                    "alarm_id supplies it)."
+                    "Optional. What the type refers to: the alarm type to "
+                    "silence (e.g. 'ALARM_VIDEO') when alarm_target_type is "
+                    "'alarm_type', or the domain or IP when it is 'domain' or "
+                    "'ip'. Required unless alarm_id supplies it."
                 ),
             ): str,
             vol.Optional(

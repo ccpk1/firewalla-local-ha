@@ -168,8 +168,9 @@ async def test_every_tool_declares_the_full_contract(hass: HomeAssistant) -> Non
         assert tool.title, tool.name
         assert tool.description, tool.name
         assert tool.integration == DOMAIN, tool.name
-        # open_world is always false: these tools act on the user's own box.
-        assert tool.annotations.open_world is False, tool.name
+        # open_world is always true: these tools reach the user's Firewalla box,
+        # which is outside Home Assistant.
+        assert tool.annotations.open_world is True, tool.name
 
 
 async def test_every_parameter_has_a_description(hass: HomeAssistant) -> None:

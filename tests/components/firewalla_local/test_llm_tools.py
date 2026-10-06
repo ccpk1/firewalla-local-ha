@@ -230,7 +230,10 @@ async def test_read_tools_are_annotated_read_only(
     assert tool.annotations.read_only is True
     assert tool.annotations.destructive is False
     assert tool.annotations.idempotent is True
-    assert tool.annotations.open_world is False
+    # open_world is true: the data comes from the user's box, which is outside
+    # Home Assistant. The flag describes where the data lives, not whether the
+    # call writes anything.
+    assert tool.annotations.open_world is True
 
 
 async def test_read_tool_catalog_matches_spec(hass: HomeAssistant) -> None:
@@ -409,7 +412,7 @@ async def test_control_tools_are_non_read_only(
     assert tool.title
     assert tool.description
     assert tool.annotations.read_only is False
-    assert tool.annotations.open_world is False
+    assert tool.annotations.open_world is True
     for marker in tool.parameters.schema:
         assert marker.description, f"{tool_name} field {marker} lacks a description"
 
@@ -428,7 +431,7 @@ async def test_destructive_tools_are_annotated_destructive(
     assert tool.integration == DOMAIN
     assert tool.annotations.read_only is False
     assert tool.annotations.destructive is True
-    assert tool.annotations.open_world is False
+    assert tool.annotations.open_world is True
     for marker in tool.parameters.schema:
         assert marker.description, f"{tool_name} field {marker} lacks a description"
 

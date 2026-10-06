@@ -307,7 +307,7 @@ Reads that tell you what exists — the first step before any control action.
   network's size.
 - **Reversibility & undo:** read-only, nothing to undo.
 - **Annotations:** `read_only=true`, `destructive=false`, `idempotent=true`,
-  `open_world=false`.
+  `open_world=true`.
 
 ### `firewalla_local__sync_runtime`
 
@@ -326,7 +326,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Reversibility & undo:** read-only; `idempotent=true` (a repeat leaves the same
   synced state; a longer first call is a transaction cost, not a state change).
 - **Annotations:** `read_only=true`, `destructive=false`, `idempotent=true`,
-  `open_world=false`.
+  `open_world=true`.
 
 ### `firewalla_local__list_hosts`
 
@@ -384,7 +384,7 @@ Reads that tell you what exists — the first step before any control action.
   default regardless of whether it has ever connected.
   `reserved_ipv4`, `network_uuid`).
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true.
 
 ### `firewalla_local__list_rules`
 
@@ -431,8 +431,10 @@ Reads that tell you what exists — the first step before any control action.
   `host_id` is a Firewalla host id, which is **not always a MAC**: a VPN peer
   carries a `wg_peer:`/`awg_peer:` prefix and an interface an `if:` prefix, and an
   `if:` host may not resolve to any host.
-- **Inputs:** `enabled`, `action`, `target_type`, `applies_to` (all optional filters;
-  `applies_to` takes a host's `group_name`);
+- **Inputs:** `enabled`, `action`, `target_type`, `applies_to`, `alarm_id` (all
+  optional filters; `applies_to` takes a host's `group_name`; `alarm_id` finds the
+  auto-block rule an alarm created and needs `include_system_managed: true` because
+  those rules are hidden by default);
   `include_purpose` (`['dap']`, `['family']`) and `include_system_managed` (bool) to
   reveal what the default hides.
 - **Returns:** read envelope — `result.rules[]`, each with `rule_id`, `name`,
@@ -446,7 +448,7 @@ Reads that tell you what exists — the first step before any control action.
   and re-creating a rule does not restore its id. Re-resolve a target rather than
   reusing an id from an earlier turn, and never assume two rules with the same
   name are the same rule.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false` (coordinator-backed) or `true` (live).
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true` (coordinator-backed) or `true` (live).
 
 ### `firewalla_local__get_network_config`
 
@@ -459,7 +461,7 @@ Reads that tell you what exists — the first step before any control action.
   host list, which is absent by default); `refresh`.
 - **Returns:** read envelope — `result.networks[]` with interface, subnet, DHCP range, VLAN, `block_icmp`, host counts, and the network-level `policy` block (settings, not rules — see [Policy controls](#policy-controls)); the `hosts` section only when requested.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true.
 
 ---
 
@@ -478,7 +480,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `network_uuid` or `network_name` (**required** — resolve from `get_system_overview`); `window` (enum: which period — the valid windows differ by source; see the tool description), `top_n` (default 5 — a truncated ranking is flagged in `meta`), `include` (e.g. `"series"` to add raw samples), `refresh`.
 - **Returns:** read envelope — `result` with top talkers, apps, categories, activity; `meta.truncated` when `top_n` cut data.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true.
 
 ### `firewalla_local__get_wan_usage`
 
@@ -492,7 +494,7 @@ Reads that explain what the network is doing and how it is performing.
   (`['history']`, `['subperiods']`); `refresh`.
 - **Returns:** read envelope — `result` with download/upload totals and periods (`*_bytes`/`*_megabytes`).
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__get_wan_events`
 
@@ -506,7 +508,7 @@ Reads that explain what the network is doing and how it is performing.
   link events only by default: the app's filter set (`wan_state`, `dualwan_state`,
   `system_reboot`), with DNS excluded and latency/loss absent entirely.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__get_user_usage`
 
@@ -525,7 +527,7 @@ Reads that explain what the network is doing and how it is performing.
   `standard`).
 - **Returns:** read envelope — `result` with internet/app/category time summaries and periods.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__get_flow_report`
 
@@ -539,7 +541,7 @@ Reads that explain what the network is doing and how it is performing.
   hours. A wider `window_hours` is accepted and quietly served as that much, so read
   `summary.window.served_hours` and `summary.window.is_clamped` and state the span
   actually covered. This is a recent-activity view, not a history.
-- **Levels:** `detail: records` is the one to reach for when diagnosing, because a
+- **Levels:** `detail: full` is the one to reach for when diagnosing, because a
   record names the rule that blocked it — the rollup's blocked families carry no
   rule reference at all, so *which rule stopped this* is answerable only there.
 - **Narrow it:** the summary is lean by default. Records are large (one page is
@@ -551,7 +553,9 @@ Reads that explain what the network is doing and how it is performing.
   `group_id` or `group_name` for a group, `user_id` or `user_name` for a user
   (`user_id` also accepts the affiliated tag the response reports as
   `query.resolved_target`); plus `window_hours` (default 24), `detail` (`summary` |
-  `records`), `record_count`, `include` (`['host_detail']`).
+  `full`), `record_count`, `include` (`['host_detail']`), and `refresh` (default
+  **true** — the rollup is a live request against the box, so the report polls
+  unless you set it false to reuse the last snapshot).
 - **Returns:** read envelope — `result` with `summary` (window, totals, counts),
   `sections` (`top_download`, `top_upload`, `blocked`, `local_peers`,
   `rollup_families`, plus `blocked_records` / `flow_records` at records detail), and
@@ -560,7 +564,7 @@ Reads that explain what the network is doing and how it is performing.
   box was actually asked — for a user those differ, because the flow queries key a
   user by the affiliated tag while the identity stays the user id.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__get_internet_quality`
 
@@ -570,7 +574,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
   raise for a short history of samples); `refresh`.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__get_speed_tests`
 
@@ -580,7 +584,7 @@ Reads that explain what the network is doing and how it is performing.
   raise for more stored results); `refresh`.
 - **Returns:** read envelope — `result.results[]` with `download_mbps`, `upload_mbps`, `latency_ms`, `*_timestamp`.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__get_wireless_status`
 
@@ -590,7 +594,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** none.
 - **Returns:** read envelope — `result` with SSIDs (`ssid_profile_id`, name, paused), access points, connected clients.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__run_internet_speed_test` *(control)*
 
@@ -601,7 +605,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — the only WAN is used when omitted).
 - **Availability:** control (behind the toggle).
 - **Reversibility & undo:** not reversible (it is a measurement), but has a cost — stated in the description. No `undo`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=true`.
 
 ---
 
@@ -617,7 +621,7 @@ echo it in `target`. All are reversible except where noted.
 - **Inputs:** `host` (name/MAC), `new_name`.
 - **Returns:** action-result (`before.name` → `after.name`).
 - **Reversibility & undo:** trivially reversible — `undo` sets the previous name back.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__set_host_dhcp_reservation`
 - **Answers:** "Give this host a fixed IP." / "Reserve IPs for every host without one."
@@ -625,7 +629,7 @@ echo it in `target`. All are reversible except where noted.
 - **Inputs:** `host` (name/MAC), `mode` (`static`/`dynamic`), `reserved_ipv4`, `network_name`/`network_uuid` (when ambiguous).
 - **Returns:** action-result (`before`/`after.ip_assignment`).
 - **Reversibility & undo:** reversible — `undo` sets `mode` back to `dynamic`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__set_host_group` / `set_host_user` / `clear_host_group` / `clear_host_user`
 
@@ -651,7 +655,7 @@ echo it in `target`. All are reversible except where noted.
 - **Reversibility & undo:** the **membership slot** is reversible — `undo` names the
   inverse call (`set_host_group` ↔ `clear_host_group`, `set_host_user` ↔
   `clear_host_user`). The **deleted rules are not restored** by any tool.
-- **Annotations:** `read_only=false, destructive=true, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=true, idempotent=true, open_world=true`.
   Registered in the `full` tier with the other destructive tools.
 
 ### `firewalla_local__set_host_dns_hostname`
@@ -661,7 +665,7 @@ echo it in `target`. All are reversible except where noted.
 - **Inputs:** `host`, `dns_hostname`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible but disruptive — `undo` restores the prior hostname.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__set_host_device_type`
 
@@ -670,7 +674,7 @@ echo it in `target`. All are reversible except where noted.
 - **Inputs:** `host`, `host_device_type` (enum: `desktop`, `phone`, `tablet`, `wearable`, `personal_default`, `console`, `smart speaker`, `tv`, …).
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible — `undo` restores the previous type.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__set_host_notify_when_next_online` / `set_host_notify_when_next_offline`
 
@@ -679,7 +683,7 @@ echo it in `target`. All are reversible except where noted.
 - **Inputs:** `host`, `enabled` (bool).
 - **Returns:** action-result (`before`/`after.enabled`).
 - **Reversibility & undo:** reversible — `undo` flips `enabled` back.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__wake_host`
 
@@ -688,7 +692,7 @@ echo it in `target`. All are reversible except where noted.
 - **Inputs:** `host`.
 - **Returns:** action-result.
 - **Reversibility & undo:** no persistent change; no `undo`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=false, open_world=true`.
 
 ---
 
@@ -703,7 +707,7 @@ Broad access control. Read the blast radius carefully.
 - **Inputs:** `rule_id` (rule id), `duration` (e.g. `30m`, `4h`, `2d 4h 30m`) **or** `resume_at` (local datetime) — omit both to pause until resumed.
 - **Returns:** action-result (`before`/`after.enabled`, `undo` = `resume_rule`).
 - **Reversibility & undo:** fully reversible — `firewalla_local__resume_rule`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__resume_rule`
 
@@ -712,7 +716,7 @@ Broad access control. Read the blast radius carefully.
 - **Inputs:** `rule_id`.
 - **Returns:** action-result.
 - **Reversibility & undo:** reversible (`pause_rule`).
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__set_ssid_paused`
 
@@ -722,7 +726,7 @@ Broad access control. Read the blast radius carefully.
   pauses the SSID, `false` resumes it).
 - **Returns:** action-result (`before`/`after.paused`).
 - **Reversibility & undo:** fully reversible — `undo` sets `paused=false`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ---
 
@@ -745,7 +749,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
   table — is omitted unless `include_exceptions` is set; it is unbounded and is
   the expensive part of this response. Set it only when hunting a silence to remove.
 - **Availability:** read, default-on.
-- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__set_alarm_muted`
 
@@ -758,7 +762,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
   `network_name`, or `all_hosts`.
 - **Returns:** action-result (`target`, `undo`).
 - **Reversibility & undo:** reversible — `undo` unmutes (removes the silence).
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 - **Caveats (must state):** scope is **mandatory** — omitting every scope selector would otherwise mean every host, so `all_hosts: true` is required to say that out loud; durations are the app's three fixed values (not free text).
 
 ### `firewalla_local__unmute_alarm`
@@ -773,7 +777,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Reversibility & undo:** reversible by re-muting. No `undo` is emitted, because
   the reversing call is `set_alarm_muted` with the same scope.
 - **Annotations:** `read_only=false`, `destructive=false`, `idempotent=true`,
-  `open_world=false`.
+  `open_world=true`.
 
 ### `firewalla_local__block_alarm_target`
 
@@ -786,7 +790,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Returns:** action-result (`target` = the created rule id + name, `undo`).
 - **Availability:** control (behind the toggle). *(Planned — a thin facade over `create_rule`.)*
 - **Reversibility & undo:** reversible — `firewalla_local__unblock_alarm_target`. Each block consumes a finite rule slot.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 - **Caveats (must state):** auto-archives the alarm (archiving is one-way); scope defaults to the alarm's host — override to widen/narrow deliberately.
 
 ### `firewalla_local__unblock_alarm_target`
@@ -797,7 +801,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Returns:** action-result.
 - **Availability:** control (behind the toggle). *(Planned — a thin facade over `delete_rule`.)*
 - **Reversibility & undo:** reversible (`block_alarm_target`).
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ### `firewalla_local__archive_alarm`
 
@@ -806,7 +810,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Inputs:** `alarm_id` — the single-alarm selector. To archive the whole active set use `archive_all_alarms`.
 - **Returns:** action-result.
 - **Reversibility & undo:** the archive itself cannot be undone, but the record is kept. No `undo`.
-- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=false`.
+- **Annotations:** `read_only=false, destructive=false, idempotent=true, open_world=true`.
 
 ---
 

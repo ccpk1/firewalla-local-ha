@@ -188,6 +188,7 @@ def _snapshot(
     target: str = "social",
     target_type: str = "category",
     target_name: str | None = "social",
+    alarm_id: str | None = None,
 ) -> FirewallaRuntimeSnapshot:
     """Return one selected rule snapshot."""
     return FirewallaRuntimeSnapshot(
@@ -224,6 +225,9 @@ def _snapshot(
                     "tag": ["tag:17"],
                     "dnsmasq_only": True,
                     "disabled": 0 if enabled else 1,
+                    # `alarm_id` is a property over this raw payload, so an
+                    # alarm-created rule is one that carries `aid`.
+                    **({"aid": alarm_id} if alarm_id else {}),
                 },
             ),
         ),
@@ -3940,6 +3944,73 @@ async def test_get_rules_supports_filters(hass: HomeAssistant) -> None:
     assert [rule["rule_id"] for rule in matches["rules"]] == ["744"]
     assert no_match is not None
     assert no_match["rules"] == []
+
+
+async def test_get_rules_can_be_filtered_by_the_alarm_that_created_a_rule(
+    hass: HomeAssistant,
+) -> None:
+    """Test `alarm_id` finds the auto-block rule an alarm created.
+
+    That rule is also the one `unblock_alarm_target` needs, and it is hidden by
+    default as a system-managed rule -- so the filter is only useful together with
+    `include_system_managed`, which the tool description states. Measured on the
+    live box: 9 of 127 rules carry an alarm id, so the field is populated and the
+    filter has something to match.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(alarm_id="1711"),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        matches = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_ALARM_ID: "1711",
+            },
+            blocking=True,
+            return_response=True,
+        )
+        other_alarm = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_RULES,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_ALARM_ID: "9999",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert matches is not None
+    assert [rule["rule_id"] for rule in matches["rules"]] == ["744"]
+    assert matches["rules"][0]["alarm_id"] == "1711"
+    assert other_alarm is not None
+    assert other_alarm["rules"] == []
 
 
 _TRANSLATIONS_PATH: Final = (
