@@ -298,6 +298,14 @@ contains `FIREWALLA_LOCAL_VOCABULARY_ALIGNMENT_COMPLETED.md` and a
 like stale duplicates from the close-out. Confirm and remove, so the next reader does not
 plan against a superseded plan.
 
+**Resolved 2026-10-06** — the duplicates were confirmed and removed. Kept as a record of the
+finding rather than deleted, because the close-out produced it twice-over: the renames here
+went on to produce the same class of problem in `translations/en.json`, where a constant
+rename left a label pointing at an attribute nothing published. Both are the same failure
+mode — a rename applied to one artefact and not to the others that name the same thing —
+and that is why Phase 5's guards check the label set and the published set against each
+other in both directions.
+
 ---
 
 ## 9. Phase 1 — the guards, and what they found on the first run

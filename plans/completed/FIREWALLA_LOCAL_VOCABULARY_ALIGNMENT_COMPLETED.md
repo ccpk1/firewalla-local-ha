@@ -532,7 +532,7 @@ changes are small and wide rather than deep.
   in two places; any service or field change must satisfy both.
 
 **Prior initiative this finishes:**
-- `plans/in-process/FIREWALLA_LOCAL_FLOW_REPORTING_IN-PROCESS.md` — introduced
+- `plans/completed/FIREWALLA_LOCAL_FLOW_REPORTING_COMPLETED.md` — introduced
   `target.kind: "device"` and the *Scoped identity* section, both corrected here.
   Its §8 records the `user`/affiliated-tag remap as a deliberate identity/protocol
   separation, which remains correct and is **not** changed by this plan.

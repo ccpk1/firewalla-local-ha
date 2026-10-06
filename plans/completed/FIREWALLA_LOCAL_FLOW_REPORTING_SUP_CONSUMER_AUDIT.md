@@ -1,6 +1,6 @@
 # SUP — Consumer audit: flow reporting and the single-logic-path requirement
 
-**Supports:** `plans/in-process/FIREWALLA_LOCAL_FLOW_REPORTING_IN-PROCESS.md`
+**Supports:** `plans/completed/FIREWALLA_LOCAL_FLOW_REPORTING_COMPLETED.md`
 **Purpose:** answer the owner's three direct requests — *no artificial caps*,
 *support both bounded defaults and all-available reads*, and *audit the existing
 consumers so intensive, complex flow-data handling has one logic path and stays

@@ -1,10 +1,10 @@
-# Flow Reporting Service — IN PROCESS
+# Flow Reporting Service — COMPLETE
 
 **Initiative:** Flow Reporting Service (`get_flow_report`)
 **Branch:** `feature/flow-reporting`, off `main` (the rule-hit-data work is already on `main`)
 **Depends on:** `2.5.0-beta.1` (rule hit data), issue #53 (stale rule switches) for one edge case only
 **Status:** **COMPLETE** — all four phases delivered and validated. Phases 1–3 land the shared core, the protocol layer and the normalization; Phase 4 lands the non-admin `get_flow_report` service, its default-off identity gate, the read-tier LLM tool, docs and quality scale.
-**Last updated:** 2026-10-04 — 4.7 verified end-to-end against the live box; nothing outstanding.
+**Last updated:** 2026-10-06 — moved to `plans/completed/` after verifying the delivery against the code. 4.7 was verified end-to-end against the live box on 2026-10-04; nothing outstanding.
 
 ---
 
@@ -1145,7 +1145,7 @@ Commands: `python -m ruff check .` · `python -m ruff format .` ·
 ## 8. Delivery note
 
 **Status: delivered.** All four phases are complete and validated, and every step
-in this plan is closed. Commits on `feature/flow-reporting`, 30 ahead of `main`:
+in this plan is closed. Commits on `feature/flow-reporting`, **73** ahead of `main`:
 
 | Phase | Commits | Tests |
 | --- | --- | --- |
@@ -1153,6 +1153,11 @@ in this plan is closed. Commits on `feature/flow-reporting`, 30 ahead of `main`:
 | 2 — Protocol layer | `a94dc29`, `9826868` | 638 |
 | 3 — Normalization | `ea8bd85` … `938700a`, `78abe40` | 705 |
 | 4 — Surface | `d4cb98d`, `f905d12`, `a168214` | 718 |
+
+The commit count read *30 ahead of `main`* when this was written and reads **73** now.
+The difference is the two initiatives that landed after it — Vocabulary Alignment and Time
+and Derived State — not flow work. Corrected here rather than left as a number that would
+be read as a claim about this initiative's size.
 
 **What ships.** `firewalla_local.get_flow_report` (non-admin, response-only) and
 the `firewalla_local__get_flow_report` read tool: one windowed rollup summarized
