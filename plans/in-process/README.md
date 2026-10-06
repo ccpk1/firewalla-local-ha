@@ -44,16 +44,17 @@ now closed, so there is nothing left to sequence against it.
 
 ### 2. Time and Derived State
 
-Planned — Phase 0 (research) complete, no phase started. Open for pressure-testing.
+Delivered — all five phases complete and validated on `feature/flow-reporting`. Moved to
+`plans/completed/`.
 
-- `FIREWALLA_LOCAL_TIME_AND_DERIVED_STATE_IN-PROCESS.md` — the plan, five phases. States one
-  rule for instants, durations and derived state; publishes the basis for every windowed
-  value on both service and entity surfaces; and converges the instant naming patterns behind
-  a guard that asserts reproducibility, not just presence.
+- `FIREWALLA_LOCAL_TIME_AND_DERIVED_STATE_COMPLETED.md` — the plan, every phase closed. Stated one
+  rule for instants, durations and derived state; published the basis for every windowed
+  value on both service and entity surfaces; and converged the instant naming patterns behind
+  guards that assert reproducibility, not just presence.
 - `FIREWALLA_LOCAL_TIME_AND_DERIVED_STATE_SUP_ENTITY_INVENTORY.md` — the measured evidence:
-  the live `vpn_hosts` contradiction, the eight entity families that derive a value without
-  publishing its inputs, the six ISO-only entity instants, and the three competing service
-  naming patterns.
+  the live `vpn_hosts` contradiction, the entity families that derive a value without
+  publishing its inputs, the ISO-only entity instants, and the competing service naming
+  patterns.
 
 **Sequencing note, and a correction.** This initiative was opened to fix two defects found
 on the live box — `vpn_hosts` reporting `online: 1` while `list_hosts` reported all five
@@ -79,28 +80,30 @@ documentation. No phase introduces a shim.
 **Q1 approved 2026-10-06:** `last_active` → `last_active_at`, declared breaking, no shim.
 It was the only instant whose name predated the convention, so it was the natural candidate
 for an exception — approving it instead makes the `_at` suffix a rule rather than a
-preference, and removes the precedent a later field could cite for special-casing. Phase 4
-is therefore no longer gated on a decision; only its migration documentation remains as work.
+preference, and removes the precedent a later field could cite for special-casing.
+
+**All five phases landed 2026-10-06.** Two decisions were reversed mid-flight with the
+reversal recorded rather than folded in: Q10 (`pause_until` left as-is, then found to be
+*unrepresentable* once the guard could see `helpers/`) and, in Phase 2, the epoch twin's own
+name, which the Phase 1 guard caught. Both are documented in the completed plan.
 
 ---
 
 ## Sequencing across initiatives
 
-Both open initiatives touch the same branch. Order that avoids rework:
+Only one initiative is still in process: Flow Reporting, whose four phases are complete and
+which is held purely for release. Time and Derived State is done, so it no longer sequences
+against anything.
 
-1. **Time and Derived State Phases 1–2** — the rule, the guards and the basis. Additive; no
-   published value changes; closes the agent-facing unverifiability. Independent of Flow
-   Reporting.
-2. **Time and Derived State Phase 3** — service and tool convergence. Breaking, free, and
-   worth doing before any release note is written, because it removes three competing naming
-   patterns from the same package the entity work then cites.
-3. **Flow Reporting push** — its four phases are complete and it is only held for release, so
+What remains, in order:
+
+1. **Flow Reporting push** — its four phases are complete and it is only held for release, so
    it can go whenever the branch is being pushed.
-4. **Time and Derived State Phases 4–5** — the entity renames and the documentation close.
-   Do these *after* the release decision so the migration table lands once rather than being
-   rewritten against a moving target.
+2. **Release** — the migration tables for both initiatives are written and verified
+   (`USER_GUIDE.md` and `RELEASE_CHECKLIST.md` §4), so the release notes are transcription
+   rather than authoring.
 
-If only one thing ships, ship Time and Derived State Phases 1–3: the rule, the basis, and one
-instant naming pattern across every service and tool, which together make every value in the
-integration reproducible from its own payload.
+If only one thing ships, ship both: the vocabulary initiative and Time and Derived State are
+each complete, guarded, and documented, and between them every published value is named
+consistently and reproducible from its own payload.
 

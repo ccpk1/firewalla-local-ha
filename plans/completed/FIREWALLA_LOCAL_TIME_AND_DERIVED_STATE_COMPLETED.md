@@ -1,10 +1,29 @@
-# Time and Derived State — IN PROCESS
+# Time and Derived State — COMPLETE
 
 **Initiative:** Every published instant is readable, and every derived value is reproducible
 **Owner:** Firewalla Strategist
-**Status:** Phase 0 (research) complete; plan open for pressure-testing. No phase started.
+**Status:** **All five phases complete, 2026-10-06.** Guards pass with no markers. No open
+questions.
 **Branch:** `feature/flow-reporting`
 **Supporting note:** `FIREWALLA_LOCAL_TIME_AND_DERIVED_STATE_SUP_ENTITY_INVENTORY.md`
+
+**Commits, in order:**
+
+| Commit | Phase |
+| --- | --- |
+| `187ff1d` | 1 — the rule, the helper, and the checks |
+| `28091ac` | 2 — publish the basis |
+| `e06a1a2` | 3 — pre-analysis, and the corrected Phase 2 names |
+| `cbe7272` | — scoped naming decision encoded as a guard; Q3 and Q10 closed |
+| `7989a5a` | 3 — converge the service instants |
+| `b7a10a2` | 4 — converge the entity instants |
+| `537d3ae` | 5 — close the loop, and repair the label defects it found |
+
+**What the initiative found that was not in the plan at all**, which is the part worth
+keeping: an unfindable bug in the derivation (`online` measured from its own subset), three
+plan items that were factually wrong when checked, a fifth instant-naming pattern, a
+self-inflicted naming error caught by the Phase 1 guard, and an over-claimed quality-scale
+rule. Each is recorded in the phase that found it rather than summarised here.
 
 ---
 

@@ -1,6 +1,6 @@
 # Time and Derived State — Supporting Entity and Attribute Inventory
 
-**Parent plan:** `FIREWALLA_LOCAL_TIME_AND_DERIVED_STATE_IN-PROCESS.md`
+**Parent plan:** `FIREWALLA_LOCAL_TIME_AND_DERIVED_STATE_COMPLETED.md`
 **Purpose:** the measured evidence behind the plan, and the entity-surface inventory the
 phases work from. Every number here is from the tree or from a live box response, not from
 memory, so "done" stays checkable.
