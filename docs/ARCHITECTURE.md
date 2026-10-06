@@ -239,6 +239,17 @@ Rules:
 - **A network reports `kind: network` and carries its own type separately.** The
   box's `lan` / `vlan` / `vpn` / `wan` distinction is real information, so
   collapsing it into the kind loses it; it belongs on a `network_kind` field.
+- **Where a coarse kind is lossy, publish the specific one beside it.** `kind`
+  collapses **eight** vendor categories into four — `bond` and `bridge` both become
+  LAN, `wireguard`/`amneziawg`/`openvpn` all become VPN, `phy` and `wlan` both
+  become WAN. That collapse is deliberate and worth keeping: it is what lets a
+  caller ask for a VPN without knowing the three ways a VPN can be built. But it
+  was previously also the *only* thing published, so AmneziaWG and WireGuard were
+  indistinguishable. `interface_category` carries the vendor's own category
+  verbatim beside the kind, which recovers all three collapses in one field, at no
+  cost to the coarse filter. Splitting the enum instead would have been the wrong
+  move: it destroys the coarse filter, renames entities, and changes a published
+  attribute value, all to gain what one additive field gives.
 
 ### Selecting a scope
 

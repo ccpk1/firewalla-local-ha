@@ -291,7 +291,10 @@ Reads that tell you what exists — the first step before any control action.
   `total`/`online`/`offline` — **`total` is not the connected count**; peers are
   configured, so answer "connected" from `online`, and `vpn_hosts` is a break-down
   of `hosts`, not an additional population),
-  `networks[]` (uuid, name, kind, `ipv4_subnets`, host/online/offline counts),
+  `networks[]` (uuid, name, kind, `interface_category` — the vendor's `bond` /
+  `bridge` / `phy` / `wlan` / `wireguard` / `amneziawg` / `openvpn` / `vlan`, which
+  is what makes two VPNs distinguishable since `kind` calls them both `vpn` —
+  `ipv4_subnets`, host/online/offline counts),
   `groups` and `users` counts, `rules` counts, `alarms` counts, per-WAN `items[]`
   with nested `latest_speed_test` and `internet_quality`, and `llm_access`
   (`mode`, plus a `note` written **from the active mode** — it states what the

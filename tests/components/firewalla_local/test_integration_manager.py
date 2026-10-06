@@ -1629,3 +1629,100 @@ async def test_async_delete_host_skips_eviction_without_host_manager() -> None:
 
     assert response == {"deleted": "12:A9:78:EB:EA:02"}
     manager.client.async_delete_host.assert_awaited_once_with("12:A9:78:EB:EA:02")
+
+
+def test_get_networks_keep_the_transport_behind_each_lossy_kind() -> None:
+    """Test the vendor's interface category survives beside the coarse kind.
+
+    `kind` collapses eight vendor categories into four: both `bond` and `bridge`
+    become LAN, all three of `wireguard`/`amneziawg`/`openvpn` become VPN, and
+    both `phy` and `wlan` become WAN. The collapse is deliberate -- it is what
+    lets a caller filter on "VPN" without knowing the three ways a VPN is built
+    -- but it was previously the only thing published, so AmneziaWG and WireGuard
+    were indistinguishable in the output.
+
+    The category is kept verbatim because it is exact as the wire spells it,
+    which is the same reason the `tag`/`utag`/`intf` reference prefixes are.
+    """
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        # A profile for the WireGuard network, so the merge path that rebuilds a
+        # network from `networkProfiles` is the one under test. That rebuild is
+        # where a field can be silently dropped, and it was: the category had to
+        # be carried through five reconstruction sites.
+        "networkProfiles": {
+            "00000000-0000-0000-0000-000000000002": {
+                "intf": "wg0",
+                "ipv4": "192.168.250.1",
+                "ipv4Subnets": ["192.168.250.0/24"],
+            }
+        },
+        "networkConfig": {
+            "interface": {
+                "bond": {
+                    "bond0": {
+                        "meta": {
+                            "name": "Bonded LAN",
+                            "type": "lan",
+                            "uuid": "00000000-0000-0000-0000-000000000001",
+                        }
+                    }
+                },
+                "wireguard": {
+                    "wg0": {
+                        "meta": {
+                            "name": "WireGuard",
+                            "type": "vpn",
+                            "uuid": "00000000-0000-0000-0000-000000000002",
+                        }
+                    }
+                },
+                "amneziawg": {
+                    "awg0": {
+                        "meta": {
+                            "name": "AmneziaWG",
+                            "type": "vpn",
+                            "uuid": "00000000-0000-0000-0000-000000000003",
+                        }
+                    }
+                },
+                "phy": {
+                    "eth0": {
+                        "meta": {
+                            "name": "WAN-ONE",
+                            "type": "wan",
+                            "uuid": "00000000-0000-0000-0000-000000000004",
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    by_uuid = {network.uuid: network for network in manager.get_networks()}
+
+    # Two VPNs, one kind -- and now distinguishable.
+    wireguard = by_uuid["00000000-0000-0000-0000-000000000002"]
+    amneziawg = by_uuid["00000000-0000-0000-0000-000000000003"]
+    assert wireguard.kind is FirewallaNetworkKind.VPN
+    assert amneziawg.kind is FirewallaNetworkKind.VPN
+    assert wireguard.interface_category == "wireguard"
+    assert amneziawg.interface_category == "amneziawg"
+
+    assert by_uuid["00000000-0000-0000-0000-000000000001"].interface_category == (
+        "bond"
+    )
+    assert by_uuid["00000000-0000-0000-0000-000000000004"].interface_category == "phy"

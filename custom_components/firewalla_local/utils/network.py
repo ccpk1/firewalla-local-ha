@@ -117,6 +117,8 @@ def _resolve_network_display_name(raw_profile: dict[str, object]) -> str | None:
 
 def _collect_network_interface_entries(
     raw_category: dict[str, object],
+    *,
+    category: str,
     kind: FirewallaNetworkKind,
     networks: dict[str, FirewallaNetwork],
 ) -> None:
@@ -153,6 +155,7 @@ def _collect_network_interface_entries(
             name=network_name,
             kind=kind,
             interface_name=interface_name,
+            interface_category=category,
             vlan_id=normalized_int(raw_entry.get(_RAW_VID_KEY)),
             ports=_normalized_string_tuple(raw_entry.get(_RAW_INTF_KEY)),
             enabled=_normalized_bool(raw_entry.get(_RAW_ENABLED_KEY)),
@@ -235,7 +238,12 @@ def build_network_inventory(data: dict[str, object]) -> tuple[FirewallaNetwork, 
                 raw_category = raw_interfaces.get(category)
                 if not isinstance(raw_category, dict):
                     continue
-                _collect_network_interface_entries(raw_category, kind, networks)
+                _collect_network_interface_entries(
+                    raw_category,
+                    category=category,
+                    kind=kind,
+                    networks=networks,
+                )
 
     # A VLAN referenced by a bridge's ``intf`` is transport for that bridge
     # (e.g. ``eth3.101`` tagging the Guest bridge), not a standalone network;
@@ -315,6 +323,7 @@ def _enrich_network_addressing(
             name=existing.name,
             kind=existing.kind,
             interface_name=existing.interface_name,
+            interface_category=existing.interface_category,
             vlan_id=existing.vlan_id,
             ports=existing.ports,
             ipv4_addresses=(
@@ -433,6 +442,7 @@ def _enrich_network_ports(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=vlan_id,
             ports=ports,
             ipv4_addresses=network.ipv4_addresses,
@@ -485,6 +495,7 @@ def _enrich_network_dhcp(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=network.vlan_id,
             ports=network.ports,
             ipv4_addresses=network.ipv4_addresses,
@@ -564,6 +575,7 @@ def _enrich_network_advanced_options(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=network.vlan_id,
             ports=network.ports,
             ipv4_addresses=network.ipv4_addresses,
@@ -642,6 +654,7 @@ def _enrich_network_device_counts(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=network.vlan_id,
             ports=network.ports,
             ipv4_addresses=network.ipv4_addresses,

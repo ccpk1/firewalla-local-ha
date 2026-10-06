@@ -669,6 +669,13 @@ class FirewallaNetwork:
     name: str
     kind: FirewallaNetworkKind
     interface_name: str | None = None
+    # The box's own ``networkConfig.interface`` category (``bond``, ``bridge``,
+    # ``phy``, ``wlan``, ``wireguard``, ``amneziawg``, ``openvpn``, ``vlan``).
+    # ``kind`` is lossy on purpose -- three categories map to LAN, three to VPN
+    # and two to WAN -- so this is the only place the specific transport
+    # survives. It is exact as the wire spells it, which is why it is kept
+    # verbatim rather than renamed.
+    interface_category: str | None = None
     vlan_id: int | None = None
     ports: tuple[str, ...] = ()
     ipv4_addresses: tuple[str, ...] = ()

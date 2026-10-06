@@ -1863,7 +1863,7 @@ def _serialize_network_host_totals(
     return {
         "host_id": host.host_id,
         "host_name": host.host_name,
-        "ip_address": host.ip_address,
+        "host_ip": host.ip_address,
         "connection_count": host.conn,
         "dns_count": host.dns,
         "blocked_dns_count": host.dns_blocked,
@@ -1882,7 +1882,7 @@ def _serialize_network_host_ranking(
     return {
         "host_id": host.host_id,
         "host_name": host.host_name,
-        "ip_address": host.ip_address,
+        "host_ip": host.ip_address,
         "remote_host": host.remote_host,
         "remote_ip": host.remote_ip,
         "value": host.value,
@@ -1952,7 +1952,7 @@ def _serialize_network_host_detail(
     return {
         "host_id": host.host_id,
         "host_name": host.host_name,
-        "ip_address": host.ip_address,
+        "host_ip": host.ip_address,
         "dhcp_name": host.dhcp_name,
         "host_device_type": host.host_device_type,
         "ip_assignment": _serialize_network_host_ip_assignment(host.ip_assignment),
@@ -4322,6 +4322,11 @@ def _build_network_overview_entries(
                 "uuid": network.uuid,
                 "name": network.name,
                 "kind": network.kind.value,
+                # The specific transport behind `kind`, which is lossy on purpose:
+                # three categories map to VPN, two to WAN and two to LAN. Absent
+                # when the network came from the WAN-status fallback, which does
+                # not say which interface carries it.
+                "interface_category": network.interface_category,
                 "ipv4_subnets": list(network.ipv4_subnets),
                 # The same count the `network` entity publishes as an attribute.
                 "host_count": len(network_hosts),
@@ -5141,7 +5146,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
         record: dict[str, object] = {
             "host_id": host.mac,
             "mac": host.mac if is_mac_host else None,
-            "ip_address": host.ip_address,
+            "host_ip": host.ip_address,
             "host_name": host.host_name,
             "dns_hostname": host.dns_hostname,
             "dns_domain": host.dns_domain,

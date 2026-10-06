@@ -4183,6 +4183,7 @@ async def test_get_system_overview_reports_counts_without_identities(
             "uuid",
             "name",
             "kind",
+            "interface_category",
             "ipv4_subnets",
             "host_count",
             "online",
@@ -4617,7 +4618,7 @@ async def test_get_hosts_defaults_to_summary_detail(
             {
                 "host_id": "00:AA:BB:CC:DD:26",
                 "mac": "00:AA:BB:CC:DD:26",
-                "ip_address": "192.168.10.10",
+                "host_ip": "192.168.10.10",
                 "host_name": "Plex Server",
                 "dns_hostname": "plex-server",
                 "dns_domain": "int.ccpk.us",
@@ -4635,7 +4636,7 @@ async def test_get_hosts_defaults_to_summary_detail(
             {
                 "host_id": "wg_peer:test-peer",
                 "mac": None,
-                "ip_address": "10.42.0.2",
+                "host_ip": "10.42.0.2",
                 "host_name": "WireGuard Kaden",
                 "dns_hostname": None,
                 "dns_domain": "int.ccpk.us",
@@ -6925,7 +6926,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     assert response["sections"]["hosts"]["items"][0] == {
         "host_id": "00:AA:BB:CC:DD:26",
         "host_name": "Plex Server",
-        "ip_address": "192.168.10.10",
+        "host_ip": "192.168.10.10",
         "dhcp_name": "plex-server",
         "host_device_type": "tablet",
         "ip_assignment": {
@@ -6942,7 +6943,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     assert response["sections"]["hosts"]["items"][1] == {
         "host_id": "0C:85:E1:B0:1D:1C",
         "host_name": "Office Phone",
-        "ip_address": "192.168.10.44",
+        "host_ip": "192.168.10.44",
         "dhcp_name": "office-phone",
         "host_device_type": "phone",
         "ip_assignment": {
@@ -7222,7 +7223,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
             {
                 "host_id": "00:AA:BB:CC:DD:26",
                 "host_name": "Plex Server",
-                "ip_address": "192.168.10.10",
+                "host_ip": "192.168.10.10",
                 "connection_count": 0,
                 "dns_count": None,
                 "blocked_dns_count": None,
@@ -7235,7 +7236,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
             {
                 "host_id": "0C:85:E1:B0:1D:1C",
                 "host_name": "Office Phone",
-                "ip_address": "192.168.10.44",
+                "host_ip": "192.168.10.44",
                 "connection_count": 0,
                 "dns_count": None,
                 "blocked_dns_count": None,
@@ -7252,7 +7253,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
             {
                 "host_id": "00:AA:BB:CC:DD:26",
                 "host_name": "Plex Server",
-                "ip_address": "192.168.10.10",
+                "host_ip": "192.168.10.10",
                 "remote_host": "pkg-containers.githubusercontent.com",
                 "remote_ip": "185.199.111.154",
                 "value": 406504404,
@@ -7262,7 +7263,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
             {
                 "host_id": "0C:85:E1:B0:1D:1C",
                 "host_name": "Office Phone",
-                "ip_address": "192.168.10.44",
+                "host_ip": "192.168.10.44",
                 "remote_host": "upload.example.net",
                 "remote_ip": "203.0.113.50",
                 "value": 133546109,
@@ -7414,7 +7415,7 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
             {
                 "host_id": "00:AA:BB:CC:DD:26",
                 "host_name": "Plex Server",
-                "ip_address": "192.168.10.10",
+                "host_ip": "192.168.10.10",
                 "connection_count": 4,
                 "dns_count": None,
                 "blocked_dns_count": None,
@@ -7427,7 +7428,7 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
             {
                 "host_id": "0C:85:E1:B0:1D:1C",
                 "host_name": "Office Phone",
-                "ip_address": "192.168.10.44",
+                "host_ip": "192.168.10.44",
                 "connection_count": 2,
                 "dns_count": None,
                 "blocked_dns_count": None,
