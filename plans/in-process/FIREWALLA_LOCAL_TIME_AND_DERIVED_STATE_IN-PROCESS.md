@@ -426,14 +426,14 @@ cannot outlive the work.
 
 **Gate met:** both guards failed for their intended reasons before any value changed, the
 output is recorded, and the suite is green with the failures held rather than hidden.
-- [ ] **1.5 Write the reproducibility guard** — for every published windowed boolean,
-      recompute `as_of - <row>_timestamp <= window` and assert it equals the published
+- [x] **1.5 Write the reproducibility guard** — for every published windowed boolean,
+      recompute `reference - <row>_timestamp <= window` and assert it equals the published
       boolean. This is the assertion that would have caught the VPN contradiction. It must
       handle three states, not two: the value can be `None` as well as true or false
       (`is_host_online` returns `None` when no host anywhere carries a timestamp, and
       `stale` is `null` for pseudo-hosts). A guard written for booleans only would fail
       spuriously on a quiet network and be relaxed until it meant nothing.
-- [ ] **1.6 Prove both guards fail on the current tree** and record the output in the
+- [x] **1.6 Prove both guards fail on the current tree** and record the output in the
       supporting note. A guard that has never failed is not evidence.
 
 **Gate:** the two guards fail for the right reasons on today's payload; `ruff`, `mypy` and
@@ -451,7 +451,7 @@ additive.
       unpack it; `device_tracker_away_window_seconds` is deliberately *not* part of it,
       because presence is a wall-clock frame.
 - [x] **2.2 Add the constants** to `const.py` — `ATTR_ACTIVITY_REFERENCE_AT`,
-      `ATTR_ACTIVITY_REFERENCE_TIMESTAMP`, `ATTR_ONLINE_WINDOW_SECONDS`,
+      `ATTR_ACTIVITY_REFERENCE_AT_TIMESTAMP`, `ATTR_ONLINE_WINDOW_SECONDS`,
       `ATTR_DEVICE_TRACKER_AWAY_WINDOW_SECONDS`. No fourth suffix was invented (Q3/Q7).
 - [x] **2.3 Publish the basis on the connectivity entities** — the watched-device binary
       sensor and the device tracker. **Deviation:** the watched-user sensor does *not* get
@@ -519,36 +519,71 @@ Purpose: make the service and LLM surfaces obey the rule, and establish the sing
 precedent the entity phase then follows. Every change here is breaking by declaration and
 carries no compatibility cost, because nothing consumes these responses yet.
 
-- [ ] **3.1 Converge the three instant naming patterns** into one — `<name>_at` (ISO) plus
-      `<name>_timestamp` (epoch). Replaces: bare `timestamp` + `timestamp_iso` (flow records,
-      WAN events), and `<name>_timestamp` + `<name>_timestamp_iso` (`start`, `end`, `begin`,
-      `anchor`). Establish `build_rule_hit_attributes`' existing `at` + `timestamp` as the
-      reference implementation, since it is already correct.
-- [ ] **3.2 Pair every service instant that is ISO-only today** — a `_timestamp` twin for
-      `tested_at`, `sampled_at`, `fired_at`, `expires_at`, `synced_at`, and `pause_until`,
-      so a caller never has to parse a string to do arithmetic.
+**Pre-analysis (2026-10-06) — the inventory was taken from the guard and from `grep`, not
+from this plan's own summary, and three of the items below were wrong as written.**
+
+Four instant patterns actually exist, not three:
+
+| # | pattern | example | site |
+| --- | --- | --- | --- |
+| 1 | `at` + bare `timestamp` | `last_hit.at` / `.timestamp` | `models.py:2030` |
+| 2 | `<name>_at` + `<name>_at_timestamp` | `fired_at` / `fired_at_timestamp` | `services.py:1349` |
+| 3 | bare `timestamp` + `timestamp_iso` | `sample.timestamp` | `services.py:1859`, `3775` |
+| 4 | `<name>_timestamp_iso` | `begin_timestamp_iso` | `services.py:1291` |
+
+Pattern 1 is a **fourth** pattern the plan did not list, and it is in the one place the plan
+called the correct reference. Item 3.1 therefore cannot simply cite `build_rule_hit_attributes`
+as already-correct: its `at` and `timestamp` are **bare**, carrying no concept name, so they do
+not satisfy the closed suffix set Phase 1 wrote. It is correct *in a different style* — scoped
+naming, where the concept is the parent key (`last_hit.at`). Whether that style is permitted
+is a decision Phase 3 has to make explicitly, not inherit.
+
+**A guard coverage hole, found while taking this inventory.** The suffix check uses
+`endswith("_at")`, which `"at"` does not match, so bare `at` and bare `timestamp` are
+invisible to it. That is how pattern 1 escaped a guard built to find exactly this. The guard
+needs a second check for scoped names, or the style must be forbidden — either way it cannot
+stay blind.
+
+**Item 3.2 is already done and must not be redone.** It lists `tested_at`, `sampled_at`,
+`fired_at`, `expires_at` and `synced_at` as needing epoch twins. They all already have them
+(`services.py:987`, `1020`, `1350`, `1382`, `4632`). The only genuine gap on the service
+surface is **`pause_until`**. The plan's list was written from the entity surface's gaps and
+carried across without checking — the same assumption error as Q8.
+
+- [ ] **3.1 Converge the instant naming patterns** into one — but first decide the scoped
+      question above, because two styles are in play and only one can win. Replaces:
+      bare `timestamp` + `timestamp_iso` (flow records, WAN events), and
+      `<name>_timestamp_iso` (`begin`, `end`, `anchor`).
+- [ ] **3.2 Pair every service instant that is ISO-only today** — verified list is
+      **`pause_until` only**. The other five already carry twins and were listed here in
+      error; re-verify before touching any of them.
 - [ ] **3.3 Give every epoch-only service field an ISO form.** `get_hosts` → `last_active`;
       flow records → `timestamp`; and in `get_runtime_inventory` → `activated_time`,
       `last_activated_time`, `updated_time`, `expires_at`, `pause_until`. These are the
       Class A failures on the service surface and the reason an agent compared floats during
       the TV diagnosis.
 - [ ] **3.4 Publish the basis on the remaining service surfaces** — confirm every windowed
-      value from Phase 2 is reproducible on the service side too, and add `as_of` where a
+      value from Phase 2 is reproducible on the service side too, and add the basis where a
       response is windowed but was missed (the flow report's window fields and the
       `get_user_usage` periods are the likely candidates; verify rather than assume).
 - [ ] **3.5 Resolve the `pause_until` collision** (Q10) — `runtime_inventory` publishes it as
       an epoch float while the rule switch and `get_rules` publish ISO. One name, one format,
       and after 3.2 it has a twin so nothing is lost.
-- [ ] **3.6 Align the LLM tool metadata** — `docs/MCP_TOOL_REFERENCE.md` and the tool
+- [ ] **3.6 Extend the guard's module list to include `helpers/`** — `_CONTRACT_MODULES` is
+      `PUBLISHING_MODULES` plus `llm_tools_read.py`, and `PUBLISHING_MODULES` stops at the
+      entity platforms, so `helpers/runtime_inventory.py` is unscanned. It is where Q10's
+      collision lives and where Phase 2 published the basis. Expect this to surface gaps not
+      listed here.
+- [ ] **3.7 Align the LLM tool metadata** — `docs/MCP_TOOL_REFERENCE.md` and the tool
       descriptions name any time field they mention, so an agent reading the reference sees
       the same names the response carries. `list_rules`' `pause_until` documentation added
       in `3f9f2f5` is the pattern; sweep for the rest.
-- [ ] **3.7 Run the Phase 1 guards** and record what they now cover on the service side,
+- [ ] **3.8 Run the Phase 1 guards** and record what they now cover on the service side,
       including which patterns no longer exist.
 
 **Gate:** one naming pattern across services and LLM tools; every instant paired; every
-windowed value carries its basis; no `_iso` suffix and no bare `timestamp` remains. Breaks
-recorded in `USER_GUIDE.md` and `RELEASE_CHECKLIST.md` (finalised in Phase 5).
+windowed value carries its basis; no `_iso` suffix and no unscoped bare `timestamp` remains.
+Breaks recorded in `USER_GUIDE.md` and `RELEASE_CHECKLIST.md` (finalised in Phase 5).
 
 ### Phase 4 — Converge the entity surface
 
