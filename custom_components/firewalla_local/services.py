@@ -3429,15 +3429,20 @@ def _network_segment_report_sections(
     """
     sections: dict[str, object] = {
         "configuration": {
-            "kind": network.kind.value,
+            # `network_kind` is the box's coarse type and carries the same name
+            # `target` uses for it, so one response does not call one concept two
+            # things. It is lossy: see `interface_category` in the overview for
+            # the specific transport.
+            "network_kind": network.kind.value,
             "interface_name": view.interface_name,
+            "interface_category": network.interface_category,
+            "interface_type": view.interface_type,
             "vlan_id": network.vlan_id,
             "ports": list(network.ports),
             "enabled": network.enabled,
             "mdns_relay": network.mdns_relay,
             "ssdp_relay": network.ssdp_relay,
             "block_icmp": network.block_icmp,
-            "type": view.network_type,
             "monitoring": view.monitoring,
             "active": view.active,
             "ready": view.ready,

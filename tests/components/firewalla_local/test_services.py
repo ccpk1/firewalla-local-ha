@@ -6888,15 +6888,20 @@ async def test_get_network_segment_report_service_returns_configuration_report(
         "has_ipv6_addressing": False,
     }
     assert response["sections"]["configuration"] == {
-        "kind": "lan",
+        # The box's coarse type under the name `target` uses for it, plus the two
+        # finer interface fields -- the registry category and the box's own
+        # `meta.type`, which is not derivable from the category (an amneziawg
+        # interface reports `lan` or `vpn`, a wlan one `wan` or `lan`).
+        "network_kind": "lan",
         "interface_name": "bond0.10",
+        "interface_category": "bond",
+        "interface_type": "lan",
         "vlan_id": None,
         "ports": [],
         "enabled": None,
         "mdns_relay": None,
         "ssdp_relay": False,
         "block_icmp": None,
-        "type": "lan",
         "monitoring": True,
         "active": None,
         "ready": None,
@@ -9834,3 +9839,98 @@ async def test_wan_events_empty_result_explains_itself(
     assert [w["code"] for w in response["metadata"]["warnings"]] == ["no_wan_events"]
     assert "quiet period" in response["metadata"]["warnings"][0]["message"]
     assert response["metadata"]["provenance"]["events"]["source_field"] == "item=events"
+
+
+async def test_network_segment_configuration_names_its_three_facets(
+    hass: HomeAssistant,
+) -> None:
+    """Test the configuration section keeps its three distinct interface facets.
+
+    One section answers three different questions, and they were previously
+    spelled `kind` and `type` -- two names that look like one vocabulary and are
+    not:
+
+    - `network_kind` is the box's coarse type, and it is the same value `target`
+      reports under `target.network_kind`, so the response no longer calls one
+      concept two names.
+    - `interface_category` is the vendor's `networkConfig.interface` registry key.
+    - `interface_type` is the box's own `meta.type`.
+
+    The last two are **not** derivable from each other: measured in the fixtures,
+    an `amneziawg` interface reports `meta.type` of `lan` or `vpn`, and a `wlan`
+    interface reports `wan` (a wireless WAN uplink) or `lan` (a wireless LAN
+    access point). So this is not a place to collapse fields -- `interface_type`
+    is the only thing that tells those two wireless cases apart.
+
+    The key set is asserted whole, because the defect this replaces was a rename
+    that would have half-landed: `kind` renamed while `type` stayed, or `type`
+    dropped as "derived" when it is not.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_network_interface_payload",
+            new=AsyncMock(return_value=_network_interface_payload()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_NETWORK_SEGMENT_REPORT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_NAME: "VLAN10 CORE",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    configuration = response["sections"]["configuration"]
+
+    assert set(configuration) == {
+        "network_kind",
+        "interface_name",
+        "interface_category",
+        "interface_type",
+        "vlan_id",
+        "ports",
+        "enabled",
+        "mdns_relay",
+        "ssdp_relay",
+        "block_icmp",
+        "monitoring",
+        "active",
+        "ready",
+        "pending_test",
+        "policy",
+    }
+    # The old ambiguous spellings, named so a reintroduction is a failure rather
+    # than a silent second vocabulary.
+    assert "kind" not in configuration
+    assert "type" not in configuration

@@ -305,6 +305,8 @@ service responses and tool results:
 | `get_time_usage_report` provenance | `apps.devices.intervals` | `apps.hosts.intervals` |
 | `get_network_segment_usage` host rows | `conn` / `dns` / `dns_blocked` / `ip_blocked` / `ip_denied` / `ntp` | `connection_count` / `dns_count` / `blocked_dns_count` / `blocked_ip_count` / `denied_ip_count` / `ntp_count` |
 | host records in `get_hosts`, the network `hosts` include, `get_network_segment_usage` and `get_time_usage_report` | `ip_address` | `host_ip` |
+| `get_network_segment_report` `sections.configuration` | `kind` | `network_kind` |
+| `get_network_segment_report` `sections.configuration` | `type` | `interface_type` |
 | `set_host_group` / `set_host_user` and the group/journal variant | `device_rules.removed` | `host_rules.removed` |
 
 **The watched-device `ip_address` attribute is now `host_ip`** on the entity as well

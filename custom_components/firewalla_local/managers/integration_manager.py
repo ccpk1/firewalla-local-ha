@@ -970,7 +970,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 name=self._optional_string(raw_payload.get("name")) or target.name,
             ),
             interface_name=self._optional_string(raw_payload.get("intf")),
-            network_type=self._optional_string(raw_payload.get("type")),
+            interface_type=self._optional_string(raw_payload.get("type")),
             monitoring=self._optional_bool(raw_payload.get("monitoring")),
             active=self._optional_bool(raw_payload.get("active")),
             ready=self._optional_bool(raw_payload.get("ready")),

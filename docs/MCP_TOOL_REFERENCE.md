@@ -463,6 +463,15 @@ Reads that tell you what exists — the first step before any control action.
   resolve from `get_system_overview`); `include` (`['hosts']` to add the per-network
   host list, which is absent by default); `refresh`.
 - **Returns:** read envelope — `result.networks[]` with interface, subnet, DHCP range, VLAN, `block_icmp`, host counts, and the network-level `policy` block (settings, not rules — see [Policy controls](#policy-controls)); the `hosts` section only when requested.
+  `sections.configuration` answers three different questions, so it names three
+  fields rather than two ambiguous ones. `network_kind` is the box's coarse type
+  (`lan`/`vlan`/`vpn`/`wan`), under the same name `target.network_kind` uses.
+  `interface_category` is the vendor's registry key (`bond`, `bridge`, `vlan`,
+  `phy`, `wlan`, `wireguard`, `amneziawg`, `openvpn`). `interface_type` is the
+  box's own `meta.type`. The last two are **not** derivable from each other: an
+  `amneziawg` interface reports `meta.type` of `lan` or `vpn`, and a `wlan` one
+  reports `wan` (wireless WAN uplink) or `lan` (wireless LAN access point), so
+  `interface_type` is the only field that tells those two apart.
   `summary.host_count` and `summary.returned_host_count` can differ, and they come
   from **two different sources**: `host_count` is derived from this integration's
   host inventory by interface, while the returned rows are the box's own

@@ -861,7 +861,7 @@ class FirewallaNetworkSegmentView:
 
     target: FirewallaNetworkSegment
     interface_name: str | None = None
-    network_type: str | None = None
+    interface_type: str | None = None
     monitoring: bool | None = None
     active: bool | None = None
     ready: bool | None = None
