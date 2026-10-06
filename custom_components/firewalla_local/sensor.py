@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -26,6 +24,7 @@ from .const import (
     ATTR_INTERNET_QUALITY_PING_PACKET_LOSS,
     ATTR_INTERNET_QUALITY_PING_TARGET,
     ATTR_INTERNET_QUALITY_SAMPLED_AT,
+    ATTR_INTERNET_QUALITY_SAMPLED_AT_TIMESTAMP,
     ATTR_INTERNET_QUALITY_WAN_NAME,
     ATTR_INTERNET_QUALITY_WAN_UUID,
     ATTR_SPEED_TEST_DOWNLOAD_MBYTES,
@@ -42,6 +41,7 @@ from .const import (
     ATTR_SPEED_TEST_SERVER_SPONSOR,
     ATTR_SPEED_TEST_SUCCESS,
     ATTR_SPEED_TEST_TESTED_AT,
+    ATTR_SPEED_TEST_TESTED_AT_TIMESTAMP,
     ATTR_SPEED_TEST_UPLOAD,
     ATTR_SPEED_TEST_UPLOAD_MBYTES,
     ATTR_SPEED_TEST_VENDOR,
@@ -52,6 +52,7 @@ from .const import (
     ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP,
     ATTR_WATCHED_USER_ASSOCIATED_HOSTS,
     ATTR_WATCHED_USER_LAST_ACTIVE,
+    ATTR_WATCHED_USER_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     ENTITY_SUFFIX_SENSOR,
     TRANS_KEY_ENTITY_SENSOR_ALARM_COUNT,
@@ -74,6 +75,7 @@ from .models import (
     FirewallaSpeedTestResult,
     FirewallaWatchedUser,
 )
+from .utils.values import iso_instant
 
 PARALLEL_UPDATES = 0
 
@@ -212,10 +214,11 @@ class FirewallaWanSpeedTestSensor(FirewallaEntity, SensorEntity):
         speed_test = self._speed_test_result
         return {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_SPEED_TEST),
-            ATTR_SPEED_TEST_TESTED_AT: (
-                datetime.fromtimestamp(speed_test.tested_at_timestamp, UTC).isoformat()
-                if speed_test is not None
-                else None
+            ATTR_SPEED_TEST_TESTED_AT: iso_instant(
+                speed_test.tested_at_timestamp if speed_test is not None else None
+            ),
+            ATTR_SPEED_TEST_TESTED_AT_TIMESTAMP: (
+                speed_test.tested_at_timestamp if speed_test is not None else None
             ),
             ATTR_SPEED_TEST_ISP: speed_test.isp if speed_test is not None else None,
             ATTR_SPEED_TEST_PUBLIC_IP: (
@@ -406,10 +409,11 @@ class FirewallaWanInternetQualitySensor(FirewallaEntity, SensorEntity):
             ATTR_INTERNET_QUALITY_PING_TARGET: (
                 sample.target if sample is not None else None
             ),
-            ATTR_INTERNET_QUALITY_SAMPLED_AT: (
-                datetime.fromtimestamp(sample.timestamp, UTC).isoformat()
-                if sample is not None and sample.timestamp is not None
-                else None
+            ATTR_INTERNET_QUALITY_SAMPLED_AT: iso_instant(
+                sample.timestamp if sample is not None else None
+            ),
+            ATTR_INTERNET_QUALITY_SAMPLED_AT_TIMESTAMP: (
+                sample.timestamp if sample is not None else None
             ),
             ATTR_INTERNET_QUALITY_PING_LATENCY: (
                 sample.ping_latency_ms if sample is not None else None
@@ -557,9 +561,10 @@ class FirewallaWatchedUserTodayUsageSensor(FirewallaEntity, SensorEntity):
                 if watched_user is not None
                 else None
             ),
-            ATTR_WATCHED_USER_LAST_ACTIVE: (
-                datetime.fromtimestamp(watched_user.last_active, UTC).isoformat()
-                if watched_user is not None and watched_user.last_active is not None
-                else None
+            ATTR_WATCHED_USER_LAST_ACTIVE: iso_instant(
+                watched_user.last_active if watched_user is not None else None
+            ),
+            ATTR_WATCHED_USER_LAST_ACTIVE_TIMESTAMP: (
+                watched_user.last_active if watched_user is not None else None
             ),
         }

@@ -375,7 +375,7 @@ and Phase 4.
 | **1** | The rule, the helper, and the checks | The three concepts stated in `DEVELOPMENT_STANDARDS.md`, one `iso_instant()` helper, and two guard tests that **fail on today's payload** | **MET** — guards failed for their intended reasons, recorded in the supporting note §9; no published value changed |
 | **2** | Publish the basis | Reference instant, applied window and `stale` on every windowed surface — the connectivity entities, the count attributes, and the three service envelopes | **MET** — three guards pass, each proven non-vacuous; additive only, no existing key changed. Two plan errors found and corrected (see §5) |
 | **3** | Converge the service and tool surfaces | Every service instant named and paired, on one rule with two families; the shared bare-key builder named | **MET** — the bare-name guard passes outright; the twin guard's remaining gaps are all entity-side. Two plan predictions were wrong (see §5 Phase 3) |
-| **4** | Converge the entity surface | `last_active_at` + twin, `fired_at` format repaired, twins added for every ISO-only entity instant, all conversions routed through the helper | Every entity instant has both forms under the same one pattern; breaks recorded in the migration table |
+| **4** | Converge the entity surface | `last_active_at` + twin, `fired_at` format repaired, twins for every remaining entity instant, all conversions routed through the helper | **MET** — both guards pass with no markers; pairing proven behaviorally by twin value assertions, not only lexically. Migration tables written |
 | **5** | Close the loop | `USER_GUIDE.md`, `RELEASE_CHECKLIST.md`, quality-scale check, and the guard extended to entity attributes | Docs match the payload; the guard covers entities, not just service responses |
 
 Phases are sequential, and **1 → 2 → 3 → 4 → 5 is deliberate**:
@@ -657,7 +657,7 @@ carried across without checking — the same assumption error as Q8.
 windowed value carries its basis; no `_iso` suffix and no unscoped bare `timestamp` remains.
 Breaks recorded in `USER_GUIDE.md` and `RELEASE_CHECKLIST.md` (finalised in Phase 5).
 
-### Phase 4 — Converge the entity surface
+### Phase 4 — Converge the entity surface — **COMPLETE**
 
 Purpose: bring the entity attributes to the same rule the services now follow. This is the
 only phase with a compatibility surface — users may have templates against these attributes
@@ -665,40 +665,61 @@ only phase with a compatibility surface — users may have templates against the
 
 **Q12 applies here in full: every entity instant is flat and names its concept.** There is no
 parent key on an entity attribute to supply the concept, so `at` and `timestamp` are not
-available as shorthand — the whole reason `build_rule_hit_attributes` has to lose them in
-Phase 3.1. The guard `test_entity_instants_name_their_concept` covers this phase.
+available as shorthand — the whole reason `build_rule_hit_attributes` had to lose them in
+Phase 3.1.
 
-- [ ] **4.1 Repair `fired_at`** on the alarm binary sensor. It publishes a raw epoch float
-      while the service publishes ISO under the same name — one name, two formats, one of
-      them wrong. It becomes ISO with a `fired_at_timestamp` twin, matching what Phase 3
-      settled.
-- [ ] **4.2 Rename `last_active` to `last_active_at`** on the watched-device binary sensor,
-      the device tracker and the watched-user sensor, and add `last_active_timestamp`
-      (**Q1 — approved 2026-10-06**; two constant values cover all five attributes). The
-      service surface publishes the same concept, so the name must match Phase 3.3 exactly:
-      one concept, one name, whichever surface carries it.
-- [ ] **4.3 Add the missing twins** for every ISO-only entity instant: `pause_until`,
-      `tested_at`, `sampled_at`, and `runtime_data_updated_at` (Q2 for the last one's name).
+- [x] **4.1 Repair `fired_at`** — it published a raw epoch float while the service published
+      ISO under the same name. It is ISO now with a `fired_at_timestamp` twin.
+- [x] **4.2 Rename `last_active` to `last_active_at`** on the watched-device binary sensor,
+      the device tracker and the watched-user sensor, with `last_active_at_timestamp` added
+      (**Q1**). The service surface's `get_hosts` was renamed in the same pass, so one
+      concept keeps one name across every surface — that was Phase 3.3's outstanding item and
+      it belonged with this rename rather than in the service phase.
+- [x] **4.3 Add the missing twins** — `pause_until`, `tested_at`, `sampled_at` and
+      `runtime_data_updated_at` all paired. `schedule_next_start` / `schedule_next_end` are
+      excluded by decision (see below).
+- [x] **4.4 Route every conversion through `iso_instant()`** — every pure UTC-to-ISO
+      conversion now goes through the helper, and `_serialize_unix_timestamp` is deleted as
+      dead code. What remains calling `datetime.fromtimestamp` is the six
+      `.astimezone(time_zone)` sites, which are a genuinely different operation: the helper
+      is UTC-only by design, so local-time rendering keeps its own path.
+- [x] **4.5 Confirm the naming convention holds** — both Phase 1 guards pass with no
+      markers left, and the pairing is now proven **behaviorally** as well as lexically:
+      twin assertions were added to the entity tests so the epoch form is checked to carry
+      the same instant as its ISO twin, not merely to exist.
 
-      **`schedule_next_start` / `schedule_next_end` are excluded — settled 2026-10-06.**
-      Both their names *and* their absence of twins stand. They are the one accepted exception
-      to the twin rule, recorded here rather than left implicit so a later reader finding them
-      untwinned knows it was decided. This does not contradict Q2's "no exceptions" ruling:
-      that was about *deriving a name* from a rule, where any carve-out makes the derivation
-      unsound, whereas this is about *which values are published at all*. Schedule window
-      boundaries are read as dates in a schedule, not used for arithmetic against a reference
-      instant.
-- [ ] **4.4 Route every conversion through `iso_instant()`** — replace the 21 hand-rolled
-      sites across `binary_sensor.py`, `device_tracker.py`, `sensor.py`, `switch.py`,
-      `services.py`, `models.py` and `managers/integration_manager.py`. Two styles exist
-      today (`datetime.fromtimestamp(t, UTC)` 12× and `dt_util.utc_from_timestamp(t)` 2×);
-      one survives. Doing this after 3.4 means the service sites are already converted.
-- [ ] **4.5 Confirm the naming convention holds across every entity pair**, by running the
-      Phase 1 pairing guard and recording what it now covers.
+**Three things this phase found that the plan did not anticipate.**
 
-**Gate:** every entity instant has both forms under the same one pattern the services use;
-the pairing guard passes; the reproducibility guard still passes; every break is listed in
-`USER_GUIDE.md`'s migration table and `RELEASE_CHECKLIST.md`.
+1. **`const.py` values were only half the change.** The `state_attributes` block in
+   `translations/en.json` is keyed by *attribute name*, so renaming `last_active` without
+   touching it would have left three attributes rendering their raw key instead of "Last
+   active". Three keys renamed, twelve twin labels added. A rename on this surface is a
+   translation change too, and that is not obvious from the code alone.
+
+2. **The rule reached a layer the plan had not considered.** `iso_instant` now lives in
+   `models.py`'s shared builder. That is fine — `models.py` already imports from
+   `utils.values`, and `values.py` is stdlib-only, so the layering holds — but it is worth
+   stating because `models.py` carries a "stdlib only, free of Home Assistant imports" note
+   that a reader could mistake for "no project imports".
+
+3. **Item 4.4 was smaller than the note claimed, in a way that mattered.** The plan said
+   "21 hand-rolled sites". Seven were live; one of the seven was a wrapper with **no
+   callers at all**, so `_serialize_unix_timestamp` was dead code that the conversion work
+   is what exposed. The remaining six are the local-time conversions, which should not be
+   folded in.
+
+**Gate met.** 801 passed, 0 xfailed (both markers removed because both tests now pass),
+ruff/format/mypy clean. Migration tables written in `USER_GUIDE.md` and
+`RELEASE_CHECKLIST.md` §4, as the gate requires; Phase 5.1 and 5.2 then verify rather than
+write them.
+
+**`schedule_next_start` / `schedule_next_end` are excluded — settled 2026-10-06.** Both their
+names *and* their absence of twins stand. They are the one accepted exception to the twin
+rule, recorded here rather than left implicit so a later reader finding them untwinned knows
+it was decided. This does not contradict Q2's "no exceptions" ruling: that was about
+*deriving a name* from a rule, where any carve-out makes the derivation unsound, whereas
+this is about *which values are published at all*. Schedule window boundaries are read as
+dates in a schedule, not used for arithmetic against a reference instant.
 
 **Execution note.** Phase 3 exists as its own phase for one reason: the service and tool
 surfaces can be converged with no risk at all, and doing that *first* means Phase 4 cites a
@@ -711,13 +732,12 @@ completed improvement.
 Purpose: make the standard operational and give the guards reach over the surface that
 matters most.
 
-- [ ] **5.1 Extend `USER_GUIDE.md`** — the *Upgrading* migration table gains the Phase 3
-      **and** Phase 4 renames with old-to-new rows, and the attribute documentation gains
-      the basis fields with one worked example showing how to recompute `online` in a
-      template.
-- [ ] **5.2 Extend `RELEASE_CHECKLIST.md`** §4's known-breaking-change block with both sets
-      of renames, following the existing breaks/fix/not-affected/migration shape, and
-      naming the no-shim policy so a reviewer does not ask for one.
+- [ ] **5.1 Extend `USER_GUIDE.md`** — the *Upgrading* time table was written in Phase 4, so
+      this becomes a **verification**: every Phase 3 and Phase 4 rename has a row, and
+      nothing in it names a key that no longer exists.
+- [ ] **5.2 Extend `RELEASE_CHECKLIST.md`** §4's known-breaking-change block — also written
+      in Phase 4; verify against the shipped payload and confirm the no-shim sentence is
+      present so a reviewer does not ask for a compatibility layer.
 - [ ] **5.3 Check the quality scale** — `docs-actions`, `action-exceptions` and
       `strict-typing` are the rules this could touch. Confirm none regresses; correct
       `quality_scale.yaml` only if implementation state actually changed.

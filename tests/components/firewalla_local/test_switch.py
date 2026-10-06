@@ -25,6 +25,7 @@ from custom_components.firewalla_local.const import (
     ATTR_RULE_NOTES,
     ATTR_RULE_PAUSE_REMAINING_SECONDS,
     ATTR_RULE_PAUSE_UNTIL,
+    ATTR_RULE_PAUSE_UNTIL_TIMESTAMP,
     ATTR_RULE_PURPOSE,
     ATTR_RULE_SCHEDULE_DAYS,
     ATTR_RULE_SCHEDULE_DURATION,
@@ -713,6 +714,7 @@ async def test_selected_rule_switch_exposes_pause_and_notes_attributes(
     assert attributes[ATTR_RULE_NOTES] == "Pause for maintenance"
     assert attributes[ATTR_RULE_IS_PAUSED] is True
     assert attributes[ATTR_RULE_PAUSE_UNTIL] == "2026-03-25T12:00:00+00:00"
+    assert attributes[ATTR_RULE_PAUSE_UNTIL_TIMESTAMP] == 1774440000.0
     assert attributes[ATTR_RULE_PAUSE_REMAINING_SECONDS] == 600
     assert attributes[ATTR_RULE_CURRENT_STATE_REASON] == RULE_STATE_REASON_PAUSED
 

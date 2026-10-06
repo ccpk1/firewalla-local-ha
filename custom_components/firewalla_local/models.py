@@ -36,7 +36,7 @@ from .const import (
     RULE_TARGET_TYPE_NETWORK,
 )
 from .utils.mac import normalize_mac_address
-from .utils.values import normalized_bool
+from .utils.values import iso_instant, normalized_bool
 
 _RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
 _RAW_UPDATE_NOTES_KEY: Final = "notes"
@@ -2029,11 +2029,7 @@ def build_rule_hit_attributes(
         }
     return {
         "matched_at_timestamp": hit.timestamp,
-        "matched_at": (
-            datetime.fromtimestamp(hit.timestamp, UTC).isoformat()
-            if hit.timestamp is not None
-            else None
-        ),
+        "matched_at": iso_instant(hit.timestamp),
         "is_blocked": hit.is_blocked,
         "block_type": hit.block_type,
         "blocked_by_rule_id": hit.blocked_by_rule_id,

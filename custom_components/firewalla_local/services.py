@@ -945,11 +945,7 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
         # enabled/disabled and puts the resume boundary in `idleTs`. Without them
         # a caller cannot tell a self-resuming pause from one that needs
         # `resume_rule`, so `is_paused` alone is not actionable.
-        "pause_until": (
-            datetime.fromtimestamp(rule.pause_until, UTC).isoformat()
-            if rule.pause_until is not None
-            else None
-        ),
+        "pause_until": iso_instant(rule.pause_until),
         "pause_until_timestamp": rule.pause_until,
         "pause_remaining_seconds": rule.pause_remaining_seconds,
         # A rule either targets a value or is scoped by a group/user, never both.
@@ -1013,11 +1009,7 @@ def _serialize_internet_quality_sample(
 ) -> JsonObjectType:
     """Serialize one shaped internet-quality sample for service responses."""
     return {
-        "sampled_at": (
-            datetime.fromtimestamp(sample.timestamp, UTC).isoformat()
-            if sample.timestamp is not None
-            else None
-        ),
+        "sampled_at": iso_instant(sample.timestamp),
         "sampled_at_timestamp": sample.timestamp,
         "ping_target": sample.target,
         "ping_latency_ms": sample.ping_latency_ms,
@@ -1038,13 +1030,6 @@ def _serialize_wan_interface(wan: FirewallaWanInterface) -> JsonObjectType:
 def _serialize_network_segment(network: FirewallaNetworkSegment) -> JsonObjectType:
     """Serialize one network-segment selector for service responses."""
     return {"uuid": network.uuid, "name": network.name}
-
-
-def _serialize_unix_timestamp(timestamp: int | None) -> str | None:
-    """Serialize one optional Unix timestamp to UTC ISO format."""
-    if timestamp is None:
-        return None
-    return datetime.fromtimestamp(timestamp, UTC).isoformat()
 
 
 def _serialize_local_timestamp(
@@ -1352,11 +1337,7 @@ def _serialize_alarm(
         "message": alarm.message,
         "state": alarm.state,
         "is_archived": alarm.is_archived,
-        "fired_at": (
-            datetime.fromtimestamp(alarm.fired_at, UTC).isoformat()
-            if alarm.fired_at is not None
-            else None
-        ),
+        "fired_at": iso_instant(alarm.fired_at),
         "fired_at_timestamp": alarm.fired_at,
         "remote_category": alarm.remote_category,
         "remote_host": alarm.remote_host,
@@ -1384,11 +1365,7 @@ def _serialize_alarm_exception(
         "target_type": exception.target_type,
         "target": exception.target,
         "target_name": exception.target_name,
-        "expires_at": (
-            datetime.fromtimestamp(exception.expires_at, UTC).isoformat()
-            if exception.expires_at is not None
-            else None
-        ),
+        "expires_at": iso_instant(exception.expires_at),
         "expires_at_timestamp": exception.expires_at,
     }
 
@@ -3783,7 +3760,7 @@ def _serialize_wan_event(event: FirewallaWanEvent) -> JsonObjectType:
         "family": event.family,
         "event_type": event.event_type,
         "occurred_at_timestamp": event.timestamp,
-        "occurred_at": datetime.fromtimestamp(event.timestamp, UTC).isoformat(),
+        "occurred_at": iso_instant(event.timestamp),
         "value": event.value,
         "previous_value": event.previous_value,
         "ok_value": event.ok_value,
@@ -4420,13 +4397,7 @@ def _build_wan_overview_entries(
                 "enabled": network.enabled,
                 "latest_speed_test": (
                     {
-                        "tested_at": (
-                            dt_util.utc_from_timestamp(
-                                latest_speed_test.tested_at_timestamp
-                            ).isoformat()
-                            if latest_speed_test.tested_at_timestamp is not None
-                            else None
-                        ),
+                        "tested_at": iso_instant(latest_speed_test.tested_at_timestamp),
                         "download_mbps": latest_speed_test.download_mbps,
                         "upload_mbps": latest_speed_test.upload_mbps,
                         "latency_ms": latest_speed_test.latency_ms,
@@ -4438,11 +4409,7 @@ def _build_wan_overview_entries(
                 ),
                 "internet_quality": (
                     {
-                        "sampled_at": (
-                            dt_util.utc_from_timestamp(quality.timestamp).isoformat()
-                            if quality.timestamp is not None
-                            else None
-                        ),
+                        "sampled_at": iso_instant(quality.timestamp),
                         "ping_latency_ms": quality.ping_latency_ms,
                         "ping_latency_max_ms": quality.ping_latency_max_ms,
                         "ping_latency_median_ms": quality.ping_latency_median_ms,
@@ -5207,7 +5174,8 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
             "network_name": host.network_name,
             "online": is_online,
             "stale": host.stale,
-            "last_active": host.last_active,
+            "last_active_at": iso_instant(host.last_active),
+            "last_active_at_timestamp": host.last_active,
             "vpn_client": (
                 {
                     "profile_id": host.vpn_client.profile_id,

@@ -380,7 +380,9 @@ Reads that tell you what exists — the first step before any control action.
   (bool, default true — performs a live poll; set false for a fast cached read).
 - **Returns:** read envelope — `result.hosts[]`, each with `host_id`, `mac`,
   `host_name`, `kind` (`mac_host`/`pseudo_host`), **`online`** (active now — the
-  connectivity signal to answer "is it connected?"), `last_active` (epoch), and
+  connectivity signal to answer "is it connected?"), `last_active_at` (the date of
+  last activity) with `last_active_at_timestamp` (the same instant in epoch
+  seconds), `stale` (the box has not seen it in about a week), and
   `ip_assignment` (`mode`: `dynamic`/`static`,
   `reserved_ipv4`, `network_uuid`). **`online` is per-host**: a returned row is
   not necessarily a connected host, and every configured VPN peer is returned by

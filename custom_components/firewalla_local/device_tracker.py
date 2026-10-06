@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from homeassistant.components.device_tracker import ScannerEntity  # type: ignore[attr-defined]
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -24,6 +22,7 @@ from .const import (
     ATTR_WATCHED_DEVICE_HOST_NAME,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
+    ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     DOMAIN,
     ENTITY_SUFFIX_DEVICE_TRACKER,
@@ -33,6 +32,7 @@ from .const import (
 from .coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from .managers import FirewallaHostManager
 from .models import FirewallaHostRuntime
+from .utils.values import iso_instant
 
 PARALLEL_UPDATES = 0
 
@@ -193,10 +193,11 @@ class FirewallaDeviceTracker(
             ATTR_WATCHED_DEVICE_CONNECTION_TYPE: (
                 host.connection_type if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_LAST_ACTIVE: (
-                datetime.fromtimestamp(host.last_active, UTC).isoformat()
-                if host is not None and host.last_active is not None
-                else None
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE: iso_instant(
+                host.last_active if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP: (
+                host.last_active if host is not None else None
             ),
             # Only the window, not a reference: this tracker measures from the
             # wall clock, so a published "now" would be stale the moment the

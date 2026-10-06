@@ -38,7 +38,6 @@ from dataclasses import replace
 from typing import Final
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from test_services import _runtime_payload, _snapshot
@@ -109,10 +108,15 @@ _BASIS_REFERENCE_KEYS: Final = (
 )
 _BASIS_WINDOW_KEYS: Final = ("online_window_seconds",)
 
-# The epoch form of a host's last activity. Accepts either name so the guard holds
-# through the planned `last_active` -> `last_active_at` + `last_active_timestamp`
-# rename rather than only before or only after it.
-_HOST_ACTIVITY_KEYS: Final = ("last_active_timestamp", "last_active")
+# The epoch form of a host's last activity. Accepts the pre-rename name too, so the
+# guard holds through the `last_active` -> `last_active_at` transition rather than
+# only before or only after it.
+_HOST_ACTIVITY_KEYS: Final = (
+    "last_active_at_timestamp",
+    "last_active_at",
+    "last_active_timestamp",
+    "last_active",
+)
 
 # Bare key names that mark an instant without saying what it is an instant *of*.
 #
@@ -204,17 +208,6 @@ def _find_bare_instant_keys() -> dict[str, list[str]]:
     return violations
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Phase 4 twins the entity instants. strict=True so this marker cannot "
-        "outlive the work: the moment Phase 4 lands, the test passes and the marker "
-        "itself fails the suite until removed. The service side is done as of Phase 3, "
-        "so every gap measured now is entity-side and all real: binary_sensor.py "
-        "`fired_at` and `runtime_data_updated_at`; sensor.py `sampled_at` and "
-        "`tested_at`; switch.py `pause_until`."
-    ),
-)
 def test_every_published_instant_has_an_epoch_twin() -> None:
     """Test an instant and its arithmetic form are published together.
 

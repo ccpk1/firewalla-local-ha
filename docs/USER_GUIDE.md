@@ -328,6 +328,61 @@ Firewalla's own payloads call these `device` (`deviceIP`, `devicePort`, `deviceT
 That word is not echoed here, because in Home Assistant a *device* is a device-registry
 entry — a different concept.
 
+## Upgrading: renamed time attributes and keys
+
+**Every published moment now appears twice and names what it is an instant of.** A date
+is the readable form (`<name>_at`); epoch seconds are the arithmetic form
+(`<name>_at_timestamp`). If you read or parse a time value in an automation or template,
+the key may have changed and the form you were reading may now be on its twin.
+
+Three things changed, and they can be adopted independently:
+
+- **Renames**, where a name did not say what the value measured.
+- **Pairs**, where a date or a number was published without the other form. If you were
+  parsing `"2026-03-26T21:00:00+00:00"` to compare two times, read the `_timestamp` twin
+  instead — no parsing needed.
+- **A basis**, where a derived value such as `online` is now published alongside the
+  reference instant and window it was measured in. This is additive: the old keys still
+  work, and the new ones let you reproduce the value.
+
+| Entity / service | Was | Now |
+| --- | --- | --- |
+| `binary_sensor` watched host, `device_tracker` presence, `sensor` watched user | `last_active` | `last_active_at`, with `last_active_at_timestamp` for the epoch form |
+| `binary_sensor` alarm `fired_at` | epoch number | `fired_at` is now the date; read `fired_at_timestamp` for the number |
+| `binary_sensor` alarm | *(absent)* | `fired_at_timestamp` added |
+| `switch` rule, `get_rules` | `pause_until` | unchanged form; `pause_until_timestamp` added |
+| `get_rules` `last_hit` | `at` / `timestamp` | `matched_at` / `matched_at_timestamp` |
+| `get_flow_report` records | `timestamp` | `occurred_at` (date) with `occurred_at_timestamp` |
+| `get_wan_events` | `timestamp` / `timestamp_iso` | `occurred_at_timestamp` / `occurred_at` |
+| `get_network_segment_usage` metric samples | `timestamp` / `timestamp_iso` | `sampled_at_timestamp` / `sampled_at` |
+| `get_internet_quality` | `sampled_at` | unchanged form; `sampled_at_timestamp` added |
+| `binary_sensor` system status | `runtime_data_updated_at` | unchanged form; `runtime_data_updated_at_timestamp` added |
+| `sensor` speed test | `tested_at` | unchanged form; `tested_at_timestamp` added |
+| `get_runtime_inventory` rule records | `activated_time` / `updated_time` / `last_activated_time` | `activated_at` / `updated_at` / `last_activated_at`, each with an `_at_timestamp` twin |
+| `get_runtime_inventory` rule records | `expires_at` (epoch) / `pause_until` (epoch) | both are dates now, matching the rule service; read `expires_at_timestamp` / `pause_until_timestamp` for the numbers |
+| `get_time_usage_report`, `get_wan_data_usage`, the segment reports | `begin_timestamp_iso` / `end_timestamp_iso` / `anchor_timestamp_iso` | `begin` / `end` / `anchor`, beside the existing `_timestamp` forms |
+| `get_hosts`, `get_system_overview`, `get_runtime_inventory` | *(absent)* | `activity_reference_at` / `activity_reference_at_timestamp` / `online_window_seconds` added |
+
+**`online` is derived, and now reproducible.** It is
+`activity_reference_at_timestamp - last_active_at_timestamp <= online_window_seconds`,
+and all three inputs are published beside it. To check one host in a template:
+
+```jinja
+{{ (state_attr('binary_sensor.my_device','activity_reference_at_timestamp')
+    - state_attr('binary_sensor.my_device','last_active_at_timestamp'))
+   <= state_attr('binary_sensor.my_device','online_window_seconds') }}
+```
+
+`stale` also participates: a host the box has not seen in about a week is offline
+however recent its activity stamp looks.
+
+**There is no compatibility layer.** These are renames, not additions, so the old names
+are gone rather than aliased — an alias would leave two names meaning one thing, which is
+the problem this set of changes exists to remove. The tables above are the migration.
+
+**Timezone is unchanged.** Times stay UTC unless a value is explicitly a local-time
+report boundary, where the offset is part of the string and `time_zone` names the zone.
+
 If you used the attribute **name** shown in the UI, it changed too, from *"Devices
 online"* to *"Hosts online"* and so on — the labels and the keys now agree.
 
@@ -732,7 +787,8 @@ integration creates one watched-user sensor per selected Firewalla user.
   available per-app totals instead of inventing a separate value
 - attributes include associated host group when present, associated host
   names, associated host count, unique usage minutes today, per-app usage
-  totals, and a manager-derived `last_active` value based on associated hosts
+  totals, and a manager-derived `last_active_at` value based on associated hosts,
+  with `last_active_at_timestamp` carrying the same instant as epoch seconds
 - `unique_usage_today` remains separate because Firewalla exposes it as a
   distinct raw field and it is not guaranteed to equal the primary total
 - `app_usage_by_app` is sourced from the proven `appTimeUsageToday` payload and

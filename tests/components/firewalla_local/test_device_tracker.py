@@ -20,6 +20,7 @@ from custom_components.firewalla_local.const import (
     ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
+    ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     CONF_AID,
     CONF_DEVICE_TRACKER_AWAY_WINDOW,
@@ -202,6 +203,10 @@ async def test_device_tracker_exposes_state_and_attributes(
     assert (
         tracker_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE]
         == datetime.fromtimestamp(1774285600.0, UTC).isoformat()
+    )
+    assert (
+        tracker_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP]
+        == 1774285600.0
     )
     assert tracker_state.attributes["source_type"] == "router"
 

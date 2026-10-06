@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -18,6 +16,7 @@ from .const import (
     ATTR_ALARM_CATEGORY_COUNTS,
     ATTR_ALARM_CATEGORY_COUNTS_COMPLETE,
     ATTR_ALARM_FIRED_AT,
+    ATTR_ALARM_FIRED_AT_TIMESTAMP,
     ATTR_ALARM_HOST_NAME,
     ATTR_ALARM_ID,
     ATTR_ALARM_MESSAGE,
@@ -76,6 +75,7 @@ from .const import (
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
     ATTR_SYSTEM_PORTS,
     ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
+    ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT_TIMESTAMP,
     ATTR_SYSTEM_SOFTWARE_VERSION,
     ATTR_SYSTEM_TIMEZONE,
     ATTR_SYSTEM_UPTIME,
@@ -95,6 +95,7 @@ from .const import (
     ATTR_WATCHED_DEVICE_HOST_NAME,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
+    ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
@@ -140,7 +141,7 @@ from .models import (
     FirewallaNetworkKind,
     FirewallaWanUsageSummary,
 )
-from .utils.values import normalized_int
+from .utils.values import iso_instant, normalized_int
 
 PARALLEL_UPDATES = 0
 
@@ -274,6 +275,11 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ),
             ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT: (
                 self.coordinator.last_runtime_data_updated_at.isoformat()
+                if self.coordinator.last_runtime_data_updated_at is not None
+                else None
+            ),
+            ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT_TIMESTAMP: (
+                self.coordinator.last_runtime_data_updated_at.timestamp()
                 if self.coordinator.last_runtime_data_updated_at is not None
                 else None
             ),
@@ -634,7 +640,12 @@ class FirewallaAlarmActiveBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_ALARM_TYPE: latest_alarm.alarm_type if latest_alarm else None,
             ATTR_ALARM_HOST_NAME: latest_alarm.device_name if latest_alarm else None,
             ATTR_ALARM_MESSAGE: latest_alarm.message if latest_alarm else None,
-            ATTR_ALARM_FIRED_AT: latest_alarm.fired_at if latest_alarm else None,
+            ATTR_ALARM_FIRED_AT: (
+                iso_instant(latest_alarm.fired_at) if latest_alarm else None
+            ),
+            ATTR_ALARM_FIRED_AT_TIMESTAMP: (
+                latest_alarm.fired_at if latest_alarm else None
+            ),
             ATTR_ALARM_ID: latest_alarm.alarm_id if latest_alarm else None,
         }
 
@@ -792,10 +803,11 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_WATCHED_DEVICE_UPLOAD_USAGE: (
                 host.upload_bytes if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_LAST_ACTIVE: (
-                datetime.fromtimestamp(host.last_active, UTC).isoformat()
-                if host is not None and host.last_active is not None
-                else None
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE: iso_instant(
+                host.last_active if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP: (
+                host.last_active if host is not None else None
             ),
         }
         if topology_connection := self._get_topology_connection():

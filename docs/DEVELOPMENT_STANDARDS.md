@@ -237,7 +237,7 @@ Rules:
 - services that target hosts must resolve against the normalized host contract and keep `host_name` as the primary human-facing selector surface
 - watched-user entity attributes must distinguish raw payload facts from
 	integration-derived joins, especially for totals, per-app usage, and
-	host-derived `last_active` metadata
+	host-derived `last_active_at` metadata
 - watched-user, watched-device, and device-tracker attributes must not expose backing group names when an app-facing user identity is available for the same relationship
 - `device_tracker` is reserved for MAC-backed LAN hosts only; VPN, tunnel,
 	overlay, and pseudo-host identities such as `wg_peer:*` are excluded by
@@ -273,12 +273,27 @@ Three concepts, and no fourth. Every published time is one of them.
   duration pair and is correct as it stands.
 - **Windowed state** — a value derived from a time, such as `online` or `is_paused`.
   Published **only alongside its basis.** A boolean is not a fact about a device; it is
-  `reference - last_active <= window`, and all three inputs must be reachable from the
+  `activity_reference_at_timestamp - last_active_at_timestamp <= online_window_seconds`,
+  and all three inputs must be reachable from the
   payload or the reader cannot reproduce the claim.
 
 Suffixes that mark a temporal field are a closed set: `_at`, `_until`, `_timestamp`,
 `_seconds`, plus `_start` and `_end` for window boundaries. A new temporal field
 declares which concept it is by taking one of them; it does not invent a seventh.
+
+**Every temporal key names its own concept.** There are two families, and the rule is
+which question the value answers rather than which shape it takes:
+
+- **A point** — when something happened. `<concept>_at` is the readable form and
+  `<concept>_at_timestamp` is the epoch form: `tested_at`, `fired_at`, `matched_at`,
+  `sampled_at`, `last_active_at`.
+- **A window position** — a named place in a range. The boundary name is the readable
+  form and `<boundary>_timestamp` is the epoch form: `start`, `end`, `begin`, `anchor`.
+
+Neither family permits a bare `at` or `timestamp`. Nesting a value under a parent key is
+allowed and does not change this: `records[].at` still leaves the reader to work out that
+a record's `at` is when its flow occurred, and that inference is exactly the work these
+rules exist to remove. The parent supplies *context*, never the *name*.
 
 **The rule this section exists to state:**
 
@@ -290,8 +305,9 @@ published `online: false` beside `last_active: 1791288092.382`. That host had be
 active **6.6 minutes** before the measurement, and the window is **5 minutes** — so the
 value was correct and completely unexplainable, because the row carried no reference
 instant, no window, and no `stale` flag. Reconstructing it took three source files. With
-`as_of` and `online_window_seconds` published, the reader computes
-`as_of - last_active <= window` and gets the same answer, unaided.
+`activity_reference_at_timestamp` and `online_window_seconds` published, the reader
+computes `activity_reference_at_timestamp - last_active_at_timestamp <=
+online_window_seconds` and gets the same answer, unaided.
 
 **A derived value must not be measured from its own subset.** `online` is relative to a
 reference instant, and that reference is the appliance's freshest activity across the

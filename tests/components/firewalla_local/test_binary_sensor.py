@@ -57,6 +57,7 @@ from custom_components.firewalla_local.const import (
     ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
+    ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
@@ -205,6 +206,12 @@ async def test_watched_device_binary_sensor_exposes_state_and_attributes(
     assert (
         watched_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE]
         == datetime.fromtimestamp(1774287984.272, UTC).isoformat()
+    )
+    # The epoch twin carries the same instant, so a template can compare times
+    # without parsing the date above.
+    assert (
+        watched_state.attributes[ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP]
+        == 1774287984.272
     )
     # Without AP7s there is no AP config, so topology/WiFi attributes are absent.
     assert ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE not in watched_state.attributes

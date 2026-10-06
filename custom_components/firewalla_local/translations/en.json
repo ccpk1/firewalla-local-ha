@@ -168,6 +168,9 @@
           "fired_at": {
             "name": "Latest alarm time"
           },
+          "fired_at_timestamp": {
+            "name": "Fired at (epoch)"
+          },
           "alarm_id": {
             "name": "Latest alarm ID"
           },
@@ -220,6 +223,9 @@
           },
           "runtime_data_updated_at": {
             "name": "Runtime data updated at"
+          },
+          "runtime_data_updated_at_timestamp": {
+            "name": "Runtime data updated at (epoch)"
           },
           "uptime": {
             "name": "Uptime"
@@ -439,8 +445,11 @@
           "ip_address": {
             "name": "IP address"
           },
-          "last_active": {
+          "last_active_at": {
             "name": "Last active"
+          },
+          "last_active_at_timestamp": {
+            "name": "Last active (epoch)"
           },
           "network_name": {
             "name": "Network name"
@@ -504,8 +513,11 @@
           "ip_address": {
             "name": "IP address"
           },
-          "last_active": {
+          "last_active_at": {
             "name": "Last active"
+          },
+          "last_active_at_timestamp": {
+            "name": "Last active (epoch)"
           },
           "network_name": {
             "name": "Network name"
@@ -600,6 +612,9 @@
           "tested_at": {
             "name": "Tested at"
           },
+          "tested_at_timestamp": {
+            "name": "Tested at (epoch)"
+          },
           "upload_megabytes": {
             "name": "Upload megabytes"
           },
@@ -670,6 +685,9 @@
           },
           "tested_at": {
             "name": "Tested at"
+          },
+          "tested_at_timestamp": {
+            "name": "Tested at (epoch)"
           },
           "upload_megabytes": {
             "name": "Upload megabytes"
@@ -742,6 +760,9 @@
           "tested_at": {
             "name": "Tested at"
           },
+          "tested_at_timestamp": {
+            "name": "Tested at (epoch)"
+          },
           "upload_megabytes": {
             "name": "Upload megabytes"
           },
@@ -776,6 +797,9 @@
           },
           "sampled_at": {
             "name": "Sampled at"
+          },
+          "sampled_at_timestamp": {
+            "name": "Sampled at (epoch)"
           },
           "ping_latency": {
             "name": "Ping latency (ms)"
@@ -818,6 +842,9 @@
           "sampled_at": {
             "name": "Sampled at"
           },
+          "sampled_at_timestamp": {
+            "name": "Sampled at (epoch)"
+          },
           "ping_latency": {
             "name": "Ping latency (ms)"
           },
@@ -856,8 +883,11 @@
           "app_usage_by_app": {
             "name": "App usage by app"
           },
-          "last_active": {
+          "last_active_at": {
             "name": "Last active"
+          },
+          "last_active_at_timestamp": {
+            "name": "Last active (epoch)"
           },
           "unique_usage_today": {
             "name": "Unique usage today"
@@ -922,6 +952,9 @@
           },
           "pause_until": {
             "name": "Pause until"
+          },
+          "pause_until_timestamp": {
+            "name": "Paused until (epoch)"
           },
           "pause_remaining_seconds": {
             "name": "Pause remaining seconds"
@@ -1011,6 +1044,9 @@
           },
           "pause_until": {
             "name": "Pause until"
+          },
+          "pause_until_timestamp": {
+            "name": "Paused until (epoch)"
           },
           "pause_remaining_seconds": {
             "name": "Pause remaining seconds"

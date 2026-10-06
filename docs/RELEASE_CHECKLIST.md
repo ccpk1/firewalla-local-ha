@@ -67,6 +67,26 @@ old-to-new table in `docs/USER_GUIDE.md` under *Upgrading: renamed attributes an
 | Not affected | `device_tracker` entities and their platform; entity ids; entity names |
 | Migration | One-to-one rename; no value, type or availability changed |
 
+### Known breaking change pending release — time and derived state
+
+Every published moment now names what it is an instant of, and appears twice: a date
+(`<name>_at`) and epoch seconds (`<name>_at_timestamp`). Derived windowed values such as
+`online` are published alongside the reference instant and window they were measured in,
+so they can be checked from the payload. Full old-to-new table in `docs/USER_GUIDE.md`
+under *Upgrading: renamed time attributes and keys*.
+
+| What | Detail |
+| --- | --- |
+| Breaks | A template, automation or agent read of `last_active` on the watched-host, device-tracker and watched-user surfaces (`last_active_at` + `last_active_at_timestamp` now); `fired_at` on the alarm sensor, which was an epoch number and is now a date; `get_rules`' `last_hit.at` / `.timestamp` (`matched_at` / `matched_at_timestamp`); `timestamp` in `get_flow_report` records (`occurred_at` + `occurred_at_timestamp`), in `get_wan_events` (`occurred_at_timestamp` + `occurred_at`) and in `get_network_segment_usage` metric samples (`sampled_at_timestamp` + `sampled_at`); `begin_timestamp_iso` / `end_timestamp_iso` / `anchor_timestamp_iso` in the report `time_basis` blocks (`begin` / `end` / `anchor`); and `activated_time` / `updated_time` / `last_activated_time` in `get_runtime_inventory` rule records (`activated_at` / `updated_at` / `last_activated_at`). `get_runtime_inventory` also changed `expires_at` and `pause_until` from epoch numbers to dates, matching the rule service surface. Bare `timestamp` is gone from every response |
+| Fix | Read the `_at` form for a date and the `_at_timestamp` twin for arithmetic. Where a value was already correct but unpaired (`tested_at`, `sampled_at`, `pause_until`, `runtime_data_updated_at`, `expires_at`, `begin` / `end` / `anchor`), the key is unchanged and the twin is new, so nothing breaks. `online` is unchanged and now carries `activity_reference_at` / `activity_reference_at_timestamp` / `online_window_seconds` beside it |
+| Not affected | Entity ids, entity names, device registry entries, all attribute *values* other than `fired_at`, `expires_at` and `pause_until` in the runtime inventory, and the local-time report boundaries, which keep their `time_zone` and offset |
+| Migration | Rename and pair only; no value, type or availability changed except the three epoch-to-date corrections above, each of which keeps its number under the new `_timestamp` twin |
+
+**No shim, alias or deprecation period accompanies this break.** An alias would leave two
+names for one value, which is the defect this change removes. The two tables in
+`docs/USER_GUIDE.md` are the migration, and a reviewer should not ask for a
+compatibility layer.
+
 ## 5) HACS and Home Assistant posture
 
 - [ ] The repository still contains only one integration under `custom_components/`.

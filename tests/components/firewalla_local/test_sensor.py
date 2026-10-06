@@ -20,6 +20,7 @@ from custom_components.firewalla_local.const import (
     ATTR_INTERNET_QUALITY_PING_PACKET_LOSS,
     ATTR_INTERNET_QUALITY_PING_TARGET,
     ATTR_INTERNET_QUALITY_SAMPLED_AT,
+    ATTR_INTERNET_QUALITY_SAMPLED_AT_TIMESTAMP,
     ATTR_INTERNET_QUALITY_WAN_NAME,
     ATTR_INTERNET_QUALITY_WAN_UUID,
     ATTR_PURPOSE,
@@ -37,6 +38,7 @@ from custom_components.firewalla_local.const import (
     ATTR_SPEED_TEST_SERVER_SPONSOR,
     ATTR_SPEED_TEST_SUCCESS,
     ATTR_SPEED_TEST_TESTED_AT,
+    ATTR_SPEED_TEST_TESTED_AT_TIMESTAMP,
     ATTR_SPEED_TEST_UPLOAD,
     ATTR_SPEED_TEST_UPLOAD_MBYTES,
     ATTR_SPEED_TEST_VENDOR,
@@ -67,6 +69,7 @@ from custom_components.firewalla_local.const import (
     ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP,
     ATTR_WATCHED_USER_ASSOCIATED_HOSTS,
     ATTR_WATCHED_USER_LAST_ACTIVE,
+    ATTR_WATCHED_USER_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY,
     CONF_AID,
     CONF_EID,
@@ -484,6 +487,9 @@ async def test_sensor_setup_exposes_system_status_and_wan_speed_test_entities(
         download_state.attributes[ATTR_SPEED_TEST_TESTED_AT]
         == datetime.fromtimestamp(1774293094.481, UTC).isoformat()
     )
+    assert (
+        download_state.attributes[ATTR_SPEED_TEST_TESTED_AT_TIMESTAMP] == 1774293094.481
+    )
 
     assert upload_state.name == "Firewalla WAN-ONE Speed test upload"
     assert float(upload_state.state) == pytest.approx(49.001976013183594)
@@ -603,6 +609,10 @@ async def test_sensor_setup_exposes_wan_internet_quality_entities(
     assert latency_state.attributes[ATTR_INTERNET_QUALITY_WAN_UUID] == "wan-1"
     assert latency_state.attributes[ATTR_INTERNET_QUALITY_SAMPLED_AT] == (
         datetime.fromtimestamp(1774293094, UTC).isoformat()
+    )
+    assert (
+        latency_state.attributes[ATTR_INTERNET_QUALITY_SAMPLED_AT_TIMESTAMP]
+        == 1774293094
     )
 
     assert loss_state.name == "Firewalla WAN-ONE Ping packet loss"
@@ -859,6 +869,10 @@ async def test_sensor_setup_exposes_watched_user_usage_sensor(
     assert (
         watched_user_state.attributes[ATTR_WATCHED_USER_LAST_ACTIVE]
         == datetime.fromtimestamp(1774287984.272, UTC).isoformat()
+    )
+    assert (
+        watched_user_state.attributes[ATTR_WATCHED_USER_LAST_ACTIVE_TIMESTAMP]
+        == 1774287984.272
     )
 
 
