@@ -10,8 +10,7 @@ Keep plans phase-based, executable, and tied to concrete files.
 When an initiative completes, move its plan and supporting notes to `plans/completed/`
 and rename the main plan to `INITIATIVE_NAME_COMPLETED.md`.
 
-**One initiative is in process.** The two most recent *completed* initiatives are
-archived in `plans/completed/`:
+Completed initiatives are archived in `plans/completed/`. Recent ones:
 
 - *Vocabulary Alignment*, closed 2026-10-06 —
   `plans/completed/FIREWALLA_LOCAL_VOCABULARY_ALIGNMENT_COMPLETED.md` (the plan, all four
@@ -28,23 +27,11 @@ archived in `plans/completed/`:
 
 ---
 
-## Current initiatives
+## Latest completed initiative
 
-### 1. Flow Reporting Service
+### Time and Derived State
 
-Delivered — all four phases complete and validated on `feature/flow-reporting`.
-
-- `FIREWALLA_LOCAL_FLOW_REPORTING_IN-PROCESS.md` — the plan, every step closed.
-- `FIREWALLA_LOCAL_FLOW_REPORTING_SUP_CONSUMER_AUDIT.md` — the existing-consumer
-  audit behind Phase 1.
-
-Held in process because it is **not yet released and not yet pushed**. The vocabulary
-initiative that finished work it started — it is where `target.kind` first appeared — is
-now closed, so there is nothing left to sequence against it.
-
-### 2. Time and Derived State
-
-Delivered — all five phases complete and validated on `feature/flow-reporting`. Moved to
+All five phases complete and validated on `feature/flow-reporting`. Moved to
 `plans/completed/`.
 
 - `FIREWALLA_LOCAL_TIME_AND_DERIVED_STATE_COMPLETED.md` — the plan, every phase closed. Stated one
@@ -89,21 +76,10 @@ name, which the Phase 1 guard caught. Both are documented in the completed plan.
 
 ---
 
-## Sequencing across initiatives
+## What remains on this branch
 
-Only one initiative is still in process: Flow Reporting, whose four phases are complete and
-which is held purely for release. Time and Derived State is done, so it no longer sequences
-against anything.
-
-What remains, in order:
-
-1. **Flow Reporting push** — its four phases are complete and it is only held for release, so
-   it can go whenever the branch is being pushed.
-2. **Release** — the migration tables for both initiatives are written and verified
-   (`USER_GUIDE.md` and `RELEASE_CHECKLIST.md` §4), so the release notes are transcription
-   rather than authoring.
-
-If only one thing ships, ship both: the vocabulary initiative and Time and Derived State are
-each complete, guarded, and documented, and between them every published value is named
-consistently and reproducible from its own payload.
+Everything implemented is complete, guarded and documented. What is left is to push the
+branch and cut the release. Both initiatives' migration tables are written and verified
+(`docs/USER_GUIDE.md` and `docs/RELEASE_CHECKLIST.md` §4), so the release notes are
+transcription rather than authoring.
 
