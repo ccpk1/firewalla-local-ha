@@ -909,6 +909,25 @@ class FirewallaNetworkSegmentView:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaActivityBasis:
+    """The frame every connectivity boolean on a surface is measured in.
+
+    ``reference_at`` is the instant host activity is compared against and
+    ``window_seconds`` is the tolerance. Publishing both beside a boolean makes
+    it reproducible: without them a caller can only compare the boolean against
+    wall clock, which yields a different answer whenever the reference is not
+    now — an inventory older than the window, or a freshly polled snapshot whose
+    newest device has been quiet since yesterday.
+
+    A ``None`` reference means no activity has ever been observed, so nothing
+    can be measured and every boolean in this frame is ``None``.
+    """
+
+    reference_at: float | None
+    window_seconds: int
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaHostVpnClient:
     """Minimal VPN client reference carried on one normalized host."""
 

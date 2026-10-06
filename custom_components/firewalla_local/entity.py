@@ -5,7 +5,14 @@ from __future__ import annotations
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_INTEGRATION, ATTR_PURPOSE, DOMAIN
+from .const import (
+    ATTR_ACTIVITY_REFERENCE_AT,
+    ATTR_ACTIVITY_REFERENCE_AT_TIMESTAMP,
+    ATTR_INTEGRATION,
+    ATTR_ONLINE_WINDOW_SECONDS,
+    ATTR_PURPOSE,
+    DOMAIN,
+)
 from .coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from .managers import (
     FirewallaAlarmManager,
@@ -21,6 +28,7 @@ from .models import (
     FirewallaSystemStatus,
     FirewallaWatchedUser,
 )
+from .utils.values import iso_instant
 
 
 class FirewallaEntity(CoordinatorEntity[FirewallaDataUpdateCoordinator]):
@@ -106,4 +114,24 @@ class FirewallaEntity(CoordinatorEntity[FirewallaDataUpdateCoordinator]):
         return {
             purpose_key: purpose,
             ATTR_INTEGRATION: DOMAIN,
+        }
+
+    def build_activity_basis_attributes(self) -> dict[str, object]:
+        """Return the frame this entity's connectivity values are measured in.
+
+        A connectivity boolean is derived -- ``reference - last_active <=
+        window`` -- so it is only checkable by a reader who has all three
+        inputs. Without them the reader has a claim, not data, and can only
+        compare against wall clock, which disagrees with the entity whenever the
+        reference is not now.
+
+        Rendered here rather than per platform so the three keys cannot drift
+        apart, and so every surface that publishes the boolean publishes the
+        same frame.
+        """
+        basis = self.host_manager.activity_basis()
+        return {
+            ATTR_ACTIVITY_REFERENCE_AT: iso_instant(basis.reference_at),
+            ATTR_ACTIVITY_REFERENCE_AT_TIMESTAMP: basis.reference_at,
+            ATTR_ONLINE_WINDOW_SECONDS: basis.window_seconds,
         }

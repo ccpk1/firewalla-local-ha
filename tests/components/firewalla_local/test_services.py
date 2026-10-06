@@ -4637,6 +4637,7 @@ async def test_get_hosts_defaults_to_summary_detail(
                 "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
                 "network_name": "VLAN10 CORE",
                 "online": True,
+                "stale": False,
                 "last_active": None,
                 "vpn_client": None,
                 "ip_assignment_mode": "static",
@@ -4655,12 +4656,18 @@ async def test_get_hosts_defaults_to_summary_detail(
                 "network_uuid": None,
                 "network_name": "VLAN10 CORE",
                 "online": True,
+                "stale": False,
                 "last_active": None,
                 "vpn_client": None,
                 "ip_assignment_mode": None,
                 "reserved_ipv4": None,
             },
         ],
+        # No host in this fixture carries activity, so there is no reference to
+        # measure from and the booleans above fall back to the box's stale flag.
+        "activity_reference_at": None,
+        "activity_reference_at_timestamp": None,
+        "online_window_seconds": 300,
     }
 
 

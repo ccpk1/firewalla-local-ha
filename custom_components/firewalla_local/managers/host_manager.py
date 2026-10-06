@@ -18,7 +18,11 @@ from ..const import (
     MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
 )
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
-from ..models import FirewallaHostRuntime, FirewallaRuntimeSnapshot
+from ..models import (
+    FirewallaActivityBasis,
+    FirewallaHostRuntime,
+    FirewallaRuntimeSnapshot,
+)
 from ..utils.host_activity import (
     count_online_hosts,
     is_host_online,
@@ -210,18 +214,21 @@ class FirewallaHostManager(FirewallaBaseManager):
             * 60
         )
 
-    def inventory_reference_activity(self) -> float | None:
-        """Return the appliance-wide reference instant for connectivity.
+    def activity_basis(self) -> FirewallaActivityBasis:
+        """Return the frame this manager's connectivity booleans are measured in.
 
         Every connectivity surface measures from the freshness of the whole host
         inventory rather than from the wall clock, so a stale snapshot does not
-        mark the entire network offline. Defining it once here is what keeps the
-        surfaces agreeing: the host list, the device counts, the watched-device
-        sensors and the VPN peer counts all read this, so none of them can drift
-        onto a baseline of its own -- which is exactly how the VPN count came to
-        disagree with the host list.
+        mark the entire network offline. It is published as a pair so a caller
+        that reports a boolean can also report what it was measured against: the
+        reference and the window are only meaningful together, and a surface that
+        paired the appliance reference with a window of its own would reopen
+        exactly the disagreement this replaced.
         """
-        return reference_last_active(self.get_hosts())
+        return FirewallaActivityBasis(
+            reference_at=reference_last_active(self.get_hosts()),
+            window_seconds=self.watched_device_online_window_seconds,
+        )
 
     def count_total_devices(self) -> int:
         """Return the total number of normalized hosts in the latest snapshot."""
@@ -229,14 +236,14 @@ class FirewallaHostManager(FirewallaBaseManager):
 
     def is_watched_device_online(self, host: FirewallaHostRuntime) -> bool | None:
         """Return whether one normalized host appears online for watched devices."""
-        hosts = self.get_hosts()
-        if not hosts:
+        if not self.get_hosts():
             return None
 
+        basis = self.activity_basis()
         return is_host_online(
             host,
-            reference_activity=self.inventory_reference_activity(),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
 
     def is_device_tracker_home(self, host: FirewallaHostRuntime) -> bool | None:
@@ -252,10 +259,11 @@ class FirewallaHostManager(FirewallaBaseManager):
 
     def count_online_devices(self) -> int:
         """Return the number of hosts that appear online in the latest snapshot."""
+        basis = self.activity_basis()
         return count_online_hosts(
             self.get_hosts(),
-            reference_activity=self.inventory_reference_activity(),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
 
     def count_offline_devices(self) -> int:
@@ -286,10 +294,11 @@ class FirewallaHostManager(FirewallaBaseManager):
         whose last activity was 4.5 days earlier, while the host list -- using the
         appliance reference -- showed all five offline.
         """
+        basis = self.activity_basis()
         return count_online_hosts(
             self.get_vpn_peers(),
-            reference_activity=self.inventory_reference_activity(),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
 
     def count_vpn_offline_devices(self) -> int:

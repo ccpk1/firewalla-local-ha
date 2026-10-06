@@ -11,6 +11,7 @@ from custom_components.firewalla_local.managers.rule_manager import (
     is_user_visible_rule,
 )
 from custom_components.firewalla_local.models import (
+    FirewallaActivityBasis,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
     format_policy_rule_label,
@@ -21,6 +22,7 @@ from custom_components.firewalla_local.utils.host_activity import (
     reference_last_active,
 )
 from custom_components.firewalla_local.utils.network import build_network_inventory
+from custom_components.firewalla_local.utils.values import iso_instant
 
 _RAW_POLICY_STATE_KEY: Final = "state"
 _RAW_USERS_KEY: Final = "userTags"
@@ -573,9 +575,14 @@ def build_runtime_inventory_report(
 ) -> dict[str, object]:
     """Build a mapping report for groups, users, and normalized rules.
 
-    ``hosts`` is the normalized host inventory and ``online_window_seconds`` is
-    the configured activity window, so the host counts reported here use the
+        ``hosts`` is the normalized host inventory and ``online_window_seconds`` is
+        the configured activity window, so the host counts reported here use the
     exact same online definition as the entities rather than a second one.
+
+        The reference is taken from the same ``hosts`` sequence the counts are
+        computed over. Deriving it anywhere else would let the published reference
+        describe one inventory while the counts describe another, which is the
+        disagreement this reporting exists to avoid.
     """
     raw_policy_rules = payload.get(_RAW_POLICY_RULES_KEY)
     raw_rule_index: dict[str, dict[str, object]] = {}
@@ -645,10 +652,14 @@ def build_runtime_inventory_report(
     group_policy_controls = _build_group_policy_controls(groups)
     target_list_references = _build_target_list_references(rules)
     hosts_total = len(hosts)
+    basis = FirewallaActivityBasis(
+        reference_at=reference_last_active(hosts),
+        window_seconds=online_window_seconds,
+    )
     hosts_online = count_online_hosts(
         hosts,
-        reference_activity=reference_last_active(hosts),
-        online_window_seconds=online_window_seconds,
+        reference_activity=basis.reference_at,
+        online_window_seconds=basis.window_seconds,
     )
 
     return {
@@ -670,6 +681,13 @@ def build_runtime_inventory_report(
             "hosts_total": hosts_total,
             "hosts_online": hosts_online,
             "hosts_offline": hosts_total - hosts_online,
+            "activity_reference_at": (
+                iso_instant(basis.reference_at)
+                if basis.reference_at is not None
+                else None
+            ),
+            "activity_reference_at_timestamp": basis.reference_at,
+            "online_window_seconds": basis.window_seconds,
             "network_count": network_count,
         },
         "groups": groups,

@@ -309,7 +309,7 @@ from .models import (
     format_policy_rule_name,
 )
 from .utils.duration import parse_duration_to_seconds
-from .utils.host_activity import is_host_online, reference_last_active
+from .utils.host_activity import is_host_online
 from .utils.mac import normalize_mac_address
 from .utils.selectors import (
     SelectorMatch,
@@ -319,7 +319,12 @@ from .utils.selectors import (
     select_exclusive,
     select_scope,
 )
-from .utils.values import normalized_bool, normalized_int, normalized_string
+from .utils.values import (
+    iso_instant,
+    normalized_bool,
+    normalized_int,
+    normalized_string,
+)
 
 _TIME_USAGE_REPORT_ALL_SECTIONS = (
     "internet",
@@ -4316,19 +4321,23 @@ def _build_network_overview_entries(
     Host counts are computed from the same host inventory and online
     definition the system-status attributes use, so a network's total plus the
     global total can never disagree about the same box.
+
+    ``host_count`` is our own count over the normalized inventory, which is why
+    ``online`` and ``offline`` add up to it. It is not the same number as
+    ``device_host_count``: that one is counted from the raw payload's
+    ``host.intf`` and excludes the Firewalla box itself, because the box is the
+    gateway rather than a client on any one network. Both are published so the
+    difference is inspectable instead of being hidden behind one name.
     """
     hosts = entry.runtime_data.host_manager.get_hosts()
-    online_window_seconds = (
-        entry.runtime_data.host_manager.watched_device_online_window_seconds
-    )
-    reference_activity = reference_last_active(hosts)
+    basis = entry.runtime_data.host_manager.activity_basis()
     online_macs = {
         host.mac
         for host in hosts
         if is_host_online(
             host,
-            reference_activity=reference_activity,
-            online_window_seconds=online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
         is True
     }
@@ -4353,7 +4362,12 @@ def _build_network_overview_entries(
                 # not say which interface carries it.
                 "interface_category": network.interface_category,
                 "ipv4_subnets": list(network.ipv4_subnets),
-                # The same count the `network` entity publishes as an attribute.
+                # Ours, over the normalized inventory, so it reconciles with the two
+                # counts below. The box also reports a client-device count for each
+                # network, counted from the raw payload's `host.intf` with the
+                # Firewalla box itself excluded, so the two are different questions
+                # rather than two answers -- which is why converging them onto one
+                # published name is a decision for the rename phase, not this one.
                 "host_count": len(network_hosts),
                 "online": online,
                 "offline": len(network_hosts) - online,
@@ -4523,11 +4537,15 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
     network_entries = _build_network_overview_entries(entry)
     wan_entries = _build_wan_overview_entries(entry)
     mode = get_llm_tool_mode(entry.options)
+    basis = runtime_data.host_manager.activity_basis()
     return {
         "llm_access": {
             "mode": mode,
             "note": _build_llm_access_note(mode),
         },
+        "activity_reference_at": iso_instant(basis.reference_at),
+        "activity_reference_at_timestamp": basis.reference_at,
+        "online_window_seconds": basis.window_seconds,
         "appliance": {
             "model": system_info.model,
             "software_version": system_info.software_version,
@@ -5128,11 +5146,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
     # the system-status counts and the overview's vpn_hosts use. The filter and
     # the exposed `online` field both read from it, so "how many are connected?"
     # cannot be answered two different ways depending on which tool was asked.
-    all_hosts = entry.runtime_data.host_manager.get_hosts()
-    online_window_seconds = (
-        entry.runtime_data.host_manager.watched_device_online_window_seconds
-    )
-    reference_activity = reference_last_active(all_hosts)
+    basis = entry.runtime_data.host_manager.activity_basis()
     user_filter = cast(str | None, call.data.get(SERVICE_FIELD_USER))
     user_tag_ids = (
         _resolve_user_filter_tag_ids(entry, user_filter)
@@ -5146,8 +5160,8 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
     ):
         is_online = is_host_online(
             host,
-            reference_activity=reference_activity,
-            online_window_seconds=online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
         if not _host_matches_filters(
             host,
@@ -5181,6 +5195,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
             "network_uuid": host.network_uuid or raw_network_uuid,
             "network_name": host.network_name,
             "online": is_online,
+            "stale": host.stale,
             "last_active": host.last_active,
             "vpn_client": (
                 {
@@ -5204,7 +5219,12 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
             )
         hosts.append(cast(JsonValueType, record))
 
-    return {"hosts": hosts}
+    return {
+        "hosts": hosts,
+        "activity_reference_at": iso_instant(basis.reference_at),
+        "activity_reference_at_timestamp": basis.reference_at,
+        "online_window_seconds": basis.window_seconds,
+    }
 
 
 def _resolve_user_filter_tag_ids(

@@ -216,6 +216,7 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
         system_status = self.system_status
         return {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS),
+            **self.build_activity_basis_attributes(),
             ATTR_SYSTEM_UPTIME: (
                 self._format_uptime(system_status.uptime_seconds)
                 if system_status is not None
@@ -759,6 +760,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
             **self.build_state_attributes(
                 TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
             ),
+            **self.build_activity_basis_attributes(),
             ATTR_WATCHED_DEVICE_IP_ADDRESS: (
                 host.ip_address if host is not None else None
             ),

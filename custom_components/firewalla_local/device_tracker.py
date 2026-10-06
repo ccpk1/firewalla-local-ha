@@ -13,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_DEVICE_TRACKER_AWAY_WINDOW_SECONDS,
     ATTR_INTEGRATION,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_HOST_GROUP,
@@ -196,5 +197,13 @@ class FirewallaDeviceTracker(
                 datetime.fromtimestamp(host.last_active, UTC).isoformat()
                 if host is not None and host.last_active is not None
                 else None
+            ),
+            # Only the window, not a reference: this tracker measures from the
+            # wall clock, so a published "now" would be stale the moment the
+            # state was written and would then disagree with `is_connected`.
+            # The caller supplies its own now, which is what makes the published
+            # window sufficient here.
+            ATTR_DEVICE_TRACKER_AWAY_WINDOW_SECONDS: (
+                self.host_manager.device_tracker_away_window_seconds
             ),
         }

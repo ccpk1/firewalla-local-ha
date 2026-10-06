@@ -32,6 +32,8 @@ while the value it existed to find was present.
 from __future__ import annotations
 
 import ast
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import Final
 from unittest.mock import AsyncMock, patch
@@ -57,6 +59,7 @@ from custom_components.firewalla_local.const import (
     DOMAIN,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_GET_HOSTS,
+    SERVICE_GET_RUNTIME_INVENTORY,
     SERVICE_GET_SYSTEM_OVERVIEW,
 )
 
@@ -82,7 +85,17 @@ _CONTRACT_MODULES: Final = (*PUBLISHING_MODULES, "llm_tools_read.py")
 # Fields a caller needs in order to reproduce a published windowed boolean. Until
 # these exist the boolean is unexplainable from the payload, which is the Class B
 # defect this module exists to catch.
-_BASIS_REFERENCE_KEYS: Final = ("as_of", "as_of_timestamp")
+#
+# `activity_reference_at` rather than the `as_of` this started as, because `as_of`
+# takes none of the closed suffix set and would have been the first published
+# temporal field to opt out of the convention it introduces. `measured_at` was
+# rejected for being actively misleading: it reads as "when the snapshot was
+# taken", and a caller computing `now - last_active` from it gets a different
+# answer than the published `online`, which is the exact defect this guards.
+_BASIS_REFERENCE_KEYS: Final = (
+    "activity_reference_at",
+    "activity_reference_at_timestamp",
+)
 _BASIS_WINDOW_KEYS: Final = ("online_window_seconds",)
 
 # The epoch form of a host's last activity. Accepts either name so the guard holds
@@ -245,54 +258,13 @@ async def _call(hass: HomeAssistant, service: str, entry: MockConfigEntry):
     )
 
 
-@pytest.mark.parametrize(
-    "service",
-    [
-        pytest.param(
-            SERVICE_GET_HOSTS,
-            id="get_hosts",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "Resolved by Phase 2, which publishes `as_of`, "
-                    "`as_of_timestamp` and `online_window_seconds`. strict=True so "
-                    "the marker cannot outlive the work: once the basis is "
-                    "published the recomputation matches and the marker fails the "
-                    "suite until removed."
-                ),
-            ),
-        ),
-        pytest.param(
-            SERVICE_GET_SYSTEM_OVERVIEW,
-            id="get_system_overview",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "Resolved by Phase 2, which publishes the basis on this "
-                    "response envelope alongside the counts it summarises. "
-                    "strict=True so the marker cannot outlive the work."
-                ),
-            ),
-        ),
-    ],
-)
-async def test_a_windowed_boolean_publishes_its_basis(
-    hass: HomeAssistant, service: str
-) -> None:
-    """Test `online` can be checked by a caller who has only the payload.
+@asynccontextmanager
+async def _loaded_entry(hass: HomeAssistant) -> AsyncIterator[MockConfigEntry]:
+    """Yield an entry loaded against a snapshot holding one active and one quiet host.
 
-    `online` is derived: `reference_activity - last_active <= online_window_seconds`.
-    All three inputs were unpublished, which made the value unexplainable without
-    reading the source -- and produced a live contradiction where the same five VPN
-    peers were simultaneously "1 online" in one tool and "0 online" in another.
-
-    So the response must carry the reference instant it measured from and the window
-    it applied, and every published boolean must agree with the arithmetic. With those
-    two published, a reader can reproduce the answer; without them, they cannot, and
-    the value is a claim rather than data.
-
-    This is the acceptance test for the whole initiative: a caller recomputing
-    `online` from the payload alone and getting the published answer.
+    Both are appended, so a recomputation always has an online and an offline row
+    to disagree about. A fixture where everything is online would satisfy an
+    `online is True` assertion that was only ever measuring the fixture.
     """
     entry = _entry()
     entry.add_to_hass(hass)
@@ -329,25 +301,57 @@ async def test_a_windowed_boolean_publishes_its_basis(
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        response = await _call(hass, service, entry)
+        yield entry
 
-    assert response is not None
 
-    missing = [key for key in _BASIS_REFERENCE_KEYS if key not in response]
-    missing += [key for key in _BASIS_WINDOW_KEYS if key not in response]
+def _assert_basis_published(service: str, envelope: object) -> None:
+    """Assert one response states the frame its connectivity values are in.
+
+    Shared by the three surfaces rather than restated, because a basis check that
+    drifts per surface is the defect it exists to catch.
+    """
+    assert isinstance(envelope, dict)
+    missing = [
+        key
+        for key in (*_BASIS_REFERENCE_KEYS, *_BASIS_WINDOW_KEYS)
+        if key not in envelope
+    ]
     assert missing == [], (
-        f"{service} publishes a windowed boolean without its basis, so a caller "
-        f"cannot reproduce it: {missing} absent. `online` is "
-        "`as_of - last_active <= online_window_seconds`, and all three inputs were "
-        "unpublished -- which is how the same peers read online in one tool and "
-        "offline in another."
+        f"{service} publishes a windowed value without its basis, so a caller "
+        f"cannot reproduce it: {missing} absent. Connectivity is "
+        "`activity_reference - last_active <= online_window_seconds`, and all "
+        "three inputs were unpublished -- which is how the same five peers read "
+        "online in one tool and offline in another."
     )
 
-    reference = response["as_of_timestamp"]
-    window = response["online_window_seconds"]
-    rows = response.get("hosts")
-    assert isinstance(rows, list), f"{service} published no host rows to check"
 
+async def test_get_hosts_publishes_the_basis_its_rows_are_measured_in(
+    hass: HomeAssistant,
+) -> None:
+    """Test `online` can be checked by a caller who has only the payload.
+
+    `online` is derived: `activity_reference - last_active <=
+    online_window_seconds`, and both halves of that have to be published for the
+    value to be data rather than a claim. This is the acceptance test for the
+    initiative: a caller recomputing `online` from the payload alone and getting
+    the published answer.
+
+    `stale` is part of the recomputation because it is part of the rule: a host
+    the box has not seen in about a week is offline however recent its last
+    activity stamp looks, so a payload without `stale` cannot explain a `False`
+    the basis says should be `True`.
+    """
+    async with _loaded_entry(hass) as entry:
+        response = await _call(hass, SERVICE_GET_HOSTS, entry)
+
+    _assert_basis_published(SERVICE_GET_HOSTS, response)
+
+    reference = response["activity_reference_at_timestamp"]
+    window = response["online_window_seconds"]
+    rows = response["hosts"]
+    assert isinstance(rows, list)
+
+    checked = 0
     for row in rows:
         activity = next(
             (row[key] for key in _HOST_ACTIVITY_KEYS if row.get(key) is not None),
@@ -355,9 +359,70 @@ async def test_a_windowed_boolean_publishes_its_basis(
         )
         if activity is None:
             continue
-        recomputed = (reference - activity) <= window
+        checked += 1
+        recomputed = row["stale"] is not True and (reference - activity) <= window
         assert row["online"] is recomputed, (
-            f"{service}: host {row.get('host_name')!r} published "
+            f"{SERVICE_GET_HOSTS}: host {row.get('host_name')!r} published "
             f"online={row['online']!r} but the published basis says {recomputed} "
-            f"(as_of={reference}, last_active={activity}, window={window})"
+            f"(activity_reference={reference}, last_active={activity}, "
+            f"stale={row['stale']}, window={window})"
         )
+
+    assert checked >= 2, (
+        "the fixture published fewer than two measurable rows, so a passing loop "
+        "above proves nothing"
+    )
+
+
+async def test_get_system_overview_publishes_the_basis_its_counts_are_measured_in(
+    hass: HomeAssistant,
+) -> None:
+    """Test the overview's counts and the host list agree on the same box.
+
+    The counts cannot be recomputed from the overview alone -- it publishes totals,
+    not rows -- so agreement is checked against `get_hosts` instead. That is the
+    stronger assertion anyway, because it is the one the live defect failed: the
+    overview reported one connected VPN peer while the host list reported all five
+    offline, seconds apart, because the count was measured against the freshest
+    *peer* rather than against the appliance.
+    """
+    async with _loaded_entry(hass) as entry:
+        overview = await _call(hass, SERVICE_GET_SYSTEM_OVERVIEW, entry)
+        listed = await _call(hass, SERVICE_GET_HOSTS, entry)
+
+    _assert_basis_published(SERVICE_GET_SYSTEM_OVERVIEW, overview)
+
+    rows = listed["hosts"]
+    assert isinstance(rows, list)
+
+    assert overview["hosts"] == {
+        "total": len(rows),
+        "online": sum(1 for row in rows if row["online"] is True),
+        "offline": sum(1 for row in rows if row["online"] is not True),
+    }, "the overview's device counts disagree with the host list's own rows"
+
+    peers = [row for row in rows if row["kind"] == "pseudo_host"]
+    assert overview["vpn_hosts"] == {
+        "total": len(peers),
+        "online": sum(1 for row in peers if row["online"] is True),
+        "offline": sum(1 for row in peers if row["online"] is not True),
+    }, "the overview's VPN peer counts disagree with the peer rows it also lists"
+
+
+async def test_get_runtime_inventory_publishes_the_basis_its_counts_are_measured_in(
+    hass: HomeAssistant,
+) -> None:
+    """Test the inventory report states the frame its host counts were taken in.
+
+    The counts sit in `summary` beside the basis rather than at the top level,
+    because that is where the counts they explain live. This path derives the
+    reference from the snapshot it just polled rather than from the coordinator's
+    cached one, so publishing it is what lets a reader confirm it describes the
+    same inventory the counts were taken over.
+    """
+    async with _loaded_entry(hass) as entry:
+        response = await _call(hass, SERVICE_GET_RUNTIME_INVENTORY, entry)
+
+    inventory = response["inventory"]
+    assert isinstance(inventory, dict)
+    _assert_basis_published(SERVICE_GET_RUNTIME_INVENTORY, inventory["summary"])

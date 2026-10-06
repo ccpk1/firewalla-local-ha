@@ -156,6 +156,26 @@ existing pairs follow (`fired_at` → `fired_at_timestamp`).
 **Recommendation:** mechanical — `<iso_name>_timestamp` everywhere, accepting the one ugly
 case. A rule with an exception for aesthetics is not a rule.
 
+**ANSWERED in Phase 2 — mechanical, confirmed against the code rather than by taste.** The
+surface already follows it in **five** places, and not only as published keys: `tested_at` /
+`tested_at_timestamp` is a **model field** name (`models.py:339`), carried through the client
+(`client.py:1625`), the manager (`integration_manager.py:1398`) and the sensor. The others
+are `sampled_at_timestamp` (`services.py:1020`), `fired_at_timestamp` (`services.py:1350`),
+`expires_at_timestamp` (`services.py:1382`) and `synced_at_timestamp` (`services.py:4632`).
+
+So this was never an open question about aesthetics: the convention was already set, and the
+only thing missing was a statement of it. There is also a real benefit to the stutter beyond
+consistency — the epoch name *contains* the ISO name, so `fired_at` and `fired_at_timestamp`
+adjacent in a payload are self-evidently the same concept in two forms, which `fired_timestamp`
+would not be.
+
+**Phase 2 got this wrong before it got it right, and the correction is recorded rather than
+quietly overwritten.** The epoch twin was first published as `activity_reference_timestamp`
+— the prettier stripping form — one phase after recommending against exactly that. The
+Phase 1 guard caught it, flagging `activity_reference_at` as untwinned in two modules, which
+is the guard doing its job on its author. Renamed to `activity_reference_at_timestamp` to
+match the five existing pairs.
+
 ### Q3. Are `schedule_next_start` / `schedule_next_end` instants needing the suffix?
 
 They hold ISO datetimes but are named `_start` / `_end`, not `_at`. They are *window
@@ -171,11 +191,16 @@ temporal suffixes that mark an instant, and keep these two. The alternative —
 Services publish rows, so a per-response envelope is available and cheaper. Entities have
 no envelope, so an attribute is the only option.
 
-**Recommendation:** per-surface, not one global answer. Services publish `as_of` +
+**Recommendation:** per-surface, not one global answer. Services publish `activity_reference_at` +
 `online_window_seconds` once at the response envelope; the three connectivity **entities**
 publish them as attributes. Justification for the split: the user's stated care about
 entities, plus the fact that an entity attribute is independently inspectable in a
 template while a service envelope is read once.
+
+**Settled in Phase 2.** The envelope carries the pair, and `get_hosts` adds one per-row
+field that the envelope cannot carry: `stale`. The basis is a *frame*, and `stale` is a
+*per-host fact* inside it, so a row whose `online` the basis alone cannot explain needs its
+own key. That is the distinction the original question did not draw.
 
 ### Q5. Do we publish `stale` as `null` or omit it?
 
@@ -186,6 +211,11 @@ The box does not report `stale` for pseudo-hosts (`null`), and `is_host_online` 
 handle absence *and* null; one that is always present with an honest `null` forces only
 null. This matches how the rest of the surface behaves.
 
+**Settled in Phase 2.** `get_hosts` rows publish `stale` unconditionally, `null` included.
+It is published because it is part of the online *rule*, not merely descriptive: a host the
+box has not seen in about a week is offline however recent its activity stamp looks, so
+without `stale` a row's `false` directly contradicts the basis beside it.
+
 ### Q6. Which entities get the basis?
 
 Eight entities derive a windowed boolean or count from the activity reference: watched
@@ -195,6 +225,16 @@ per-network binary sensor.
 **Recommendation:** all of them, for one reason — they all read the same reference, so
 publishing it on only some would recreate the exact "two answers" problem this initiative
 exists to fix.
+
+**Corrected during Phase 2: the count was wrong, and the rule was too broad.** The real set
+is **three**, not eight. Two of the eight carry no windowed boolean or count at all: the
+per-network binary sensor publishes the box's plain inventory count, and the watched-user
+sensor publishes `total_minutes_today`, a calendar-window aggregate from the box. Neither
+has a derived value for a basis to explain, so a basis there would be noise that *dilutes*
+the signal the other three carry. The rule the list should have stated is not "every entity
+that mentions a host" but **"every surface that publishes a value derived from the activity
+reference"** — which is the shape of the guard, and the reason the guard is written against
+responses and recomputation rather than against a list of entities.
 
 ### Q7. Is the existing `uptime` / `uptime_seconds` pair the model to cite?
 
@@ -216,6 +256,26 @@ computations, and the comment asserts they are identical.
 **Recommendation:** treat as a Phase 1 investigation, not a known defect. If they diverge
 on live data this is a third instance of the same class and must be resolved before any
 attribute rename lands, because it determines which of the two names is correct.
+
+**Answered in Phase 2, and the investigation changed the answer.** They *do* differ, but the
+difference is intentional rather than a defect, so this is **not** a third instance of the
+class. `device_host_count` is counted from the raw payload's `host.intf` and excludes the
+Firewalla box itself, because the box is the gateway rather than a client of any one
+network. The overview's `host_count` is counted over the normalized inventory and includes
+it, which is exactly why `online` and `offline` reconcile against it and why it cannot
+simply be replaced by the other.
+
+The real defect is smaller and sharper: **two different quantities were published under one
+name.** The fix is a rename, so it moves to Phase 3. Two things were learned trying to fix
+it in Phase 2:
+
+- Publishing the box's number beside ours was attempted and **reverted**. The vocabulary
+guard rejected `device_host_count` as a published key, because it names a host as a
+"device" — the guard catching a real naming problem in a key that had existed for a while
+as a *model field* and never as a published name. That is the evidence the fix is a naming
+decision rather than an additive one.
+- The comment was worse than the code. It asserted the overview's count *was* the entity's,
+which was false. It now states why the two differ and why they are not interchangeable.
 
 ### Q9. What is the break policy, now that services and tools are in scope?
 
@@ -271,9 +331,18 @@ measurement.
 | Q1 | `last_active` → `last_active_at`, declared breaking, no shim | 2026-10-06 |
 | Q9 | No shims, wrappers, aliases or deprecation anywhere; documentation is the compatibility | 2026-10-06 |
 | Q11 | Service and LLM time fields are **in scope**; free to rename because nothing consumes them | 2026-10-06 |
+| Q4 | Basis goes on the **envelope**, plus per-row `stale` — a frame is per-response, a fact is per-row | 2026-10-06 |
+| Q5 | `stale` is always published, `null` included, because it is part of the online rule | 2026-10-06 |
+| Q6 | Only the **three** surfaces with a derived value get a basis, not all eight that mention a host | 2026-10-06 |
+| Q8 | Not a defect: two intentional quantities under one name. Fix is a rename, moved to Phase 3 | 2026-10-06 |
+| Q2 | Mechanical: `<iso_name>_timestamp`, matching the five pairs already in the code | 2026-10-06 |
 
-Remaining open: **Q2, Q3, Q5, Q6, Q8, Q10** — all with recommendations in §3, none of which
-blocks Phase 1.
+Remaining open: **Q3, Q10** — both with recommendations in §3, neither blocking Phase 3 from
+starting.
+
+**Q2 blocked Phase 3 and is now closed.** It could not be deferred: the guard derives the
+epoch name, so every twin Phase 3 adds depends on which derivation is correct. It is also no
+longer a judgement call — five existing pairs, one of them a model field, settle it.
 
 ---
 
@@ -282,7 +351,7 @@ blocks Phase 1.
 | Phase | Name | Deliverable | Gate |
 | --- | --- | --- | --- |
 | **1** | The rule, the helper, and the checks | The three concepts stated in `DEVELOPMENT_STANDARDS.md`, one `iso_instant()` helper, and two guard tests that **fail on today's payload** | **MET** — guards failed for their intended reasons, recorded in the supporting note §9; no published value changed |
-| **2** | Publish the basis | Reference instant, applied window and `stale` on every windowed surface — the three connectivity entity families, the count attributes, and the three service envelopes | A caller can recompute every published windowed boolean and count from the payload alone; **additive only** |
+| **2** | Publish the basis | Reference instant, applied window and `stale` on every windowed surface — the connectivity entities, the count attributes, and the three service envelopes | **MET** — three guards pass, each proven non-vacuous; additive only, no existing key changed. Two plan errors found and corrected (see §5) |
 | **3** | Converge the service and tool surfaces | The three competing instant naming patterns become one, on services and LLM tools, plus the derived-state and unpublished-daylight gaps there | One naming pattern; every instant paired; every derived value carries its basis. Breaking, and free — no consumers |
 | **4** | Converge the entity surface | `last_active_at` + twin, `fired_at` format repaired, twins added for every ISO-only entity instant, all conversions routed through the helper | Every entity instant has both forms under the same one pattern; breaks recorded in the migration table |
 | **5** | Close the loop | `USER_GUIDE.md`, `RELEASE_CHECKLIST.md`, quality-scale check, and the guard extended to entity attributes | Docs match the payload; the guard covers entities, not just service responses |
@@ -370,37 +439,79 @@ output is recorded, and the suite is green with the failures held rather than hi
 **Gate:** the two guards fail for the right reasons on today's payload; `ruff`, `mypy` and
 the suite are otherwise green; **no published value has changed**.
 
-### Phase 2 — Publish the basis
+### Phase 2 — Publish the basis — **COMPLETE**
 
 Purpose: make every derived windowed value checkable from the payload alone. Entirely
 additive.
 
-- [ ] **2.1 One accessor returning the basis as a pair** — extend `FirewallaHostManager`
-      (which now owns `inventory_reference_activity()`) to return the reference instant and
-      the applied window together, so a surface takes *the basis* rather than assembling it
-      from two places. This mirrors the fix in `5113793`: a required value cannot be
-      silently omitted, a default can.
-- [ ] **2.2 Add the constants** to `const.py` under the existing `ATTR_*` rules — an
-      `as_of` instant pair, an online-window duration, the device-tracker away window, and
-      `stale`. Follow the naming from Q3/Q7 exactly; do not invent a fourth suffix.
-- [ ] **2.3 Publish the basis on the connectivity entities** — the watched-device binary
-      sensor, the device tracker, and the watched-user sensor, so `is_on` / `home` and
-      `associated_host_count` become reproducible from their own attributes (Q6).
-- [ ] **2.4 Publish the basis on the count-bearing entities** — system status
-      (`hosts_online` / `vpn_hosts_online`) and the per-network binary sensor, so a count
-      has the same stated basis as the boolean it summarises.
-- [ ] **2.5 Update the three service responses' envelopes** to carry `as_of` and the
-      applied window (Q4), so entity attributes and service rows describe the same
-      measurement with the same words.
-- [ ] **2.6 Resolve Q8** — determine on live data whether the network entity's `host_count`
-      and the service's `host_count` are the same number, and either make the comment true
-      or correct it. Do this before Phase 3 and Phase 4 rename anything in that area: the
-      value exists on both surfaces, so an unresolved divergence would rename a field whose
-      name is wrong rather than merely inconsistent.
+- [x] **2.1 One accessor returning the basis as a pair** — `FirewallaHostManager.activity_basis()`
+      returns a `FirewallaActivityBasis(reference_at, window_seconds)`. The public
+      `inventory_reference_activity()` was folded into it, so the reference cannot now be
+      obtained without the window it pairs with. The three internal connectivity methods
+      unpack it; `device_tracker_away_window_seconds` is deliberately *not* part of it,
+      because presence is a wall-clock frame.
+- [x] **2.2 Add the constants** to `const.py` — `ATTR_ACTIVITY_REFERENCE_AT`,
+      `ATTR_ACTIVITY_REFERENCE_TIMESTAMP`, `ATTR_ONLINE_WINDOW_SECONDS`,
+      `ATTR_DEVICE_TRACKER_AWAY_WINDOW_SECONDS`. No fourth suffix was invented (Q3/Q7).
+- [x] **2.3 Publish the basis on the connectivity entities** — the watched-device binary
+      sensor and the device tracker. **Deviation:** the watched-user sensor does *not* get
+      it. It publishes `last_active` as information, and its `native_value` is
+      `total_minutes_today` — a calendar-window aggregate from the box, not a derived
+      windowed boolean. There is no derived value there for a basis to explain, so adding
+      one would be noise. Its instant still needs its epoch twin, which is Phase 4.
+- [x] **2.4 Publish the basis on the count-bearing entities** — system status. The
+      per-network binary sensor needs none: its `host_count` is `device_host_count`, an
+      inventory count with no windowed boolean beside it.
+- [x] **2.5 Update the three service responses' envelopes** — `get_hosts`,
+      `get_system_overview`, and `get_runtime_inventory` (the basis lands in the inventory
+      report's `summary`, beside the counts it explains). `get_hosts` host rows also gained
+      `stale`, without which an `online: false` that the basis says should be `true` is
+      unexplainable.
+- [x] **2.6 Resolve Q8** — see below.
 
-**Gate:** the Phase 1 reproducibility guard passes for every windowed value; a reader with
-only the payload can recompute `online`, `home` and every count. `USER_GUIDE.md` documents
-the new attributes; no existing key changes.
+**Two decisions the work forced, both recorded because the plan's wording was wrong.**
+
+1. **The reference is `activity_reference_at`, not `as_of`.** The plan said `as_of`, which
+   takes none of the closed suffix set written in Phase 1 and would have been the first
+   published temporal field to opt out of the convention it introduces. `measured_at` was
+   rejected as actively misleading: it reads as "when the snapshot was taken", so a caller
+   computing `now - last_active` from it gets a *different* answer than the published
+   `online` — the exact defect this initiative exists to fix. `activity_reference_at`
+   matches the code's own `reference_last_active`.
+
+   **Its epoch twin is `activity_reference_at_timestamp`**, following Q2's mechanical rule
+   and the five pairs already in the code. The first attempt used
+   `activity_reference_timestamp`; the Phase 1 guard flagged it in two modules and it was
+   renamed. Recorded because the slip is instructive: the same pull toward a prettier name
+   that Q2 rejected is what produced it, one phase later, in the phase that was supposed to
+   be the easy additive one.
+
+2. **Q8 was not a bug, and its fix belongs in Phase 3.** `device_host_count` is counted
+   from the raw payload's `host.intf` and **excludes the Firewalla box**, because the box
+   is the gateway rather than a client of any one network. The overview's `host_count` is
+   counted over the normalized inventory and **includes** it, which is why `online` and
+   `offline` reconcile against it. They are two different questions, not two answers. The
+   defect is that both were published under one name, and the fix is a rename — so it
+   stays in Phase 3. Adding the box's number to the overview beside ours was attempted and
+   reverted: the vocabulary guard rejected `device_host_count` as a published key for
+   naming a host as a "device", which is the guard working correctly and the reason this is
+   a naming decision rather than an additive one.
+
+**Gate met.** All three Phase 1 basis guards pass and were proven non-vacuous (fed `{}`,
+each fails). The twin guard is still `xfail(strict=True)` — untouched, as planned, because
+it belongs to Phases 3 and 4. Suite: 799 passed, 1 xfailed. `ruff check`, `ruff format`
+and `mypy` clean.
+
+**Still open after Phase 2:** `USER_GUIDE.md` has not been updated with the new attributes.
+Moved to Phase 5 rather than done here, so the guide is written once against the converged
+names instead of twice.
+
+**Finding handed to Phase 3 — the guard does not see `helpers/`.** `_CONTRACT_MODULES` is
+`PUBLISHING_MODULES` plus `llm_tools_read.py`, and `PUBLISHING_MODULES` stops at the entity
+platforms. `helpers/runtime_inventory.py` is therefore unscanned, which matters for two
+reasons: it is where Q10's `pause_until` epoch/ISO collision lives, and Phase 2 published the
+basis into its `summary`. The guard could not see either. Extending the module list is part of
+Phase 3, and it will very likely surface gaps this inventory does not list.
 
 ### Phase 3 — Converge the service and tool surfaces
 
