@@ -271,6 +271,15 @@
           },
           "vpn_hosts_total": {
             "name": "VPN hosts total"
+          },
+          "activity_reference_at": {
+            "name": "Activity reference"
+          },
+          "activity_reference_at_timestamp": {
+            "name": "Activity reference (epoch)"
+          },
+          "online_window_seconds": {
+            "name": "Online window (seconds)"
           }
         }
       },
@@ -442,7 +451,7 @@
           "download_usage": {
             "name": "Data downloaded"
           },
-          "ip_address": {
+          "host_ip": {
             "name": "IP address"
           },
           "last_active_at": {
@@ -474,6 +483,27 @@
           },
           "host_group": {
             "name": "Host group"
+          },
+          "activity_reference_at": {
+            "name": "Activity reference"
+          },
+          "activity_reference_at_timestamp": {
+            "name": "Activity reference (epoch)"
+          },
+          "online_window_seconds": {
+            "name": "Online window (seconds)"
+          },
+          "dns_hostname": {
+            "name": "DNS hostname"
+          },
+          "dns_domain": {
+            "name": "DNS domain"
+          },
+          "dns_fqdn": {
+            "name": "DNS fully qualified name"
+          },
+          "host_device_type": {
+            "name": "Device type"
           }
         }
       }
@@ -510,7 +540,7 @@
           "connection_type": {
             "name": "Connection type"
           },
-          "ip_address": {
+          "host_ip": {
             "name": "IP address"
           },
           "last_active_at": {
@@ -524,6 +554,21 @@
           },
           "host_group": {
             "name": "Host group"
+          },
+          "away_window_seconds": {
+            "name": "Away window (seconds)"
+          },
+          "dns_hostname": {
+            "name": "DNS hostname"
+          },
+          "dns_domain": {
+            "name": "DNS domain"
+          },
+          "dns_fqdn": {
+            "name": "DNS fully qualified name"
+          },
+          "host_device_type": {
+            "name": "Device type"
           }
         }
       }
@@ -994,6 +1039,12 @@
               "time_limit_active": "Time limit active",
               "time_limit_reached": "Time limit reached"
             }
+          },
+          "hit_count": {
+            "name": "Match count"
+          },
+          "last_hit": {
+            "name": "Last match"
           }
         }
       },
@@ -1086,6 +1137,12 @@
               "time_limit_active": "Time limit active",
               "time_limit_reached": "Time limit reached"
             }
+          },
+          "hit_count": {
+            "name": "Match count"
+          },
+          "last_hit": {
+            "name": "Last match"
           }
         }
       },

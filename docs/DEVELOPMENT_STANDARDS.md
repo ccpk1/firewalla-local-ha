@@ -261,12 +261,11 @@ Rules:
 
 Three concepts, and no fourth. Every published time is one of them.
 
-- **Instant** — a moment. Published **twice**, under `_at` for the ISO 8601 form and
-  `_timestamp` for the epoch form: `<name>_at` is the string a human or a model reads,
-  `<name>_timestamp` is the number arithmetic needs. Never only one of the two. An
-  ISO-only instant forces a caller to parse a date to compare two times; an epoch-only
-  instant hands a reader a number with no date, which is how `last_active: 1791258075.36`
-  came to be compared by eye during a live diagnosis.
+- **Instant** — a moment. Published **twice**: a readable form and an epoch form.
+  Never only one of the two. An ISO-only instant forces a caller to parse a date to
+  compare two times; an epoch-only instant hands a reader a number with no date, which
+  is how `last_active: 1791258075.36` came to be compared by eye during a live
+  diagnosis. The two forms are named by the family the value belongs to, below.
 - **Duration** — a length of time. Published as `<name>_seconds`, never as a date.
   `_seconds` and `_timestamp` are **not interchangeable**: a duration in seconds and an
   instant in seconds are different quantities. `uptime` beside `uptime_seconds` is the
@@ -274,8 +273,8 @@ Three concepts, and no fourth. Every published time is one of them.
 - **Windowed state** — a value derived from a time, such as `online` or `is_paused`.
   Published **only alongside its basis.** A boolean is not a fact about a device; it is
   `activity_reference_at_timestamp - last_active_at_timestamp <= online_window_seconds`,
-  and all three inputs must be reachable from the
-  payload or the reader cannot reproduce the claim.
+  and all three inputs must be reachable from the payload, or the reader cannot
+  reproduce the claim.
 
 Suffixes that mark a temporal field are a closed set: `_at`, `_until`, `_timestamp`,
 `_seconds`, plus `_start` and `_end` for window boundaries. A new temporal field
@@ -286,7 +285,7 @@ which question the value answers rather than which shape it takes:
 
 - **A point** — when something happened. `<concept>_at` is the readable form and
   `<concept>_at_timestamp` is the epoch form: `tested_at`, `fired_at`, `matched_at`,
-  `sampled_at`, `last_active_at`.
+  `sampled_at`, `last_active_at`, `activated_at`.
 - **A window position** — a named place in a range. The boundary name is the readable
   form and `<boundary>_timestamp` is the epoch form: `start`, `end`, `begin`, `anchor`.
 
@@ -294,6 +293,13 @@ Neither family permits a bare `at` or `timestamp`. Nesting a value under a paren
 allowed and does not change this: `records[].at` still leaves the reader to work out that
 a record's `at` is when its flow occurred, and that inference is exactly the work these
 rules exist to remove. The parent supplies *context*, never the *name*.
+
+**One documented exception: `schedule_next_start` / `schedule_next_end`.** They name
+window boundaries and take neither the `_at` suffix nor an epoch twin. The rationale is
+that they are read as dates in a schedule and never used arithmetically against a
+reference instant, which is the only thing the epoch form exists for. It is recorded here
+rather than left to be discovered, and it is the *only* one — a second exception would
+mean the rule is wrong rather than that these two are.
 
 **The rule this section exists to state:**
 

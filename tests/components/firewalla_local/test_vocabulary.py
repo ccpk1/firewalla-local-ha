@@ -20,6 +20,7 @@ The three checks mirror the three surfaces the register rule governs:
 from __future__ import annotations
 
 import ast
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
@@ -751,4 +752,149 @@ def test_the_published_key_check_reads_real_keys() -> None:
     assert len(keys) > 50, (
         f"the key scan found only {len(keys)} keys, far fewer than the payload "
         "modules define; it is not reading them"
+    )
+
+
+TRANSLATIONS_PATH: Final = PACKAGE_ROOT / "translations" / "en.json"
+
+# Modules whose attributes reach the entity registry, so each key needs a label.
+#
+# `entity.py` is here because attributes it builds are published by the entities that
+# call it -- `build_activity_basis_attributes` returns three of them. Leaving it out
+# made those three invisible: the check passed with their labels deleted, because it
+# was looking for the names in the platform modules while the shared base class is
+# where they are written. A shared builder is a blind spot for any scan that reads one
+# file at a time, and this is the second guard in this package to hit it.
+ENTITY_MODULES: Final = (
+    "binary_sensor.py",
+    "sensor.py",
+    "switch.py",
+    "device_tracker.py",
+    "button.py",
+    "entity.py",
+)
+
+
+def _translated_attribute_keys() -> set[str]:
+    """Return every state-attribute name the translations declare a label for."""
+    data = json.loads(TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+    keys: set[str] = set()
+    for platform in data.get("entity", {}).values():
+        for node in platform.values():
+            keys.update((node.get("state_attributes") or {}).keys())
+    return keys
+
+
+def _entity_attribute_keys() -> dict[str, list[str]]:
+    """Return each attribute an entity module names, keyed by its published value.
+
+    Read through the `ATTR_*` constants rather than by scanning dict keys, because
+    the entity attribute dicts nest: the `ports` attribute holds a per-port map and
+    the DHCP attribute holds a nested record, and those inner keys are *values* inside
+    an attribute rather than attributes of their own. They correctly carry no label, so
+    a positional scan would report two dozen false gaps and drown the real ones.
+
+    An `ATTR_*` reference is the signal that the name is a published attribute, and it
+    is also how every attribute is in fact written.
+    """
+    constants = _string_constants()
+    found: dict[str, list[str]] = {}
+    for module_name in ENTITY_MODULES:
+        for node in ast.walk(_module_tree(PACKAGE_ROOT / module_name)):
+            if (
+                isinstance(node, ast.Name)
+                and node.id in constants
+                and node.id.startswith("ATTR_")
+            ):
+                found.setdefault(constants[node.id], []).append(module_name)
+    return found
+
+
+def test_every_published_attribute_has_a_translation_label() -> None:
+    """Test no entity attribute ships without a label.
+
+    `quality_scale.yaml` marks `entity-translations` done on the strength of
+    "translation-backed names, states, and attributes without inline user-facing
+    strings". An attribute with no label breaks that **quietly**: Home Assistant
+    renders the raw key, so the entity still works and only the display is wrong.
+    Nothing failed, which is why this check had to be written rather than noticed.
+
+    Two defect classes, both found here and both real:
+
+    - **Unlabelled** -- five attributes had been published since before the time work
+      and never had a label: `dns_hostname`, `dns_domain`, `dns_fqdn`,
+      `host_device_type` and `host_ip`.
+    - **Stale** -- the vocabulary pass renamed the constant's value from `ip_address`
+      to `host_ip` but did not carry the translation key with it, so the label pointed
+      at a name nothing published while the real attribute had none. A rename is a
+      translation change, and that is not visible from the code.
+
+    Coverage, not placement: this proves a name has *some* label, not that the
+    label sits on the entity that publishes it. Asserting placement would need a
+    binding from each model class to its translation key, and a binding that can rot
+    is worse than a check that proves slightly less. The companion check below covers
+    the other direction, and together they pin the label set and the published set to
+    the same vocabulary.
+    """
+    published = _entity_attribute_keys()
+    translated = _translated_attribute_keys()
+
+    unlabelled = {
+        key: sorted(set(modules))
+        for key, modules in published.items()
+        if key not in translated
+    }
+
+    assert unlabelled == {}, (
+        "these entity attributes have no translation label, so Home Assistant renders "
+        f"the raw key instead of a readable name: {unlabelled}"
+    )
+
+
+def test_no_translation_label_names_an_attribute_nothing_publishes() -> None:
+    """Test no label is left pointing at a name the entities stopped publishing.
+
+    The other half of the same problem, and the half that is genuinely invisible without
+    a test. When a constant's value is renamed, the code follows it and the translation
+    key does not: the attribute then ships unlabelled *and* leaves a dead label behind.
+    That is exactly what happened to `ip_address` -> `host_ip`, and neither half was
+    noticed for a release because the entity kept working and the UI showed `host_ip`
+    in the raw-key fallback rather than failing.
+
+    This is what makes the pair worth having. Checking only for missing labels would
+    have caught that defect's symptom; checking both directions is what proves the label
+    set and the published set describe the same vocabulary, which is the property a
+    rename is supposed to preserve.
+    """
+    published = set(_entity_attribute_keys())
+    translated = _translated_attribute_keys()
+
+    dead = sorted(translated - published)
+
+    assert dead == [], (
+        "these translation labels name an attribute no entity publishes, so a rename "
+        f"was applied to the code but not to the translations: {dead}"
+    )
+
+
+def test_the_translation_check_reads_real_keys() -> None:
+    """Test the label scan found both sides, so a pass above means something.
+
+    A scan reading an empty translation file fails loudly; one reading an empty module
+    set reports nothing unlabelled and passes while proving nothing. This pins both.
+    """
+    published = _entity_attribute_keys()
+    translated = _translated_attribute_keys()
+
+    assert len(published) > 100, (
+        f"only {len(published)} entity attribute keys were read, far fewer than the "
+        "entity modules name; the scan is not reading them"
+    )
+    assert "last_active_at" in published, (
+        "the scan did not resolve an ATTR_* constant to its published value, so it is "
+        f"reading names rather than values: {sorted(published)[:20]}"
+    )
+    assert len(translated) > 100, (
+        f"only {len(translated)} translated attribute keys were read, far fewer than "
+        "the translations declare; the scan is not reading the file"
     )

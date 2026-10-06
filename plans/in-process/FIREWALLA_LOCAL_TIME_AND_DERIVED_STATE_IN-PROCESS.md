@@ -376,7 +376,7 @@ and Phase 4.
 | **2** | Publish the basis | Reference instant, applied window and `stale` on every windowed surface — the connectivity entities, the count attributes, and the three service envelopes | **MET** — three guards pass, each proven non-vacuous; additive only, no existing key changed. Two plan errors found and corrected (see §5) |
 | **3** | Converge the service and tool surfaces | Every service instant named and paired, on one rule with two families; the shared bare-key builder named | **MET** — the bare-name guard passes outright; the twin guard's remaining gaps are all entity-side. Two plan predictions were wrong (see §5 Phase 3) |
 | **4** | Converge the entity surface | `last_active_at` + twin, `fired_at` format repaired, twins for every remaining entity instant, all conversions routed through the helper | **MET** — both guards pass with no markers; pairing proven behaviorally by twin value assertions, not only lexically. Migration tables written |
-| **5** | Close the loop | `USER_GUIDE.md`, `RELEASE_CHECKLIST.md`, quality-scale check, and the guard extended to entity attributes | Docs match the payload; the guard covers entities, not just service responses |
+| **5** | Close the loop | `USER_GUIDE.md`, `RELEASE_CHECKLIST.md`, quality-scale check, and the guard extended to entity attributes | **MET** — docs verified against the payload; guards cover entities and services; the quality-scale check found `entity-translations` had been over-claimed and repaired it. Three guard attempts, only the third correct |
 
 Phases are sequential, and **1 → 2 → 3 → 4 → 5 is deliberate**:
 
@@ -727,30 +727,77 @@ pattern that already exists in the codebase rather than arguing one into being f
 competing examples. If Phase 4 is ever deferred, Phase 3 still stands on its own as a
 completed improvement.
 
-### Phase 5 — Close the loop
+### Phase 5 — Close the loop — **COMPLETE**
 
 Purpose: make the standard operational and give the guards reach over the surface that
 matters most.
 
-- [ ] **5.1 Extend `USER_GUIDE.md`** — the *Upgrading* time table was written in Phase 4, so
-      this becomes a **verification**: every Phase 3 and Phase 4 rename has a row, and
-      nothing in it names a key that no longer exists.
-- [ ] **5.2 Extend `RELEASE_CHECKLIST.md`** §4's known-breaking-change block — also written
-      in Phase 4; verify against the shipped payload and confirm the no-shim sentence is
-      present so a reviewer does not ask for a compatibility layer.
-- [ ] **5.3 Check the quality scale** — `docs-actions`, `action-exceptions` and
-      `strict-typing` are the rules this could touch. Confirm none regresses; correct
-      `quality_scale.yaml` only if implementation state actually changed.
-- [ ] **5.4 Extend the guard's reach to entity attributes.** The Phase 1 guards should cover
-      `ATTR_*` *values* as published keys, not only service-response literals, so an entity
-      attribute cannot be added one-legged. This is the gap that let `pause_until` ship
-      without its twin.
-- [ ] **5.5 Review the standard against what was built** and correct the document where the
-      implementation disagreed with it, the way Vocabulary Alignment §1 was corrected rather
-      than quietly edited.
+- [x] **5.1 Verify `USER_GUIDE.md`** — the time migration table was written in Phase 4, so
+      this was a check rather than a write. Every renamed-away name is absent from the code
+      and every new name is present. Three names the check flagged as "still present" are
+      correct rather than errors, and each for a different reason: `expires_at` and
+      `pause_until` keep their names with only the format changed, which is what the table
+      says, and `"timestamp"` survives only in `api/client.py` as a **vendor payload key
+      being read**, never as a published one. That last one confirms Phase 3's claim by
+      measurement rather than by assertion.
+- [x] **5.2 Verify `RELEASE_CHECKLIST.md`** §4 — the block was written in Phase 4; confirmed
+      it names both the breaks and the no-shim policy, and that it was verified against the
+      shipped payload rather than against the change list.
+- [x] **5.3 Check the quality scale — and this is where the phase earned itself.** No rule
+      regressed, but `entity-translations` was **over-claimed**: it was marked `done` while
+      seven entity attributes shipped with no label. Five had never had one
+      (`dns_hostname`, `dns_domain`, `dns_fqdn`, `host_device_type`, `host_ip`) and two were
+      Phase 2/twin additions. The `ip_address` → `host_ip` rename had also left a **dead**
+      label behind, because a translation key is keyed by the attribute name and a constant
+      rename does not carry it. All repaired, and the rule now has a guard and a corrected
+      comment.
+- [x] **5.4 Extend the guard's reach to entity attributes** — done, and it took three
+      attempts to get right, which is recorded below because the failures are the useful
+      part.
+- [x] **5.5 Review the standard against what was built** — the standard was internally
+      inconsistent: its "Instant" bullet said `<name>_timestamp` for the epoch form while
+      the families section immediately below said `<concept>_at_timestamp`. Corrected, the
+      `schedule_next_start` / `schedule_next_end` exception is now stated in the document
+      rather than only in this plan, and it is named as the *only* exception with the reason
+      it is one.
 
-**Gate:** documentation matches the payload; the guards cover entities and services; no
-quality-scale rule regressed.
+**5.4 took three attempts, and the wrong two are worth recording.**
+
+1. **A positional scan of published keys was far too broad.** It read every dict key in the
+   publishing modules, which includes service response keys — 250+ of them, none of which
+   should have an entity label. It reported 250 false gaps.
+2. **Restricting to the entity modules was still wrong.** Entity attribute dicts nest: the
+   `ports` attribute holds a per-port map and the DHCP attribute a nested record, so their
+   inner keys read as attributes. It reported 16 false gaps.
+3. **Reading through the `ATTR_*` constants is what worked**, because that is how every
+   attribute is in fact written, and it separates an attribute from a value inside one.
+
+**Then the guard still passed on a defect.** With `entity.py` left out of the module list,
+deleting the labels for the three basis attributes did not fail the test: those names are
+written in the shared base class, not in the platform modules. That is the **second** guard
+in this package to have a shared builder as its blind spot, after the time guard missed
+`build_rule_hit_attributes`. Both now include the shared module, and the coincidence is the
+finding: a scan that reads one file at a time will keep missing the code that several files
+call.
+
+**Two checks, not one, because the two directions catch different defects.** The first
+asserts every published attribute has a label (catches the unlabelled class); the second
+asserts no label names an attribute nothing publishes (catches the stale class). Coverage in
+both directions is what pins the label set and the published set to the same vocabulary —
+which is exactly the property a rename is supposed to preserve.
+
+**How far each check actually reaches, stated so a pass is not over-read.** The coverage
+check proves a name has *some* label, not that the label sits on the entity that publishes
+it. Removing a label from one of several blocks that publish the same key does **not** fail
+it — verified, deliberately, while trying to prove the guard non-vacuous. Placement would
+need a binding from each model class to its translation key, and a binding that can rot is
+worse than a check that proves slightly less. The stale check has no such gap.
+
+**Every check was proven to fail before being trusted**, on five defect classes: a Phase 2
+basis attribute, a basis window, an epoch twin, `host_ip`, and the device tracker's away
+window. Each was made absent everywhere and each failed the suite as required.
+
+**Gate met.** 804 passed, ruff/format/mypy clean.
 
 ---
 

@@ -79,7 +79,7 @@ rules:
     comment: "Rule-backed switches plus watched-device and watched-user entities are created only when the user selects them in options, while core appliance-monitoring and alarm entities remain always available."
   entity-translations:
     status: done
-    comment: "Rule-backed switches, appliance-monitoring entities, alarm entities, watched-device entities, and watched-user entities use translation-backed names, states, and attributes without inline user-facing strings."
+    comment: "Rule-backed switches, appliance-monitoring entities, alarm entities, watched-device entities, and watched-user entities use translation-backed names, states, and attributes without inline user-facing strings. Now enforced rather than asserted: two tests in test_vocabulary.py hold the published attribute set and the translated label set to each other in both directions, because this rule was marked done while seven attributes shipped unlabelled. Five had never had a label (dns_hostname, dns_domain, dns_fqdn, host_device_type, host_ip) and the other two were twins added without one; the ip_address to host_ip rename had also left a dead label behind, since a translation key is keyed by the attribute name and is not carried by a constant rename."
   exception-translations:
     status: done
     comment: Config flow and service validation now use distinct translation keys for host, QR, entry-scope, duration, and rule-target failures.
