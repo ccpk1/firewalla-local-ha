@@ -210,6 +210,19 @@ class FirewallaHostManager(FirewallaBaseManager):
             * 60
         )
 
+    def inventory_reference_activity(self) -> float | None:
+        """Return the appliance-wide reference instant for connectivity.
+
+        Every connectivity surface measures from the freshness of the whole host
+        inventory rather than from the wall clock, so a stale snapshot does not
+        mark the entire network offline. Defining it once here is what keeps the
+        surfaces agreeing: the host list, the device counts, the watched-device
+        sensors and the VPN peer counts all read this, so none of them can drift
+        onto a baseline of its own -- which is exactly how the VPN count came to
+        disagree with the host list.
+        """
+        return reference_last_active(self.get_hosts())
+
     def count_total_devices(self) -> int:
         """Return the total number of normalized hosts in the latest snapshot."""
         return len(self.get_hosts())
@@ -222,7 +235,7 @@ class FirewallaHostManager(FirewallaBaseManager):
 
         return is_host_online(
             host,
-            reference_activity=reference_last_active(hosts),
+            reference_activity=self.inventory_reference_activity(),
             online_window_seconds=self.watched_device_online_window_seconds,
         )
 
@@ -241,6 +254,7 @@ class FirewallaHostManager(FirewallaBaseManager):
         """Return the number of hosts that appear online in the latest snapshot."""
         return count_online_hosts(
             self.get_hosts(),
+            reference_activity=self.inventory_reference_activity(),
             online_window_seconds=self.watched_device_online_window_seconds,
         )
 
@@ -265,9 +279,16 @@ class FirewallaHostManager(FirewallaBaseManager):
 
         Peers carry ``last_active`` from the peer inventory, so the shared
         online definition applies unchanged — no peer-specific window.
+
+        The reference is the *appliance-wide* freshest activity, not the freshest
+        peer. Measuring from the peers alone made the newest peer online by
+        construction, however long ago it was: it reported one connected VPN peer
+        whose last activity was 4.5 days earlier, while the host list -- using the
+        appliance reference -- showed all five offline.
         """
         return count_online_hosts(
             self.get_vpn_peers(),
+            reference_activity=self.inventory_reference_activity(),
             online_window_seconds=self.watched_device_online_window_seconds,
         )
 

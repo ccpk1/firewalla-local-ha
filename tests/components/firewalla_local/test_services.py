@@ -4488,8 +4488,11 @@ async def test_get_system_overview_counts_vpn_peers_separately(
 ) -> None:
     """VPN peers are counted as a breakdown of the device total.
 
-    Peers reuse the shared online definition, so a recent peer counts online
-    and a stale one does not — the same 1-online/1-offline shape seen live.
+    Peers reuse the shared online definition, so a recent peer counts online and
+    a stale one does not. Both references agree in this fixture -- the newer peer
+    is also the newest host -- which is why it passed while the reference was
+    still derived from the peer subset. The distinguishing case is
+    `test_vpn_peers_are_measured_against_the_whole_inventory`.
     """
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -10173,3 +10176,112 @@ async def test_get_rules_reports_no_resume_boundary_for_an_indefinite_pause(
     assert rule["is_paused"] is True
     assert rule["pause_until"] is None
     assert rule["pause_remaining_seconds"] is None
+
+
+async def test_vpn_peers_are_measured_against_the_whole_inventory(
+    hass: HomeAssistant,
+) -> None:
+    """Test a peer's online state uses the appliance's freshest activity.
+
+    "Online" is `reference - last_active <= window`, and the reference is the
+    freshest activity in the **whole host inventory**. Counting a subset against
+    its own freshest member makes that member online by construction, however long
+    ago it was. Measured on the dev box: the VPN count reported one connected peer
+    whose last activity was **4.5 days** earlier, while the host list -- using the
+    appliance-wide reference -- showed all five peers offline. Same box, same
+    moment, two answers.
+
+    The fixture is that shape: an active LAN host, and two peers both days behind
+    it. The newer peer is the newest *peer*, so a peer-derived reference would
+    call it online. The appliance reference does not, because a TV active now
+    cannot make something quiet for days count as connected.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    base = _snapshot()
+    template = base.hosts[0]
+
+    # The appliance's freshest activity: a LAN host active "now".
+    active_lan_host = replace(
+        template,
+        mac="11:22:33:44:55:66",
+        host_name="ftv-lr",
+        connection_type=None,
+        last_active=1_700_000_000.0,
+    )
+    # Two peers, both long quiet, the newer one still the newest *peer*.
+    newer_peer = replace(
+        template,
+        mac="wg_peer:chads-phone",
+        host_name="chads-phone-wgvpn",
+        connection_type="vpn",
+        last_active=1_700_000_000.0 - (86_400 * 4.5),
+    )
+    older_peer = replace(
+        template,
+        mac="awg_peer:chads-laptop",
+        host_name="chads-laptop-awgvpn",
+        connection_type="vpn",
+        last_active=1_700_000_000.0 - (86_400 * 30),
+    )
+    snapshot = replace(
+        base, hosts=(*base.hosts, active_lan_host, newer_peer, older_peer)
+    )
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=snapshot,
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        overview = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SYSTEM_OVERVIEW,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+        peers = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOSTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_KIND: "pseudo_host",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert overview is not None
+    # Neither peer is within the window of the freshest activity anywhere.
+    assert overview["vpn_hosts"] == {"total": 2, "online": 0, "offline": 2}
+    # The active LAN host is the only thing online, and it is not a peer.
+    assert overview["hosts"]["online"] == 1
+
+    # The list and the count agree: this is the cross-surface contradiction the
+    # peer-derived reference produced.
+    assert peers is not None
+    assert [host["online"] for host in peers["hosts"]] == [False, False]

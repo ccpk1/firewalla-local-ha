@@ -16,7 +16,10 @@ from custom_components.firewalla_local.models import (
     format_policy_rule_label,
     format_policy_rule_name,
 )
-from custom_components.firewalla_local.utils.host_activity import count_online_hosts
+from custom_components.firewalla_local.utils.host_activity import (
+    count_online_hosts,
+    reference_last_active,
+)
 from custom_components.firewalla_local.utils.network import build_network_inventory
 
 _RAW_POLICY_STATE_KEY: Final = "state"
@@ -644,6 +647,7 @@ def build_runtime_inventory_report(
     hosts_total = len(hosts)
     hosts_online = count_online_hosts(
         hosts,
+        reference_activity=reference_last_active(hosts),
         online_window_seconds=online_window_seconds,
     )
 
