@@ -186,6 +186,11 @@ temporal suffixes that mark an instant, and keep these two. The alternative —
 `schedule_next_start_at` — is noticeably worse and buys nothing, since no other reading of
 `next_start` is possible.
 
+**CLOSED 2026-10-06 — left as is by owner decision.** Renaming would cost clarity rather
+than buy it, so `schedule_next_start` / `schedule_next_end` keep their `_start` / `_end`
+names and are accepted as instants without an `_at`. The guard's suffix set already treats
+them as valid, so nothing further is required for them.
+
 ### Q4. Where does the basis go — envelope or every row?
 
 Services publish rows, so a per-response envelope is available and cheaper. Entities have
@@ -299,6 +304,16 @@ policy for the full statement.
 things depending on which surface a user reads. Resolved in Phase 3.5, and the twin added in
 3.2 means nothing is lost.
 
+**CLOSED 2026-10-06 — left as is by owner decision.** `pause_until` keeps its epoch form in
+the runtime inventory and its ISO form on the rule switch and in `get_rules`.
+
+**The residual is recorded rather than treated as resolved, because it is a real
+inconsistency and not a preference:** the same name carries two formats depending on which
+surface a reader looks at. A caller that reads `pause_until` from `get_rules` and then from
+the runtime inventory must handle both a string and a number under one name. The decision
+accepts that rather than churn the field; it does not make the two formats agree, so nobody
+should read this as the collision having gone away.
+
 ### Q11. Was the earlier reading of the owner's instruction wrong?
 
 **Yes, and this is recorded rather than quietly corrected.** The plan's first draft treated
@@ -336,13 +351,20 @@ measurement.
 | Q6 | Only the **three** surfaces with a derived value get a basis, not all eight that mention a host | 2026-10-06 |
 | Q8 | Not a defect: two intentional quantities under one name. Fix is a rename, moved to Phase 3 | 2026-10-06 |
 | Q2 | Mechanical: `<iso_name>_timestamp`, matching the five pairs already in the code | 2026-10-06 |
+| Q3 | Closed — `_start` / `_end` stay; renaming would cost clarity, not buy it | 2026-10-06 |
+| Q6 | Superseded by the scoped/flat decision below for the nested case | 2026-10-06 |
+| Q10 | Closed — `pause_until` keeps its per-surface format; residual accepted, not resolved | 2026-10-06 |
+| Q12 | **Scoped naming permitted in service and tool responses; entity attributes flat** | 2026-10-06 |
 
-Remaining open: **Q3, Q10** — both with recommendations in §3, neither blocking Phase 3 from
-starting.
+**No open questions remain.** Q6 is recorded as superseded rather than closed because the
+scoped/flat decision governs the nested case it was asking about, and leaving both would have
+left two answers in the plan.
 
-**Q2 blocked Phase 3 and is now closed.** It could not be deferred: the guard derives the
-epoch name, so every twin Phase 3 adds depends on which derivation is correct. It is also no
-longer a judgement call — five existing pairs, one of them a model field, settle it.
+**Q12 is a new question, and it is answered but not yet fully applied.** It arose from the
+Phase 3 pre-analysis rather than from §3, so it has no section of its own: the decision is
+stated in Phase 3's pre-analysis, the collision it exposes is `build_rule_hit_attributes`, and
+the guard `test_entity_instants_name_their_concept` now enforces it. Applying it is Phase 3.1
+and Phase 4.
 
 ---
 
@@ -535,8 +557,32 @@ Pattern 1 is a **fourth** pattern the plan did not list, and it is in the one pl
 called the correct reference. Item 3.1 therefore cannot simply cite `build_rule_hit_attributes`
 as already-correct: its `at` and `timestamp` are **bare**, carrying no concept name, so they do
 not satisfy the closed suffix set Phase 1 wrote. It is correct *in a different style* — scoped
-naming, where the concept is the parent key (`last_hit.at`). Whether that style is permitted
-is a decision Phase 3 has to make explicitly, not inherit.
+naming, where the concept is the parent key (`last_hit.at`).
+
+**Answered the same day: scoped naming is permitted in service and tool responses; entity
+attributes are flat.** The parent key supplies the concept in a nested response, so `at`
+there is not ambiguous. An entity attribute is flat and has no parent, so `at` and `timestamp`
+there are incomplete names rather than shorthand.
+
+**The one place the two rules collide, and it is not resolvable by picking a side.**
+`build_rule_hit_attributes` (`models.py:1982`) is called from **both** sides:
+
+- `services.py:971` — the rule service payload, where scoped naming is fine.
+- `switch.py:202` — `attributes[ATTR_RULE_LAST_HIT]`, an entity attribute, where it is not.
+
+One builder, two consumers, opposite rules. Splitting it would duplicate a 35-field shape and
+let the two drift, which is the drift the shared builder exists to prevent. The resolution is
+to name the concept in the keys — `at` -> `matched_at`, `timestamp` -> `matched_at_timestamp` —
+which is valid under **both** rules at once: scoped, because the parent still contextualises
+it, and self-describing, because each key now says what it is an instant of. That is a 2-key
+rename in one function, not a restructure.
+
+**A guard now encodes the rule, because it could not be enforced by statement alone.**
+`test_entity_instants_name_their_concept` scans the eight entity-publishing modules for a bare
+`at` or `timestamp` key. It is `xfail(strict=True)` and currently flags exactly one module:
+`models.py: ['at', 'timestamp']`. `models.py` is deliberately classified as an entity surface
+rather than a service one — attributing the shared builder to the service half is the
+attribution error that would put the defect straight back out of sight.
 
 **A guard coverage hole, found while taking this inventory.** The suffix check uses
 `endswith("_at")`, which `"at"` does not match, so bare `at` and bare `timestamp` are
@@ -550,13 +596,16 @@ stay blind.
 surface is **`pause_until`**. The plan's list was written from the entity surface's gaps and
 carried across without checking — the same assumption error as Q8.
 
-- [ ] **3.1 Converge the instant naming patterns** into one — but first decide the scoped
-      question above, because two styles are in play and only one can win. Replaces:
-      bare `timestamp` + `timestamp_iso` (flow records, WAN events), and
-      `<name>_timestamp_iso` (`begin`, `end`, `anchor`).
+- [ ] **3.1 Converge the instant naming patterns** into one. Scoped nesting is allowed in
+      service and tool responses, so "one pattern" means one way of **naming** an instant,
+      not one payload shape. Replaces: bare `timestamp` + `timestamp_iso` (flow records, WAN
+      events), and `<name>_timestamp_iso` (`begin`, `end`, `anchor`). Renames the shared
+      builder's two bare keys to `matched_at` + `matched_at_timestamp`, which is the only
+      resolution that satisfies both halves of the scoped/flat decision at once.
 - [ ] **3.2 Pair every service instant that is ISO-only today** — verified list is
-      **`pause_until` only**. The other five already carry twins and were listed here in
-      error; re-verify before touching any of them.
+      **`pause_until` only** (Q10 closed: it keeps its format, and gains its twin here). The
+      other five already carry twins and were listed here in error; re-verify before
+      touching any of them.
 - [ ] **3.3 Give every epoch-only service field an ISO form.** `get_hosts` → `last_active`;
       flow records → `timestamp`; and in `get_runtime_inventory` → `activated_time`,
       `last_activated_time`, `updated_time`, `expires_at`, `pause_until`. These are the
@@ -566,9 +615,9 @@ carried across without checking — the same assumption error as Q8.
       value from Phase 2 is reproducible on the service side too, and add the basis where a
       response is windowed but was missed (the flow report's window fields and the
       `get_user_usage` periods are the likely candidates; verify rather than assume).
-- [ ] **3.5 Resolve the `pause_until` collision** (Q10) — `runtime_inventory` publishes it as
-      an epoch float while the rule switch and `get_rules` publish ISO. One name, one format,
-      and after 3.2 it has a twin so nothing is lost.
+- [ ] **3.5 Resolve the `pause_until` collision** (Q10) — **closed: left as is.** Recorded
+      here so the item is not silently dropped, not because work remains. See Q10 for the
+      residual it accepts.
 - [ ] **3.6 Extend the guard's module list to include `helpers/`** — `_CONTRACT_MODULES` is
       `PUBLISHING_MODULES` plus `llm_tools_read.py`, and `PUBLISHING_MODULES` stops at the
       entity platforms, so `helpers/runtime_inventory.py` is unscanned. It is where Q10's
@@ -591,6 +640,11 @@ Purpose: bring the entity attributes to the same rule the services now follow. T
 only phase with a compatibility surface — users may have templates against these attributes
 — so it gets the most careful migration documentation, and no shim.
 
+**Q12 applies here in full: every entity instant is flat and names its concept.** There is no
+parent key on an entity attribute to supply the concept, so `at` and `timestamp` are not
+available as shorthand — the whole reason `build_rule_hit_attributes` has to lose them in
+Phase 3.1. The guard `test_entity_instants_name_their_concept` covers this phase.
+
 - [ ] **4.1 Repair `fired_at`** on the alarm binary sensor. It publishes a raw epoch float
       while the service publishes ISO under the same name — one name, two formats, one of
       them wrong. It becomes ISO with a `fired_at_timestamp` twin, matching what Phase 3
@@ -601,8 +655,19 @@ only phase with a compatibility surface — users may have templates against the
       service surface publishes the same concept, so the name must match Phase 3.3 exactly:
       one concept, one name, whichever surface carries it.
 - [ ] **4.3 Add the missing twins** for every ISO-only entity instant: `pause_until`,
-      `schedule_next_start`, `schedule_next_end`, `tested_at`, `sampled_at`, and
-      `runtime_data_updated_at` (Q2 for the last one's name).
+      `tested_at`, `sampled_at`, `runtime_data_updated_at` (Q2 for the last one's name), and
+      `schedule_next_start` / `schedule_next_end`.
+
+      **The schedule pair needs a decision, because Q3 and the guard disagree about it.**
+      Q3 closed the *name* question — they keep `_start` / `_end` rather than becoming
+      `_start_at`. That is separate from whether they need epoch twins, and the answer is not
+      recorded anywhere: the guard's `_INSTANT_SUFFIXES` is `("_at", "_until")`, so it
+treats
+      them as instants for naming purposes while never requiring their twins, and Q3's
+      docstring reasoning is about the name. Recommendation: **add the twins.** They are
+      instants, the rule is unconditional, and the alternative is a rule with a list of
+      exceptions — which is what Q2 rejected. Not large, but it should be decided rather
+      than discovered later.
 - [ ] **4.4 Route every conversion through `iso_instant()`** — replace the 21 hand-rolled
       sites across `binary_sensor.py`, `device_tracker.py`, `sensor.py`, `switch.py`,
       `services.py`, `models.py` and `managers/integration_manager.py`. Two styles exist

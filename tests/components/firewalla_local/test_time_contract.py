@@ -103,6 +103,30 @@ _BASIS_WINDOW_KEYS: Final = ("online_window_seconds",)
 # rename rather than only before or only after it.
 _HOST_ACTIVITY_KEYS: Final = ("last_active_timestamp", "last_active")
 
+# Bare key names that mark an instant without saying what it is an instant *of*. They
+# are only unambiguous when the parent key supplies the concept, which is why they are
+# permitted inside a nested response and wrong as a flat entity attribute.
+#
+# The suffix check in this module cannot see them: it tests `endswith("_at")`, and
+# `"at"` does not end in `"_at"`. That is how the one instant shape the standard does
+# not permit escaped a guard built to find exactly it.
+_BARE_INSTANT_KEYS: Final = ("at", "timestamp")
+
+# Modules whose published keys reach an entity attribute, directly or through a shared
+# builder. `models.py` is here deliberately: `build_rule_hit_attributes` is called by
+# the rule service payload *and* by the rule switch, so a bare key defined there is a
+# bare key on an entity however the service half reads it.
+_ENTITY_PUBLISHING_MODULES: Final = (
+    "binary_sensor.py",
+    "sensor.py",
+    "switch.py",
+    "device_tracker.py",
+    "button.py",
+    "diagnostics.py",
+    "entity.py",
+    "models.py",
+)
+
 
 def _published_time_keys(module_name: str, constants: dict[str, str]) -> set[str]:
     """Return every time-ish published key one module contributes.
@@ -159,6 +183,25 @@ def _find_unpaired_instants() -> dict[str, list[str]]:
     return violations
 
 
+def _find_bare_instant_keys() -> dict[str, list[str]]:
+    """Return each entity surface publishing an instant that does not name its concept.
+
+    The decision this encodes: nesting is allowed, so a service or tool response may
+    scope an instant under a parent key that supplies the concept. An entity attribute
+    is flat and has no parent, so `at` and `timestamp` there are incomplete names
+    rather than shorthand -- `fired_at` says what happened, `at` says only that
+    something happened at some point in the enclosing object.
+    """
+    constants = _string_constants()
+    violations: dict[str, list[str]] = {}
+    for module_name in _ENTITY_PUBLISHING_MODULES:
+        keys = _published_time_keys(module_name, constants)
+        found = sorted(key for key in keys if key in _BARE_INSTANT_KEYS)
+        if found:
+            violations[module_name] = found
+    return violations
+
+
 @pytest.mark.xfail(
     strict=True,
     reason=(
@@ -174,20 +217,22 @@ def _find_unpaired_instants() -> dict[str, list[str]]:
 def test_every_published_instant_has_an_epoch_twin() -> None:
     """Test an instant and its arithmetic form are published together.
 
-    Every instant appears twice: an ISO form to read (`<name>_at`) and an epoch form
-    to compute with (`<name>_timestamp`). Publishing only the ISO form forces a caller
-    to parse a string to compare two times; publishing only the epoch form is the
-    Class A defect, where a reader has a number and no date.
+    Every instant appears twice: an ISO form to read (`<name>_at` or `_until`) and an
+    epoch form to compute with (`<name>_timestamp`). Publishing only the ISO form
+    forces a caller to parse a string to compare two times; publishing only the epoch
+    form is the Class A defect, where a reader has a number and no date.
 
-    `build_rule_hit_attributes` already does this correctly with `at` + `timestamp`,
-    and is the reference the rest of the surface is being brought to.
+    **Known limitations, stated so this is not mistaken for total.** Two, and both are
+    the reason the companion guard below exists rather than this one being widened:
 
-    **Known limitation, stated so it is not mistaken for total:** this check is
-    suffix-based, so a key that *predates* the convention is invisible to it --
-    `last_active` marks an instant without using `_at`. That is what the approved
-    `last_active` -> `last_active_at` rename fixes; once renamed, this guard covers
-    it. The guard enforces the convention for every key that follows it, and the
-    rename is what brings the last straggler inside the rule.
+    - The check is suffix-based, so a key that *predates* the convention is invisible
+      to it -- `last_active` marks an instant without using `_at`. The approved
+      `last_active` -> `last_active_at` rename is what brings that straggler inside
+      the rule.
+    - It requires `endswith("_at")`, which does not match a bare `at` or `timestamp`.
+      Scoped names therefore pass unseen, which is how `build_rule_hit_attributes`
+      came to be cited here as the correct reference while using names this standard
+      does not permit. That is `test_entity_instants_name_their_concept`'s job.
     """
     violations = _find_unpaired_instants()
 
@@ -195,6 +240,40 @@ def test_every_published_instant_has_an_epoch_twin() -> None:
         "these published instants have no epoch twin, so a caller must parse a "
         "string to do arithmetic -- or, on the entity side, has a raw number and no "
         f"date: {violations}"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Phase 3 resolves the one shared builder that publishes bare keys. "
+        "`build_rule_hit_attributes` serves the rule service payload *and* the rule "
+        "switch, so its `at`/`timestamp` land on an entity attribute as well as in a "
+        "nested response, and the two rules this decision draws apart disagree there. "
+        "strict=True so the marker cannot outlive the work."
+    ),
+)
+def test_entity_instants_name_their_concept() -> None:
+    """Test no entity surface publishes an instant that does not name its concept.
+
+    Nesting is permitted: a service or tool response may scope an instant under a
+    parent key, where the parent supplies the concept. An entity attribute is flat and
+    has no parent, so `at` and `timestamp` there are incomplete names rather than
+    shorthand -- `fired_at` says what happened, `at` says only that something happened
+    at some point inside the enclosing object.
+
+    `models.py` is scanned as an entity surface on purpose. `build_rule_hit_attributes`
+    is called by the rule service payload *and* by the rule switch, so a bare key
+    defined there is a bare key on an entity however the service half reads it, and
+    attributing it to the service half would be the attribution error that puts the
+    defect back out of sight.
+    """
+    violations = _find_bare_instant_keys()
+
+    assert violations == {}, (
+        "these entity surfaces publish an instant that does not name its concept, so "
+        "a reader has a bare `at`/`timestamp` with nothing to say what it is an "
+        f"instant of: {violations}"
     )
 
 
