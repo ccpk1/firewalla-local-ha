@@ -1,12 +1,17 @@
-# Vocabulary Alignment — IN PROCESS
+# Vocabulary Alignment — COMPLETED
 
 **Initiative:** One vocabulary across every surface a user or model reads or writes
-**Branch:** `feature/flow-reporting` (the vocabulary work continues on it; nothing here is pushed)
-**Depends on:** nothing. Independent of the flow-reporting initiative, though it finishes work that initiative started.
-**Status:** **Phase 2 complete for the report surface** — rule stated, guard live and
-proven to fail, report targets canonical; Phases 3–4 not started, and two findings
-are awaiting an owner decision (inventory §8)
-**Last updated:** 2026-10-05
+**Branch:** `feature/flow-reporting` (the vocabulary work continued on it; nothing here
+was pushed)
+**Depends on:** nothing. Independent of the flow-reporting initiative, though it
+finishes work that initiative started.
+**Status:** **COMPLETE — all four phases, closed 2026-10-06.** The rule is one word,
+`host`, with a single exception where `device` means a Home Assistant device-registry
+concept. Every `device`-named published key and value is gone, the LLM instructions and
+the prose were swept, and two guards hold it. 763 tests pass; `ruff check`,
+`ruff format` and `mypy` are clean.
+**Supporting note:** `FIREWALLA_LOCAL_VOCABULARY_ALIGNMENT_SUP_INVENTORY.md`
+**Last updated:** 2026-10-06
 
 ---
 

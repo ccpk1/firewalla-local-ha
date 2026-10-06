@@ -1,6 +1,8 @@
 # Vocabulary Alignment — Supporting Inventory
 
-**Parent plan:** `FIREWALLA_LOCAL_VOCABULARY_ALIGNMENT_IN-PROCESS.md`
+**Parent plan:** `FIREWALLA_LOCAL_VOCABULARY_ALIGNMENT_COMPLETED.md`
+**Status:** closed 2026-10-06. The phases it fed are complete; §1–§8 are the audit as it
+was taken, §9–§16 are the design record of what the measurements then changed.
 **Purpose:** the audit behind the plan, as an exhaustive work list. Phase 1.4 publishes
 it; Phases 2–4 consume it; Phase 4.4 proves it empty.
 
