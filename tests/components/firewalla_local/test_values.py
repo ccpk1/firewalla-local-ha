@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 
 from custom_components.firewalla_local.utils.values import (
+    epoch_instant,
+    iso_instant,
     normalized_bool,
     normalized_float,
     normalized_int,
@@ -149,3 +151,85 @@ def test_strings_are_stripped_and_blanks_read_as_absent(
 ) -> None:
     """An empty destination is absent, never an empty-named destination."""
     assert normalized_string(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            1791258075.36,
+            "2026-10-06T03:41:15.360000+00:00",
+            id="epoch_fractional",
+        ),
+        pytest.param(1791258075, "2026-10-06T03:41:15+00:00", id="epoch_whole"),
+        pytest.param(
+            "1791258075.36", "2026-10-06T03:41:15.360000+00:00", id="epoch_string"
+        ),
+        pytest.param(
+            "2026-10-06T03:41:15.360000+00:00",
+            "2026-10-06T03:41:15.360000+00:00",
+            id="already_iso",
+        ),
+        pytest.param(
+            "2026-10-06T03:41:15Z", "2026-10-06T03:41:15+00:00", id="iso_zulu"
+        ),
+        pytest.param(
+            "2026-10-06T03:41:15", "2026-10-06T03:41:15+00:00", id="iso_naive_is_utc"
+        ),
+        pytest.param(None, None, id="none"),
+        pytest.param("", None, id="empty"),
+        pytest.param("   ", None, id="whitespace"),
+        pytest.param("not-a-date", None, id="unparseable"),
+        pytest.param(True, None, id="bool_is_not_an_instant"),
+        pytest.param(float("nan"), None, id="nan_is_not_an_instant"),
+        pytest.param(float("inf"), None, id="inf_is_not_an_instant"),
+    ],
+)
+def test_an_instant_publishes_as_an_iso_date(
+    value: object,
+    expected: str | None,
+) -> None:
+    """Every instant has one ISO form, whatever shape it arrives in.
+
+    `bool` is rejected rather than read as 0 or 1, matching the module's numeric
+    policy. `nan` and `inf` are rejected because they are floats that
+    `datetime.fromtimestamp` raises on -- a payload sending one would otherwise
+    crash an entity update instead of reporting a missing value.
+    """
+    assert iso_instant(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("2026-10-06T03:41:15.360000+00:00", 1791258075.36, id="iso"),
+        pytest.param("2026-10-06T03:41:15Z", 1791258075.0, id="iso_zulu"),
+        pytest.param(1791258075.36, 1791258075.36, id="already_epoch"),
+        pytest.param("1791258075.36", 1791258075.36, id="epoch_string"),
+        pytest.param(None, None, id="none"),
+        pytest.param("not-a-date", None, id="unparseable"),
+        pytest.param(float("nan"), None, id="nan"),
+    ],
+)
+def test_an_instant_converts_back_to_epoch_seconds(
+    value: object,
+    expected: float | None,
+) -> None:
+    """The inverse conversion, so a caller holding either form is served."""
+    assert epoch_instant(value) == expected
+
+
+def test_the_two_instant_forms_round_trip() -> None:
+    """Test both conversions are idempotent, which is what lets callers be careless.
+
+    A caller may hold either form and should not have to know which: feeding an ISO
+    value back must return the same instant in the same shape, and converting to
+    epoch must land on the original number. Without this, routing an already-ISO
+    value through the helper would double-convert it.
+    """
+    epoch = 1791258075.36
+    iso = iso_instant(epoch)
+
+    assert iso_instant(iso) == iso
+    assert epoch_instant(iso) == epoch
+    assert epoch_instant(epoch) == epoch

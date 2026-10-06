@@ -37,6 +37,8 @@ raising would turn a cosmetic payload change into an unavailable entity.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from math import isfinite
 from typing import Final
 
 # Representations of a boolean the box actually puts on the wire. Measured
@@ -127,6 +129,89 @@ def normalized_packet_loss_percent(value: object) -> float | None:
     if percentage is None or percentage < 0:
         return None
     return percentage
+
+
+def iso_instant(value: object) -> str | None:
+    """Return the ISO 8601 form of one instant, in UTC.
+
+    Every instant this integration publishes appears **twice**: an ISO form to
+    read and an epoch form to do arithmetic with. This is the single conversion,
+    so the format cannot drift between call sites -- which is how the same
+    operation came to be written two different ways across 14 places, leaving one
+    published field as a raw float while the field beside it was a date.
+
+    Accepts epoch seconds (``int``/``float``), an existing ISO string, or a
+    ``datetime``, and is idempotent: feeding an ISO value back returns the same
+    instant in the same shape. A naive ``datetime`` or an offset-less string is
+    read as UTC, because every instant here is UTC-based -- the alternative,
+    letting ``timestamp()`` assume local time, would make the same value mean
+    different things on different machines.
+    """
+    if isinstance(value, datetime):
+        moment = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return moment.isoformat()
+
+    if isinstance(value, str):
+        parsed = _parse_instant(value)
+        if parsed is not None:
+            return parsed.isoformat()
+        # Not a date. It may still be an epoch in string form -- the box sends
+        # numbers as strings on several endpoints -- so fall through to the numeric
+        # path rather than reporting a present instant as absent.
+
+    seconds = _finite_seconds(value)
+    if seconds is None:
+        return None
+    return datetime.fromtimestamp(seconds, UTC).isoformat()
+
+
+def epoch_instant(value: object) -> float | None:
+    """Return one instant as epoch seconds, from an ISO string or epoch seconds.
+
+    The inverse of :func:`iso_instant`, and idempotent for the same reason: a
+    caller may hold either form and should not have to know which.
+    """
+    if isinstance(value, str):
+        parsed = _parse_instant(value)
+        if parsed is not None:
+            return parsed.timestamp()
+        # Same fall-through as `iso_instant`: a numeric string is a valid epoch.
+
+    if isinstance(value, datetime):
+        moment = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return moment.timestamp()
+
+    return _finite_seconds(value)
+
+
+def _finite_seconds(value: object) -> float | None:
+    """Return finite epoch seconds, treating a non-finite number as absent.
+
+    ``normalized_float`` accepts ``nan`` and ``inf`` because it only checks the
+    type, and both are floats. They are not instants: ``fromtimestamp`` raises on
+    either, so a payload sending one would crash an entity update rather than
+    report a missing value. Rejected here, once, for both conversions.
+    """
+    seconds = normalized_float(value)
+    if seconds is None or not isfinite(seconds):
+        return None
+    return seconds
+
+
+def _parse_instant(value: str) -> datetime | None:
+    """Return an aware UTC datetime for one ISO 8601 string, or ``None``.
+
+    Uses the stdlib rather than Home Assistant's parser because this module is
+    pure, which is what lets the entity and service layers share it.
+    """
+    stripped_value = value.strip()
+    if not stripped_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stripped_value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def normalized_string(value: object) -> str | None:

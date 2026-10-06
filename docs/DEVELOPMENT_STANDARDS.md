@@ -257,6 +257,60 @@ Rules:
 
 ## Time and timezone standards
 
+### Publishing a moment in time
+
+Three concepts, and no fourth. Every published time is one of them.
+
+- **Instant** — a moment. Published **twice**, under `_at` for the ISO 8601 form and
+  `_timestamp` for the epoch form: `<name>_at` is the string a human or a model reads,
+  `<name>_timestamp` is the number arithmetic needs. Never only one of the two. An
+  ISO-only instant forces a caller to parse a date to compare two times; an epoch-only
+  instant hands a reader a number with no date, which is how `last_active: 1791258075.36`
+  came to be compared by eye during a live diagnosis.
+- **Duration** — a length of time. Published as `<name>_seconds`, never as a date.
+  `_seconds` and `_timestamp` are **not interchangeable**: a duration in seconds and an
+  instant in seconds are different quantities. `uptime` beside `uptime_seconds` is the
+  duration pair and is correct as it stands.
+- **Windowed state** — a value derived from a time, such as `online` or `is_paused`.
+  Published **only alongside its basis.** A boolean is not a fact about a device; it is
+  `reference - last_active <= window`, and all three inputs must be reachable from the
+  payload or the reader cannot reproduce the claim.
+
+Suffixes that mark a temporal field are a closed set: `_at`, `_until`, `_timestamp`,
+`_seconds`, plus `_start` and `_end` for window boundaries. A new temporal field
+declares which concept it is by taking one of them; it does not invent a seventh.
+
+**The rule this section exists to state:**
+
+> Every published value is either a raw fact, or reproducible from other published
+> fields.
+
+Worked example, because the failure is easier to see than to describe. A host row once
+published `online: false` beside `last_active: 1791288092.382`. That host had been
+active **6.6 minutes** before the measurement, and the window is **5 minutes** — so the
+value was correct and completely unexplainable, because the row carried no reference
+instant, no window, and no `stale` flag. Reconstructing it took three source files. With
+`as_of` and `online_window_seconds` published, the reader computes
+`as_of - last_active <= window` and gets the same answer, unaided.
+
+**A derived value must not be measured from its own subset.** `online` is relative to a
+reference instant, and that reference is the appliance's freshest activity across the
+whole inventory — never the freshest member of whatever subset is being counted.
+Measuring peers against the freshest peer made the newest peer online by construction,
+however long ago it was: the live box reported one connected VPN peer whose last
+activity was **4.5 days** earlier, while the host list, using the appliance reference,
+correctly showed it offline. Same box, same moment, two answers. The reference is a
+required parameter rather than a default for exactly this reason — a required value
+cannot be omitted, and a default can.
+
+**Distinct questions get distinct windows, and each publishes its own basis.**
+Connectivity ("is this host reachable", default 5 minutes) and presence ("is this person
+home", default 15 minutes) are different questions with independently configured
+windows. Publishing the basis for both is required; unifying them is not, and would be
+wrong.
+
+### Timezone rules
+
 - time-bucketed Firewalla data such as day, week, and month reports must use the Firewalla appliance timezone as the canonical timezone when the box exposes a valid timezone name
 - Home Assistant timezone is a fallback only when the Firewalla runtime does not expose a usable timezone
 - do not derive canonical period boundaries from Home Assistant timezone when Firewalla has already provided its own timezone context
