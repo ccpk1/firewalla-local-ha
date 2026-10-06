@@ -950,6 +950,7 @@ def _serialize_rule_summary(rule: FirewallaPolicyRule) -> JsonObjectType:
             if rule.pause_until is not None
             else None
         ),
+        "pause_until_timestamp": rule.pause_until,
         "pause_remaining_seconds": rule.pause_remaining_seconds,
         # A rule either targets a value or is scoped by a group/user, never both.
         # The box signals the second case with the literal `TAG` in `target`,
@@ -1288,15 +1289,24 @@ def _serialize_report_time_basis(
         "time_zone": time_basis.time_zone,
     }
     if time_zone is not None:
-        payload["begin_timestamp_iso"] = _serialize_local_timestamp(
+        # Window positions, so the readable form is the bare boundary name and the
+        # epoch form takes `_timestamp` -- the same family as `time_period`'s
+        # `start` + `start_timestamp`, rather than the `_at` family used for a point
+        # where something happened. Only the `_iso` suffix goes; it was the one part
+        # of this shape outside the closed suffix set.
+        #
+        # These are local time, unlike most instants here, because a report window is
+        # defined in the appliance's zone. The offset is carried in the string and
+        # `time_zone` names the zone, so the instant stays exact.
+        payload["begin"] = _serialize_local_timestamp(
             time_basis.begin_timestamp,
             time_zone=time_zone,
         )
-        payload["end_timestamp_iso"] = _serialize_local_timestamp(
+        payload["end"] = _serialize_local_timestamp(
             time_basis.end_timestamp,
             time_zone=time_zone,
         )
-        payload["anchor_timestamp_iso"] = _serialize_local_timestamp(
+        payload["anchor"] = _serialize_local_timestamp(
             time_basis.anchor_timestamp,
             time_zone=time_zone,
         )
@@ -1856,8 +1866,8 @@ def _serialize_network_metric_sample(
 ) -> JsonObjectType:
     """Serialize one network metric sample for service responses."""
     return {
-        "timestamp": sample.timestamp,
-        "timestamp_iso": _serialize_unix_timestamp(sample.timestamp),
+        "sampled_at_timestamp": sample.timestamp,
+        "sampled_at": iso_instant(sample.timestamp),
         "value": sample.value,
     }
 
@@ -3016,7 +3026,8 @@ def _serialize_flow_record(
     address, port -- is the record's subject and is not gated.
     """
     payload: JsonObjectType = {
-        "timestamp": record.timestamp,
+        "occurred_at_timestamp": record.timestamp,
+        "occurred_at": iso_instant(record.timestamp),
         "is_blocked": record.is_blocked,
         "block_type": record.block_type,
         "blocked_by_rule_id": record.blocked_by_rule_id,
@@ -3771,8 +3782,8 @@ def _serialize_wan_event(event: FirewallaWanEvent) -> JsonObjectType:
     return {
         "family": event.family,
         "event_type": event.event_type,
-        "timestamp": event.timestamp,
-        "timestamp_iso": datetime.fromtimestamp(event.timestamp, UTC).isoformat(),
+        "occurred_at_timestamp": event.timestamp,
+        "occurred_at": datetime.fromtimestamp(event.timestamp, UTC).isoformat(),
         "value": event.value,
         "previous_value": event.previous_value,
         "ok_value": event.ok_value,

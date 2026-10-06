@@ -201,18 +201,30 @@ def _build_rule_record(
         "enabled": rule.enabled,
         "scope": list(rule.scope),
         "applies_to": list(rule.applies_to),
-        "activated_time": rule.activated_time,
-        "updated_time": rule.updated_time,
-        "last_activated_time": rule.last_activated_time,
+        # Every rule instant appears twice: `_at` to read, `_at_timestamp` to compute
+        # with. These arrive from the box as epoch floats, which is why they need the
+        # readable half added rather than corrected -- but `expires_at` and
+        # `pause_until` needed the reverse. Both held epoch while this same name holds
+        # ISO on the rule service surface, so one name meant a date in one tool and a
+        # number in another. Both are ISO here now, matching that surface, and the
+        # epoch form moved to its own key.
+        "activated_at": iso_instant(rule.activated_time),
+        "activated_at_timestamp": rule.activated_time,
+        "updated_at": iso_instant(rule.updated_time),
+        "updated_at_timestamp": rule.updated_time,
+        "last_activated_at": iso_instant(rule.last_activated_time),
+        "last_activated_at_timestamp": rule.last_activated_time,
         "expire_seconds": rule.expire_seconds,
-        "expires_at": rule.expires_at,
+        "expires_at": iso_instant(rule.expires_at),
+        "expires_at_timestamp": rule.expires_at,
         "auto_delete_when_expires": rule.auto_delete_when_expires,
         "dnsmasq_only": rule.dnsmasq_only,
         "is_temporary": rule.is_temporary,
         "tag_refs": tag_refs,
         "notes": rule.notes,
         "is_paused": rule.is_paused,
-        "pause_until": rule.pause_until,
+        "pause_until": iso_instant(rule.pause_until),
+        "pause_until_timestamp": rule.pause_until,
         "pause_remaining_seconds": rule.pause_remaining_seconds,
         "active_time_schedule": rule.active_time_schedule,
         "app_time_period": rule.app_time_period,

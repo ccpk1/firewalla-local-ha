@@ -2004,8 +2004,8 @@ def build_rule_hit_attributes(
     """
     if hit is None:
         return {
-            "timestamp": None,
-            "at": None,
+            "matched_at_timestamp": None,
+            "matched_at": None,
             "is_blocked": None,
             "block_type": None,
             "blocked_by_rule_id": None,
@@ -2028,8 +2028,8 @@ def build_rule_hit_attributes(
             "region": None,
         }
     return {
-        "timestamp": hit.timestamp,
-        "at": (
+        "matched_at_timestamp": hit.timestamp,
+        "matched_at": (
             datetime.fromtimestamp(hit.timestamp, UTC).isoformat()
             if hit.timestamp is not None
             else None

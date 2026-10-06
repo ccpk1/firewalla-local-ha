@@ -428,7 +428,8 @@ Reads that tell you what exists — the first step before any control action.
   reach YouTube?" — read the rules governing it, then see which one last matched
   and for which host), and cleanup (enabled rules with `hit_count: 0` are
   candidates for removal).
-  `last_hit` carries `host_id`/`host_ip`, a single resolved `destination`
+  `last_hit` carries `matched_at`/`matched_at_timestamp` (when it matched, as a date
+  and as epoch seconds), `host_id`/`host_ip`, a single resolved `destination`
   with its `destination_kind` (`domain`/`host`/`ip`/`peer`), `destination_ip` when known,
   `port`, `protocol`, and `app`/`category` when the box identified them.
   `host_id` is a Firewalla host id, which is **not always a MAC**: a VPN peer
@@ -447,6 +448,8 @@ Reads that tell you what exists — the first step before any control action.
   `is_paused` says a rule is not running; **`pause_until` says whether it will come
   back on its own** — a timestamp means the box resumes it, `null` means it stays
   paused until `resume_rule`. `pause_remaining_seconds` counts down the timed case.
+  `pause_until_timestamp` carries the same instant as epoch seconds, so a caller can
+  subtract it from `now` without parsing a date.
   Without those two, one `is_paused: true` is not actionable: a caller cannot tell
   a self-resuming pause from an indefinite one. An indefinite pause and a rule
   switched off in the Firewalla app are the same state, because the box keeps only

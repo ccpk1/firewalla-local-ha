@@ -353,7 +353,7 @@ measurement.
 | Q2 | Mechanical: `<iso_name>_timestamp`, matching the five pairs already in the code | 2026-10-06 |
 | Q3 | Closed — `_start` / `_end` stay; renaming would cost clarity, not buy it | 2026-10-06 |
 | Q6 | Superseded by the scoped/flat decision below for the nested case | 2026-10-06 |
-| Q10 | Closed — `pause_until` keeps its per-surface format; residual accepted, not resolved | 2026-10-06 |
+| Q10 | **Reversed 2026-10-06** — `pause_until` is ISO on both surfaces with a twin; the leave-as-is option was unrepresentable | 2026-10-06 |
 | Q12 | **Scoped naming permitted in service and tool responses; entity attributes flat** | 2026-10-06 |
 
 **No open questions remain.** Q6 is recorded as superseded rather than closed because the
@@ -374,7 +374,7 @@ and Phase 4.
 | --- | --- | --- | --- |
 | **1** | The rule, the helper, and the checks | The three concepts stated in `DEVELOPMENT_STANDARDS.md`, one `iso_instant()` helper, and two guard tests that **fail on today's payload** | **MET** — guards failed for their intended reasons, recorded in the supporting note §9; no published value changed |
 | **2** | Publish the basis | Reference instant, applied window and `stale` on every windowed surface — the connectivity entities, the count attributes, and the three service envelopes | **MET** — three guards pass, each proven non-vacuous; additive only, no existing key changed. Two plan errors found and corrected (see §5) |
-| **3** | Converge the service and tool surfaces | The three competing instant naming patterns become one, on services and LLM tools, plus the derived-state and unpublished-daylight gaps there | One naming pattern; every instant paired; every derived value carries its basis. Breaking, and free — no consumers |
+| **3** | Converge the service and tool surfaces | Every service instant named and paired, on one rule with two families; the shared bare-key builder named | **MET** — the bare-name guard passes outright; the twin guard's remaining gaps are all entity-side. Two plan predictions were wrong (see §5 Phase 3) |
 | **4** | Converge the entity surface | `last_active_at` + twin, `fired_at` format repaired, twins added for every ISO-only entity instant, all conversions routed through the helper | Every entity instant has both forms under the same one pattern; breaks recorded in the migration table |
 | **5** | Close the loop | `USER_GUIDE.md`, `RELEASE_CHECKLIST.md`, quality-scale check, and the guard extended to entity attributes | Docs match the payload; the guard covers entities, not just service responses |
 
@@ -535,7 +535,7 @@ reasons: it is where Q10's `pause_until` epoch/ISO collision lives, and Phase 2 
 basis into its `summary`. The guard could not see either. Extending the module list is part of
 Phase 3, and it will very likely surface gaps this inventory does not list.
 
-### Phase 3 — Converge the service and tool surfaces
+### Phase 3 — Converge the service and tool surfaces — **COMPLETE**
 
 Purpose: make the service and LLM surfaces obey the rule, and establish the single
 precedent the entity phase then follows. Every change here is breaking by declaration and
@@ -596,39 +596,62 @@ stay blind.
 surface is **`pause_until`**. The plan's list was written from the entity surface's gaps and
 carried across without checking — the same assumption error as Q8.
 
-- [ ] **3.1 Converge the instant naming patterns** into one. Scoped nesting is allowed in
+- [x] **3.1 Converge the instant naming patterns** into one. Scoped nesting is allowed in
       service and tool responses, so "one pattern" means one way of **naming** an instant,
-      not one payload shape. Replaces: bare `timestamp` + `timestamp_iso` (flow records, WAN
-      events), and `<name>_timestamp_iso` (`begin`, `end`, `anchor`). Renames the shared
-      builder's two bare keys to `matched_at` + `matched_at_timestamp`, which is the only
-      resolution that satisfies both halves of the scoped/flat decision at once.
-- [ ] **3.2 Pair every service instant that is ISO-only today** — verified list is
-      **`pause_until` only** (Q10 closed: it keeps its format, and gains its twin here). The
-      other five already carry twins and were listed here in error; re-verify before
-      touching any of them.
-- [ ] **3.3 Give every epoch-only service field an ISO form.** `get_hosts` → `last_active`;
-      flow records → `timestamp`; and in `get_runtime_inventory` → `activated_time`,
-      `last_activated_time`, `updated_time`, `expires_at`, `pause_until`. These are the
-      Class A failures on the service surface and the reason an agent compared floats during
-      the TV diagnosis.
-- [ ] **3.4 Publish the basis on the remaining service surfaces** — confirm every windowed
-      value from Phase 2 is reproducible on the service side too, and add the basis where a
-      response is windowed but was missed (the flow report's window fields and the
-      `get_user_usage` periods are the likely candidates; verify rather than assume).
-- [ ] **3.5 Resolve the `pause_until` collision** (Q10) — **closed: left as is.** Recorded
-      here so the item is not silently dropped, not because work remains. See Q10 for the
-      residual it accepts.
-- [ ] **3.6 Extend the guard's module list to include `helpers/`** — `_CONTRACT_MODULES` is
-      `PUBLISHING_MODULES` plus `llm_tools_read.py`, and `PUBLISHING_MODULES` stops at the
-      entity platforms, so `helpers/runtime_inventory.py` is unscanned. It is where Q10's
-      collision lives and where Phase 2 published the basis. Expect this to surface gaps not
-      listed here.
-- [ ] **3.7 Align the LLM tool metadata** — `docs/MCP_TOOL_REFERENCE.md` and the tool
-      descriptions name any time field they mention, so an agent reading the reference sees
-      the same names the response carries. `list_rules`' `pause_until` documentation added
-      in `3f9f2f5` is the pattern; sweep for the rest.
-- [ ] **3.8 Run the Phase 1 guards** and record what they now cover on the service side,
-      including which patterns no longer exist.
+      not one payload shape.
+- [x] **3.2 Pair every service instant that is ISO-only today** — verified list was
+      **`pause_until` only**, now paired.
+- [x] **3.3 Give every epoch-only service field an ISO form.** `get_hosts` → `last_active`
+      is Phase 4; the `get_runtime_inventory` rule record is done here, including three
+      fields whose *names* were also outside the closed set.
+- [x] **3.4 Publish the basis on the remaining service surfaces** — **verified, nothing
+      added.** All eight windowed report surfaces already publish `time_basis`, and none of
+      them derives a connectivity boolean, so Phase 2's basis does not apply to them. The
+      plan guessed "the flow report's window fields and the `get_user_usage` periods" as
+      likely candidates; both already declare their window, so the guess was wrong in the
+      harmless direction.
+- [x] **3.5 Resolve the `pause_until` collision** (Q10) — **this one came back, see below.**
+- [x] **3.6 Extend the guard's module list to include `helpers/`** — done, and it
+      immediately found the collision in 3.5 rather than only after the fact.
+- [x] **3.7 Align the LLM tool metadata** — `docs/MCP_TOOL_REFERENCE.md` now names
+      `matched_at` / `matched_at_timestamp` and `pause_until_timestamp`.
+- [x] **3.8 Run the Phase 1 guards** — the bare-name guard passes outright (its
+      `strict=True` marker was removed); the twin guard still `xfail`s with every remaining
+      gap entity-side.
+
+**Two answers the work found, both different from what this plan predicted.**
+
+1. **The naming rule has two coherent families, not one, and that is correct.** The plan
+   said "one pattern". Convergence actually produces two, because they answer different
+   questions and `time_period` already used the second:
+
+   | family | shape | for | examples |
+   | --- | --- | --- | --- |
+   | **point** | `<concept>_at` + `<concept>_at_timestamp` | when something *happened* | `tested_at`, `fired_at`, `matched_at`, `sampled_at` |
+   | **position** | `<boundary>` + `<boundary>_timestamp` | a named place in a **window** | `start`, `end`, `begin`, `anchor` |
+
+   Both name their concept, both are in the closed suffix set, and `position` was already
+   in the code as `start` + `start_timestamp`. Discovering it prevented a wrong rename:
+   `time_basis` was first changed to `begin_at` + `begin_at_timestamp`, which was uniform
+   with the point family and **inconsistent with `time_period` beside it**. Reverted to
+   `begin` + `begin_timestamp`, which is a two-word change (drop `_iso`) instead of a
+   six-word one. The general lesson is that "one pattern" was the wrong goal — the goal is
+   **one rule for choosing** a pattern, and the rule is which question the value answers.
+
+2. **Q10 could not survive contact with the guard, and was resolved rather than left.**
+   The owner closed Q10 as leave-as-is on the reasoning that changing `pause_until` would
+   cost more than it bought. Extending the guard to `helpers/` then showed the state was
+   not merely inconsistent but **unrepresentable under the suffix rule**: the guard
+   requires `<name>_timestamp` as the twin of an ISO `<name>`, and `runtime_inventory`
+   published `pause_until` as an *epoch*, so its twin had no valid name. `expires_at` had
+   the same defect — an `_at` key holding a number, with `expires_at` meaning a date in
+   `services.py` and a number here.
+
+   Both are ISO on both surfaces now, with `_timestamp` twins. This **reverses the Q10
+   closure**, so it is recorded as a reversal rather than folded in quietly: the earlier
+   decision was made without the guard being able to see the file, and the new evidence
+   removes the option it chose. The residual Q10 accepted — one name, two formats — is
+   gone as a side effect, which is the outcome the owner wanted from leaving it alone.
 
 **Gate:** one naming pattern across services and LLM tools; every instant paired; every
 windowed value carries its basis; no `_iso` suffix and no unscoped bare `timestamp` remains.
@@ -655,19 +678,16 @@ Phase 3.1. The guard `test_entity_instants_name_their_concept` covers this phase
       service surface publishes the same concept, so the name must match Phase 3.3 exactly:
       one concept, one name, whichever surface carries it.
 - [ ] **4.3 Add the missing twins** for every ISO-only entity instant: `pause_until`,
-      `tested_at`, `sampled_at`, `runtime_data_updated_at` (Q2 for the last one's name), and
-      `schedule_next_start` / `schedule_next_end`.
+      `tested_at`, `sampled_at`, and `runtime_data_updated_at` (Q2 for the last one's name).
 
-      **The schedule pair needs a decision, because Q3 and the guard disagree about it.**
-      Q3 closed the *name* question — they keep `_start` / `_end` rather than becoming
-      `_start_at`. That is separate from whether they need epoch twins, and the answer is not
-      recorded anywhere: the guard's `_INSTANT_SUFFIXES` is `("_at", "_until")`, so it
-treats
-      them as instants for naming purposes while never requiring their twins, and Q3's
-      docstring reasoning is about the name. Recommendation: **add the twins.** They are
-      instants, the rule is unconditional, and the alternative is a rule with a list of
-      exceptions — which is what Q2 rejected. Not large, but it should be decided rather
-      than discovered later.
+      **`schedule_next_start` / `schedule_next_end` are excluded — settled 2026-10-06.**
+      Both their names *and* their absence of twins stand. They are the one accepted exception
+      to the twin rule, recorded here rather than left implicit so a later reader finding them
+      untwinned knows it was decided. This does not contradict Q2's "no exceptions" ruling:
+      that was about *deriving a name* from a rule, where any carve-out makes the derivation
+      unsound, whereas this is about *which values are published at all*. Schedule window
+      boundaries are read as dates in a schedule, not used for arithmetic against a reference
+      instant.
 - [ ] **4.4 Route every conversion through `iso_instant()`** — replace the 21 hand-rolled
       sites across `binary_sensor.py`, `device_tracker.py`, `sensor.py`, `switch.py`,
       `services.py`, `models.py` and `managers/integration_manager.py`. Two styles exist

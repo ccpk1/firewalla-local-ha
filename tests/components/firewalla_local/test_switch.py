@@ -262,8 +262,8 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
         # from a rule that has fired.
         assert attributes[ATTR_RULE_HIT_COUNT] is None
         assert attributes[ATTR_RULE_LAST_HIT] == {
-            "timestamp": None,
-            "at": None,
+            "matched_at_timestamp": None,
+            "matched_at": None,
             "is_blocked": None,
             "block_type": None,
             "blocked_by_rule_id": None,
@@ -789,8 +789,8 @@ async def test_selected_rule_switch_exposes_hit_data(
 
     assert attributes[ATTR_RULE_HIT_COUNT] == 26617
     assert attributes[ATTR_RULE_LAST_HIT] == {
-        "timestamp": timestamp,
-        "at": "2026-10-03T01:17:14.243000+00:00",
+        "matched_at_timestamp": timestamp,
+        "matched_at": "2026-10-03T01:17:14.243000+00:00",
         "is_blocked": None,
         "block_type": None,
         "blocked_by_rule_id": None,

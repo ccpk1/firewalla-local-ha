@@ -80,7 +80,18 @@ _TWIN_SUFFIX: Final = "_timestamp"
 # Modules whose published keys are part of the contract. The read tools declare their
 # own copies of several service schemas, so a vocabulary can drift there while the
 # service side stays correct.
-_CONTRACT_MODULES: Final = (*PUBLISHING_MODULES, "llm_tools_read.py")
+#
+# `helpers/` belongs here and was missing, which left the surface that renders the
+# runtime inventory report unscanned -- the one place the `pause_until` format collision
+# lived and the one place Phase 2 published the basis. A module that assembles published
+# keys is a contract module regardless of which directory it sits in.
+_CONTRACT_MODULES: Final = (
+    *PUBLISHING_MODULES,
+    "llm_tools_read.py",
+    "helpers/runtime_inventory.py",
+    "helpers/usage_report.py",
+    "helpers/llm_support.py",
+)
 
 # Fields a caller needs in order to reproduce a published windowed boolean. Until
 # these exist the boolean is unexplainable from the payload, which is the Class B
@@ -103,29 +114,20 @@ _BASIS_WINDOW_KEYS: Final = ("online_window_seconds",)
 # rename rather than only before or only after it.
 _HOST_ACTIVITY_KEYS: Final = ("last_active_timestamp", "last_active")
 
-# Bare key names that mark an instant without saying what it is an instant *of*. They
-# are only unambiguous when the parent key supplies the concept, which is why they are
-# permitted inside a nested response and wrong as a flat entity attribute.
+# Bare key names that mark an instant without saying what it is an instant *of*.
+#
+# Nesting is permitted: a service or tool response may scope an instant under a parent
+# key. But scoping is about *structure*, and it does not make an unnamed key named --
+# `records[].at` still leaves the reader to infer that a record's `at` is when the flow
+# occurred. So every key names its concept, on every surface, and there is no carve-out.
+# The alternative was permitting bare keys in nested responses, which is the kind of
+# exception Q2 rejected and which would have needed a judgement call ("when does the
+# parent supply the concept?") at every future site.
 #
 # The suffix check in this module cannot see them: it tests `endswith("_at")`, and
-# `"at"` does not end in `"_at"`. That is how the one instant shape the standard does
-# not permit escaped a guard built to find exactly it.
+# `"at"` does not end in `"_at"`. That is how this shape escaped a guard built to find
+# exactly it.
 _BARE_INSTANT_KEYS: Final = ("at", "timestamp")
-
-# Modules whose published keys reach an entity attribute, directly or through a shared
-# builder. `models.py` is here deliberately: `build_rule_hit_attributes` is called by
-# the rule service payload *and* by the rule switch, so a bare key defined there is a
-# bare key on an entity however the service half reads it.
-_ENTITY_PUBLISHING_MODULES: Final = (
-    "binary_sensor.py",
-    "sensor.py",
-    "switch.py",
-    "device_tracker.py",
-    "button.py",
-    "diagnostics.py",
-    "entity.py",
-    "models.py",
-)
 
 
 def _published_time_keys(module_name: str, constants: dict[str, str]) -> set[str]:
@@ -184,17 +186,17 @@ def _find_unpaired_instants() -> dict[str, list[str]]:
 
 
 def _find_bare_instant_keys() -> dict[str, list[str]]:
-    """Return each entity surface publishing an instant that does not name its concept.
+    """Return each contract module publishing an instant that does not name its concept.
 
-    The decision this encodes: nesting is allowed, so a service or tool response may
-    scope an instant under a parent key that supplies the concept. An entity attribute
-    is flat and has no parent, so `at` and `timestamp` there are incomplete names
-    rather than shorthand -- `fired_at` says what happened, `at` says only that
-    something happened at some point in the enclosing object.
+    Every contract module, not only the entity ones. Because the rule has no carve-out
+    for nested responses there is no reason to classify modules by surface, and every
+    reason not to: `models.py` holds a builder shared by a service payload and an
+    entity, and attributing it to either half puts a defect out of sight. Scanning
+    everything removes the classification rather than getting it right.
     """
     constants = _string_constants()
     violations: dict[str, list[str]] = {}
-    for module_name in _ENTITY_PUBLISHING_MODULES:
+    for module_name in _CONTRACT_MODULES:
         keys = _published_time_keys(module_name, constants)
         found = sorted(key for key in keys if key in _BARE_INSTANT_KEYS)
         if found:
@@ -205,13 +207,12 @@ def _find_bare_instant_keys() -> dict[str, list[str]]:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Phase 3 pairs the service instants and Phase 4 the entity ones. "
-        "strict=True so this marker cannot outlive the work: the moment both phases "
-        "land, the test passes and the marker itself fails the suite until removed. "
-        "Measured gaps at the time of writing, all real: "
-        "services.py `pause_until`; switch.py `pause_until`; binary_sensor.py "
+        "Phase 4 twins the entity instants. strict=True so this marker cannot "
+        "outlive the work: the moment Phase 4 lands, the test passes and the marker "
+        "itself fails the suite until removed. The service side is done as of Phase 3, "
+        "so every gap measured now is entity-side and all real: binary_sensor.py "
         "`fired_at` and `runtime_data_updated_at`; sensor.py `sampled_at` and "
-        "`tested_at`."
+        "`tested_at`; switch.py `pause_until`."
     ),
 )
 def test_every_published_instant_has_an_epoch_twin() -> None:
@@ -243,37 +244,25 @@ def test_every_published_instant_has_an_epoch_twin() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Phase 3 resolves the one shared builder that publishes bare keys. "
-        "`build_rule_hit_attributes` serves the rule service payload *and* the rule "
-        "switch, so its `at`/`timestamp` land on an entity attribute as well as in a "
-        "nested response, and the two rules this decision draws apart disagree there. "
-        "strict=True so the marker cannot outlive the work."
-    ),
-)
-def test_entity_instants_name_their_concept() -> None:
-    """Test no entity surface publishes an instant that does not name its concept.
+def test_every_instant_names_its_concept() -> None:
+    """Test no published instant is an unnamed `at` or `timestamp`.
 
-    Nesting is permitted: a service or tool response may scope an instant under a
-    parent key, where the parent supplies the concept. An entity attribute is flat and
-    has no parent, so `at` and `timestamp` there are incomplete names rather than
-    shorthand -- `fired_at` says what happened, `at` says only that something happened
-    at some point inside the enclosing object.
+    Nesting is permitted, so a response may scope an instant under a parent key. That
+    does not make an unnamed key named: `records[].at` still leaves the reader to infer
+    that a record's `at` is when its flow occurred, and the inference is the work this
+    initiative exists to remove.
 
-    `models.py` is scanned as an entity surface on purpose. `build_rule_hit_attributes`
-    is called by the rule service payload *and* by the rule switch, so a bare key
-    defined there is a bare key on an entity however the service half reads it, and
-    attributing it to the service half would be the attribution error that puts the
-    defect back out of sight.
+    The companion suffix guard cannot see this shape at all -- it tests
+    `endswith("_at")`, which a bare `at` does not match. That blindness is how
+    `build_rule_hit_attributes` came to be cited as the correct reference while using
+    names the standard does not permit, so this check exists rather than the other one
+    being widened into a shape test.
     """
     violations = _find_bare_instant_keys()
 
     assert violations == {}, (
-        "these entity surfaces publish an instant that does not name its concept, so "
-        "a reader has a bare `at`/`timestamp` with nothing to say what it is an "
-        f"instant of: {violations}"
+        "these surfaces publish an instant that does not name its concept, so a reader "
+        f"has a bare `at`/`timestamp` with nothing to say what it is of: {violations}"
     )
 
 

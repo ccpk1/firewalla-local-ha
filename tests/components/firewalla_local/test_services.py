@@ -3718,8 +3718,8 @@ async def test_get_rules_exposes_hit_count_and_last_hit(
     # `upload_bytes` are present here because this fixture models a *regular*
     # flow: a blocked one has no bytes at all and would read None rather than 0.
     assert fired["last_hit"] == {
-        "timestamp": 1790990234.243,
-        "at": "2026-10-03T01:17:14.243000+00:00",
+        "matched_at_timestamp": 1790990234.243,
+        "matched_at": "2026-10-03T01:17:14.243000+00:00",
         "is_blocked": None,
         "block_type": None,
         "blocked_by_rule_id": None,
@@ -5793,9 +5793,9 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
         "is_partial": False,
         "boundary_source": "query_window",
         "time_zone": "America/New_York",
-        "begin_timestamp_iso": "2026-03-21T00:00:00-04:00",
-        "end_timestamp_iso": "2026-03-28T00:00:00-04:00",
-        "anchor_timestamp_iso": "2026-03-28T00:00:00-04:00",
+        "begin": "2026-03-21T00:00:00-04:00",
+        "end": "2026-03-28T00:00:00-04:00",
+        "anchor": "2026-03-28T00:00:00-04:00",
     }
     assert response["summary"] == {
         "total_minutes": 596,
@@ -7219,9 +7219,9 @@ async def test_get_network_segment_usage_service_returns_summary_report(
         "is_partial": None,
         "boundary_source": "newLast24",
         "time_zone": "America/New_York",
-        "begin_timestamp_iso": "2026-03-26T17:00:00-04:00",
-        "end_timestamp_iso": "2026-03-27T16:00:00-04:00",
-        "anchor_timestamp_iso": "2026-03-27T16:00:00-04:00",
+        "begin": "2026-03-26T17:00:00-04:00",
+        "end": "2026-03-27T16:00:00-04:00",
+        "anchor": "2026-03-27T16:00:00-04:00",
     }
     assert response["summary"] == {
         "host_count": 2,
@@ -7587,13 +7587,13 @@ async def test_get_network_segment_usage_service_returns_series_when_requested(
     }
     assert metric["samples"] == [
         {
-            "timestamp": 1_774_558_800,
-            "timestamp_iso": "2026-03-26T21:00:00+00:00",
+            "sampled_at_timestamp": 1_774_558_800,
+            "sampled_at": "2026-03-26T21:00:00+00:00",
             "value": 5696,
         },
         {
-            "timestamp": 1_774_641_600,
-            "timestamp_iso": "2026-03-27T20:00:00+00:00",
+            "sampled_at_timestamp": 1_774_641_600,
+            "sampled_at": "2026-03-27T20:00:00+00:00",
             "value": 650,
         },
     ]
@@ -7764,12 +7764,8 @@ async def test_get_wan_data_usage_service_returns_history_days_in_local_time(
     assert response is not None
     assert response["query"]["time_zone"] == "America/New_York"
     first_history_day = response["sections"]["reports"][0]["history"]["days"][0]
-    assert first_history_day["time_period"]["begin_timestamp_iso"] == (
-        "2025-06-08T00:00:00-04:00"
-    )
-    assert first_history_day["time_period"]["end_timestamp_iso"] == (
-        "2025-06-09T00:00:00-04:00"
-    )
+    assert first_history_day["time_period"]["begin"] == ("2025-06-08T00:00:00-04:00")
+    assert first_history_day["time_period"]["end"] == ("2025-06-09T00:00:00-04:00")
 
 
 async def test_get_wan_data_usage_service_returns_current_and_history_weeks(
@@ -7874,26 +7870,16 @@ async def test_get_wan_data_usage_service_returns_current_and_history_weeks(
         "note": "History rows appear only when history_count is greater than zero",
     }
     current_week = response["sections"]["reports"][0]["current"]["week"]
-    assert current_week["time_period"]["begin_timestamp_iso"] == (
-        "2025-06-09T00:00:00-04:00"
-    )
-    assert current_week["time_period"]["end_timestamp_iso"] == (
-        "2025-06-16T00:00:00-04:00"
-    )
+    assert current_week["time_period"]["begin"] == ("2025-06-09T00:00:00-04:00")
+    assert current_week["time_period"]["end"] == ("2025-06-16T00:00:00-04:00")
     assert current_week["detail"] == "daily"
     assert len(current_week["days"]) == 2
     current_day = response["sections"]["reports"][0]["current"]["day"]
-    assert current_day["time_period"]["begin_timestamp_iso"] == (
-        "2025-06-10T00:00:00-04:00"
-    )
+    assert current_day["time_period"]["begin"] == ("2025-06-10T00:00:00-04:00")
     assert current_day["time_period"]["is_partial"] is True
     history_week = response["sections"]["reports"][0]["history"]["weeks"][0]
-    assert history_week["time_period"]["begin_timestamp_iso"] == (
-        "2025-06-02T00:00:00-04:00"
-    )
-    assert history_week["time_period"]["end_timestamp_iso"] == (
-        "2025-06-09T00:00:00-04:00"
-    )
+    assert history_week["time_period"]["begin"] == ("2025-06-02T00:00:00-04:00")
+    assert history_week["time_period"]["end"] == ("2025-06-09T00:00:00-04:00")
     assert len(history_week["days"]) == 7
 
 
