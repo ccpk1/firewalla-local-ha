@@ -201,9 +201,15 @@ Each tool declares four machine-readable flags (served to MCP clients):
 - `read_only` — true for reads.
 - `destructive` — true only where an action is genuinely destructive.
 - `idempotent` — true where re-calling is a no-op after the pre-check.
-- `open_world` — **false on every tool.** These tools operate on the user's own,
-  bounded Firewalla box, not on an open-ended external world. (Polling the box is
-  still a closed world; Home Assistant's built-in tools all use `false` too.)
+- `open_world` — **true on every tool.** The flag means "this reaches outside
+  Home Assistant", and these tools read and change a Firewalla appliance, which
+  is outside it. Home Assistant's built-in tools use `false` because they act on
+  Home Assistant's own state. This was previously documented as `false`, on the
+  reasoning that the box is a bounded system rather than an open-ended one; that
+  reads the flag as "unbounded" when it means "beyond this process", so the
+  annotations were corrected to `true` and every per-tool entry in this document
+  already says `true`. A caller that treats these as closed-world would
+  under-warn about what a call reaches.
 
 ### Inputs
 

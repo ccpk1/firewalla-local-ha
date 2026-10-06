@@ -60,6 +60,104 @@ _UNIT_SUFFIXES: Final = (
 _EPOCH_ONLY_SUFFIX: Final = "_timestamp"
 _ISO_ONLY_SUFFIX: Final = "_at"
 
+# Keys a response carries by passing the box's own object through unchanged, so they
+# exist in the payload and can never appear as a literal in this package. Named as a
+# **category** rather than a work list of exemptions: these are unreachable by any
+# static scan, which is a different thing from a name we forgot to rename.
+_PASSTHROUGH_PAYLOAD_KEYS: Final = frozenset(
+    {"adblock", "safeSearch", "family", "doh", "monitor", "qos"}
+)
+
+# Backticked values a description quotes as literal data rather than naming a field.
+_PROSE_IDENTIFIERS: Final = frozenset(
+    {"null", "true", "false", "applied", "already_in_state", "failed"}
+)
+
+# Constants whose *value* names something a client sends or reads: an argument, an
+# entity attribute, or a key this integration writes into a request to the box.
+_NAME_CONSTANT_PREFIXES: Final = (
+    "SERVICE_FIELD_",
+    "ATTR_",
+    "DETAIL_",
+    "TARGET_KIND_",
+    "_RAW_",
+    "_COMMAND_",
+)
+
+_IDENTIFIER = re.compile(r"`([A-Za-z][A-Za-z0-9_.]*)`")
+
+_PACKAGE_ROOT: Final = (
+    Path(__file__).resolve().parents[3] / "custom_components" / "firewalla_local"
+)
+
+
+def _published_key_corpus() -> set[str]:
+    """Return every name a description may legitimately reference.
+
+    Built from **position**, not from every string in the package. That distinction is
+    the whole difference between a working guard and a decorative one, and the first
+    attempt got it wrong: a corpus of all string literals contains docstrings, so
+    ``host.last_active`` put ``last_active`` in it and the scan then passed on the
+    very defect it was written for. Keys written in key position exclude both
+    docstrings and internal attribute names by construction.
+
+    Four sources, because a model can name all four:
+
+    - a dict key or subscript key, which is a payload field
+    - a constant whose value is an argument or attribute name
+    - a vendor key this integration sends or reads
+    - a tool action, so prose can point at another tool
+    """
+    corpus: set[str] = set()
+
+    for path in _PACKAGE_ROOT.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Dict):
+                for key in node.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        corpus.add(key.value)
+            elif isinstance(node, ast.Subscript):
+                subscript = node.slice
+                if isinstance(subscript, ast.Constant) and isinstance(
+                    subscript.value, str
+                ):
+                    corpus.add(subscript.value)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                if (
+                    node.target.id.startswith(_NAME_CONSTANT_PREFIXES)
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, str)
+                ):
+                    corpus.add(node.value.value)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "format_tool_name"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                corpus.add(node.args[0].value)
+
+    return corpus
+
+
+def _unresolved_identifiers(text: str, corpus: set[str]) -> list[str]:
+    """Return the identifiers one description names that resolve to nothing.
+
+    A dotted path resolves if either the whole path or its final segment is known, so
+    ``summary.host_count`` is satisfied by ``host_count``.
+    """
+    misses: list[str] = []
+    for identifier in _IDENTIFIER.findall(text):
+        head = identifier.split("(")[0].strip()
+        if head in _PASSTHROUGH_PAYLOAD_KEYS or head in _PROSE_IDENTIFIERS:
+            continue
+        if head in corpus or head.rsplit(".", 1)[-1] in corpus:
+            continue
+        misses.append(head)
+    return misses
+
 
 def _entry(*, mode: str = "full") -> MockConfigEntry:
     """Return a provisioned entry with the given LLM tool mode."""
@@ -244,6 +342,73 @@ def test_at_and_timestamp_are_distinct_representations() -> None:
     assert _ISO_ONLY_SUFFIX == "_at"
     assert _EPOCH_ONLY_SUFFIX == "_timestamp"
     assert _ISO_ONLY_SUFFIX != _EPOCH_ONLY_SUFFIX
+
+
+async def test_every_identifier_in_a_description_resolves(
+    hass: HomeAssistant,
+) -> None:
+    """No description names a field the package cannot produce.
+
+    A description is prose *about* the payload, so it drifts the moment a field is
+    renamed — and nothing noticed. The Time and Derived State renames updated the
+    payload, the constants, the translations and the reference document, and left
+    ``list_hosts`` telling the model to read ``` `last_active` ``` (epoch seconds)
+    for a field that no longer existed under that name, in a form that had moved to
+    its twin. The pairing guards could not see it: they assert key names in
+    *payloads*, and a description is a string literal.
+
+    Read from the **registered tools** rather than from source, so this checks the
+    text a client actually receives — after composition, and including any family
+    block. An AST scan of `description =` assignments misses the five membership
+    tools, which build theirs by concatenating a shared constant, and those are the
+    highest-risk descriptions on the surface.
+    """
+    api_instance = await _api_instance(hass)
+    corpus = _published_key_corpus()
+
+    unresolved = {
+        tool.name: misses
+        for tool in api_instance.tools
+        if (misses := _unresolved_identifiers(tool.description, corpus))
+    }
+
+    assert unresolved == {}, (
+        "these tool descriptions name identifiers the package does not produce, so a "
+        "model is being told to read fields that do not exist — most likely a rename "
+        f"that reached the payload but not the prose: {unresolved}"
+    )
+
+
+def test_the_description_identifier_scan_reads_real_text() -> None:
+    """Test the scan found a corpus and reports a stale name, so a pass means something.
+
+    Both failure modes are pinned. A corpus collected wrongly resolves too much: the
+    first attempt took every string literal, which pulled ``last_active`` in through
+    the model's own docstrings and made the scan pass on the exact defect it exists
+    to find. A corpus collected too narrowly would flag every tool. So this asserts
+    size, asserts a known key resolves, and **replays the defect** to prove the scan
+    can still see it.
+    """
+    corpus = _published_key_corpus()
+
+    assert len(corpus) > 500, (
+        f"the corpus holds only {len(corpus)} names, so it is not reading the "
+        "package; too little would resolve and every tool would fail"
+    )
+    assert "last_active_at" in corpus, "the corpus is missing a known published key"
+    assert "list_rules" in corpus, "the corpus is missing a known tool action"
+
+    # The defect, replayed. If prose naming the pre-rename field resolves, the corpus
+    # has been contaminated by an internal name and the guard proves nothing.
+    stale = _unresolved_identifiers("Read `last_active` for the last activity.", corpus)
+    assert stale == ["last_active"], (
+        "the scan does not report a stale field name — the corpus is resolving a name "
+        "the package no longer publishes, so this guard would pass on the defect "
+        "that prompted it"
+    )
+
+    # And a valid identifier must pass, so the scan is not flagging everything.
+    assert _unresolved_identifiers("Read `last_active_at` instead.", corpus) == []
 
 
 async def test_prompt_is_non_empty_and_covers_the_contract(
