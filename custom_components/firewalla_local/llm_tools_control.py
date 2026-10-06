@@ -82,7 +82,11 @@ from .const import (
     TARGET_KIND_SILENCE,
     TARGET_KIND_SSID,
 )
-from .llm_tools_common import format_tool_name
+from .llm_tools_common import (
+    CONTROL_INJECTION,
+    DESTRUCTIVE_INJECTION,
+    format_tool_name,
+)
 from .models import FirewallaNetworkKind
 
 # Every tool here acts on the user's Firewalla box, not on Home Assistant, so
@@ -133,6 +137,11 @@ class _FirewallaControlTool(llm.Tool):
     integration = DOMAIN
     annotations = _CONTROL_ANNOTATIONS
 
+    # Prepended at construction rather than written into each description, so a new
+    # control tool cannot be added without the family block. The genuinely
+    # destructive tools override this with `DESTRUCTIVE_INJECTION`.
+    _injection: str = CONTROL_INJECTION
+
     _service: str
     # True for SupportsResponse.ONLY services (returns a payload); False for
     # SupportsResponse.NONE services (returns nothing).
@@ -141,6 +150,8 @@ class _FirewallaControlTool(llm.Tool):
     def __init__(self, *, entry_id: str) -> None:
         """Bind the tool to the config entry it was registered for."""
         self._entry_id = entry_id
+        if self.description:
+            self.description = f"{self._injection}\n\n{self.description}"
 
     def _args(self, tool_input: llm.ToolInput) -> dict[str, Any]:
         """Return tool args validated against the declared schema.
@@ -645,6 +656,8 @@ class _SetHostMembershipTool(_FirewallaControlTool):
     """
 
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _returns_response = True
 
     @override
@@ -1347,6 +1360,8 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
     )
     parameters = vol.Schema({})
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_ARCHIVE_ALARMS
 
     @override
@@ -1396,6 +1411,8 @@ class DeleteAlarmTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_ALARMS
 
     @override
@@ -1448,6 +1465,8 @@ class DeleteAlarmsTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_ALARMS
 
     @override
@@ -1497,6 +1516,8 @@ class DeleteHostTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_HOST
     _returns_response = True
 
@@ -1549,6 +1570,8 @@ class DeleteRuleTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_RULE
 
     @override

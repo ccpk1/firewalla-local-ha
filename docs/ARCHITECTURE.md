@@ -641,6 +641,86 @@ Assist and to any MCP client. Each entry therefore appears as its own selectable
 with its own URL; several can be merged, and Home Assistant then namespaces the tools
 by entry title.
 
+#### How guidance reaches a model
+
+Three layers of text, each with one job, and no two of them say the same thing.
+
+| Layer | Scope | Delivered by |
+| --- | --- | --- |
+| `SYSTEM_MODEL` | true across every tool | the API prompt, and `system_model` on `get_system_overview` |
+| Family injection | true across one family | prepended to every description in that family |
+| Description body | true of one tool only | that tool's own description |
+
+Three layers rather than one because **no single channel reaches every client**:
+
+- The **API prompt** is Assist's, and Home Assistant's MCP server serves it only
+ through MCP's `prompts` primitive. A client must invoke that explicitly; the
+ clients in common use send `tools/list` and nothing else. (The server does not
+ populate `InitializeResult.instructions`, and the MCP client ignores the field
+ anyway.)
+- **`system_model`** arrives only if the agent has already called
+ `get_system_overview`. An agent that goes straight to a write tool never sees it.
+- A description's **family injection** arrives with `tools/list`, unconditionally.
+
+So the tool descriptions are the only text every client is guaranteed to receive,
+and the injection is how a rule is stated once and still reaches all of them. An
+agent that lists tools and immediately calls `set_host_group` therefore knows the
+membership warning, because it is in that description rather than only in a prompt
+it was never sent.
+
+Each family block opens with the same **orientation question** — whether the agent
+can explain what a Firewalla host is and how a rule reaches one, and if not, that
+`get_system_overview` returns the model defining it. It is phrased as a question the
+model can answer about its own state rather than a request to be careful, names one
+concrete remedy, and bounds itself to once per session, so it does not cause a call
+before every read. The control and destructive variants bind it *before writing*,
+since a wrong write against a live network costs more than a wrong read.
+
+The division of labour, and the rule for deciding where a sentence belongs:
+
+- **`SYSTEM_MODEL`** carries anything true of all 39 tools: the vocabulary, units
+ and the `_at`/`_timestamp` pair, both result envelopes, `undo`, the rule-scope
+ model, and the membership-deletes-rules warning.
+- **A family injection** carries what is true across that family *and absent from
+ the model*. Read adds that a default result omits optional detail. Destructive
+ adds that the family cannot be undone. **Control adds nothing beyond
+ orientation**, because every control-wide rule it could carry is already in the
+ model.
+- **A description body** carries what is true of one tool: its arguments, its
+ enums, its own failure modes.
+
+A rule that applies to two tools rather than a whole family belongs in those two
+bodies, not in a block repeated across twenty-five.
+
+#### The injection is structural
+
+Both base classes carry an `_injection` class attribute and prepend it in
+`__init__`:
+
+```python
+class _FirewallaControlTool(llm.Tool):
+    _injection: str = CONTROL_INJECTION
+```
+
+The destructive tools override it with `DESTRUCTIVE_INJECTION`. A tool therefore
+cannot be added without a block: subclass the base and it inherits the family
+injection, or override it deliberately. `test_every_tool_carries_its_family_injection`
+enforces it in both directions — every tool starts with a block, every destructive
+tool gets the destructive one, and no other tool does. The failure being guarded
+against is not a wrong block but a **missing** one, which is how the description
+prose once drifted a rename behind without anything failing.
+
+Two rules for this layer:
+
+- `llm_tools_common.py` must stay free of `homeassistant.helpers.llm` imports. The
+ tool modules are guard-loaded for the Core 2026.10 LLM contract, but `SYSTEM_MODEL`
+ is imported by `services.py` to serve on the overview, so this module has to stay
+ importable outside that guard
+- a description is written for a **machine consumer**: field → meaning, one fact per
+ line, no justification clauses. Prose explaining why a rule exists costs tokens on
+ every request and changes no behaviour. `test_every_identifier_in_a_description_resolves`
+ keeps the prose honest about the payload it describes
+
 ## Entity architecture
 
 Entities are derived views over manager-owned state.

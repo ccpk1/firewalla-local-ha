@@ -29,7 +29,12 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     DOMAIN,
 )
-from custom_components.firewalla_local.llm_tools_common import PROMPT
+from custom_components.firewalla_local.llm_tools_common import (
+    CONTROL_INJECTION,
+    DESTRUCTIVE_INJECTION,
+    PROMPT,
+    READ_INJECTION,
+)
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
@@ -411,6 +416,145 @@ def test_the_description_identifier_scan_reads_real_text() -> None:
     assert _unresolved_identifiers("Read `last_active_at` instead.", corpus) == []
 
 
+async def test_every_tool_carries_its_family_injection(
+    hass: HomeAssistant,
+) -> None:
+    """Every description is composed as `injection + body`, and no tool is missed.
+
+    The failure mode this guards is not a *wrong* block but a **missing** one. The
+    composition lives in the base classes so a tool cannot be registered without it,
+    and this asserts that from the outside — against the registered tools, so it
+    holds for the composed text rather than for the class attribute.
+
+    It also pins the destructive split in both directions. A destructive tool that
+    kept the plain control block would omit the one thing a caller must know before
+    writing, and a tool that is *not* destructive must not claim to be — that is how
+    a model learns to distrust the warning.
+
+    The channels are not equivalent, which is why this matters more than it looks:
+    the API prompt reaches an MCP client only through MCP's `prompts` primitive,
+    which the client must invoke explicitly, and `system_model` only arrives once
+    `get_system_overview` has been called. A client that sends `tools/list` and goes
+    straight to a write tool receives **only** these descriptions.
+    """
+    api_instance = await _api_instance(hass)
+
+    control_names = {
+        "firewalla_local__pause_rule",
+        "firewalla_local__resume_rule",
+    }
+
+    missing: list[str] = []
+    wrong_family: list[str] = []
+    destructive_misfiled: list[str] = []
+
+    for tool in api_instance.tools:
+        carries_read = tool.description.startswith(READ_INJECTION)
+        carries_control = tool.description.startswith(CONTROL_INJECTION)
+        carries_destructive = tool.description.startswith(DESTRUCTIVE_INJECTION)
+
+        if not (carries_read or carries_control or carries_destructive):
+            missing.append(tool.name)
+            continue
+
+        # A destructive tool is the only kind that may carry the destructive block.
+        if carries_destructive and not tool.annotations.destructive:
+            destructive_misfiled.append(tool.name)
+
+        if tool.name in control_names and carries_read:
+            wrong_family.append(tool.name)
+
+    assert missing == [], (
+        "these tools carry no family injection, so a client that sends only "
+        "`tools/list` receives none of the cross-cutting context: "
+        f"{missing}"
+    )
+    assert destructive_misfiled == [], (
+        "these tools carry the destructive block without being destructive, which "
+        f"teaches a model to distrust it: {destructive_misfiled}"
+    )
+    assert wrong_family == [], (
+        f"these control tools carry the read block: {wrong_family}"
+    )
+
+    # Every destructive tool must carry the destructive block, checked as its own
+    # direction so a whole family cannot silently keep the weaker one.
+    undecorated = [
+        tool.name
+        for tool in api_instance.tools
+        if tool.annotations.destructive
+        and not tool.description.startswith(DESTRUCTIVE_INJECTION)
+    ]
+    assert undecorated == [], (
+        f"these destructive tools do not warn that they cannot be undone: {undecorated}"
+    )
+
+
+async def test_family_injections_say_what_the_model_cannot_get_elsewhere(
+    hass: HomeAssistant,
+) -> None:
+    """Each block carries a rule the system model genuinely lacks.
+
+    Modelled on the Control D finding that the control block should add *nothing*
+    beyond orientation, because every control-wide rule it could carry (read state
+    before writing, confirm wide-reaching changes, act on `undo`) was already in the
+    system model — and repeating it would mean paying for the same sentence on every
+    control tool.
+
+    So this asserts the split rather than the wording: the read block adds the
+    bounded-result rule, the destructive block adds no-undo, and the control block
+    adds only orientation. If a future edit moves a rule into the control block that
+    the model already states, this fails and the rule goes back.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+
+    # Read adds the bounded-result rule, which is not in the model.
+    read_body = tools["firewalla_local__list_hosts"].description
+    assert "truncated" in read_body
+    assert "truncated" not in PROMPT, (
+        "the model already covers truncated results, so the read block is repeating "
+        "it on every read tool"
+    )
+
+    # Destructive adds no-undo, which is also not in the model.
+    destructive_body = tools["firewalla_local__delete_host"].description
+    assert "cannot be undone" in destructive_body
+    assert "cannot be undone" not in PROMPT, (
+        "the model already covers irreversibility, so the destructive block is "
+        "repeating it on every destructive tool"
+    )
+
+    # Control adds orientation only, so it must be exactly that plus nothing.
+    control_body = tools["firewalla_local__pause_rule"].description
+    assert CONTROL_INJECTION in control_body
+    assert len(CONTROL_INJECTION) < len(READ_INJECTION), (
+        "the control block is longer than the read block, which suggests a rule "
+        "crept in that the system model already states"
+    )
+
+
+async def test_the_injection_check_distinguishes_the_families(
+    hass: HomeAssistant,
+) -> None:
+    """Test the blocks are genuinely different, so the check above means something.
+
+    A guard asserting "every tool carries its family block" is vacuous if all three
+    blocks are the same string or if one is a prefix of another. This pins that each
+    opens with the shared orientation sentence, that the three are distinct, and that
+    none is a prefix of another.
+    """
+    assert READ_INJECTION != CONTROL_INJECTION != DESTRUCTIVE_INJECTION
+    assert not CONTROL_INJECTION.startswith(DESTRUCTIVE_INJECTION)
+    assert not DESTRUCTIVE_INJECTION.startswith(CONTROL_INJECTION)
+
+    # All three open with the same orientation question, which is the one thing they
+    # are meant to share.
+    assert READ_INJECTION.startswith("**If you cannot clearly explain")
+    assert CONTROL_INJECTION.startswith("**If you cannot clearly explain")
+    assert DESTRUCTIVE_INJECTION.startswith("**If you cannot clearly explain")
+
+
 async def test_prompt_is_non_empty_and_covers_the_contract(
     hass: HomeAssistant,
 ) -> None:
@@ -435,9 +579,9 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "once per session",
         # 5.6 — action reporting, blast-radius confirmation, and the rule model.
         "before` and `after`",
-        "wait for the user to agree",
+        "wait for agreement",
         "applies_to",
-        "Attachment replaces",
+        "Attachment **replaces**",
         # A smoke test caught invented IP addresses, so the no-guessing rule is
         # part of the contract rather than a nicety.
         "Never guess at data",
@@ -495,8 +639,8 @@ async def test_rule_scope_precedence_is_stated_consistently(
     tools = {tool.name: tool for tool in api_instance.tools}
     rules_description = tools["firewalla_local__list_rules"].description
 
-    assert "Attachment replaces" in PROMPT
-    assert "no longer apply" in PROMPT
+    assert "Attachment **replaces**" in PROMPT
+    assert "no longer reach it" in PROMPT
     assert "no longer apply" in rules_description
 
 
@@ -514,20 +658,30 @@ async def test_membership_change_warns_that_it_deletes_host_rules(
     Checked against the prompt, which is served as the API prompt, because the
     four membership tools are added in a later phase and this guidance must exist
     before a model can call one.
+
+    It reaches through a second channel that this test predates: the destructive
+    tools carry `DESTRUCTIVE_INJECTION` in every description, and all four
+    membership tools are in that family. That matters because the API prompt
+    reaches an MCP client only if it invokes MCP's `prompts` primitive
+    explicitly, so before the injections existed a client could reach
+    `set_host_group` having received none of this.
     """
-    assert "DELETES THE RULES ATTACHED TO THAT HOST" in PROMPT
+    assert "destroys the host's own rules" in PROMPT
     assert "enabled rules the user created" in PROMPT
     assert "host_rules.removed" in PROMPT
     # The blast radius must be bounded, or a model will over-warn and a user may
     # refuse a harmless change: only this host's rules go.
-    assert "are NOT affected" in PROMPT
+    assert "are unaffected" in PROMPT
     # And it must check first, so the confirmation is proportionate rather than
     # blanket on a call that often destroys nothing.
-    assert "Check before you ask" in PROMPT
+    assert "something to lose" in PROMPT
     # It must also be in the confirm-first list, or a model scanning that list
-    # would classify a membership change as routine.
-    confirm_paragraph = PROMPT.split("Confirm before wide-reaching changes", 1)[1]
-    assert "membership" in confirm_paragraph.split(".", 2)[1]
+    # would classify a membership change as routine. Asserted against the whole
+    # paragraph rather than a sentence index, so rewording the block cannot make
+    # this pass or fail for a reason unrelated to what it checks.
+    confirm_section = PROMPT.split("Confirm before anything wide-reaching", 1)[1]
+    confirm_paragraph = confirm_section.split("\n\n", 1)[0]
+    assert "membership change" in confirm_paragraph
 
 
 async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:

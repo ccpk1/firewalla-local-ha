@@ -246,6 +246,11 @@ from .const import (
 )
 from .coordinator import FirewallaConfigEntry, get_llm_tool_mode
 from .helpers.usage_report import serialize_usage_summary
+
+# Safe at module level: `llm_tools_common` is deliberately free of
+# `homeassistant.helpers.llm` imports so it stays importable outside the version
+# guard that gates the tool modules themselves.
+from .llm_tools_common import SYSTEM_MODEL
 from .managers.rule_manager import (
     build_switch_rule_evaluations_for_rules,
     is_system_managed_rule,
@@ -4521,6 +4526,13 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
             "mode": mode,
             "note": _build_llm_access_note(mode),
         },
+        # The cross-cutting model, served here so a client that sees only tool
+        # results can still obtain it. Every tool description's family block tells
+        # an agent to call this tool once for exactly this field, so the pointer is
+        # only honest while the field is present. Assist already has the same text
+        # as the API prompt, which is why this is the one place both paths carry it
+        # identically rather than two texts that can drift.
+        "system_model": SYSTEM_MODEL,
         "activity_reference_at": iso_instant(basis.reference_at),
         "activity_reference_at_timestamp": basis.reference_at,
         "online_window_seconds": basis.window_seconds,

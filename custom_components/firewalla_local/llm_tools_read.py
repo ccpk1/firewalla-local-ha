@@ -87,7 +87,7 @@ from .const import (
     SERVICE_GET_WIRELESS_STATUS,
     SERVICE_SYNC_RUNTIME,
 )
-from .llm_tools_common import format_tool_name
+from .llm_tools_common import READ_INJECTION, format_tool_name
 
 # Every read tool is a bounded, read-only query against the user's own box,
 # which is outside Home Assistant -- so `open_world` is true even though nothing
@@ -133,12 +133,21 @@ class _FirewallaReadTool(llm.Tool):
     integration = DOMAIN
     annotations = _READ_ANNOTATIONS
 
+    # Prepended at construction rather than written into each description, so a new
+    # read tool cannot be added without the family block. A client that sends only
+    # `tools/list` never receives the API prompt, and `system_model` only arrives
+    # once `get_system_overview` has been called, so the descriptions are the one
+    # channel every client is guaranteed to receive.
+    _injection: Final = READ_INJECTION
+
     _service: str
     _response_type: str
 
     def __init__(self, *, entry_id: str) -> None:
         """Bind the tool to the config entry it was registered for."""
         self._entry_id = entry_id
+        if self.description:
+            self.description = f"{self._injection}\n\n{self.description}"
 
     def _args(self, tool_input: llm.ToolInput) -> dict[str, Any]:
         """Return tool args validated against the declared schema.
