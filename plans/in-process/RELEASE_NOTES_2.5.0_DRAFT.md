@@ -5,6 +5,12 @@
 > were moved here out of `docs/USER_GUIDE.md`, because they describe one upgrade
 > step rather than how the integration works.
 >
+> **This branch ships as `2.5.0-beta.2`**, a prerelease of these notes. It is the
+> second beta: `2.5.0-beta.1` was tagged before the flow-reporting, time-state and
+> vocabulary work below, so everything in §1 is new since that tag. Publish these
+> notes for the prerelease, then reuse them for the final 2.5.0 — the beta is a
+> name for the same content, not a separate set of notes.
+>
 > Before publishing, confirm every item still matches the code — the same
 > discipline the user guide is held to.
 
@@ -188,9 +194,9 @@ already changed the local snapshot, so an immediate read agrees with it, and
 
 ## Upgrading
 
-Go to HACS → Integrations → Firewalla Local and install version 2.5.0, then restart
-Home Assistant. No config entry changes are needed — an existing setup continues to
-work, and no re-pairing is required.
+Go to HACS → Integrations → Firewalla Local and install version **2.5.0-beta.2** (or
+2.5.0 once it is out), then restart Home Assistant. No config entry changes are needed —
+an existing setup continues to work, and no re-pairing is required.
 
 **Before upgrading, check your automations and templates against §2.** The renames are
 the only part of this release that can break an existing setup, and they fail loudly
