@@ -44,7 +44,7 @@ This integration is for the users who don't want another cloud dependency just t
 This isn't just a wrapper for a few scripts. It was built from the ground up to meet Home Assistant’s "Platinum" quality standards:
 *   **100% Local Data Plane:** After a one-time cloud-brokered pairing (matching the official app's security), all communication is direct to your box on your local network.
 *   **Optimistic UI:** When you toggle a rule, Home Assistant updates immediately. No waiting for the next poll cycle to see if your command worked.
-*   **UID-First Identity:** Your entities and devices are anchored to your hardware license. They stay stable even if your IP changes or you have to re-pair the device.
+*   **UID-First Identity:** Your entities and devices are anchored to your hardware license. They stay stable even if your IP changes or you have to re-pair the box.
 *   **Manager-Based Architecture:** Thin, efficient, and typed. Designed for stability and low CPU impact on your Home Assistant instance.
 
 ## ✨ **What it Enables**
@@ -58,38 +58,38 @@ It also makes Home Assistant the hub your *other* tools read from. Because every
 You can read state or call services this way, and both return structured data your tools can consume. The [User Guide](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md) has worked examples.
 
 ### **Dynamic Network Control**
-* **Rule-Backed Switches & Timed Pauses:** Toggle your most-used rules (Internet Block, Social, Gaming) instantly. Use the `pause_rule` and `resume_rule` services to grant duration-based access (e.g., "Give the kids 30 more minutes of gaming") via any HA automation or voice assistant. Use `delete_rule` when a rule should be removed for good.
-* **Host Operator Actions:** Act as the network admin directly from Home Assistant. Wake devices (WOL), rename hosts, set/clear DHCP reservations, and toggle "notify when online/offline" settings seamlessly via actions (services).
+* **Rule-Backed Switches & Timed Pauses:** Toggle your most-used rules (Internet Block, Social, Gaming) instantly, or grant duration-based access from any automation — "give the kids 30 more minutes of gaming" by voice. Rules can be paused and resumed reversibly, or removed permanently when they are no longer wanted.
+* **Host Operator Actions:** Act as the network admin directly from Home Assistant. Wake hosts over the network, rename them, set or clear DHCP reservations, and turn "notify when online/offline" settings on and off — all without opening the Firewalla app.
 
 ### **Alarm Monitoring & Triage**
 * **Native Alarm Entities:** See at a glance whether the box has active alarms through a dedicated binary sensor plus an active-alarm count sensor. Both carry a bounded per-category summary so automations can gate on "any gaming alarms?" without a service call, and a completeness flag tells you when the box's 50-record snapshot limit means the summary is partial rather than empty.
-* **Alarm Triage Services:** Query the newest active and archived alarms (with optional per-alarm detail), archive them, permanently delete them, and create or remove scoped silences — all admin-gated, with explicit confirmation required for irreversible deletes.
-* **Blocks Stay Rules:** A Firewalla "block" action on an alarm is ordinary policy-rule creation, so blocked targets appear in the normal rule inventory and are cleaned up with `delete_rule`. There is deliberately no separate alarm block/unblock service, so the rule surface remains the single place enforcement is managed.
+* **Alarm Triage:** Query recent active and archived alarms with optional per-alarm detail, archive them, delete them permanently, and create or remove scoped silences — all admin-gated, with explicit confirmation required for anything irreversible.
+* **Blocks Stay Rules:** A Firewalla "block" action on an alarm is ordinary policy-rule creation, so a blocked target appears in the normal rule inventory and is removed with the rule it created. Enforcement stays in one place, and any block can be undone without hunting through the app.
 
 ### **Presence & Usage Tracking**
 * **Router-Based Device Trackers:** Expose highly reliable Home Assistant `device_tracker` entities for your MAC-backed LAN clients for rock-solid "Home/Away" presence automations.
-* **Watched-User Monitoring:** Select household members to track their daily total internet usage, unique-usage, associated devices, and positive-only per-app usage based on real-time host joins.
+* **Watched-User Monitoring:** Select household members to track their daily total internet usage, unique-usage, associated hosts, and positive-only per-app usage based on real-time host joins.
 * **Watched-Device Monitoring:** Expose critical endpoints as connectivity sensors with stable activity attributes to ensure your vital hardware stays online.
 
 ### **Appliance & Data Visibility**
 * **Appliance Monitoring:** Track Firewalla system status, WAN IP details, uptime, memory/disk usage, per-port link/speed/MAC, Bluetooth MAC, box time zone, and the latest successful Speed Test natively. Includes a diagnostic `Sync runtime` button to force an immediate local data refresh.
-* **Internet Quality Monitoring:** Expose per-WAN ping latency and packet-loss sensors from the box's continuous Internet Quality monitor (15-minute samples), plus a `get_internet_quality` service for the recent history.
-* **Per-Network Entities:** Expose every Firewalla network (LAN, VLAN, VPN, WAN) as a native binary sensor carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, device count, advanced options (mDNS/SSDP Relay, Block ICMP), and usage — including current-month WAN usage.
+* **Internet Quality Monitoring:** Expose per-WAN ping latency and packet-loss sensors from the box's continuous Internet Quality monitor (15-minute samples), with recent history available as a report.
+* **Per-Network Entities:** Expose every Firewalla network (LAN, VLAN, VPN, WAN) as a native binary sensor carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, host count, advanced options (mDNS/SSDP Relay, Block ICMP), and usage — including current-month WAN usage.
 * **Per-SSID Wireless Entities (AP7):** When Firewalla AP7 access points are present, expose every wireless network (SSID) as a native binary sensor (status + band, encryption, WPA3, VLAN, interface) and a toggle switch to pause/resume it — all under the Firewalla box device.
 * **Per-AP Device Monitoring (AP7):** Each Firewalla AP7 access point becomes its own Home Assistant device (linked to the box), with a system-status binary sensor exposing channel, LED, TX power, country, mesh mode, timezone, pause-WiFi/ACL state, and live client count.
-* **Rich Local Reporting:** Leverage over two dozen native Home Assistant services to query host identity records, per-network segment configuration + usage, time usage history, WAN data, WAN event timelines, and current or archived alarms with their silences—all pulled directly from the local data plane without touching the cloud.
+* **Rich Local Reporting:** Over 30 native Home Assistant services cover host identity records, per-network configuration and usage, time usage history, WAN data, WAN event timelines, and current or archived alarms with their silences — all pulled directly from the local data plane without touching the cloud.
 
 ### **AI Assistant & MCP Access**
 > **Requires Home Assistant Core 2026.10 or newer.** On older Core the integration works normally; the AI tools are simply not offered.
 
-* **Ask your network questions:** The integration registers its own MCP tool surface, so an AI assistant can answer questions like "how many devices are online?", "did my internet drop this week?", or "which devices on my guest network used the most bandwidth in the last hour?" — using real local data, with no sidecar and no cloud subscription.
+* **Ask your network questions:** The integration registers its own MCP tool surface, so an AI assistant can answer questions like "how many hosts are online?", "did my internet drop this week?", or "which hosts on my guest network used the most bandwidth in the last hour?" — using real local data, with no sidecar and no cloud subscription.
 * **Use it from almost any AI client:** This is a standard MCP server, not an Assist-only feature. Home Assistant's native [Model Context Protocol Server](https://next.home-assistant.io/integrations/mcp_server/) serves these tools to **any MCP client** — ChatGPT, VS Code and other editors, Claude Desktop, or a custom agent — so you can query your network from whichever assistant you already use, and one integration reaches all of them. Requires enabling the MCP Server integration in Home Assistant.
 * **Multiple boxes appear as separate tool sets:** Each Firewalla box is registered as its own MCP API with its own URL, so you can point a client at one box or at several. Merged, Home Assistant namespaces each box's tools by the name you gave that entry, so the assistant always knows which box it is acting on.
-* **Graduated access, privacy-first default:** Five settings control what the assistant can reach. The default, **Summary only**, answers general questions using counts, network names, and performance metrics — **no device addresses, hardware identifiers, group or user names, or public IP**. Raise it to **Read only** for device names and addresses, then **Read and control** for reversible actions, and finally **Full** for destructive ones.
-* **Read access is useful, and it is a real trade:** Anything above Summary only sends actual network detail to whichever LLM provider the assistant talks to — device names, IP and MAC addresses, rule and alarm detail (including remote endpoints and, for some alarms, approximate location), and your public IP. That is enough to build a detailed picture of a household, so consider who operates the model you are using, and raise the setting only as far as you need it, for as long as you need it.
+* **Graduated access, privacy-first default:** Five settings control what the assistant can reach. **Off** registers no tools at all. The default, **Summary only**, answers general questions using counts, network names, and performance metrics — **no host addresses, hardware identifiers, group or user names, or public IP**. Raise it to **Read only** for host names and addresses, then **Read and control** for reversible actions, and finally **Full** for destructive ones.
+* **Read access is useful, and it is a real trade:** Anything above Summary only sends actual network detail to whichever LLM provider the assistant talks to — host names, IP and MAC addresses, rule and alarm detail (including remote endpoints and, for some alarms, approximate location), and your public IP. That is enough to build a detailed picture of a household, so consider who operates the model you are using, and raise the setting only as far as you need it, for as long as you need it.
 * **Structural safeguards:** In Summary only the other tools are not registered at all, so there is no sensitive field to filter out and nothing to leak. Every control action is admin-gated, so a non-admin user can never change your network through the assistant, and credentials, pairing keys, and symmetric keys cannot appear in tool output at all.
 
-## **Supported Hardware & Prerequisites**
+## 📡 **Supported Hardware & Prerequisites**
 * **Firewalla Hardware:** Developed and actively tested on Firewalla Gold. Confirmed working on the following models running the Firewalla Box software that supports the local API:
    * Gold
    * Gold Plus
@@ -148,37 +148,47 @@ Financial support is **never required**, but it is the strongest motivation for 
 
 The operating guide lives here: [docs/USER_GUIDE.md](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/USER_GUIDE.md).
 
-It covers:
+It is organized around the jobs you can do with the integration:
 
-- installation and removal
-- pairing expectations
-- options-flow management for rule switches (allow, block, disturb, QoS, and route), watched devices, device trackers, watched users, network entities, SSID entities, and polling
-- refresh behavior
-- appliance monitoring, watched-device monitoring, device-tracker monitoring, watched-user monitoring, per-SSID wireless monitoring, per-AP device monitoring, and alarm monitoring
-- internet-quality monitoring (per-WAN ping latency and packet loss)
-- runtime inventory, network, time-usage, speed-test, internet-quality, WAN report, and alarm report services
-- host operator actions including Wake-on-LAN, rename, notification toggles, and DHCP reservations
-- wireless services including `get_wireless_status` and `set_ssid_paused`
-- pause and resume services, plus `delete_rule` for permanent rule removal
-- alarm services including `get_alarms`, `archive_alarms`, `delete_alarms`, `mute_alarm`, and `unmute_alarm`
-- which actions require an administrator, and why automations and scripts are unaffected
+- **Install and pair** — HACS installation, the QR-based pairing flow, and removal
+- **Use the data** — dashboards, automations, history, voice, and reading it over the
+  REST and WebSocket APIs
+- **Choose your surfaces** — the options flow, and what each monitoring surface adds
+- **Monitor** — the appliance, your networks, wireless, hosts, users, and alarms
+- **Operate** — host actions, rule control, alarm triage, and the report services
+- **Reference** — every service with its arguments, which actions require an
+  administrator, and a vocabulary section for the terms this integration uses
+
+A separate [MCP tool reference](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/MCP_TOOL_REFERENCE.md)
+covers the AI tool surface.
 
 ## 🏗️ **Development & Architecture Docs**
 
-The durable project rules live in:
+Durable project rules live in `docs/`:
 
-- `docs/ARCHITECTURE.md`
-- `docs/DEVELOPMENT_STANDARDS.md`
-- `docs/QUALITY_REFERENCE.md`
+- `ARCHITECTURE.md` — how the integration is put together, and the trade-offs behind it
+- `DEVELOPMENT_STANDARDS.md` — the standards code here is held to
+- `QUALITY_REFERENCE.md` — where the integration stands against the Home Assistant
+  quality scale
+- `RULE_MODEL.md` — how Firewalla rules are modelled
+- `MCP_TOOL_REFERENCE.md` — the AI tool surface, tool by tool
+- `REVERSE_ENGINEERING_WORKFLOW.md` — how the local protocol was established
+- `RELEASE_CHECKLIST.md` — the steps to work through for every release
 
 Repository layout:
 
 ```text
+├── README.md
 ├── custom_components/
 │   └── firewalla_local/
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── DEVELOPMENT_STANDARDS.md
+│   ├── MCP_TOOL_REFERENCE.md
+│   ├── QUALITY_REFERENCE.md
+│   ├── RELEASE_CHECKLIST.md
+│   ├── REVERSE_ENGINEERING_WORKFLOW.md
+│   ├── RULE_MODEL.md
 │   └── USER_GUIDE.md
 └── tests/
     └── components/

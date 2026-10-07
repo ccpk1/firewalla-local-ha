@@ -40,7 +40,11 @@ and rename the main plan to `INITIATIVE_NAME_COMPLETED.md`.
 ## What remains on this branch
 
 Everything implemented is complete, guarded and documented. What is left is to push the
-branch and cut the release. The migration tables for the breaking renames are written and
-verified (`docs/USER_GUIDE.md` and `docs/RELEASE_CHECKLIST.md` §4), so the release notes
-are transcription rather than authoring.
+branch and cut the release.
+
+The migration tables for the breaking renames now live in
+`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md`, which is the working source for the
+GitHub release body. They were moved out of `docs/USER_GUIDE.md`, because they describe
+one upgrade step rather than how the integration works. Confirm each item still matches
+the code before publishing.
 

@@ -11,10 +11,41 @@ This guide is organized around the main jobs you can do with the integration:
 - use the data across Home Assistant (dashboards, automations, history, APIs)
 - choose which monitoring surfaces you want exposed
 - understand the main Firewalla device entities and refresh behavior
-- monitor watched devices, watched users, and device trackers
+- monitor watched hosts, watched users, and host trackers
 - monitor active and archived Firewalla alarms
 - operate hosts and rules from Home Assistant
 - call the local report services added after 1.0.0
+
+**Upgrading from an earlier version?** The attribute, key, and service renames are
+breaking changes, and they live in the release notes for the version that introduced
+them rather than here. See
+[`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md`](../plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md)
+until 2.5.0 ships, then the GitHub release for 2.5.0.
+
+## Key vocabulary
+
+A few words mean something specific here. They are worth knowing before reading
+the rest of this guide, because they are used consistently and the differences
+matter.
+
+| Word | What it means |
+| --- | --- |
+| **host** | One device on your Firewalla network. This is the integration's own word for it, used in entity names, attributes, service arguments, and tool names (`get_hosts`, `host_mac`, `hosts_online`). |
+| **device** | A Home Assistant device-registry entry, which is a different concept. When this guide says "device" it means the Home Assistant object, not a host. |
+| **device_tracker** | The Home Assistant platform used for presence tracking. It keeps its Home Assistant name even though it tracks a host. |
+| **box** / **appliance** | The Firewalla hardware itself. |
+| **rule** | A Firewalla policy rule — the thing that blocks, allows, shapes, or routes traffic. |
+| **scope** vs **applies to** | A rule's `scope` is the hosts it is attached to directly; `applies_to` is the groups, users, or networks it governs. Attachment **replaces** rather than adds: once a host belongs to a group or user, its rules come from that group or user, and its own host-level rules no longer reach it. To find what governs a host, read its `group_name` and pass that as `applies_to`. |
+| **silence** / **exception** | A mute on future alarms that match a target. It does not block traffic and does not remove an alarm. |
+
+Firewalla's own API calls a host a `device` (`deviceIP`, `devicePort`, `deviceTags`).
+This integration does not echo that word, for the reason given above. Where the two
+vocabularies meet — in service responses and tool results — every key uses `host`.
+
+The **options flow** is one place the two still meet visibly: its steps and field
+labels read *"Edit watched devices"* and *"Devices to monitor"* for surfaces whose
+entities and attributes are all `host_*`. The labels are what you see in the UI, so
+this guide names them as the UI does; read them as "hosts" throughout.
 
 ## What the integration provides
 
@@ -184,10 +215,10 @@ answers ordinary questions:
 | Setting | What the assistant can do |
 |---|---|
 | **Off** | No Firewalla tools at all. |
-| **Summary only** *(default)* | Ask general questions — how many devices are online, which networks exist, appliance health, per-WAN speed and quality. Sends network names, counts, and performance metrics; never device addresses, hardware identifiers, group or user names, or your public IP. |
-| **Read only** | The above, plus device names and addresses, rules, alarms, and usage detail. |
-| **Read and control** | The above, plus reversible actions — pause/resume a rule, pause an SSID, rename a device, set a DHCP reservation, sleep/unmute alarms. |
-| **Full** | The above, plus **destructive** actions: delete a device, rule, or alarm, and bulk archive. |
+| **Summary only** *(default)* | Ask general questions — how many hosts are online, which networks exist, appliance health, per-WAN speed and quality. Sends network names, counts, and performance metrics; never host addresses, hardware identifiers, group or user names, or your public IP. |
+| **Read only** | The above, plus host names and addresses, rules, alarms, and usage detail. |
+| **Read and control** | The above, plus reversible actions — pause/resume a rule, pause an SSID, rename a host, set a DHCP reservation, sleep/unmute alarms. |
+| **Full** | The above, plus **destructive** actions: delete a host, rule, or alarm, and bulk archive. |
 
 **Why the default is Summary only.** A firewall assistant that cannot see IP
 addresses cannot answer firewall questions, so the useful tiers send real network
@@ -264,130 +295,6 @@ Services added after 1.0.0:
 - `firewalla_local.sync_runtime`
 - `firewalla_local.get_system_overview`
 - `firewalla_local.get_flow_report`
-
-## Upgrading: renamed attributes and keys
-
-**If you read these attributes or service-response keys in an automation or template,
-they were renamed.** `host` is the word this integration uses for a Firewalla endpoint,
-on every surface, so the keys and the labels shown in the UI now both say it. Nothing
-about the data changed — only the names.
-
-| Entity / service | Was | Now |
-| --- | --- | --- |
-| `binary_sensor` system status | `devices_online` / `devices_offline` / `devices_total` | `hosts_online` / `hosts_offline` / `hosts_total` |
-| `binary_sensor` system status | `vpn_devices_online` / `_offline` / `_total` | `vpn_hosts_online` / `_offline` / `_total` |
-| `binary_sensor` network | `device_count` | `host_count` |
-| `binary_sensor` watched host | `device_group` | `host_group` |
-| `device_tracker` presence | `device_group` | `host_group` |
-| `sensor` watched user usage | `associated_devices` / `associated_device_count` / `associated_device_group` | `associated_hosts` / `associated_host_count` / `associated_host_group` |
-| `binary_sensor` alarm | `device_name` | `host_name` |
-| `binary_sensor` network top talkers | `device_name` | `host_name` |
-
-The same rename applies where those values are returned by a service, so
-`get_runtime_inventory` reports `hosts_online` / `hosts_offline` / `hosts_total`, and
-the network list in `get_system_overview` reports `host_count`.
-
-**Rule matches, membership and flow rows were renamed too.** These keys appear inside
-service responses and tool results:
-
-| Service / tool | Was | Now |
-| --- | --- | --- |
-| `get_rules` (`last_hit`) | `device_id` / `device_ip` / `device_port` | `host_id` / `host_ip` / `host_port` |
-| `get_time_usage` | `device_id` / `device_name` | `host_id` / `host_name` |
-| `get_network_config` host rows | `device_type` | `host_device_type` |
-| `get_network_config` summary | `device_host_count` | *(removed — it duplicated `host_count`)* |
-| `get_flow_report` member and record rows | `device_id` / `device_name` / `device_ip` / `device_ids` | `host_id` / `host_name` / `host_ip` / `host_ids` |
-| `get_flow_report` `destination_kind` | `"device"` (a LAN peer) | `"peer"` |
-| `get_system_overview` sections | `devices` / `vpn_devices` | `hosts` / `vpn_hosts` |
-| `get_network_usage` section and provenance | `devices` | `hosts` |
-| `get_network_usage` summary | `active_device_count` | `active_host_count` |
-| `get_time_usage` app and category rows | `devices` | `hosts` |
-| `get_time_usage` provenance | `apps.devices.intervals` | `apps.hosts.intervals` |
-| `get_network_usage` host rows | `conn` / `dns` / `dns_blocked` / `ip_blocked` / `ip_denied` / `ntp` | `connection_count` / `dns_count` / `blocked_dns_count` / `blocked_ip_count` / `denied_ip_count` / `ntp_count` |
-| host records in `get_hosts`, the network `hosts` include, `get_network_usage` and `get_time_usage` | `ip_address` | `host_ip` |
-| `get_network_config` `sections.configuration` | `kind` | `network_kind` |
-| `get_network_config` `sections.configuration` | `type` | `interface_type` |
-| `get_rules` (tag-scoped rules only) | `target: "TAG"` | `target: null` — read `applies_to` / `applies_to_kind` / `tag_refs` instead |
-| `get_rules` | *(absent)* | `applies_to_kind` added — names what each `applies_to` entry is (`group` / `user` / `network`) |
-| `set_host_group` / `set_host_user` and the group/journal variant | `device_rules.removed` | `host_rules.removed` |
-
-**The watched-device `ip_address` attribute is now `host_ip`** on the entity as well
-as in service responses, so one concept keeps one name everywhere it is published.
-
-**Every response dropped its `config_entry_id` echo.** The integration instance is
-already bound to one Firewalla setup, and the value was only ever the id the caller
-passed in — so it was noise in 21 of 22 responses and absent from the 22nd. Nothing
-replaces it, because nothing can vary: a tool call reaches exactly one setup.
-
-In a flow record, `port` is the destination's port and `host_port` is the port on the
-host. `host_id` is not always a MAC: a VPN peer's id is not one. `destination_kind`
-is `domain` / `host` / `ip` / `peer`, where `peer` is a LAN peer named by its id
-rather than by a name or an address.
-
-Firewalla's own payloads call these `device` (`deviceIP`, `devicePort`, `deviceTags`).
-That word is not echoed here, because in Home Assistant a *device* is a device-registry
-entry — a different concept.
-
-## Upgrading: renamed time attributes and keys
-
-**Every published moment now appears twice and names what it is an instant of.** A date
-is the readable form (`<name>_at`); epoch seconds are the arithmetic form
-(`<name>_at_timestamp`). If you read or parse a time value in an automation or template,
-the key may have changed and the form you were reading may now be on its twin.
-
-Three things changed, and they can be adopted independently:
-
-- **Renames**, where a name did not say what the value measured.
-- **Pairs**, where a date or a number was published without the other form. If you were
-  parsing `"2026-03-26T21:00:00+00:00"` to compare two times, read the `_timestamp` twin
-  instead — no parsing needed.
-- **A basis**, where a derived value such as `online` is now published alongside the
-  reference instant and window it was measured in. This is additive: the old keys still
-  work, and the new ones let you reproduce the value.
-
-| Entity / service | Was | Now |
-| --- | --- | --- |
-| `binary_sensor` watched host, `device_tracker` presence, `sensor` watched user | `last_active` | `last_active_at`, with `last_active_at_timestamp` for the epoch form |
-| `binary_sensor` alarm `fired_at` | epoch number | `fired_at` is now the date; read `fired_at_timestamp` for the number |
-| `binary_sensor` alarm | *(absent)* | `fired_at_timestamp` added |
-| `switch` rule, `get_rules` | `pause_until` | unchanged form; `pause_until_timestamp` added |
-| `get_rules` `last_hit` | `at` / `timestamp` | `matched_at` / `matched_at_timestamp` |
-| `get_flow_report` records | `timestamp` | `occurred_at` (date) with `occurred_at_timestamp` |
-| `get_wan_events` | `timestamp` / `timestamp_iso` | `occurred_at_timestamp` / `occurred_at` |
-| `get_network_usage` metric samples | `timestamp` / `timestamp_iso` | `sampled_at_timestamp` / `sampled_at` |
-| `get_internet_quality` | `sampled_at` | unchanged form; `sampled_at_timestamp` added |
-| `binary_sensor` system status | `runtime_data_updated_at` | unchanged form; `runtime_data_updated_at_timestamp` added |
-| `sensor` speed test | `tested_at` | unchanged form; `tested_at_timestamp` added |
-| `get_runtime_inventory` rule records | `activated_time` / `updated_time` / `last_activated_time` | `activated_at` / `updated_at` / `last_activated_at`, each with an `_at_timestamp` twin |
-| `get_runtime_inventory` rule records | `expires_at` (epoch) / `pause_until` (epoch) | both are dates now, matching the rule service; read `expires_at_timestamp` / `pause_until_timestamp` for the numbers |
-| `get_time_usage`, `get_wan_usage`, `get_network_config`, `get_network_usage` | `begin_timestamp_iso` / `end_timestamp_iso` / `anchor_timestamp_iso` | `begin` / `end` / `anchor`, beside the existing `_timestamp` forms |
-| `get_hosts`, `get_system_overview`, `get_runtime_inventory` | *(absent)* | `activity_reference_at` / `activity_reference_at_timestamp` / `online_window_seconds` added |
-
-**`online` is derived, and now reproducible.** It is
-`activity_reference_at_timestamp - last_active_at_timestamp <= online_window_seconds`,
-and all three inputs are published beside it. To check one host in a template:
-
-```jinja
-{{ (state_attr('binary_sensor.my_device','activity_reference_at_timestamp')
-    - state_attr('binary_sensor.my_device','last_active_at_timestamp'))
-   <= state_attr('binary_sensor.my_device','online_window_seconds') }}
-```
-
-`stale` also participates: a host the box has not seen in about a week is offline
-however recent its activity stamp looks.
-
-**There is no compatibility layer.** These are renames, not additions, so the old names
-are gone rather than aliased — an alias would leave two names meaning one thing, which is
-the problem this set of changes exists to remove. The tables above are the migration.
-
-**Timezone is unchanged.** Times stay UTC unless a value is explicitly a local-time
-report boundary, where the offset is part of the string and `time_zone` names the zone.
-
-If you used the attribute **name** shown in the UI, it changed too, from *"Devices
-online"* to *"Hosts online"* and so on — the labels and the keys now agree.
-
-**What did not change:** `device_tracker` entities. That is a Home Assistant platform,
-not this integration's vocabulary, and it keeps its name and its behavior.
 
 ## Installation
 
@@ -1032,7 +939,7 @@ records: identity, IP, device type, kind, group membership, and connectivity.
   unreliable `dhcp_name`, and the nested `ip_assignment` (its useful parts are
   flattened to `ip_assignment_mode` and `reserved_ipv4`); use `full` for the
   complete record
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 - MAC-backed hosts appear as `kind=mac_host`; non-MAC pseudo-hosts (VPN peers)
   appear as `kind=pseudo_host` and have no MAC, so they cannot be passed to host
   actions that take one
@@ -1075,7 +982,7 @@ report for a single network segment.
 Use `firewalla_local.get_speed_tests` to read normalized speed test
 results.
 
-- by default it refreshes once and returns only the most recent result
+- returns only the most recent result by default
 - use `limit` to request more than one record
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
 
@@ -1084,7 +991,7 @@ results.
 Use `firewalla_local.get_internet_quality` to read normalized
 internet-quality samples (ping latency and packet loss) for one or all WANs.
 
-- by default it refreshes once and returns only the most recent sample
+- returns only the most recent sample by default
 - use `limit` to request more than one sample (the runtime keeps ~24 hours of
   15-minute buckets)
 - use `wan_uuid` or `wan_name` to filter to one WAN when needed
@@ -1218,8 +1125,13 @@ optionally, archived alarms.
 
 - `limit` defaults to 10 and is capped at 500; it returns the newest matching
   records rather than a cursor page
-- set `include_archived` to include archived alarms in the result
-- `type` accepts a raw `ALARM_*` identifier or the supported `security`,
+- `refresh` defaults to `false`, so the result comes from the runtime snapshot —
+  which is what makes it agree with an archive you just made. Pass `refresh: true`
+  to read the box instead
+- set `include_archived` to include archived alarms in the result. This requires
+  `refresh: true`: the archived set is box-retained history, and the snapshot holds
+  only the active set, so the combination is refused rather than quietly polled
+- `alarm_type` accepts a raw `ALARM_*` identifier or the supported `security`,
   `abnormal_upload`, and `open_port` groups; the `security` group includes its
   implicit companion types
 - `detail` is opt-in and makes one additional local request per returned alarm
@@ -1261,7 +1173,7 @@ it directly.
 
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - `host_mac` is best for deterministic automations
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 - the service returns an acknowledgement with the resolved host and command
   details
 
@@ -1277,7 +1189,7 @@ it directly.
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide the exact `new_name` string you want Firewalla to store
 - this writes the Firewalla custom host name, not the DNS hostname override
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 
 #### Set host DNS hostname
 
@@ -1293,7 +1205,7 @@ it directly.
 - provide the exact `dns_hostname` string you want Firewalla to store
 - this is separate from `set_host_name` and targets DNS naming rather than the
   Firewalla display or custom host name
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 
 #### Set host device type
 
@@ -1308,7 +1220,7 @@ it directly.
 - choose one host with `host_mac`, `host_name`, or `host_id`
 - provide one supported `host_device_type` value from the current runtime
   category set
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 - supported values are `desktop`, `phone`, `tablet`, `wearable`,
   `personal_default`, `console`, `smart speaker`, `tv`, `projector`,
   `entertainment_default`, `switch`, `automation`, `iot_default`,
@@ -1328,7 +1240,7 @@ it directly.
 
 - both services reuse the same host selectors as `wake_host`
 - set `enabled` to `true` or `false`
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 
 #### Set host DHCP reservation
 
@@ -1346,7 +1258,7 @@ it directly.
 - for `mode=dynamic`, omit `reserved_ipv4` to clear the reservation
 - static reservations are validated against the resolved network range and
   existing reservations
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 
 #### Set host membership
 
@@ -1389,7 +1301,7 @@ it directly.
   from silently targeting the wrong kind
 - if a name matches more than one group or user, the service fails with the
   matching candidates and you should use the id field instead
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 - the response reports the membership `before` and `after` plus a `changed`
   flag, so an automation can tell whether the call actually altered anything, and
   `host_rules.removed` listing the rule ids that were deleted
@@ -1414,7 +1326,7 @@ it directly.
   the remaining hosts are still processed
 - the service returns a per-host result envelope showing each MAC's status
   (`success`, `failed`, or `skipped`/`not_found`)
-- `refresh` defaults to `true`
+- `refresh` defaults to `false`; pass `true` to poll the box first
 - deleting a host that is also in your watched-device or device-tracker lists
   simply stops appearing in those choices after the next refresh; the saved
   option lists are not modified
@@ -1489,7 +1401,8 @@ it directly.
 
 Use `firewalla_local.archive_alarms` to move one active alarm or all active
 alarms into the archive. Archiving is recoverable; the records remain visible
-through `get_alarms` with `include_archived: true`.
+through `get_alarms` with `include_archived: true` and `refresh: true`, because
+the archived set is read from the box rather than the cached snapshot.
 
 **Requires an administrator.** This action is registered as an admin-only
 service. Automations and scripts are unaffected — Home Assistant only enforces

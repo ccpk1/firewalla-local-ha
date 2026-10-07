@@ -866,11 +866,18 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 ### `firewalla_local__get_alarms`
 
 - **Answers:** "What is happening on my network?" / "What fired recently?"
-- **When to use / not:** the entry point for the alarm workflow. Defaults to the **10 most recent** — a large alarm payload is expensive context, so raise `limit` deliberately. `limit` bounds the whole response.
+- **When to use / not:** the entry point for the alarm workflow. Defaults to the
+  **10 most recent** — a large alarm payload is expensive context, so raise `limit`
+  deliberately. `limit` bounds the whole response. The default reads the cached
+  snapshot, so an alarm archived in the same session is already gone from the
+  result; pass `refresh: true` to read the box.
 - **Inputs:** `limit` (default 10, max 500), `include_archived` (bool), `alarm_type`
   (filter — a raw `ALARM_*` value or a group: `security`, `abnormal_upload`,
   `open_port`), `detail` (bool — adds enrichment), `include_exceptions` (bool,
-  default false). There is no time-window filter: the box keeps
+  default false), `refresh` (bool, default false). `include_archived` **requires**
+  `refresh: true`, because the archived set is box-retained history the snapshot
+  does not hold; the combination is refused rather than polled quietly. There is
+  no time-window filter: the box keeps
   roughly 30 days and ignores time parameters.
 - **Returns:** read envelope — `result.alarms[]` with `alarm_id`, `alarm_type`,
   `fired_at` (ISO 8601) / `fired_at_timestamp` (epoch), `host_name`, and

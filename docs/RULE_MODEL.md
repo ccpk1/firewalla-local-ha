@@ -158,6 +158,16 @@ Current interpretation rules:
 - temporary rules may disappear automatically after expiry instead of remaining
   installed in a disabled or paused state
 
+**This diverges from the pause or resume contract above, and the divergence is
+reachable from the tool surface.** A temporary rule is returned by `get_rules`
+(nothing filters it out), but its record does not publish `is_temporary`,
+`expires_at` or `expire_seconds` — only `get_runtime_inventory` does. So an agent
+reading `get_rules` cannot tell a rule that will self-delete from one that will
+not, while `pause_rule`'s description and the system model both promise that a
+paused rule keeps its id and that `resume_rule` restores it. Closing this means
+publishing the expiry on the `get_rules` record and saying so in
+`pause_rule`, not only recording the family here.
+
 ## Switch eligibility model
 
 Switch eligibility should be driven by control semantics first and presentation
@@ -181,9 +191,14 @@ The currently confirmed controllable action set is:
 - `block`
 - `disturb`
 - `qos`
+- `route`
 
 Notes:
 
+- `route` was added to the switch surface after the original action set was
+  established, and is confirmed by the same live pause or resume evidence as the
+  other families. It is easy to miss when updating this list, because the switch
+  action set in `models.py` grows independently of the families captured below.
 - app-selected rules may still appear as ordinary `block` rules with
   category-backed targets such as `TLX-fw-roblox`
 - historical `app_block` observations should be treated as a specialized app
@@ -400,6 +415,7 @@ Interpretation rules:
 | direct `block` | category, internet, app-backed category block | persistent in-place pause or resume | targeting, app, schedule, quota |
 | `disturb` | scheduled or scoped traffic shaping | persistent in-place pause or resume | disturb, schedule |
 | `qos` | internet or category QoS | persistent in-place pause or resume | QoS, app |
+| `route` | interface or network route selection | persistent in-place pause or resume | targeting, route |
 | temporary block | short-duration quick block | temporary create plus expiry or delete | expiry |
 | port forwarding | inbound allow using target lists | persistent in-place pause or resume | port-forward context |
 
