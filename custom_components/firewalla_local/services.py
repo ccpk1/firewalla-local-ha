@@ -5599,12 +5599,15 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
     # Publishing it here is what makes the next read agree; without it the old
     # membership stood until the next poll, and `host_rules.removed` below already
     # reported rules as gone while the host still looked as though it owned them.
-    entry.runtime_data.integration_manager.apply_optimistic_host_membership(
-        host.mac,
-        group_id=None if target is None else target.group_id,
-        group_name=None if target is None else target.name,
-        is_user=target is not None and target.kind == _MEMBERSHIP_KIND_USER,
-    )
+    # Membership is deliberately *not* published optimistically, unlike the other
+    # host fields. A user assignment is stored as that user's affiliated backing tag
+    # in the host's `tags`, which the model surfaces as `group_ids` for a group and
+    # for a user alike — so a host record carries no membership *kind*. The tag
+    # collection distinguishes them with a `kind` discriminator precisely so no
+    # consumer has to infer it, and writing `group_ids` from a resolved target would
+    # assert a kind through a field that cannot carry one, from state this process
+    # built rather than the box's own normalized answer. Reporting membership is
+    # therefore left to the next refresh.
 
     return {
         "refreshed": refresh_requested,

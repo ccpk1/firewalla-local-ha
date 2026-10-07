@@ -347,36 +347,6 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Write one host-scoped policy payload to the requested host."""
         return await self.client.async_set_host_policy(host_mac, policy_value)
 
-    def apply_optimistic_host_membership(
-        self,
-        host_mac: str,
-        *,
-        group_id: str | None,
-        group_name: str | None,
-        is_user: bool,
-    ) -> None:
-        """Publish a successful membership change to the in-memory snapshot.
-
-        Membership is *not* applied inside `async_set_host_policy`, because that
-        method is the generic policy write and does not know what the payload means.
-        The caller resolved the target, so the caller states the membership.
-
-        A host holds exactly one membership and the box expresses it as a tag: the id
-        lands in `tags` and `group_name` resolves that tag through the affiliated
-        users before the tag names. The fields move together deliberately — updating
-        `group_name` without the id tuples would publish a host that reads as
-        belonging to a group it carries no id for, and `list_hosts` publishes both.
-        """
-        self._apply_optimistic_host(
-            host_mac,
-            transform=lambda host: replace(
-                host,
-                group_name=group_name,
-                group_ids=() if group_id is None else (group_id,),
-                user_ids=(group_id,) if is_user and group_id is not None else (),
-            ),
-        )
-
     async def async_set_host_name(
         self,
         host_mac: str,
