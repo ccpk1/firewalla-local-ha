@@ -431,10 +431,10 @@ class GetNetworkUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_network_usage")
     title = "Get network usage"
     description = (
-        "Windowed usage for one network: top talkers, apps, and categories. A "
-        "network must be selected — this is per segment over a time window, not a "
-        "whole-box total. Windowed WAN usage is not available; `get_wan_usage` has "
-        "WAN totals."
+        "What is using the most bandwidth on one network — top talkers, apps, and "
+        "categories over a window. A network must be selected: this is per segment, "
+        "not a whole-box total. Windowed WAN usage is not available; `get_wan_usage` "
+        "has WAN totals."
     )
     parameters = vol.Schema(
         {
@@ -488,7 +488,8 @@ class GetWanUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_wan_usage")
     title = "Get WAN usage"
     description = (
-        "WAN download/upload totals, not per-host usage (`get_network_usage`). "
+        "How much internet data has been used — WAN download/upload totals, by "
+        "day, week, month or year. Not per-host usage (`get_network_usage`). "
         "Defaults to the day and week periods, which is what the question usually "
         "means; add `history` only when a trend is wanted, since it is roughly 12x "
         "the size."
@@ -541,10 +542,11 @@ class GetWanEventsTool(_FirewallaReadTool):
     name = format_tool_name("get_wan_events")
     title = "Get WAN events"
     description = (
-        "WAN link events — outages and status changes — for when the internet "
-        "drops. Defaults to the last 7 days of real connectivity events. "
-        "`get_wan_usage` is volume over time; `get_internet_quality` is latency and "
-        "packet loss."
+        "Why the internet dropped — WAN link events: outages and status changes. "
+        "Defaults to the last 7 days of real connectivity events. The box's own "
+        "DNS health probes are excluded unless `include_dns` asks for them, since "
+        "they are not connectivity events. `get_wan_usage` is volume over time; "
+        "`get_internet_quality` is latency and packet loss."
     )
     parameters = vol.Schema(
         {
@@ -589,9 +591,9 @@ class GetUserUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_user_usage")
     title = "Get user usage"
     description = (
-        "Time spent online for one person, host, or group, over a begin/end range. "
-        "Minutes, not bandwidth volume (`get_network_usage`). Resolve the scope "
-        "from `list_hosts` or the watched-user surfaces.\n"
+        "How much time a person, host, or group spent online, over a begin/end "
+        "range. Minutes, not bandwidth volume (`get_network_usage`). Resolve the "
+        "scope from `list_hosts` or the watched-user surfaces.\n"
         "\n"
         "Every section is returned by default; pass `sections` to keep only what "
         "the question needs."
@@ -815,9 +817,9 @@ class GetInternetQualityTool(_FirewallaReadTool):
     name = format_tool_name("get_internet_quality")
     title = "Get internet quality"
     description = (
-        "Latency, jitter, and packet loss samples for one WAN. For a "
-        "point-in-time throughput test use `run_internet_speed_test`; for past "
-        "results use `get_speed_tests`."
+        "How good the internet is right now — latency, jitter, and packet loss "
+        "samples for one WAN. For a point-in-time throughput test use "
+        "`run_internet_speed_test`; for past results use `get_speed_tests`."
     )
     parameters = vol.Schema(
         {
@@ -844,8 +846,9 @@ class GetSpeedTestsTool(_FirewallaReadTool):
     name = format_tool_name("get_speed_tests")
     title = "Get speed tests"
     description = (
-        "Stored speed-test results: download, upload, latency, and packet loss. "
-        "To run a new test use `run_internet_speed_test`."
+        "What were the last speed test results — stored download, upload, "
+        "latency, and packet loss. To run a new test use "
+        "`run_internet_speed_test`."
     )
     parameters = vol.Schema(
         {
@@ -872,10 +875,12 @@ class SyncRuntimeTool(_FirewallaReadTool):
     name = format_tool_name("sync_runtime")
     title = "Sync runtime"
     description = (
-        "Poll the box once, without running a query, and report the snapshot "
-        "time. Requests within about 10 seconds are coalesced. The cheap way to "
-        "freshen several reads at once: call this, then read with `refresh: "
-        "false` — one poll instead of one per tool."
+        "Poll the Firewalla box now and report the snapshot time it filled, "
+        "without answering any question itself. Use it when the cached snapshot "
+        "is stale and the answer depends on what is true right now — then read "
+        "whichever tools the question needs. Requests within about 10 seconds are "
+        "coalesced, so calling it before several reads costs one box poll rather "
+        "than one per read."
     )
     parameters = vol.Schema({})
     _service = SERVICE_SYNC_RUNTIME
@@ -969,9 +974,9 @@ class GetAlarmsTool(_FirewallaReadTool):
     name = format_tool_name("get_alarms")
     title = "Get alarms"
     description = (
-        "Recent alarms — active, and archived when asked. Defaults to the 10 "
-        "newest; raise `limit` deliberately, since a large alarm payload is "
-        "expensive context.\n"
+        "What is happening on the network — recent alarms, active, and archived "
+        "when asked. Defaults to the 10 newest; raise `limit` deliberately, since "
+        "a large alarm payload is expensive context.\n"
         "\n"
         "Silence records are omitted by default, and each alarm already carries "
         "its own `exception_id`, so `include_exceptions` is only for finding a "
