@@ -72,8 +72,12 @@ SYSTEM_MODEL: Final = (
     "guess them, so read them first: a rule id from `list_rules`, a host from "
     "`list_hosts`, an SSID from `get_wireless_status`. `get_system_overview` returns "
     "the network, group and user identifiers the others need; call it once per "
-    "session unless the network has changed. `refresh` forces a live poll and is "
-    "slower, so leave it unset unless the user needs current data.\n"
+    "session unless the network has changed. **`refresh` defaults to false**, so a "
+    "read serves the cached snapshot: fast, and current to within the poll interval. "
+    "Set `refresh: true` only when the user needs the box polled now, or when a "
+    "recent change has not shown up yet — it costs a full box poll and is slow. "
+    "`sync_runtime` polls once without running a query, which is the cheaper way to "
+    "freshen several reads at once.\n"
     "\n"
     "**How a rule reaches a host.** Rules attach to a host (`scope`), to a group or "
     "user (`applies_to` with matching `tag_refs`), or to a network; a rule with none "
@@ -146,11 +150,19 @@ _ORIENTATION: Final = (
 )
 
 READ_INJECTION: Final = (
-    _ORIENTATION
-    + " — once per session is enough unless a result stops making sense. A default "
-    "result omits optional detail: check the tool's `detail` or `include` before "
-    "concluding a field is absent, and `truncated` / `next_cursor` / `rows_returned` "
-    "before presenting a page or a cap as the whole answer."
+    _ORIENTATION + " — once per session is enough unless a result stops making sense.\n"
+    "\n"
+    "Read results are **newest first** unless a tool says otherwise, so the most "
+    'recent record is `[0]`; no tool returns a separate "latest". The box clamps '
+    "or ignores what it does not like **without erroring**, so where a response "
+    "reports the span or window it actually served, state that rather than the one "
+    "requested. Where an id/name pair exists (`_uuid`/`_name`, `_mac`/`_name`), the "
+    "id is a deterministic match and the name is for interactive use — provide one. "
+    "Names are not unique, so a name matching nothing or more than one object is "
+    "refused rather than resolved arbitrarily. A default result also omits optional "
+    "detail: check the tool's `detail` or `include` before concluding a field is "
+    "absent, and `truncated` / `next_cursor` / `rows_returned` before presenting a "
+    "page or a cap as the whole answer."
 )
 
 CONTROL_INJECTION: Final = (

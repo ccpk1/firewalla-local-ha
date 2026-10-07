@@ -2551,6 +2551,10 @@
       "name": "Get wireless status",
       "description": "Returns the current wireless configuration (SSID profiles and access points) as structured data. SSID profiles include the SSID, band, encryption, paused state, VLAN, and interface. Access points include the name, model, channels, and LED state. For Firewalla boxes without AP7 access points, the returned sections are empty.",
       "fields": {
+        "refresh": {
+          "name": "Refresh",
+          "description": "Set to true to poll the Firewalla box for current data first. Defaults to false, which reads the last snapshot — fast, and current to within the polling interval."
+        },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
           "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."

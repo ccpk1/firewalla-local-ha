@@ -2040,6 +2040,13 @@ get_wireless_status:
   name: Get wireless status
   description: Returns the current Firewalla wireless configuration (SSID profiles and access points) as structured data.
   fields:
+    refresh:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Refresh
+      description: Set to true to poll the Firewalla box for current data first. Defaults to false, which reads the last snapshot — fast, and current to within the polling interval.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

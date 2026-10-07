@@ -101,9 +101,10 @@ _READ_ANNOTATIONS: Final = llm.ToolAnnotations(
 )
 
 _REFRESH_DESCRIPTION: Final = (
-    "Optional. Defaults to true. Poll the Firewalla box for current data before "
-    "building the result; this is slower and usually unnecessary when a recent "
-    "refresh already happened. Set false to read the last snapshot."
+    "Optional. Defaults to false: the result comes from the cached runtime "
+    "snapshot, which is fast and current to within the poll interval. Set true to "
+    "poll the box first — a full poll, worth it only when the user needs data "
+    "newer than the last one."
 )
 
 _NETWORK_UUID_DESCRIPTION: Final = (
@@ -124,6 +125,15 @@ _WAN_UUID_DESCRIPTION: Final = (
 _WAN_NAME_DESCRIPTION: Final = (
     "Optional. A Firewalla WAN display name. Omit to use the only WAN when "
     "there is one."
+)
+
+# Both overview tools publish these counts, so the reading rule is stated once and
+# composed into each rather than kept in two places that can drift.
+_COUNTS_READING: Final = (
+    "Reading the counts: `total` is everything known, not the connected count — a "
+    "VPN peer is *configured* and may have been idle for weeks — so answer "
+    '"how many are connected?" from `online`. `vpn_hosts` is a breakdown of '
+    "`hosts`, already inside it: never add the two."
 )
 
 
@@ -190,56 +200,33 @@ class ListHostsTool(_FirewallaReadTool):
     name = format_tool_name("list_hosts")
     title = "List hosts"
     description = (
-        "List the hosts on your Firewalla network with their name, host "
-        "device type (`host_device_type`), IP address, and DNS/DHCP identity. "
-        "Use it to find a host before "
-        "renaming it or setting a DHCP reservation. Refreshing first polls the "
-        "box and is slower than reading the last snapshot.\n"
+        "Hosts on the network: identity, IP assignment, and connectivity.\n"
         "\n"
-        "Naming: `host_name` is the primary human-facing label and the one to "
-        "match a user's words against. `dns_hostname`/`dns_domain`/`dns_fqdn` "
-        "are the DNS-facing names. `dhcp_name` is host-supplied and "
-        "unreliable (`nvidia-shield` carries `android-66fc79bd9bb55411`) — "
-        "never use it to identify a host.\n"
-        "\n"
-        "`group_name` is the host's group or user membership, and it is the "
-        "key for rule lookup: pass it to `list_rules` as `applies_to` to find "
-        "the rules that govern this host. It can hold several names separated "
-        'by ", ". A host follows only the group it belongs to, so assigning '
-        "it to a group removes its own rules.\n"
-        "\n"
-        "Which network: every record carries `network_uuid` and `network_name`, "
-        "so a host's segment is stated rather than inferred from its IP. "
-        "`network_uuid` is also a filter if you only want one segment's hosts."
-        "\n"
-        "\n"
-        'VPN peers: a host with `kind: "pseudo_host"` is a VPN peer. Those '
-        "have NO MAC address (`mac` is null and `host_id` is a `wg_peer:`/"
-        "`awg_peer:` identifier), so they cannot be passed to any host tool "
-        "that takes a MAC. `ip_assignment` is also null for them; do not assume "
-        "it is always an object.\n"
-        "\n"
-        "Connectivity: `online` is derived, not a fact about the host — "
+        "`host_name` — the primary label; match a user's words against this one.\n"
+        "`dns_hostname` / `dns_domain` / `dns_fqdn` — DNS-facing names.\n"
+        "`dhcp_name` — host-supplied and unreliable (`nvidia-shield` reports "
+        "`android-66fc79bd9bb55411`); never identify a host by it.\n"
+        "`network_uuid` / `network_name` — the host's segment, stated rather than "
+        "inferred from its IP. `network_uuid` also filters.\n"
+        "`group_name` — the group or user this host follows. Pass it to `list_rules` "
+        "as `applies_to` to find the rules that govern the host.\n"
+        "`kind` — `mac_host`, or `pseudo_host` for a VPN peer. A peer has no MAC "
+        "(`mac` null, `host_id` a `wg_peer:` / `awg_peer:` id), so it cannot be "
+        "passed to any MAC-taking tool, and its `ip_assignment` is null.\n"
+        "`online` — derived, not a fact about the host: "
         "`activity_reference_at_timestamp - last_active_at_timestamp <= "
-        "online_window_seconds`, or false when `stale` is true. All four are "
-        "published on every row, so recompute it rather than guess. A peer here "
-        "is a *configured* peer, not necessarily a connected one — several may "
-        "be idle for weeks. When asked how many are connected, count "
-        "`online: true` (or filter `online=true`), never the length of the "
-        "list.\n"
+        "online_window_seconds`, and false when `stale`. All four are on every row, "
+        "so recompute it rather than guess.\n"
         "\n"
-        "Past hosts are included. The init request asks the box for inactive "
-        "hosts (`includeInactiveHosts`), which is the same data behind the app's "
-        '"Show past devices" toggle, so a host that has not been online for '
-        "weeks still appears here with `online: false` and an old "
-        "`last_active_at`. "
-        "A group's membership here is therefore the group's full host list, "
-        "not just the active ones — use `online` to separate the two.\n"
+        "Inactive hosts are included (`includeInactiveHosts`, the app's \"Show past "
+        'devices"), so `online: false` beside an old `last_active_at` is normal. '
+        "Count connected hosts from `online`, never from the row count — most rows "
+        "are configured rather than active.\n"
         "\n"
-        "This lists every host by default. Pass the filters to narrow it — a "
-        "name, one network, online state or kind — rather than pulling the whole "
-        "inventory, and keep the default `detail: summary` unless the full "
-        "record is needed."
+        "`detail: summary` (the default) omits the derivable `dns_fqdn`, the "
+        "unreliable `dhcp_name`, and flattens `ip_assignment` to "
+        "`ip_assignment_mode` and `reserved_ipv4`; `full` returns the whole record. "
+        "The filters narrow on the box, so prefer them to pulling the inventory."
     )
     parameters = vol.Schema(
         {
@@ -295,15 +282,7 @@ class ListHostsTool(_FirewallaReadTool):
                     "name does not match the `group_name` filter."
                 ),
             ): str,
-            vol.Optional(
-                SERVICE_FIELD_REFRESH,
-                default=True,
-                description=(
-                    "Optional. Poll the Firewalla box for "
-                    "current host data; set false to read the last snapshot "
-                    "faster."
-                ),
-            ): bool,
+            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )
     _service = SERVICE_GET_HOSTS
@@ -316,38 +295,28 @@ class ListRulesTool(_FirewallaReadTool):
     name = format_tool_name("list_rules")
     title = "List rules"
     description = (
-        "List your Firewalla firewall rules with id, name, action, "
-        "enabled/paused state, target, scope, and any originating alarm. Use it "
-        "to resolve the rule target that pause_rule and resume_rule require.\n"
+        "Firewall rules with id, name, action, paused state, target, scope, and "
+        "the alarm that created any.\n"
         "\n"
-        "`applies_to` names the groups, users or networks a rule governs, and "
-        "`tag_refs` carries the matching ids. A rule with neither applies "
-        "globally. Rules do not stack by scope: once a host belongs to a group "
-        "or user, its rules come from that group or user and its host-level "
-        "rules no longer apply, so check a host's membership before concluding "
-        "which rules cover it.\n"
+        "`applies_to` — the groups, users, or networks this rule governs, by name, "
+        "each with a matching `applies_to_kind`. A rule with no entry applies "
+        "globally. A host is never listed here: its rules are in `scope`, which is "
+        "why a host's `group_name` is the value to pass as `applies_to` to find "
+        "what covers it. `tag_refs` carries the underlying ids. A host's rules are "
+        "not added to its group's — attachment replaces, so it follows only the "
+        "group or user it belongs to.\n"
         "\n"
-        "`hit_count` is how many times a rule has matched and `last_hit` is its "
-        "most recent single match, with the host and destination involved. Two "
-        "uses: to troubleshoot connectivity, read the rules governing the host "
-        "and see which one last matched it and what it was reaching for; to find "
-        "cleanup candidates, look for enabled rules with a `hit_count` of 0. "
-        "`hit_count` is always a number; `last_hit` is null when there is no match "
-        "to describe. The box keeps only the last match per rule, not a history, "
-        'so this is one observation and cannot answer "everything this rule '
-        'blocked".\n'
+        "`hit_count` — matches recorded. Always a number, so `0` means no recorded "
+        "match rather than unknown; enabled rules with `hit_count: 0` are cleanup "
+        "candidates. `last_hit` — the most recent single match, with its host and "
+        "destination, or null. The box keeps one match per rule and no history, so "
+        'it cannot answer "everything this rule blocked".\n'
         "\n"
-        "Defaults to user-visible rules. The box also carries large numbers of "
-        "product-owned DAP and family rules, plus rules owned by a Firewalla "
-        "subsystem (the alarm-intel auto-blocks); those are hidden unless "
-        "requested via include_purpose or include_system_managed.\n"
-        "\n"
-        "Filters narrow the result on the box. Pass `enabled`, `action`, "
-        "`target_type`, `applies_to` or `alarm_id` to answer a question about "
-        "specific rules rather than listing every one. `alarm_id` finds the "
-        "auto-block rule an alarm created, which is what `unblock_alarm_target` "
-        "needs; those rules are system-managed, so pass "
-        "`include_system_managed: true` with it."
+        "User-visible rules only by default. Product-owned DAP and family rules "
+        "and alarm-intel auto-blocks are hidden unless `include_purpose` or "
+        "`include_system_managed` asks for them. `alarm_id` finds the auto-block an "
+        "alarm created — that is the rule `unblock_alarm_target` needs, and it "
+        "requires `include_system_managed: true`."
     )
     parameters = vol.Schema(
         {
@@ -414,26 +383,23 @@ class GetNetworkConfigTool(_FirewallaReadTool):
     name = format_tool_name("get_network_config")
     title = "Get network config"
     description = (
-        "Show how a network (LAN/VLAN) is configured: addressing, gateway, DNS, "
-        "DHCP range, and ports. Use it for network structure. For per-host "
-        "traffic use get_network_usage.\n"
+        "One network's configuration: addressing, gateway, DNS, DHCP range, and "
+        "ports. Per-host traffic is `get_network_usage`.\n"
         "\n"
-        "The `policy` block holds network-level Firewalla settings (`adblock`, "
-        "`safeSearch`, `family`, `doh`, `monitor`, `qos`, and similar). They are "
-        "settings, not rules: they neither create nor correspond to any rule, so "
-        "a `family` setting here has nothing to do with a `family` rule purpose "
-        "in list_rules.\n"
+        "`policy` — network-level Firewalla **settings**, not rules (`adblock`, "
+        "`safeSearch`, `family`, `doh`, `monitor`, `qos`). They neither create nor "
+        "correspond to a rule, so a `family` setting here is unrelated to a "
+        "`family` rule purpose in `list_rules`.\n"
         "\n"
-        "The network's host list is not included by default. Ask for it with "
-        "`include: ['hosts']` only when the user wants the hosts on that "
-        "network; use list_hosts for host questions.\n"
+        "`summary.host_count` is the network's host count from the host inventory "
+        "and is the number to quote — it is the same with or without the host "
+        "list. `summary.returned_host_count` appears only with "
+        "`include: ['hosts']` and reports the rows that section returned.\n"
         "\n"
-        "Reading the counts: `summary.host_count` is the network's host count "
-        "from the host inventory, and it is the same whether or not you ask for "
-        "the host list — it is the number to quote. `summary."
-        "returned_host_count` is only present when `include: ['hosts']` is set "
-        "and reports how many rows that section actually returned, which can be "
-        "fewer than `host_count`."
+        "The host list is off by default. Ask for it only when the hosts "
+        "themselves are wanted — those rows carry MAC addresses, hostnames, IPs "
+        "and reservations — and use `list_hosts` for host questions. The filters "
+        "narrow on the box, so prefer them to pulling the inventory."
     )
     parameters = vol.Schema(
         {
@@ -465,10 +431,10 @@ class GetNetworkUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_network_usage")
     title = "Get network usage"
     description = (
-        "Answer 'what is using the most bandwidth on this network?' with windowed "
-        "top talkers, apps, and categories. A network must be selected: this is "
-        "per network segment over a time window, not a whole-box total. Note: "
-        "windowed WAN usage is not available; use get_wan_usage for WAN totals."
+        "Windowed usage for one network: top talkers, apps, and categories. A "
+        "network must be selected — this is per segment over a time window, not a "
+        "whole-box total. Windowed WAN usage is not available; `get_wan_usage` has "
+        "WAN totals."
     )
     parameters = vol.Schema(
         {
@@ -522,11 +488,10 @@ class GetWanUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_wan_usage")
     title = "Get WAN usage"
     description = (
-        "Answer 'how much internet data have I used?' with WAN download/upload "
-        "totals. Defaults to the day and week periods, which is what this "
-        "question usually means; add history only when a trend is wanted, since "
-        "it is roughly 12x the size. This is WAN totals, not per-host usage "
-        "(see get_network_usage)."
+        "WAN download/upload totals, not per-host usage (`get_network_usage`). "
+        "Defaults to the day and week periods, which is what the question usually "
+        "means; add `history` only when a trend is wanted, since it is roughly 12x "
+        "the size."
     )
     parameters = vol.Schema(
         {
@@ -576,10 +541,10 @@ class GetWanEventsTool(_FirewallaReadTool):
     name = format_tool_name("get_wan_events")
     title = "Get WAN events"
     description = (
-        "Answer 'why did my internet drop?' with WAN link events such as outages "
-        "and status changes. Defaults to the last 7 days of real connectivity "
-        "events. For volume over time use get_wan_usage; for latency and packet "
-        "loss samples use get_internet_quality."
+        "WAN link events — outages and status changes — for when the internet "
+        "drops. Defaults to the last 7 days of real connectivity events. "
+        "`get_wan_usage` is volume over time; `get_internet_quality` is latency and "
+        "packet loss."
     )
     parameters = vol.Schema(
         {
@@ -624,10 +589,9 @@ class GetUserUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_user_usage")
     title = "Get user usage"
     description = (
-        "Answer 'how much time did a person/host spend online?' with a "
-        "time-based usage report over a begin/end range. This is time (minutes), "
-        "not bandwidth volume (see get_network_usage). Resolve scope from "
-        "list_hosts (for a host) or the watched-user surfaces.\n"
+        "Time spent online for one person, host, or group, over a begin/end range. "
+        "Minutes, not bandwidth volume (`get_network_usage`). Resolve the scope "
+        "from `list_hosts` or the watched-user surfaces.\n"
         "\n"
         "Every section is returned by default; pass `sections` to keep only what "
         "the question needs."
@@ -726,34 +690,26 @@ class GetFlowReportTool(_FirewallaReadTool):
     name = format_tool_name("get_flow_report")
     title = "Get flow report"
     description = (
-        "Answer 'what did this host or group do, and what was blocked?' with "
-        "traffic totals, the destinations it reached, the blocked breakdown, and "
-        "its LAN peers. Resolve scope from list_hosts (for a host) or the "
-        "watched-user surfaces.\n"
+        "What one host, group, or user did, and what was blocked: traffic totals, "
+        "destinations reached, the blocked breakdown, and LAN peers.\n"
         "\n"
-        "Coverage: this is the box's own flow data, and the box retains roughly "
-        f"{DEFAULT_FLOW_REPORT_WINDOW_HOURS} hours of it. A wider `window_hours` is "
-        "accepted but quietly served as that much, so the response reports the span "
-        "it actually covered in `summary.window` (`served_hours`, and `is_clamped` "
-        "when it was shortened). State the served span rather than the requested "
-        "one, and do not present this as history.\n"
+        "Two levels. `detail: summary` (the default) is one request answering "
+        "*how much* and *to where*. `detail: full` adds the individual flow "
+        'records, which name the rule that blocked each — so "which rule stopped '
+        'this" is only answerable there, and it is the level to diagnose with. '
+        "Records are large, so keep "
+        "`record_count` small and widen only if the answer is not there.\n"
         "\n"
-        "Two levels. `detail: summary` (the default) is one request and answers "
-        "*how much* and *to where*. `detail: full` adds the individual blocked "
-        "and regular flow records, and it is the level to use when diagnosing — a "
-        "record names the rule that blocked it, so 'which rule stopped this' is "
-        "only answerable there. Records are large (one page is hundreds of rows), "
-        "so keep `record_count` small and raise it only if the answer is not "
-        "there.\n"
+        "This is the box's own flow data, retained roughly "
+        f"{DEFAULT_FLOW_REPORT_WINDOW_HOURS} hours — not history. A wider "
+        "`window_hours` is accepted and quietly clamped, so read "
+        "`summary.window` (`served_hours`, and `is_clamped` when it was "
+        "shortened) and state the span served.\n"
         "\n"
-        "Per-host detail is not included by default. Add "
-        '`include: ["host_detail"]` when the question needs to know which host '
-        "was behind a member row, a destination, or a record. A host scope always "
-        "names its own host whether or not the flag is set.\n"
-        "\n"
-        "`refresh` defaults to true, because the rollup is a live request against "
-        "the box rather than a cached report. Set it false only to reuse the last "
-        "runtime snapshot."
+        'Per-host detail is off by default. Add `include: ["host_detail"]` when '
+        "the answer needs to know *which* host was behind a member row, a "
+        "destination, or a record. A host scope always names its own host "
+        "regardless."
     )
     parameters = vol.Schema(
         {
@@ -830,12 +786,11 @@ class GetFlowReportTool(_FirewallaReadTool):
             ),
             vol.Optional(
                 SERVICE_FIELD_REFRESH,
-                default=True,
+                default=False,
                 description=(
-                    "Optional. Defaults to true. The rollup is a live request "
-                    "against the box rather than a cached report, so the "
-                    "report polls by default; set false only to reuse the last "
-                    "runtime snapshot."
+                    "Optional. The rollup itself is always a live request against "
+                    "the box; this only re-polls the runtime snapshot first, which "
+                    "is what resolves host, rule and tag names. Defaults to false."
                 ),
             ): bool,
             vol.Optional(
@@ -860,12 +815,9 @@ class GetInternetQualityTool(_FirewallaReadTool):
     name = format_tool_name("get_internet_quality")
     title = "Get internet quality"
     description = (
-        "Answer 'how good is my internet right now?' with quality samples such "
-        "as latency, jitter, and packet loss. For a point-in-time throughput "
-        "test run run_internet_speed_test; for past results use get_speed_tests."
-        "\n\n"
-        "`samples` is newest first, so the current reading is `samples[0]`. "
-        "There is no separate latest record."
+        "Latency, jitter, and packet loss samples for one WAN. For a "
+        "point-in-time throughput test use `run_internet_speed_test`; for past "
+        "results use `get_speed_tests`."
     )
     parameters = vol.Schema(
         {
@@ -892,11 +844,8 @@ class GetSpeedTestsTool(_FirewallaReadTool):
     name = format_tool_name("get_speed_tests")
     title = "Get speed tests"
     description = (
-        "Answer 'what were my last speed test results?' with stored download, "
-        "upload, latency, and packet-loss measurements. To run a new test use "
-        "run_internet_speed_test.\n\n"
-        "`results` is newest first, so the most recent test is `results[0]`. "
-        "There is no separate latest record."
+        "Stored speed-test results: download, upload, latency, and packet loss. "
+        "To run a new test use `run_internet_speed_test`."
     )
     parameters = vol.Schema(
         {
@@ -923,11 +872,10 @@ class SyncRuntimeTool(_FirewallaReadTool):
     name = format_tool_name("sync_runtime")
     title = "Sync runtime"
     description = (
-        "Poll the Firewalla box for a fresh snapshot and report when it was "
-        "taken. Use it when the user needs current data and the last snapshot "
-        "may be stale; then read other tools with refresh=false. Requests "
-        "within about 10 seconds are coalesced, so calling it before several "
-        "other tools costs at most one poll."
+        "Poll the box once, without running a query, and report the snapshot "
+        "time. Requests within about 10 seconds are coalesced. The cheap way to "
+        "freshen several reads at once: call this, then read with `refresh: "
+        "false` — one poll instead of one per tool."
     )
     parameters = vol.Schema({})
     _service = SERVICE_SYNC_RUNTIME
@@ -940,23 +888,15 @@ class GetSystemOverviewTool(_FirewallaReadTool):
     name = format_tool_name("get_system_overview")
     title = "Get system overview"
     description = (
-        "Start here. Call this once at the beginning of a session for any "
-        "general question about the network. It returns appliance health, the "
-        "networks with their host counts, and counts for hosts, VPN peers, "
-        "groups, users, rules, and alarms, plus the network, group and user "
-        "identifiers the other tools accept as selectors.\n"
+        "The session anchor: appliance health, the networks with their host "
+        "counts, and counts for hosts, VPN peers, groups, users, rules, and "
+        "alarms. It also returns `system_model`, the one statement of this "
+        "surface's vocabulary.\n"
         "\n"
         "It returns counts and identifiers only — never host or rule records. "
-        "Use list_hosts for hosts and list_rules for rules; do not answer a "
-        "per-host question from this summary. Call it once per session unless "
-        "the network has changed.\n"
-        "\n"
-        "Reading the counts: `hosts` and `vpn_hosts` each report `total` "
-        "(everything known), `online` (active now), and `offline`. `total` is "
-        "not the connected count — a VPN peer is *configured*, and may have been "
-        'idle for weeks, so answer "how many are connected?" from `online`, '
-        "never from `total`. The two sections overlap: peers are already inside "
-        "`hosts`, so `vpn_hosts` is a breakdown of it, not a group to add."
+        "Answer per-host questions from `list_hosts` and per-rule questions from "
+        "`list_rules`.\n"
+        "\n" + _COUNTS_READING
     )
     parameters = vol.Schema(
         {
@@ -985,22 +925,16 @@ class GetSystemOverviewSummaryTool(GetSystemOverviewTool):
     """
 
     description = (
-        "Answer general questions about this Firewalla network: appliance "
-        "health, the networks with their host counts, and counts for hosts, "
-        "VPN peers, and alarms.\n"
-        "\n"
-        "Reading the counts: `hosts` and `vpn_hosts` each report `total` "
-        "(everything known), `online` (active now), and `offline`. `total` is "
-        "not the connected count — a VPN peer is *configured*, and may have been "
-        'idle for weeks, so answer "how many are connected?" from `online`, '
-        "never from `total`. The two sections overlap: peers are already inside "
-        "`hosts`, so `vpn_hosts` is a breakdown of it, not a group to add.\n"
+        "General questions about this Firewalla network: appliance health, the "
+        "networks with their host counts, and counts for hosts, VPN peers, and "
+        "alarms.\n"
+        "\n" + _COUNTS_READING + "\n"
         "\n"
         "This report is intentionally limited to counts, network names, and "
-        "performance metrics — it carries no host addresses, no hardware "
-        "identifiers, and no group or user names. For host names and "
-        "addresses, rules, alarms, or usage detail, the user must raise "
-        "Firewalla's AI access level in the integration options."
+        "performance metrics — no host addresses, no hardware identifiers, and no "
+        "group or user names. For those, or for rules, alarms, or usage detail, "
+        "the user must raise Firewalla's AI access level in the integration "
+        "options."
     )
     parameters = vol.Schema({})
 
@@ -1011,17 +945,20 @@ class GetWirelessStatusTool(_FirewallaReadTool):
     name = format_tool_name("get_wireless_status")
     title = "Get wireless status"
     description = (
-        "Show WiFi state: SSID profiles (with paused state), access points, and "
-        "connected clients. Use it to resolve the ssid_profile_id that "
-        "set_ssid_paused requires.\n"
+        "WiFi state: SSID profiles (with paused state), access points, and "
+        "connected clients. The source for the `ssid_profile_id` that "
+        "`set_ssid_paused` requires.\n"
         "\n"
-        "This is empty when the box manages no Firewalla access points: an empty "
-        "`ssid_profiles` means there is no SSID to pause, not that the read "
-        "failed. `get_system_overview` reports whether the box has access "
-        "points at all, so check there before concluding anything from an empty "
-        "result here."
+        "Empty is meaningful: when the box manages no Firewalla access points "
+        "there is no SSID to pause, and an empty `ssid_profiles` means exactly "
+        "that rather than a failed read. `get_system_overview` reports whether "
+        "the box has access points at all."
     )
-    parameters = vol.Schema({})
+    parameters = vol.Schema(
+        {
+            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+        }
+    )
     _service = SERVICE_GET_WIRELESS_STATUS
     _response_type = "wireless_status"
 
@@ -1032,15 +969,14 @@ class GetAlarmsTool(_FirewallaReadTool):
     name = format_tool_name("get_alarms")
     title = "Get alarms"
     description = (
-        "Answer 'what is happening on my network?' with the most recent alarms "
-        "(active, and archived when requested). Defaults to the 10 newest; raise "
-        "limit deliberately, since a large alarm payload is expensive context. "
-        "The box keeps roughly 30 days and offers no time-window filter.\n"
+        "Recent alarms — active, and archived when asked. Defaults to the 10 "
+        "newest; raise `limit` deliberately, since a large alarm payload is "
+        "expensive context.\n"
         "\n"
-        "`limit` bounds the whole response. Silence records are omitted by "
-        "default; each alarm already carries its own `exception_id`, so you only "
-        "need `include_exceptions` when hunting a silence to remove — that list "
-        "is unbounded and is the expensive part of this response."
+        "Silence records are omitted by default, and each alarm already carries "
+        "its own `exception_id`, so `include_exceptions` is only for finding a "
+        "silence to remove — that list is unbounded and is the expensive part of "
+        "this response. The box keeps roughly 30 days and takes no time filter."
     )
     parameters = vol.Schema(
         {

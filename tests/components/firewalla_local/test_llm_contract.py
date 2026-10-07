@@ -96,28 +96,66 @@ _PACKAGE_ROOT: Final = (
 )
 
 
+def _docstring_nodes(tree: ast.Module) -> set[int]:
+    """Return the ids of Constant nodes that are docstrings.
+
+    Docstrings are the one kind of string literal that must **not** be in the corpus,
+    and they are why the first attempt at this guard was decorative: a docstring in
+    ``host_manager.py`` says ``host.last_active``, so collecting every string pulled
+    the internal attribute name in and the stale reference resolved. They are
+    identifiable by position — the first statement of a module, class or function —
+    which is a property of where they sit rather than of what they say.
+    """
+    docstrings: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                docstrings.add(id(body[0].value))
+    return docstrings
+
+
 def _published_key_corpus() -> set[str]:
     """Return every name a description may legitimately reference.
 
-    Built from **position**, not from every string in the package. That distinction is
-    the whole difference between a working guard and a decorative one, and the first
-    attempt got it wrong: a corpus of all string literals contains docstrings, so
-    ``host.last_active`` put ``last_active`` in it and the scan then passed on the
-    very defect it was written for. Keys written in key position exclude both
-    docstrings and internal attribute names by construction.
+    Three positions, and the distinction is the whole difference between a working
+    guard and a decorative one.
 
-    Four sources, because a model can name all four:
+    **Every string literal except a docstring.** That covers an enum value, a tool
+    action, a field name, and a payload key wherever it is written — including the
+    inline form ``"kind": "mac_host" if ... else "pseudo_host"``, whose strings are
+    values inside a conditional and so are invisible to a scan that reads only dict
+    keys. Excluding docstrings is what keeps it honest: they describe the code rather
+    than the payload, so a docstring naming an internal attribute would let a stale
+    field name resolve. The first version of this function collected every string,
+    docstrings included, and passed on the very defect it exists to find.
 
-    - a dict key or subscript key, which is a payload field
-    - a constant whose value is an argument or attribute name
-    - a vendor key this integration sends or reads
-    - a tool action, so prose can point at another tool
+    **A key in key position**, which is the payload field a description names.
+
+    **A constant whose value is an argument or attribute name**, since
+    `SERVICE_FIELD_*` and `ATTR_*` are how those are declared.
     """
     corpus: set[str] = set()
 
     for path in _PACKAGE_ROOT.rglob("*.py"):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Dict):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        docstrings = _docstring_nodes(tree)
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+            ):
+                corpus.add(node.value)
+            elif isinstance(node, ast.Dict):
                 for key in node.keys:
                     if isinstance(key, ast.Constant) and isinstance(key.value, str):
                         corpus.add(key.value)
@@ -622,7 +660,7 @@ async def test_policy_guidance_sits_with_the_tool_that_shows_it(
     tools = {tool.name: tool for tool in api_instance.tools}
     config_description = tools["firewalla_local__get_network_config"].description
 
-    assert "settings, not rules" in config_description
+    assert "settings**, not rules" in config_description
     assert "`family` rule purpose" in config_description
     assert "policy" not in PROMPT
 
@@ -641,7 +679,7 @@ async def test_rule_scope_precedence_is_stated_consistently(
 
     assert "Attachment **replaces**" in PROMPT
     assert "no longer reach it" in PROMPT
-    assert "no longer apply" in rules_description
+    assert "attachment replaces" in rules_description
 
 
 async def test_membership_change_warns_that_it_deletes_host_rules(
@@ -704,7 +742,7 @@ async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
     )
 
     assert "`group_name`" in hosts_description
-    assert "rule lookup" in hosts_description
+    assert "as `applies_to` to find the rules" in hosts_description
     assert "group_name" in applies_to
     assert "`applies_to`" in PROMPT
     assert "group_name" in PROMPT
@@ -713,9 +751,9 @@ async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
 # Each entry pairs a tool that returns a large payload with the phrase in its
 # description that tells the model how to avoid paying for all of it.
 _PAYLOAD_GUIDANCE: Final = (
-    ("firewalla_local__list_hosts", "filters to narrow"),
-    ("firewalla_local__list_rules", "Filters narrow the result"),
-    ("firewalla_local__get_network_config", "not included by default"),
+    ("firewalla_local__list_hosts", "filters narrow on the box"),
+    ("firewalla_local__list_rules", "User-visible rules only by default"),
+    ("firewalla_local__get_network_config", "off by default"),
     ("firewalla_local__get_user_usage", "pass `sections`"),
 )
 
@@ -746,7 +784,10 @@ async def test_count_totals_are_not_presented_as_connected(
     # which is what the app's "Show past devices" toggle does. A live Quarantine
     # group returned 10 hosts, 7 of them long-idle, so membership here is the
     # group's full host list.
-    assert "Past hosts are included" in tools["firewalla_local__list_hosts"].description
+    assert (
+        "Inactive hosts are included"
+        in tools["firewalla_local__list_hosts"].description
+    )
 
     config = tools["firewalla_local__list_hosts"].parameters.schema
     assert any(marker.schema == "online" for marker in config)

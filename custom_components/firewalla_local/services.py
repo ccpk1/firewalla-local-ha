@@ -433,7 +433,7 @@ GET_FLOW_REPORT_SCHEMA = vol.Schema(
             cv.ensure_list_csv,
             [vol.In((FLOW_REPORT_INCLUDE_HOST_DETAIL,))],
         ),
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -563,7 +563,7 @@ GET_HOST_NAME_MAPPING_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_ONLINE): cv.boolean,
         vol.Optional(SERVICE_FIELD_USER): cv.string,
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -577,7 +577,7 @@ GET_NETWORK_SEGMENT_REPORT_SCHEMA = vol.Schema(
             cv.ensure_list_csv,
             [vol.In(("hosts",))],
         ),
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -602,7 +602,7 @@ GET_NETWORK_SEGMENT_USAGE_SCHEMA = vol.Schema(
             cv.ensure_list_csv,
             [vol.In(("series",))],
         ),
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -684,6 +684,7 @@ SET_SSID_PAUSED_SCHEMA = vol.Schema(
 
 GET_WIRELESS_STATUS_SCHEMA = vol.Schema(
     {
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -740,7 +741,7 @@ GET_SPEED_TEST_RESULTS_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_LIMIT, default=1): cv.positive_int,
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -751,7 +752,7 @@ GET_INTERNET_QUALITY_REPORT_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_LIMIT, default=1): cv.positive_int,
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -806,7 +807,7 @@ GET_WAN_DATA_USAGE_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_DETAIL, default=DETAIL_SUMMARY): vol.In(
             DETAIL_LEVELS
         ),
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -6762,13 +6763,19 @@ async def _async_handle_get_wireless_status(call: ServiceCall) -> JsonObjectType
     profiles (SSID, band, encryption, paused state, VLAN, interface) and
     the per-access-point assets (name, model, channels, LED). For boxes
     without AP7s, the returned sections are empty.
+
+    Reads the cached snapshot unless the caller asks for a poll. This handler
+    used to refresh unconditionally, with no way for a caller to opt out, so every
+    read paid for a full box poll to learn something that changes when the user
+    changes it and not otherwise.
     """
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
-    await _async_refresh_runtime_state(entry)
+    if cast(bool, call.data.get(SERVICE_FIELD_REFRESH, False)):
+        await _async_refresh_runtime_state(entry)
     return entry.runtime_data.wireless_manager.get_wireless_status()
 
 

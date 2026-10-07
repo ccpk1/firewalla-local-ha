@@ -2309,7 +2309,9 @@ async def test_get_speed_test_results_service_defaults_to_latest_result(
         )
 
     assert response is not None
-    assert response["refreshed"] is True
+    # `refresh` now defaults to false, so an unqualified read serves
+    # the cached snapshot rather than polling the box.
+    assert response["refreshed"] is False
     assert response["count"] == 1
     assert response["wan"] is None
     assert "latest" not in response
@@ -2431,7 +2433,9 @@ async def test_get_internet_quality_report_service_returns_latest_sample(
         )
 
     assert response is not None
-    assert response["refreshed"] is True
+    # `refresh` now defaults to false, so an unqualified read serves
+    # the cached snapshot rather than polling the box.
+    assert response["refreshed"] is False
     assert response["count"] == 1
     assert response["wan"] is None
     assert "latest" not in response
@@ -6503,7 +6507,9 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_when_req
 
     assert mock_get_monthly.await_count == 1
     assert response is not None
-    assert response["refreshed"] is True
+    # `refresh` now defaults to false, so an unqualified read serves
+    # the cached snapshot rather than polling the box.
+    assert response["refreshed"] is False
     assert response["target"] == {
         "kind": "network",
         "id": None,
@@ -6514,7 +6520,7 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_when_req
         "detail": "summary",
         "include": [],
         "time_zone": "America/New_York",
-        "refresh": True,
+        "refresh": False,
         "current_periods": ["month"],
         "history_period": None,
         "history_count": 0,
@@ -9561,10 +9567,11 @@ async def test_flow_report_accepts_exactly_the_fields_the_llm_tool_passes(
             return_response=True,
         )
 
-    # The omitted `refresh` defaulted to true, so the runtime was refreshed.
+    # The omitted `refresh` now defaults to false, so the runtime was not
+    # re-polled before the report was built.
     assert client["rollup"].await_count == 1
     assert response is not None
-    assert response["query"]["refresh"] is True
+    assert response["query"]["refresh"] is False
     # The omitted `detail` defaulted to summary, so no records were read.
     assert response["query"]["detail"] == "summary"
     assert response["query"]["record_count"] == 300
