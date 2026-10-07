@@ -478,6 +478,11 @@ Reads that tell you what exists — the first step before any control action.
 - **When to use / not:** use to resolve a `rule_id` before any rule action and to
   resolve scope targets (person → host-group, valid app ids, network). Not for host
   traffic (`get_network_usage`).
+- **A `rule_id` does not survive deletion.** A deleted rule loses its id, and a temporary
+  rule that expires loses it the same way; re-creating an equivalent rule produces a new
+  id. The app is unaffected because it addresses a rule by its contents, but the id is
+  what this surface holds, so a stored id stops matching. Prefer `pause_rule` /
+  `resume_rule` for a rule you intend to keep, since those preserve the id.
 - **Narrow it:** filters are applied server-side. Pass `enabled`, `action`,
   `target_type` or `applies_to` to answer a question about specific rules instead of
   listing every one; the default already hides the product-owned DAP/family and

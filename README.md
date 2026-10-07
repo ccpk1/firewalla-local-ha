@@ -172,7 +172,6 @@ Durable project rules live in `docs/`:
   quality scale
 - `RULE_MODEL.md` — how Firewalla rules are modelled
 - `MCP_TOOL_REFERENCE.md` — the AI tool surface, tool by tool
-- `REVERSE_ENGINEERING_WORKFLOW.md` — how the local protocol was established
 - `RELEASE_CHECKLIST.md` — the steps to work through for every release
 
 Repository layout:
@@ -187,7 +186,6 @@ Repository layout:
 │   ├── MCP_TOOL_REFERENCE.md
 │   ├── QUALITY_REFERENCE.md
 │   ├── RELEASE_CHECKLIST.md
-│   ├── REVERSE_ENGINEERING_WORKFLOW.md
 │   ├── RULE_MODEL.md
 │   └── USER_GUIDE.md
 └── tests/

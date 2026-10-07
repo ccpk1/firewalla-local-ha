@@ -32,7 +32,8 @@ matter.
 | --- | --- |
 | **host** | One device on your Firewalla network. This is the integration's own word for it, used in entity names, attributes, service arguments, and tool names (`get_hosts`, `host_mac`, `hosts_online`). |
 | **device** | A Home Assistant device-registry entry, which is a different concept. When this guide says "device" it means the Home Assistant object, not a host. |
-| **device_tracker** | The Home Assistant platform used for presence tracking. It keeps its Home Assistant name even though it tracks a host. |
+| **device_tracker** | The Home Assistant platform for presence tracking. A platform name, so it stays spelled as Home Assistant spells it. |
+| **watched device** | A host you have chosen to monitor. An established feature name, used for the options-flow step, the entity purpose, and the `Watched-device online window` setting; the data underneath it is still `host_*`. |
 | **box** / **appliance** | The Firewalla hardware itself. |
 | **rule** | A Firewalla policy rule — the thing that blocks, allows, shapes, or routes traffic. |
 | **scope** vs **applies to** | A rule's `scope` is the hosts it is attached to directly; `applies_to` is the groups, users, or networks it governs. Attachment **replaces** rather than adds: once a host belongs to a group or user, its rules come from that group or user, and its own host-level rules no longer reach it. To find what governs a host, read its `group_name` and pass that as `applies_to`. |
@@ -41,11 +42,8 @@ matter.
 Firewalla's own API calls a host a `device` (`deviceIP`, `devicePort`, `deviceTags`).
 This integration does not echo that word, for the reason given above. Where the two
 vocabularies meet — in service responses and tool results — every key uses `host`.
-
-The **options flow** is one place the two still meet visibly: its steps and field
-labels read *"Edit watched devices"* and *"Devices to monitor"* for surfaces whose
-entities and attributes are all `host_*`. The labels are what you see in the UI, so
-this guide names them as the UI does; read them as "hosts" throughout.
+`device_tracker` and *watched device* are the two deliberate exceptions, both named in
+the table above. They name a platform and a feature rather than the host itself.
 
 ## What the integration provides
 
@@ -1427,6 +1425,20 @@ it directly.
 - set `confirm: true` to acknowledge permanent deletion
 
 ### Rule services
+
+**A rule id does not survive deletion.** A rule that is deleted loses its id, and a
+temporary rule that expires loses it the same way. Re-creating an equivalent rule
+afterward produces a **new** id rather than reusing the old one, and ids are never
+reused.
+
+Inside the Firewalla app this does not matter, because the app addresses a rule by its
+contents. It matters here, because the rule id is the link this integration holds: a
+rule switch selection, an automation, or a stored `rule_id` stops matching a rule that
+was deleted and re-created, even though the rule looks identical on the box.
+
+So the practical guidance is to **pause and resume rules you intend to keep**, because
+those are in-place changes that preserve the id, and to use deletion or temporary rules
+only for rules you do not intend to reference again.
 
 #### Get rules
 
