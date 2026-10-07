@@ -51,6 +51,35 @@ Normalized host identity rule:
 - do not collapse `host_name`, `dns_hostname`, `dns_domain`, `dns_fqdn`, and `dhcp_name` into one convenience field
 - do not add compatibility aliases such as duplicate `display_name` or `fallback_name` fields once a normalized host contract exists
 
+Register boundary rule:
+
+- **`host` is the word for a Firewalla endpoint on every surface** — field names, enum values, published discriminators, entity attribute keys **and their labels**, service `name:`/`description:` values, tool descriptions, and prose. There is no second register
+- the one exception is where `device` means a **Home Assistant device-registry concept**: the `device_tracker` platform (HA's name, never rename it), the device registry, and the options a user picks to create those entries. Those say `device` and must keep saying it
+- **the vendor's word is not kept either.** Firewalla's flow rows name a host `device`, `deviceIP`, `devicePort`, and its host tag names are `deviceTags`; a published key still says `host`, because echoing `device` would collide with the Home Assistant concept above. Renaming the vendor's keys is what the record layer does generally and is visible in the same row — `dstMac` publishes as `destination_mac`, `pid` as `blocked_by_rule_id`, `intf` as `network_id`. Only keys that are already exact and are not the host concept stay verbatim: `port`, `protocol`, `apid`, `category`, `app`
+- `host_port` is a port on a host, not a host, and `host_id` is not always a MAC
+- **a published value obeys the same rule as a published key.** `destination_kind` is `host` / `domain` / `ip` / `peer`, never `device` — the LAN-peer case is what the record layer already called `peer` in its own code
+- **a published payload key is held by a test, not only by a constant.** The value-keyed guard cannot see a literal key, so `test_no_published_key_names_a_host_as_a_device` reads the keys by their position in the syntax. `host_device_type` is the one allowed survivor, because it carries the host prefix
+- a Firewalla protocol word we must send in input stays as the wire says
+- measured support: service text says `host` 111 times against 26 for `device`; every device selector field is `host_*`; every device-facing service name uses `host`; no service is named `*device*`
+- `target.kind` is `host` / `group` / `user` / `network`; never the protocol's `tag` and never `device`
+- a network reports `kind: network` and carries the box's `lan`/`vlan`/`vpn`/`wan` distinction on a separate `network_kind` field rather than in the kind, because collapsing it would lose real information
+- **a published value must be accepted back as a selector.** A service that reports an id its own resolver rejects is a defect, not a limitation
+- **one concept never gets two published names.** If a value is published both as an entity attribute and in a service response, renaming it means renaming both
+
+Scope selection rule:
+
+- every service that takes a scope takes it as a **typed pair**: `host_mac`/`host_name`, `group_id`/`group_name`, `user_id`/`user_name`, `network_uuid`/`network_name`. Never a kind enum plus a free-text target — one free-text field cannot tell an identifier from a label, so it will match a group id against a user's name
+- **exactly one** selector is required. None is an error, two is an error, and two fields of the same pair is also an error, because supplying both is ambiguous rather than a preference
+- the wide scope is a **flag**: `all_hosts: true`. Never an omission. On the wire the wide scope is an empty selection, so a dropped selector would silently widen the change instead of failing
+- **a group and a user are not interchangeable.** A user entry's `group_id` is its affiliated backing tag, and a rule addresses a user as a `tag:`-prefixed reference to that tag — not as the user id and not under a `utag:` prefix. Select a user by its own id or name; write it as its affiliated tag. Keep that substitution in one resolver rather than per service
+- **a user selector accepts both of a user's ids.** The user id is the identity; the affiliated tag is what the box is addressed by and what services report back. A selector that accepts only one of them is a defect either way: accepting only the tag rejects the id this integration publishes, and accepting only the id rejects the value it reports
+- enforce the rule in one shared helper so every service raises the same translation key, and validate the selection **before** resolving the config entry, so a caller mistake is reported without I/O
+
+Detail level rule:
+
+- `detail` is one vocabulary everywhere: `summary` or `full`. Not a boolean, and not `standard` or `records` alongside it
+- what "full" costs differs per service — extra fields, an extra request, or the raw record log — and that belongs in the field's description, never in a second set of value names
+
 User-facing identity rule:
 
 - when local payloads expose both a user-facing identity and an affiliated backing group or tag, prefer the user-facing identity for Home Assistant names and attributes
@@ -208,7 +237,7 @@ Rules:
 - services that target hosts must resolve against the normalized host contract and keep `host_name` as the primary human-facing selector surface
 - watched-user entity attributes must distinguish raw payload facts from
 	integration-derived joins, especially for totals, per-app usage, and
-	host-derived `last_active` metadata
+	host-derived `last_active_at` metadata
 - watched-user, watched-device, and device-tracker attributes must not expose backing group names when an app-facing user identity is available for the same relationship
 - `device_tracker` is reserved for MAC-backed LAN hosts only; VPN, tunnel,
 	overlay, and pseudo-host identities such as `wg_peer:*` are excluded by
@@ -227,6 +256,82 @@ Rules:
 - keep executor usage tightly scoped to the actual blocking work
 
 ## Time and timezone standards
+
+### Publishing a moment in time
+
+Three concepts, and no fourth. Every published time is one of them.
+
+- **Instant** — a moment. Published **twice**: a readable form and an epoch form.
+  Never only one of the two. An ISO-only instant forces a caller to parse a date to
+  compare two times; an epoch-only instant hands a reader a number with no date, which
+  is how `last_active: 1791258075.36` came to be compared by eye during a live
+  diagnosis. The two forms are named by the family the value belongs to, below.
+- **Duration** — a length of time. Published as `<name>_seconds`, never as a date.
+  `_seconds` and `_timestamp` are **not interchangeable**: a duration in seconds and an
+  instant in seconds are different quantities. `uptime` beside `uptime_seconds` is the
+  duration pair and is correct as it stands.
+- **Windowed state** — a value derived from a time, such as `online` or `is_paused`.
+  Published **only alongside its basis.** A boolean is not a fact about a device; it is
+  `activity_reference_at_timestamp - last_active_at_timestamp <= online_window_seconds`,
+  and all three inputs must be reachable from the payload, or the reader cannot
+  reproduce the claim.
+
+Suffixes that mark a temporal field are a closed set: `_at`, `_until`, `_timestamp`,
+`_seconds`, plus `_start` and `_end` for window boundaries. A new temporal field
+declares which concept it is by taking one of them; it does not invent a seventh.
+
+**Every temporal key names its own concept.** There are two families, and the rule is
+which question the value answers rather than which shape it takes:
+
+- **A point** — when something happened. `<concept>_at` is the readable form and
+  `<concept>_at_timestamp` is the epoch form: `tested_at`, `fired_at`, `matched_at`,
+  `sampled_at`, `last_active_at`, `activated_at`.
+- **A window position** — a named place in a range. The boundary name is the readable
+  form and `<boundary>_timestamp` is the epoch form: `start`, `end`, `begin`, `anchor`.
+
+Neither family permits a bare `at` or `timestamp`. Nesting a value under a parent key is
+allowed and does not change this: `records[].at` still leaves the reader to work out that
+a record's `at` is when its flow occurred, and that inference is exactly the work these
+rules exist to remove. The parent supplies *context*, never the *name*.
+
+**One documented exception: `schedule_next_start` / `schedule_next_end`.** They name
+window boundaries and take neither the `_at` suffix nor an epoch twin. The rationale is
+that they are read as dates in a schedule and never used arithmetically against a
+reference instant, which is the only thing the epoch form exists for. It is recorded here
+rather than left to be discovered, and it is the *only* one — a second exception would
+mean the rule is wrong rather than that these two are.
+
+**The rule this section exists to state:**
+
+> Every published value is either a raw fact, or reproducible from other published
+> fields.
+
+Worked example, because the failure is easier to see than to describe. A host row once
+published `online: false` beside `last_active: 1791288092.382`. That host had been
+active **6.6 minutes** before the measurement, and the window is **5 minutes** — so the
+value was correct and completely unexplainable, because the row carried no reference
+instant, no window, and no `stale` flag. Reconstructing it took three source files. With
+`activity_reference_at_timestamp` and `online_window_seconds` published, the reader
+computes `activity_reference_at_timestamp - last_active_at_timestamp <=
+online_window_seconds` and gets the same answer, unaided.
+
+**A derived value must not be measured from its own subset.** `online` is relative to a
+reference instant, and that reference is the appliance's freshest activity across the
+whole inventory — never the freshest member of whatever subset is being counted.
+Measuring peers against the freshest peer made the newest peer online by construction,
+however long ago it was: the live box reported one connected VPN peer whose last
+activity was **4.5 days** earlier, while the host list, using the appliance reference,
+correctly showed it offline. Same box, same moment, two answers. The reference is a
+required parameter rather than a default for exactly this reason — a required value
+cannot be omitted, and a default can.
+
+**Distinct questions get distinct windows, and each publishes its own basis.**
+Connectivity ("is this host reachable", default 5 minutes) and presence ("is this person
+home", default 15 minutes) are different questions with independently configured
+windows. Publishing the basis for both is required; unifying them is not, and would be
+wrong.
+
+### Timezone rules
 
 - time-bucketed Firewalla data such as day, week, and month reports must use the Firewalla appliance timezone as the canonical timezone when the box exposes a valid timezone name
 - Home Assistant timezone is a fallback only when the Firewalla runtime does not expose a usable timezone
@@ -384,6 +489,13 @@ Review changes against these questions:
 - does the change keep entity identity stable?
 - does the change reuse the shared registry pipeline instead of introducing another ad hoc lookup path?
 - does the change introduce orphan-prone lifecycle behavior without an explicit reconciliation policy?
+- does a new service that takes a scope use the typed pairs with an explicit `all_hosts`, rather than a kind enum plus free text?
+- does a new `detail` field use the shared `summary`/`full` vocabulary?
+- is the selection validated before the config entry is resolved, so a caller mistake does not depend on loaded state?
+- does the change keep a group and a user distinguishable, given a user entry's `group_id` is its affiliated tag?
+- **does every new user-visible field, enum value, attribute key or tool parameter state which register it is in, and does a deviation from the established word name what forced it?**
+- **can a value this change publishes be passed back in as a selector?**
+- **is every value this change requests or accepts actually consumed, or is some of it accepted and then discarded?**
 
 ## Boundary enforcement
 
@@ -391,6 +503,7 @@ Review changes against these questions:
 - boundary checks should reject Home Assistant imports in `utils/`
 - boundary checks should reject duplicated business logic or write paths in services, flows, and platform files
 - boundary checks should reject unowned specialized root modules when the code clearly belongs under `managers/`, `helpers/`, or `utils/`
+- boundary checks should reject published values outside the register boundary, because a rule that is only prose is not enforced — the register rule was documented and violated three times before a test was added for it
 
 ## Validation workflow
 

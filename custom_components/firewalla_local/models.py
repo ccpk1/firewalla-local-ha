@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 from enum import StrEnum
-from typing import Final, Literal, NotRequired, TypedDict
+from typing import Final, NotRequired, TypedDict
 
 from cronsim import CronSim, CronSimError
 
@@ -33,8 +34,10 @@ from .const import (
     RULE_TARGET_TYPE_IP,
     RULE_TARGET_TYPE_MAC,
     RULE_TARGET_TYPE_NETWORK,
+    MembershipKind,
 )
 from .utils.mac import normalize_mac_address
+from .utils.values import iso_instant, normalized_bool
 
 _RAW_UPDATE_IDLE_TS_KEY: Final = "idleTs"
 _RAW_UPDATE_NOTES_KEY: Final = "notes"
@@ -60,6 +63,9 @@ _RAW_UPDATE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
 _RAW_UPDATE_ALARM_ID_KEY: Final = "aid"
 _STATUS_DISABLED: Final = "disabled"
 _STATUS_ENABLED: Final = "enabled"
+# `ltype` is the box's own discriminator between a record it stopped and one it
+# let through: "audit" is blocked, "flow" is regular.
+_FLOW_LTYPE_BLOCKED: Final = "audit"
 _TEMPLATE_DATA_ACTION_KEY: Final = "action"
 _TEMPLATE_DATA_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
 _TEMPLATE_DATA_NAME_KEY: Final = "name"
@@ -177,16 +183,16 @@ def _normalized_optional_string(value: object) -> str | None:
 
 
 def _normalized_optional_bool(value: object) -> bool | None:
-    """Return a normalized boolean when Firewalla exposes one."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        stripped_value = value.strip().casefold()
-        if stripped_value == "true":
-            return True
-        if stripped_value == "false":
-            return False
-    return None
+    """Return a normalized boolean when Firewalla exposes one.
+
+    Delegates to the shared boolean policy, which accepts all four encodings the
+    box uses (``bool``, ``0``/``1``, ``"1"``/``"0"``, ``"true"``/``"false"``).
+    The previous local version accepted only real booleans and
+    ``"true"``/``"false"``, so any field the box sent as ``"0"``/``"1"`` read
+    as absent. ``autoDeleteWhenExpires`` is such a field: it has no caller today,
+    which is why this was a trap rather than a live defect.
+    """
+    return normalized_bool(value)
 
 
 def _normalized_metadata_value(value: object) -> object | None:
@@ -408,6 +414,9 @@ class FirewallaReportTarget:
     kind: str
     id: str | None = None
     name: str | None = None
+    # Only set for a network target. The kind says "a network"; this says which
+    # kind of network, which the box distinguishes and the kind must not lose.
+    network_kind: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -440,6 +449,74 @@ class FirewallaReportWarning:
 
     code: str
     message: str
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowReportTarget:
+    """One resolved flow-report scope, carrying **two** identities on purpose.
+
+    ``kind`` / ``identity_id`` / ``identity_name`` are the caller-facing identity,
+    and they follow the integration's identity contract: a device is keyed by MAC, a
+    group by its group id, and a **user by its user id** -- the same key the
+    watched-user entities use in their unique ids and the same value
+    ``get_time_usage`` reports as ``target_id``. ``kind`` is the same machine
+    vocabulary every other published target uses, because it is read from
+    :data:`SCOPE_SELECTOR_FIELDS`' kind rather than from a request enum.
+
+    ``request_type`` / ``request_target`` are what the flow queries are actually
+    asked, which is not always the identity. The box keys flow data by the
+    protocol pair ``host`` / ``tag``, and for a user that means the **affiliated
+    tag**, not the user id: measured on all 10 users, the affiliated tag returned
+    398-578 rollup rows where the user id returned **zero**, and
+    ``item=appTimeUsage`` accepts both, so the two endpoints disagree.
+
+    Keeping them apart is what stops a protocol implementation detail from
+    becoming the published identity. The affiliated tag is still reported, as a
+    *resolution* rather than as the target, so the report remains explicable
+    without anyone having to treat it as the answer to "who is this?".
+    """
+
+    kind: str
+    identity_id: str
+    identity_name: str | None
+    request_type: str
+    request_target: str
+
+    @property
+    def is_identity_remapped(self) -> bool:
+        """Return whether the protocol target differs from the published identity."""
+        return self.request_target != self.identity_id
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaScopeIdentity:
+    """One resolved scope, in the machine vocabulary, before any wire translation.
+
+    The two services that take a scope need the same resolution and different wire
+    forms, so the shared part stops here: `kind` is `host` / `group` / `user` /
+    `network`, or `all` for the wide case, and `identifier` is the value the *box*
+    addresses that scope by -- which for a user is its affiliated tag, not its user id.
+
+    Keeping the affiliated-tag substitution in one place is deliberate. It is the
+    easiest thing in this area to get wrong, and a second copy of the rule is how two
+    services would come to scope the same request differently.
+    """
+
+    kind: str
+    identifier: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaRuleScope:
+    """What a created rule applies to, in the two shapes the wire uses.
+
+    They are separate lists because the box keys them separately: `scope` holds host
+    MACs, and `tag_refs` holds prefixed references naming a group, a user or a
+    network. Both empty is the wide scope -- every host.
+    """
+
+    scope: tuple[str, ...] = ()
+    tag_refs: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -593,6 +670,13 @@ class FirewallaNetwork:
     name: str
     kind: FirewallaNetworkKind
     interface_name: str | None = None
+    # The box's own ``networkConfig.interface`` category (``bond``, ``bridge``,
+    # ``phy``, ``wlan``, ``wireguard``, ``amneziawg``, ``openvpn``, ``vlan``).
+    # ``kind`` is lossy on purpose -- three categories map to LAN, three to VPN
+    # and two to WAN -- so this is the only place the specific transport
+    # survives. It is exact as the wire spells it, which is why it is kept
+    # verbatim rather than renamed.
+    interface_category: str | None = None
     vlan_id: int | None = None
     ports: tuple[str, ...] = ()
     ipv4_addresses: tuple[str, ...] = ()
@@ -625,6 +709,15 @@ class FirewallaNetworkUsageSummary:
     ``monthly`` is the current calendar-month total (from the WAN monthly
     usage source) and is distinct from the rolling ``last_30d`` window; the two
     are never conflated.
+
+    ``flow_families`` records which ``flows`` families the payload actually
+    carried. The box returns two **disjoint** sets depending on the request -- the
+    app and category families (``appDetails``, ``categoryDetails``) or the eleven
+    traffic families (``download``, ``upload``, ``dnsB``, ``ipB:*``, ``local:*``)
+    -- so a caller can tell a network with no traffic from a network whose ranking
+    families were never returned. Without it, an empty ``top_download_hosts`` reads
+    as "nothing is using bandwidth", which is a statement the payload does not
+    support.
     """
 
     last_24h: FirewallaNetworkUsageWindow | None = None
@@ -632,6 +725,7 @@ class FirewallaNetworkUsageSummary:
     last_30d: FirewallaNetworkUsageWindow | None = None
     last_12m: FirewallaNetworkUsageWindow | None = None
     monthly: FirewallaNetworkUsageWindow | None = None
+    flow_families: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -709,7 +803,7 @@ class FirewallaNetworkTopTalker:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaNetworkHostIpAssignment:
-    """One normalized host IP assignment for a network segment report."""
+    """One normalized host IP assignment for `get_network_config`."""
 
     mode: str | None = None
     network_uuid: str | None = None
@@ -733,7 +827,7 @@ class FirewallaNetworkHostActions:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaNetworkHostDetail:
-    """One configuration-oriented host detail row for a segment report."""
+    """One configuration-oriented host detail row for `get_network_config`."""
 
     host_id: str
     host_name: str | None = None
@@ -750,7 +844,7 @@ class FirewallaNetworkHostDetail:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaNetworkDhcpConfig:
-    """One normalized DHCP configuration section for a segment report."""
+    """One normalized DHCP configuration section for `get_network_config`."""
 
     gateway: str | None = None
     subnet_mask: str | None = None
@@ -768,7 +862,7 @@ class FirewallaNetworkSegmentView:
 
     target: FirewallaNetworkSegment
     interface_name: str | None = None
-    network_type: str | None = None
+    interface_type: str | None = None
     monitoring: bool | None = None
     active: bool | None = None
     ready: bool | None = None
@@ -797,11 +891,41 @@ class FirewallaNetworkSegmentView:
     last60: tuple[FirewallaNetworkMetricSeries, ...] = ()
     last30: tuple[FirewallaNetworkMetricSeries, ...] = ()
     last12_months: tuple[FirewallaNetworkMetricSeries, ...] = ()
+    flow_families: tuple[str, ...] = ()
+
+    @property
+    def has_ranking_families(self) -> bool:
+        """Return whether the payload carried the per-device ranking families.
+
+        An empty ``top_download_hosts`` means "nothing transferred" only when this
+        is true. When it is false the ranking was never measured, which is a
+        different statement a caller must be able to distinguish.
+        """
+        return "download" in self.flow_families or "upload" in self.flow_families
 
     @property
     def host_count(self) -> int:
         """Return the number of host totals rows exposed for this segment."""
         return len(self.hosts)
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaActivityBasis:
+    """The frame every connectivity boolean on a surface is measured in.
+
+    ``reference_at`` is the instant host activity is compared against and
+    ``window_seconds`` is the tolerance. Publishing both beside a boolean makes
+    it reproducible: without them a caller can only compare the boolean against
+    wall clock, which yields a different answer whenever the reference is not
+    now — an inventory older than the window, or a freshly polled snapshot whose
+    newest device has been quiet since yesterday.
+
+    A ``None`` reference means no activity has ever been observed, so nothing
+    can be measured and every boolean in this frame is ``None``.
+    """
+
+    reference_at: float | None
+    window_seconds: int
 
 
 @dataclass(slots=True, frozen=True)
@@ -831,6 +955,11 @@ class FirewallaHostRuntime:
     dns_fqdn: str | None = None
     dhcp_name: str | None = None
     host_device_type: str | None = None
+    # Which kind `group_name` names, using the tag collection's own vocabulary. A
+    # host carries no such discriminator in the payload — a group and a user are the
+    # same tag — so without this a reader has to resolve the label against both
+    # collections and hope it matches one.
+    membership_kind: MembershipKind | None = None
     vpn_client: FirewallaHostVpnClient | None = None
     group_ids: tuple[str, ...] = ()
     user_ids: tuple[str, ...] = ()
@@ -848,7 +977,7 @@ class FirewallaGroupRuntime:
 
     group_id: str
     name: str
-    kind: Literal["group", "user"]
+    kind: MembershipKind
     user_id: str | None = None
 
 
@@ -892,9 +1021,16 @@ class FirewallaWatchedUser:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaUsageHistoryTarget:
-    """Resolved usage-history target metadata for one scoped query."""
+    """Resolved usage-history target metadata for one scoped query.
 
-    scope_kind: str
+    ``kind`` and ``selector_field`` are the machine vocabulary values: the resolved
+    scope's kind, and the selector field the caller actually wrote (``host_mac``,
+    ``group_name``, ...). The field is carried because a caller who asked by name
+    and got a MAC back benefits from reading which of their inputs was used.
+    """
+
+    kind: str
+    selector_field: str
     target_id: str
     target_name: str | None
     request_scope_type: str
@@ -974,24 +1110,415 @@ class FirewallaUsageHistoryView:
 
 
 @dataclass(slots=True, frozen=True)
-class FirewallaRuleHit:
-    """The most recent traffic a rule matched.
+class FirewallaFlowRecord:
+    """One flow record, exactly as the box stores it.
 
-    Firewalla keeps only the last matched flow per rule, not a log, so this is a
-    point-in-time observation rather than a history. It is what makes a rule
-    answerable as "what did this rule last stop, and for which device?".
+    The same shape is returned by the flow log, the block log, and a rule's
+    ``lastHitFlow``. Measured live: of the 32 fields a flow-log record carried,
+    **all 32** appear identically in ``lastHitFlow``, and the per-``ltype`` field
+    sets match too. So one model and one reader serve all three surfaces rather
+    than each keeping its own hand-picked subset.
+
+    Blocked and regular records differ in which fields are populated, not in
+    structure:
+
+    - **blocked** (``ltype == "audit"``) names the rule that stopped it
+      (``blocked_by_rule_id``) and the match kind (``block_type``), and carries
+      **no byte fields at all** -- Firewalla intercepts it before it travels.
+    - **regular** (``ltype == "flow"``) carries ``download_bytes``,
+      ``upload_bytes``, ``duration_seconds`` and the resolved destination.
+
+    Three states for a byte total, and all three occur:
+
+    - a **number** -- measured up to 488 MB on one destination
+    - an **explicit ``0``** -- the box sends it: 188 of one 5,000-record page
+      carried ``download: 0``. A measured empty transfer, not an absence.
+    - **absent** -- a blocked record, which never transferred anything.
+      ``None`` is kept rather than defaulting to ``0`` so those two are not
+      conflated.
+
+    ``ltype`` was ``"audit"`` or ``"flow"`` on all 12,315 records measured, so
+    ``is_blocked``'s third state is a guard rather than a live case.
+
+    **A rule hit can describe traffic the record logs never return.** Measured,
+    21 of 48 hits carried ``dstMac`` and ``local: true`` -- LAN-to-LAN traffic --
+    while **0 of 20,000** live flow-log or block-log records carried either. So
+    this model serves both sources, and a consumer must not assume the population
+    is the same: a rule can last have matched a LAN flow that the flow report's
+    record families will never show.
+
+    Three rare fields the box sometimes puts on a rule hit -- ``appHosts``,
+    ``rl`` and ``drl`` -- are deliberately not modelled: they appeared on at most
+    5 of 48 records, their meaning is not established, and a modelled field we
+    cannot interpret is worse than an absent one.
+
+    ``device_id`` is a Firewalla device id, not necessarily a MAC: measured, 3 of
+    48 hits carried a ``wg_peer:`` / ``awg_peer:`` / ``if:`` prefixed id, and an
+    ``if:`` device names an interface with no host-inventory entry at all.
+    ``device_id`` and ``destination_mac`` are **both device ids** and either can
+    hold the peer, so the field a MAC appears in does not identify the side.
     """
 
-    timestamp: float | None
-    device_mac: str | None
-    device_ip: str | None
-    destination: str | None
-    destination_kind: str | None
-    destination_ip: str | None
-    port: int | None
-    protocol: str | None
-    app: str | None
-    category: str | None
+    timestamp: float | None = None
+    ltype: str | None = None
+    device_id: str | None = None
+    device_ip: str | None = None
+    destination: str | None = None
+    destination_kind: str | None = None
+    destination_ip: str | None = None
+    destination_mac: str | None = None
+    port: int | None = None
+    device_port: int | None = None
+    protocol: str | None = None
+    blocked_by_rule_id: int | None = None
+    block_type: str | None = None
+    download_bytes: int | None = None
+    upload_bytes: int | None = None
+    duration_seconds: float | None = None
+    event_count: int | None = None
+    network_id: str | None = None
+    remote_network_id: str | None = None
+    apid: int | None = None
+    category: str | None = None
+    app: str | None = None
+    region: str | None = None
+    tags: tuple[str, ...] = ()
+    user_tags: tuple[str, ...] = ()
+    membership_tags: tuple[str, ...] = ()
+    destination_tags: tuple[str, ...] = ()
+    flow_tags: tuple[str, ...] = ()
+
+    @property
+    def is_blocked(self) -> bool | None:
+        """Return whether the box stopped this flow before it travelled.
+
+        ``None`` when the record carries no ``ltype``, rather than ``False``. The
+        box reported ``ltype`` on every record measured, so the unknown case is
+        not expected -- but ``False`` would be a positive claim that a record we
+        could not classify was allowed through, and a wrong answer is worse than
+        an absent one.
+        """
+        if self.ltype is None:
+            return None
+        return self.ltype == _FLOW_LTYPE_BLOCKED
+
+    @property
+    def total_bytes(self) -> int | None:
+        """Return the combined transfer total, or ``None`` when there is none.
+
+        Absent rather than zero for a blocked record: an intercepted flow has no
+        bytes to report, and ``0`` would read as a measured empty transfer.
+        """
+        if self.download_bytes is None and self.upload_bytes is None:
+            return None
+        return (self.download_bytes or 0) + (self.upload_bytes or 0)
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowWindow:
+    """The time window a flow response **actually** covered.
+
+    Separate from the window that was requested, because the box silently clamps
+    rather than rejecting: measured, requests for 1h, 24h, 25h, 48h and 168h
+    windows all returned identical data spanning 24.00h. Reporting the requested
+    window would describe data the caller does not have.
+    """
+
+    requested_hours: int
+    begin_timestamp: int | None = None
+    end_timestamp: int | None = None
+
+    @property
+    def served_hours(self) -> float | None:
+        """Return how many hours the response actually covered."""
+        if self.begin_timestamp is None or self.end_timestamp is None:
+            return None
+        return (self.end_timestamp - self.begin_timestamp) / 3600
+
+    @property
+    def is_clamped(self) -> bool:
+        """Return whether the box served a shorter window than was asked for.
+
+        A small tolerance absorbs the second-level rounding in the row bounds, so
+        an exactly-24h answer to a 24h request is not reported as clamped.
+        """
+        served = self.served_hours
+        if served is None:
+            return False
+        return served < self.requested_hours - 0.05
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowRollup:
+    """One windowed flow rollup, with the window it really covered.
+
+    ``families`` maps a family name (``download``, ``dnsB``, ``local:upload``,
+    ...) to its rows. Rows stay raw mappings: their fields vary by family, and the
+    ``count`` field means **bytes** on the byte families but a **block count** on
+    the blocked ones, so a single typed row would misreport one of them.
+    """
+
+    target_type: str
+    target: str
+    window: FirewallaFlowWindow
+    families: Mapping[str, tuple[Mapping[str, object], ...]] = field(
+        default_factory=dict
+    )
+    hosts: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+
+    @property
+    def total_rows(self) -> int:
+        """Return how many destination rows the rollup carried."""
+        return sum(len(rows) for rows in self.families.values())
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowRecordSet:
+    """One collected set of flow-log or block-log records.
+
+    ``rows_returned`` and ``rows_available`` are kept apart deliberately: the box
+    caps a requested page silently and reports a count that can exceed the rows it
+    sent, so a caller needs both to tell a truncated result from a quiet target.
+
+    ``records_dropped_as_duplicates`` makes the page-boundary dedupe visible. If
+    two genuinely distinct records ever serialise identically they would be
+    merged, and that has to be observable rather than silent.
+    """
+
+    records: tuple[Mapping[str, object], ...]
+    rows_available: int | None = None
+    next_cursor: float | None = None
+    truncated: bool = False
+    pages_fetched: int = 1
+    records_dropped_as_duplicates: int = 0
+
+    @property
+    def rows_returned(self) -> int:
+        """Return how many records this set actually carries."""
+        return len(self.records)
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowTotals:
+    """Whole-window totals for one flow rollup.
+
+    Byte and count totals are separate fields rather than one number, because the
+    box overloads ``count`` per family and the units are not interchangeable.
+    """
+
+    download_bytes: int = 0
+    upload_bytes: int = 0
+    local_download_bytes: int = 0
+    local_upload_bytes: int = 0
+    blocked_dns_count: int = 0
+    blocked_ip_count: int = 0
+    denied_ip_count: int = 0
+    connection_count: int = 0
+
+    @property
+    def total_bytes(self) -> int:
+        """Return the combined WAN-facing transfer total."""
+        return self.download_bytes + self.upload_bytes
+
+    @property
+    def blocked_total(self) -> int:
+        """Return how many blocks the box reported across all blocked families."""
+        return self.blocked_dns_count + self.blocked_ip_count + self.denied_ip_count
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowDestination:
+    """One destination's WAN-facing traffic, merged across both byte families.
+
+    The rollup lists ``download`` and ``upload`` separately and names the same
+    destinations in both, so one row here carries both directions. Ranking by
+    either is therefore a choice the caller makes over one set of rows rather than
+    a second request.
+
+    ``destination`` is whatever the box resolved, which is subdomain-granular
+    (``catalog.gamepass.com`` rather than ``gamepass.com``). Rolling up to a
+    registrable domain would need a public suffix list to be correct for the likes
+    of ``co.uk``, so it is deliberately not attempted here rather than being
+    approximated wrongly.
+
+    ``destination_ips`` is a tuple because one hostname resolves to many
+    addresses -- measured, 43 of 116 hosts in a single window had more than one.
+    Aggregating per address would list ``speed.cloudflare.com`` several times over
+    and understate each entry, so the hostname is the key and its addresses are
+    reported alongside it.
+    """
+
+    destination: str | None = None
+    destination_kind: str | None = None
+    destination_ips: tuple[str, ...] = ()
+    download_bytes: int = 0
+    upload_bytes: int = 0
+    rollup_rows: int = 0
+    device_ids: tuple[str, ...] = ()
+
+    @property
+    def total_bytes(self) -> int:
+        """Return this destination's combined transfer total."""
+        return self.download_bytes + self.upload_bytes
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaBlockedDestination:
+    """One destination the box stopped, and what it stopped.
+
+    A blocked record never travelled, so it carries a **count of blocks** rather
+    than bytes. That is a different measurement from
+    :class:`FirewallaFlowDestination` and is kept in a different model so the two
+    cannot be read as one another.
+
+    ``destination_ips`` is a tuple for the same reason as on
+    :class:`FirewallaFlowDestination`: a hostname can resolve to several
+    addresses, and keying per address would split one destination into a
+    confusing run of near-identical rows.
+
+    ``direction`` is ``None`` when the family name does not carry one, which is
+    the case for ``dnsB``.
+    """
+
+    destination: str | None = None
+    destination_kind: str | None = None
+    destination_ips: tuple[str, ...] = ()
+    block_type: str | None = None
+    direction: str | None = None
+    block_count: int = 0
+    rollup_rows: int = 0
+    device_ids: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaLocalPeer:
+    """One LAN peer a device talked to, which never left the network.
+
+    Identified by MAC because a peer inside the LAN has no hostname to resolve to,
+    and counted in connections rather than bytes.
+    """
+
+    peer_id: str
+    connection_count: int = 0
+    rollup_rows: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowMember:
+    """One device's totals, from the rollup's per-member block.
+
+    Only populated on a ``tag`` request: a device report has no members to rank,
+    so an empty member list means "not applicable" rather than "no members".
+
+    ``device_name`` is resolved from the host inventory when the device is known.
+    VPN peers **are** in that inventory -- the box synthesizes them from its
+    ``wgPeers`` / ``awgPeers`` blocks -- so a ``wg_peer:`` or ``awg_peer:`` member
+    normally does resolve. A member whose id has no entry keeps ``None``, which is
+    the honest answer for an id that is not a host: an ``if:`` device names a
+    network interface, which has no inventory entry at all.
+    """
+
+    device_id: str
+    device_name: str | None = None
+    device_ip: str | None = None
+    download_bytes: int = 0
+    upload_bytes: int = 0
+    connection_count: int = 0
+    dns_count: int = 0
+    blocked_dns_count: int = 0
+    blocked_ip_count: int = 0
+    denied_ip_count: int = 0
+    ntp_count: int = 0
+    local_download_bytes: int = 0
+    local_upload_bytes: int = 0
+
+    @property
+    def total_bytes(self) -> int:
+        """Return this device's combined WAN-facing transfer total."""
+        return self.download_bytes + self.upload_bytes
+
+    @property
+    def blocked_total(self) -> int:
+        """Return how many of this device's flows the box stopped."""
+        return self.blocked_dns_count + self.blocked_ip_count + self.denied_ip_count
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowSummary:
+    """The summarized view of one flow rollup.
+
+    Every section is derived from the **same single response** -- the rollup
+    already carries totals, per-destination rows, the blocked breakdown and the
+    per-member ranking -- so this is one fetch presented several ways rather than
+    several fetches.
+    """
+
+    window: FirewallaFlowWindow
+    totals: FirewallaFlowTotals = field(default_factory=FirewallaFlowTotals)
+    top_download: tuple[FirewallaFlowDestination, ...] = ()
+    top_upload: tuple[FirewallaFlowDestination, ...] = ()
+    blocked: tuple[FirewallaBlockedDestination, ...] = ()
+    local_peers: tuple[FirewallaLocalPeer, ...] = ()
+    top_members: tuple[FirewallaFlowMember, ...] = ()
+    family_row_counts: Mapping[str, int] = field(default_factory=dict)
+
+    @property
+    def rollup_rows(self) -> int:
+        """Return how many destination rows the rollup carried in total."""
+        return sum(self.family_row_counts.values())
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowRecordView:
+    """One normalized record family, with the block-to-rule join applied.
+
+    ``rule_names`` maps each blocking rule id found in these records to its
+    current name. A rule id is **not durable** across a delete and re-create, so a
+    record can name a rule that no longer exists; those records are kept and
+    counted in ``unattributed_blocks`` rather than dropped, because an
+    unattributable block is exactly the signal worth surfacing.
+
+    ``network_names`` and ``membership_names`` do the same for the interfaces and
+    tags a record mentions, so a consumer reads "VLAN10 CORE" rather than a uuid.
+    Only the ids these records actually reference are resolved, since a record
+    carries these as lists and resolving the whole inventory would be wasted work.
+    """
+
+    records: tuple[FirewallaFlowRecord, ...] = ()
+    rows_available: int | None = None
+    next_cursor: float | None = None
+    truncated: bool = False
+    pages_fetched: int = 1
+    records_dropped_as_duplicates: int = 0
+    unattributed_blocks: int = 0
+    rule_names: Mapping[int, str] = field(default_factory=dict)
+    network_names: Mapping[str, str] = field(default_factory=dict)
+    membership_names: Mapping[str, str] = field(default_factory=dict)
+
+    @property
+    def rows_returned(self) -> int:
+        """Return how many records this family carries."""
+        return len(self.records)
+
+    @property
+    def blocked_count(self) -> int:
+        """Return how many of these records the box stopped."""
+        return sum(1 for record in self.records if record.is_blocked is True)
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaFlowReportView:
+    """Everything one flow report contains, before it is shaped for a response.
+
+    ``records`` is ``None`` when the record families were not requested, which is
+    the common case: a summary is a single rollup and needs no log read at all.
+    """
+
+    target_type: str
+    target: str
+    summary: FirewallaFlowSummary | None = None
+    blocked_records: FirewallaFlowRecordView | None = None
+    flow_records: FirewallaFlowRecordView | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -1019,7 +1546,7 @@ class FirewallaPolicyRule:
     dnsmasq_only: bool | None = None
     category: str | None = None
     hit_count: int = 0
-    last_hit: FirewallaRuleHit | None = None
+    last_hit: FirewallaFlowRecord | None = None
     raw_update_payload: dict[str, object] = field(default_factory=dict, compare=False)
 
     @property
@@ -1035,6 +1562,21 @@ class FirewallaPolicyRule:
             return None
         stripped_notes = raw_notes.strip()
         return stripped_notes or None
+
+    @property
+    def is_tag_scoped(self) -> bool:
+        """Return whether this rule's scope is a group or user rather than a target.
+
+        The box signals this by putting the literal ``TAG`` in ``target`` with a
+        ``mac`` target type, so the field holds either a real target or the
+        protocol's own sentinel word. Keeping the test in one place matters
+        because it was written three times in two different forms, and the
+        published payload has to distinguish the two cases rather than pass the
+        sentinel through as if it were a target.
+        """
+        return (
+            self.target_type == RULE_TARGET_TYPE_MAC and self.target == RULE_TARGET_TAG
+        )
 
     @property
     def alarm_id(self) -> str | None:
@@ -1069,23 +1611,31 @@ class FirewallaPolicyRule:
 
     @property
     def is_paused(self) -> bool:
-        """Return whether the rule is currently in a timed paused state."""
-        if self.enabled:
-            return False
+        """Return whether the rule is paused, whether for a set time or indefinitely.
 
-        if (pause_until := self.pause_until) is None:
-            return False
+        Firewalla keeps one underlying pair of states: a rule is enabled or it is
+        disabled, and ``idleTs`` carries the boundary at which a disabled rule
+        should resume. A timed pause sets that boundary; an indefinite pause
+        carries none, which is also the shape the app's plain "off" sends -- so a
+        rule turned off in the app and a rule paused indefinitely are the same
+        state and cannot be told apart afterwards.
 
-        return pause_until > time.time()
+        So a disabled rule is paused, and :attr:`pause_until` is what separates
+        "resumes on its own" from "stays off until resumed".
+        """
+        return not self.enabled
 
     @property
     def pause_remaining_seconds(self) -> int | None:
-        """Return remaining seconds for a timed pause, if the rule is paused."""
-        if not self.is_paused:
-            return None
+        """Return seconds until an automatic resume, or ``None`` when none is set.
 
-        assert self.pause_until is not None
-        return max(0, int(self.pause_until - time.time()))
+        ``None`` covers the enabled case and the indefinite pause, where there is
+        no boundary to count down to.
+        """
+        pause_until = self.pause_until
+        if not self.is_paused or pause_until is None:
+            return None
+        return max(0, int(pause_until - time.time()))
 
     @property
     def active_time_schedule(self) -> str | None:
@@ -1384,7 +1934,7 @@ class FirewallaRuntimeSnapshot:
     hosts: tuple[FirewallaHostRuntime, ...] = ()
     groups: tuple[FirewallaGroupRuntime, ...] = ()
     users: tuple[FirewallaUserRuntime, ...] = ()
-    speed_test_results: tuple[FirewallaSpeedTestRecord, ...] = ()
+    speed_tests: tuple[FirewallaSpeedTestRecord, ...] = ()
     alarms: tuple[FirewallaAlarm, ...] = ()
     alarm_exceptions: tuple[FirewallaAlarmException, ...] = ()
     active_alarm_count: int = 0
@@ -1436,7 +1986,7 @@ class FirewallaAlarmException:
 
 
 def build_rule_hit_attributes(
-    hit: FirewallaRuleHit | None,
+    hit: FirewallaFlowRecord | None,
 ) -> dict[str, object]:
     """Build the shared shape for one rule's last matched flow.
 
@@ -1445,38 +1995,67 @@ def build_rule_hit_attributes(
     means the rule has never matched, never "unknown", so callers keep the two
     apart rather than defaulting to a zero count.
 
+    This projects the shared record down to what a rule surface needs. It is a
+    deliberate subset rather than the whole record: these keys land on an entity
+    attribute, and a record carries 35 fields whose meaning depends on whether it
+    was blocked or regular.
+
+    ``host_id`` identifies the host the flow belongs to and is not necessarily a
+    MAC; a VPN peer's id is not one. For a blocked record
+    ``block_type`` and ``blocked_by_rule_id`` are populated and the byte keys are
+    **absent, not zero**: a blocked flow never travelled. For a regular record the
+    reverse holds, so ``block_type`` is ``None`` rather than a default.
+
     Stdlib only, so the models layer stays free of Home Assistant imports.
     """
     if hit is None:
         return {
-            "timestamp": None,
-            "at": None,
-            "device_mac": None,
-            "device_ip": None,
+            "matched_at_timestamp": None,
+            "matched_at": None,
+            "is_blocked": None,
+            "block_type": None,
+            "blocked_by_rule_id": None,
+            "host_id": None,
+            "host_ip": None,
             "destination": None,
             "destination_kind": None,
             "destination_ip": None,
+            "destination_mac": None,
             "port": None,
+            "host_port": None,
             "protocol": None,
+            "download_bytes": None,
+            "upload_bytes": None,
+            "duration_seconds": None,
+            "event_count": None,
+            "network_id": None,
             "app": None,
             "category": None,
+            "region": None,
         }
     return {
-        "timestamp": hit.timestamp,
-        "at": (
-            datetime.fromtimestamp(hit.timestamp, UTC).isoformat()
-            if hit.timestamp is not None
-            else None
-        ),
-        "device_mac": hit.device_mac,
-        "device_ip": hit.device_ip,
+        "matched_at_timestamp": hit.timestamp,
+        "matched_at": iso_instant(hit.timestamp),
+        "is_blocked": hit.is_blocked,
+        "block_type": hit.block_type,
+        "blocked_by_rule_id": hit.blocked_by_rule_id,
+        "host_id": hit.device_id,
+        "host_ip": hit.device_ip,
         "destination": hit.destination,
         "destination_kind": hit.destination_kind,
         "destination_ip": hit.destination_ip,
+        "destination_mac": hit.destination_mac,
         "port": hit.port,
+        "host_port": hit.device_port,
         "protocol": hit.protocol,
+        "download_bytes": hit.download_bytes,
+        "upload_bytes": hit.upload_bytes,
+        "duration_seconds": hit.duration_seconds,
+        "event_count": hit.event_count,
+        "network_id": hit.network_id,
         "app": hit.app,
         "category": hit.category,
+        "region": hit.region,
     }
 
 
@@ -1487,7 +2066,7 @@ def format_policy_rule_name(rule: FirewallaPolicyRule) -> str:
 
     applicability = f" for {', '.join(rule.applies_to)}" if rule.applies_to else ""
 
-    if rule.target_type == RULE_TARGET_TYPE_MAC and rule.target == RULE_TARGET_TAG:
+    if rule.is_tag_scoped:
         if rule.target_name:
             return f"{rule.action} internet for {rule.target_name}"
         return f"{rule.action} internet{applicability}"

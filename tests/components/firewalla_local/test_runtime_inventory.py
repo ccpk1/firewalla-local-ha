@@ -52,13 +52,10 @@ def test_runtime_inventory_reports_device_counts_with_entity_definition() -> Non
     )
 
     summary = report["summary"]
-    assert summary["devices_total"] == 4
-    assert summary["devices_online"] == 1
-    assert summary["devices_offline"] == 3
-    assert (
-        summary["devices_online"] + summary["devices_offline"]
-        == summary["devices_total"]
-    )
+    assert summary["hosts_total"] == 4
+    assert summary["hosts_online"] == 1
+    assert summary["hosts_offline"] == 3
+    assert summary["hosts_online"] + summary["hosts_offline"] == summary["hosts_total"]
 
 
 def test_runtime_inventory_device_counts_are_zero_without_host_timestamps() -> None:
@@ -73,9 +70,9 @@ def test_runtime_inventory_device_counts_are_zero_without_host_timestamps() -> N
     )
 
     summary = report["summary"]
-    assert summary["devices_total"] == 1
-    assert summary["devices_online"] == 0
-    assert summary["devices_offline"] == 1
+    assert summary["hosts_total"] == 1
+    assert summary["hosts_online"] == 0
+    assert summary["hosts_offline"] == 1
 
 
 def test_build_runtime_inventory_report() -> None:
@@ -281,9 +278,13 @@ def test_build_runtime_inventory_report() -> None:
             "enabled": True,
             "expire_seconds": None,
             "expires_at": None,
-            "activated_time": None,
-            "updated_time": None,
-            "last_activated_time": None,
+            "expires_at_timestamp": None,
+            "activated_at": None,
+            "activated_at_timestamp": None,
+            "updated_at": None,
+            "updated_at_timestamp": None,
+            "last_activated_at": None,
+            "last_activated_at_timestamp": None,
             "auto_delete_when_expires": None,
             "custom_name": None,
             "dnsmasq_only": None,
@@ -307,6 +308,7 @@ def test_build_runtime_inventory_report() -> None:
             "notes": None,
             "pause_remaining_seconds": None,
             "pause_until": None,
+            "pause_until_timestamp": None,
             "protocol": None,
             "purpose": None,
             "raw_extras": {},
@@ -342,10 +344,14 @@ def test_build_runtime_inventory_report() -> None:
             "app_uid": None,
             "enabled": True,
             "expire_seconds": 3600,
-            "expires_at": 1_700_003_600.0,
-            "activated_time": 1_700_000_000.0,
-            "updated_time": None,
-            "last_activated_time": None,
+            "expires_at": "2023-11-14T23:13:20+00:00",
+            "expires_at_timestamp": 1_700_003_600.0,
+            "activated_at": "2023-11-14T22:13:20+00:00",
+            "activated_at_timestamp": 1_700_000_000.0,
+            "updated_at": None,
+            "updated_at_timestamp": None,
+            "last_activated_at": None,
+            "last_activated_at_timestamp": None,
             "auto_delete_when_expires": True,
             "custom_name": None,
             "dnsmasq_only": False,
@@ -369,6 +375,7 @@ def test_build_runtime_inventory_report() -> None:
             "notes": None,
             "pause_remaining_seconds": None,
             "pause_until": None,
+            "pause_until_timestamp": None,
             "protocol": None,
             "purpose": None,
             "raw_extras": {},
@@ -399,9 +406,13 @@ def test_build_runtime_inventory_report() -> None:
             "enabled": True,
             "expire_seconds": None,
             "expires_at": None,
-            "activated_time": None,
-            "updated_time": None,
-            "last_activated_time": None,
+            "expires_at_timestamp": None,
+            "activated_at": None,
+            "activated_at_timestamp": None,
+            "updated_at": None,
+            "updated_at_timestamp": None,
+            "last_activated_at": None,
+            "last_activated_at_timestamp": None,
             "auto_delete_when_expires": None,
             "custom_name": None,
             "dnsmasq_only": None,
@@ -425,6 +436,7 @@ def test_build_runtime_inventory_report() -> None:
             "notes": None,
             "pause_remaining_seconds": None,
             "pause_until": None,
+            "pause_until_timestamp": None,
             "protocol": None,
             "purpose": None,
             "raw_extras": {},
@@ -461,9 +473,13 @@ def test_build_runtime_inventory_report() -> None:
             "enabled": True,
             "expire_seconds": None,
             "expires_at": None,
-            "activated_time": None,
-            "updated_time": None,
-            "last_activated_time": None,
+            "expires_at_timestamp": None,
+            "activated_at": None,
+            "activated_at_timestamp": None,
+            "updated_at": None,
+            "updated_at_timestamp": None,
+            "last_activated_at": None,
+            "last_activated_at_timestamp": None,
             "auto_delete_when_expires": None,
             "custom_name": None,
             "dnsmasq_only": True,
@@ -493,6 +509,7 @@ def test_build_runtime_inventory_report() -> None:
             "notes": None,
             "pause_remaining_seconds": None,
             "pause_until": None,
+            "pause_until_timestamp": None,
             "protocol": None,
             "purpose": None,
             "raw_extras": {
@@ -654,7 +671,10 @@ def test_build_runtime_inventory_report_promotes_rule_metadata() -> None:
     assert rule["trust"] is False
     assert rule["use_bf"] is None
     assert rule["upnp"] is False
-    assert rule["pause_until"] == 1_774_488_468.0
+    # ISO on the readable key and epoch on the twin, matching the rule service
+    # surface: this name used to carry an epoch here and a date there.
+    assert rule["pause_until"] == "2026-03-26T01:27:48+00:00"
+    assert rule["pause_until_timestamp"] == 1_774_488_468.0
     assert rule["raw_extras"] == {
         "targetList": "0",
         "timestamp": "1745623964.006",

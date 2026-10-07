@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -24,6 +22,7 @@ from .const import (
     ATTR_RULE_NOTES,
     ATTR_RULE_PAUSE_REMAINING_SECONDS,
     ATTR_RULE_PAUSE_UNTIL,
+    ATTR_RULE_PAUSE_UNTIL_TIMESTAMP,
     ATTR_RULE_PURPOSE,
     ATTR_RULE_SCHEDULE_DAYS,
     ATTR_RULE_SCHEDULE_DURATION,
@@ -60,6 +59,7 @@ from .models import (
     build_rule_hit_attributes,
     format_policy_rule_name,
 )
+from .utils.values import iso_instant
 
 PARALLEL_UPDATES = 0
 
@@ -159,13 +159,14 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
             if matched_rule is not None
             else None
         )
-        pause_until = (
-            datetime.fromtimestamp(matched_rule.pause_until, UTC).isoformat()
+        pause_until_timestamp = (
+            matched_rule.pause_until
             if matched_rule is not None
             and matched_rule.is_paused
             and matched_rule.pause_until is not None
             else None
         )
+        pause_until = iso_instant(pause_until_timestamp)
         attributes: dict[str, object] = {
             **self.build_state_attributes(
                 TRANS_KEY_PURPOSE_RULE_SWITCH,
@@ -208,6 +209,7 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
 
         if pause_until is not None:
             attributes[ATTR_RULE_PAUSE_UNTIL] = pause_until
+            attributes[ATTR_RULE_PAUSE_UNTIL_TIMESTAMP] = pause_until_timestamp
 
         if (
             matched_rule is not None

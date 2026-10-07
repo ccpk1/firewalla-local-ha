@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Final
+from typing import Final, Literal, get_args
 
 DOMAIN: Final = "firewalla_local"
 LOGGER: Final = logging.getLogger(__name__)
@@ -15,6 +15,34 @@ MANUFACTURER: Final = "Firewalla"
 # tuple so this module stays free of homeassistant imports; the version
 # predicate lives in llm_support.py.
 MIN_LLM_TOOLS_HA_VERSION: Final = (2026, 10)
+
+# Published report target kinds. This is the machine register for "what sort of
+# thing is this target", so an endpoint is `host` and never the human word
+# `device`. A network reports `network` and carries the box's own lan/vlan/vpn/wan
+# type on a separate `network_kind` field rather than in the kind, because those
+# are different questions and collapsing them would lose one.
+#
+# The set covers every object the integration publishes as a target, not only the
+# report scopes: a control tool's result target names a rule, an alarm, a silence or
+# an SSID, and those are the same kind of question. One vocabulary, so a reader who
+# learns it from a report is not surprised by a tool result.
+TARGET_KIND_HOST: Final = "host"
+TARGET_KIND_GROUP: Final = "group"
+TARGET_KIND_USER: Final = "user"
+TARGET_KIND_NETWORK: Final = "network"
+TARGET_KIND_RULE: Final = "rule"
+TARGET_KIND_ALARM: Final = "alarm"
+TARGET_KIND_SILENCE: Final = "silence"
+TARGET_KIND_SSID: Final = "ssid"
+
+# The request vocabulary spells an endpoint `device`; the published vocabulary
+# spells it `host`. A resolved scope cannot be passed through as its own kind, so
+# every report translates through this map rather than re-deciding per service.
+TARGET_KIND_BY_REPORT_SCOPE: Final = {
+    "device": TARGET_KIND_HOST,
+    "group": TARGET_KIND_GROUP,
+    "user": TARGET_KIND_USER,
+}
 
 # Entity state attributes
 ATTR_INTEGRATION: Final = "integration"
@@ -35,6 +63,7 @@ ATTR_RULE_HIT_COUNT: Final = "hit_count"
 ATTR_RULE_LAST_HIT: Final = "last_hit"
 ATTR_RULE_IS_PAUSED: Final = "is_paused"
 ATTR_RULE_PAUSE_UNTIL: Final = "pause_until"
+ATTR_RULE_PAUSE_UNTIL_TIMESTAMP: Final = "pause_until_timestamp"
 ATTR_RULE_PAUSE_REMAINING_SECONDS: Final = "pause_remaining_seconds"
 ATTR_RULE_ACTIVE_TIME_SCHEDULE: Final = "active_time_schedule"
 ATTR_RULE_APP_TIME_PERIOD: Final = "app_time_period"
@@ -65,12 +94,12 @@ ATTR_SYSTEM_BOX_IMAGE_VERSION: Final = "box_image_version"
 ATTR_SYSTEM_BOOT_COMPLETE: Final = "boot_complete"
 ATTR_SYSTEM_CPU_USAGE_1M: Final = "cpu_usage_1m"
 ATTR_SYSTEM_CLOUD_CONNECTED: Final = "cloud_connected"
-ATTR_SYSTEM_DEVICES_OFFLINE: Final = "devices_offline"
-ATTR_SYSTEM_DEVICES_ONLINE: Final = "devices_online"
-ATTR_SYSTEM_DEVICES_TOTAL: Final = "devices_total"
-ATTR_SYSTEM_VPN_DEVICES_OFFLINE: Final = "vpn_devices_offline"
-ATTR_SYSTEM_VPN_DEVICES_ONLINE: Final = "vpn_devices_online"
-ATTR_SYSTEM_VPN_DEVICES_TOTAL: Final = "vpn_devices_total"
+ATTR_SYSTEM_HOSTS_OFFLINE: Final = "hosts_offline"
+ATTR_SYSTEM_HOSTS_ONLINE: Final = "hosts_online"
+ATTR_SYSTEM_HOSTS_TOTAL: Final = "hosts_total"
+ATTR_SYSTEM_VPN_HOSTS_OFFLINE: Final = "vpn_hosts_offline"
+ATTR_SYSTEM_VPN_HOSTS_ONLINE: Final = "vpn_hosts_online"
+ATTR_SYSTEM_VPN_HOSTS_TOTAL: Final = "vpn_hosts_total"
 ATTR_SYSTEM_CURRENT_WAN_USAGE: Final = "current_wan_usage"
 ATTR_SYSTEM_DDNS: Final = "ddns"
 ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT: Final = "disk_usage_percent_by_mount"
@@ -79,6 +108,9 @@ ATTR_SYSTEM_MEMORY_FREE_MB: Final = "memory_free_mb"
 ATTR_SYSTEM_SOFTWARE_VERSION: Final = "software_version"
 ATTR_SYSTEM_MEMORY_USAGE_PERCENT: Final = "memory_usage_percent"
 ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT: Final = "runtime_data_updated_at"
+ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT_TIMESTAMP: Final = (
+    "runtime_data_updated_at_timestamp"
+)
 ATTR_SYSTEM_UPTIME: Final = "uptime"
 ATTR_SYSTEM_UPTIME_SECONDS: Final = "uptime_seconds"
 ATTR_SYSTEM_WAN_IP: Final = "wan_ip"
@@ -96,7 +128,7 @@ ATTR_NETWORK_IPV6_SUBNETS: Final = "ipv6_subnets"
 ATTR_NETWORK_GATEWAY: Final = "gateway"
 ATTR_NETWORK_DNS_SERVERS: Final = "dns_servers"
 ATTR_NETWORK_DHCP: Final = "dhcp"
-ATTR_NETWORK_DEVICE_COUNT: Final = "device_count"
+ATTR_NETWORK_HOST_COUNT: Final = "host_count"
 ATTR_NETWORK_TOP_TALKERS: Final = "top_talkers"
 ATTR_NETWORK_USAGE: Final = "network_usage"
 ATTR_NETWORK_ENABLED: Final = "enabled"
@@ -122,16 +154,21 @@ ATTR_AP_PAUSE_WIFI: Final = "pause_wifi"
 ATTR_AP_DISABLE_ACL: Final = "disable_acl"
 ATTR_AP_CLIENT_COUNT: Final = "client_count"
 ATTR_NETWORK_BLOCK_ICMP: Final = "block_icmp"
+ATTR_ACTIVITY_REFERENCE_AT: Final = "activity_reference_at"
+ATTR_ACTIVITY_REFERENCE_AT_TIMESTAMP: Final = "activity_reference_at_timestamp"
+ATTR_ONLINE_WINDOW_SECONDS: Final = "online_window_seconds"
+ATTR_DEVICE_TRACKER_AWAY_WINDOW_SECONDS: Final = "away_window_seconds"
 ATTR_WATCHED_DEVICE_CONNECTION_TYPE: Final = "connection_type"
-ATTR_WATCHED_DEVICE_DEVICE_GROUP: Final = "device_group"
+ATTR_WATCHED_DEVICE_HOST_GROUP: Final = "host_group"
 ATTR_WATCHED_DEVICE_HOST_NAME: Final = "host_name"
 ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE: Final = "host_device_type"
 ATTR_WATCHED_DEVICE_DNS_DOMAIN: Final = "dns_domain"
 ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE: Final = "download_usage"
 ATTR_WATCHED_DEVICE_DNS_FQDN: Final = "dns_fqdn"
 ATTR_WATCHED_DEVICE_DNS_HOSTNAME: Final = "dns_hostname"
-ATTR_WATCHED_DEVICE_IP_ADDRESS: Final = "ip_address"
-ATTR_WATCHED_DEVICE_LAST_ACTIVE: Final = "last_active"
+ATTR_WATCHED_DEVICE_IP_ADDRESS: Final = "host_ip"
+ATTR_WATCHED_DEVICE_LAST_ACTIVE: Final = "last_active_at"
+ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP: Final = "last_active_at_timestamp"
 ATTR_WATCHED_DEVICE_NETWORK_NAME: Final = "network_name"
 ATTR_WATCHED_DEVICE_UPLOAD_USAGE: Final = "upload_usage"
 ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE: Final = "topology_connection_type"
@@ -140,10 +177,11 @@ ATTR_WATCHED_DEVICE_WIFI_BAND: Final = "wifi_band"
 ATTR_WATCHED_DEVICE_WIFI_RSSI: Final = "wifi_rssi"
 ATTR_WATCHED_DEVICE_WIFI_SSID: Final = "wifi_ssid"
 ATTR_WATCHED_USER_APP_USAGE_BY_APP: Final = "app_usage_by_app"
-ATTR_WATCHED_USER_ASSOCIATED_DEVICE_COUNT: Final = "associated_device_count"
-ATTR_WATCHED_USER_ASSOCIATED_DEVICE_GROUP: Final = "associated_device_group"
-ATTR_WATCHED_USER_ASSOCIATED_DEVICES: Final = "associated_devices"
-ATTR_WATCHED_USER_LAST_ACTIVE: Final = "last_active"
+ATTR_WATCHED_USER_ASSOCIATED_HOST_COUNT: Final = "associated_host_count"
+ATTR_WATCHED_USER_ASSOCIATED_HOST_GROUP: Final = "associated_host_group"
+ATTR_WATCHED_USER_ASSOCIATED_HOSTS: Final = "associated_hosts"
+ATTR_WATCHED_USER_LAST_ACTIVE: Final = "last_active_at"
+ATTR_WATCHED_USER_LAST_ACTIVE_TIMESTAMP: Final = "last_active_at_timestamp"
 ATTR_WATCHED_USER_UNIQUE_USAGE_TODAY: Final = "unique_usage_today"
 ATTR_SPEED_TEST_DOWNLOAD_MBYTES: Final = "download_megabytes"
 ATTR_SPEED_TEST_ISP: Final = "isp"
@@ -159,6 +197,7 @@ ATTR_SPEED_TEST_SERVER_LOCATION: Final = "server_location"
 ATTR_SPEED_TEST_SERVER_SPONSOR: Final = "server_sponsor"
 ATTR_SPEED_TEST_SUCCESS: Final = "success"
 ATTR_SPEED_TEST_TESTED_AT: Final = "tested_at"
+ATTR_SPEED_TEST_TESTED_AT_TIMESTAMP: Final = "tested_at_timestamp"
 ATTR_SPEED_TEST_UPLOAD: Final = "upload_speed"
 ATTR_SPEED_TEST_UPLOAD_MBYTES: Final = "upload_megabytes"
 ATTR_SPEED_TEST_VENDOR: Final = "vendor"
@@ -166,6 +205,7 @@ ATTR_SPEED_TEST_WAN_NAME: Final = "wan_name"
 ATTR_SPEED_TEST_WAN_UUID: Final = "wan_uuid"
 ATTR_INTERNET_QUALITY_PING_TARGET: Final = "ping_target"
 ATTR_INTERNET_QUALITY_SAMPLED_AT: Final = "sampled_at"
+ATTR_INTERNET_QUALITY_SAMPLED_AT_TIMESTAMP: Final = "sampled_at_timestamp"
 ATTR_INTERNET_QUALITY_PING_LATENCY: Final = "ping_latency"
 ATTR_INTERNET_QUALITY_PING_LATENCY_MAX: Final = "ping_latency_max"
 ATTR_INTERNET_QUALITY_PING_LATENCY_MEDIAN: Final = "ping_latency_median"
@@ -195,8 +235,6 @@ SERVICE_FIELD_USAGE_HISTORY_APP_IDS: Final = "app_ids"
 SERVICE_FIELD_USAGE_HISTORY_BEGIN: Final = "begin"
 SERVICE_FIELD_USAGE_HISTORY_END: Final = "end"
 SERVICE_FIELD_USAGE_HISTORY_GRANULARITY: Final = "granularity"
-SERVICE_FIELD_USAGE_HISTORY_SCOPE_KIND: Final = "scope_kind"
-SERVICE_FIELD_USAGE_HISTORY_SCOPE_TARGET: Final = "scope_target"
 SERVICE_FIELD_LIMIT: Final = "limit"
 SERVICE_FIELD_WINDOW_DAYS: Final = "window_days"
 SERVICE_FIELD_INCLUDE_DNS: Final = "include_dns"
@@ -219,17 +257,52 @@ SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED: Final = "include_system_managed"
 HIDDEN_RULE_PURPOSES: Final = ("dap", "family")
 SERVICE_FIELD_NETWORK_NAME: Final = "network_name"
 SERVICE_FIELD_NETWORK_UUID: Final = "network_uuid"
+
+# A rule's scope can name a whole population instead of specific hosts. It is a flag
+# rather than a `scope_kind: "all"` value for two reasons: the wide case must be
+# chosen rather than reached by leaving a field out, and on the wire an empty scope
+# *is* the wide case -- so a scope that gets dropped by mistake would silently widen
+# a rule. Naming it `all_hosts` keeps the machine word (`host`, never `device`).
+SERVICE_FIELD_ALL_HOSTS: Final = "all_hosts"
+
+# How a rule names what it applies to, on the wire. A rule carries its scope as a
+# list of prefixed references, and the prefix says what kind each one is. The
+# vocabulary lives here rather than in the API client because it is shared: the client
+# reads these back and the service layer writes them, and a second copy is how the two
+# would drift.
+#
+# **A user is a group-prefixed reference.** The box expresses a rule's user attachment
+# as `tag:<affiliated_tag_id>` -- the *group* prefix carrying the user's affiliated
+# backing tag -- not as `utag:<user_id>`. The client's reader reconciles exactly that
+# shape, resolving a `tag:` reference to a user when the id is an affiliated tag. So a
+# `utag:` reference, which looks like the obvious choice from this list, is wrong for
+# a rule.
+TAG_REF_PREFIX_GROUP: Final = "tag"
+TAG_REF_PREFIX_DEVICE: Final = "dtag"
+TAG_REF_PREFIX_USER: Final = "utag"
+TAG_REF_PREFIX_USER_ALT: Final = "userTag"
+TAG_REF_PREFIX_NETWORK: Final = "intf"
+TAG_REF_SEPARATOR: Final = ":"
+
+
+def build_tag_reference(prefix: str, value: str) -> str:
+    """Return one prefixed rule-scope reference as the wire expects it."""
+    return f"{prefix}{TAG_REF_SEPARATOR}{value}"
+
+
 SERVICE_FIELD_OFFSET: Final = "offset"
 SERVICE_FIELD_REFRESH: Final = "refresh"
 SERVICE_FIELD_RESERVED_IPV4: Final = "reserved_ipv4"
 SERVICE_FIELD_SECTIONS: Final = "sections"
 SERVICE_FIELD_RULE_DURATION: Final = "duration"
 SERVICE_FIELD_RULE_RESUME_AT: Final = "resume_at"
-SERVICE_FIELD_RULE_TARGET: Final = "rule_target"
 SERVICE_FIELD_TOP_N: Final = "top_n"
 SERVICE_FIELD_WAN_NAME: Final = "wan_name"
 SERVICE_FIELD_WAN_UUID: Final = "wan_uuid"
 SERVICE_FIELD_WINDOW: Final = "window"
+SERVICE_FIELD_WINDOW_HOURS: Final = "window_hours"
+SERVICE_FIELD_RECORD_COUNT: Final = "record_count"
+SERVICE_FIELD_FETCH_ALL_RECORDS: Final = "fetch_all_records"
 SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
 
 # Default query windows. The network usage default is the smallest supported
@@ -238,6 +311,74 @@ SERVICE_FIELD_SSID_PROFILE_ID: Final = "ssid_profile_id"
 DEFAULT_NETWORK_USAGE_WINDOW: Final = "last_60_minutes"
 DEFAULT_WAN_USAGE_CURRENT_PERIODS: Final = ("day", "week")
 DEFAULT_WAN_EVENT_WINDOW_DAYS: Final = 7
+
+# The flow report's default window. The box serves its own 24-hour window when a
+# request carries no time bounds at all, which is what this mirrors; it is a
+# constant because the box can change that default, and a caller asking for a
+# wider window is served 24 hours anyway rather than being told.
+DEFAULT_FLOW_REPORT_WINDOW_HOURS: Final = 24
+
+# The most records one flow-log or block-log request will return, measured. The
+# box caps a positive ``count`` here and silently returns this many for anything
+# larger, so a full 24-hour window on a busy target needs pagination rather than a
+# bigger request. A non-positive ``count`` bypasses the cap and returns the whole
+# retained window, so a caller-supplied count is never forwarded unvalidated.
+MAX_FLOW_LOG_PAGE_SIZE: Final = 5000
+
+# The smallest page worth asking for. Below this the box's behaviour is undefined
+# rather than merely small -- measured: `count: 1` returned zero rows while
+# `count: 0` returned 100 -- so a caller-supplied count is clamped to at least
+# this rather than forwarded. It is a constant because the service schema and the
+# client must agree on it: a schema that admitted a smaller value would have the
+# client silently adjust it.
+MIN_FLOW_LOG_PAGE_SIZE: Final = 50
+
+# The all-available walk stops on a wall-clock deadline rather than a row cap, so
+# a slow box cannot stall a report indefinitely. It is deliberately not a service
+# field: a caller able to raise it without limit would defeat its purpose.
+FLOW_LOG_PAGE_DEADLINE_SECONDS: Final = 30
+
+# Which unit a rollup family's `count` is in. The box overloads the field and
+# documents doing so: "number of TCP connections or UDP sessions for flow, or
+# block count for blocked flow". Measured, the byte families run 49,148+ against
+# the blocked ones' 5,410 maximum, so reading one as the other is not a rounding
+# error -- it is a thousands-fold misstatement.
+FLOW_UNIT_BYTES: Final = "bytes"
+FLOW_UNIT_BLOCKED: Final = "blocked"
+FLOW_UNIT_CONNECTIONS: Final = "connections"
+
+# A flow's direction, taken from the family name and never from `fd`. Measured:
+# `fd` is "in" on all 199 `download` rows *and* all 199 `upload` rows, so it
+# cannot be a byte direction. `local` is a third case -- the traffic never left
+# the network, so it is neither inbound nor outbound.
+FLOW_DIRECTION_INBOUND: Final = "inbound"
+FLOW_DIRECTION_OUTBOUND: Final = "outbound"
+FLOW_DIRECTION_LOCAL: Final = "local"
+
+# The flow report's two depth levels. A summary is one rollup request and carries
+# no records; records adds the flow log and the block log, which are separate
+# reads and are only made when asked for.
+# The one `detail` vocabulary. A service returns either its summary or everything it
+# can, and that is the same question everywhere it is asked -- so one pair of values,
+# not the boolean, `standard` and `records` this replaces. What differs between
+# services is what "everything" costs: for some it is extra fields, for others an extra
+# request, and for the flow report it is the raw record log. That belongs in the field's
+# description, not in a second set of value names.
+DETAIL_SUMMARY: Final = "summary"
+DETAIL_FULL: Final = "full"
+DETAIL_LEVELS: Final = (DETAIL_SUMMARY, DETAIL_FULL)
+
+# The one include that widens a report: it adds the host identifiers the caller did
+# not itself name (member ranking, a destination's host ids, a record's host id and
+# address). Destination hostnames and addresses are never gated -- they are the
+# report's subject -- and a host target needs no flag at all, because it contains no
+# identity beyond the host that was asked for.
+FLOW_REPORT_INCLUDE_HOST_DETAIL: Final = "host_detail"
+
+# The page a records read asks for when the caller does not say. One page is the
+# default because a full day on a busy target is thousands of records; asking for
+# everything is an explicit choice, not a side effect of reading records.
+DEFAULT_FLOW_REPORT_RECORD_COUNT: Final = 300
 
 # Config entry data and options keys
 CONF_AID: Final = "aid"
@@ -324,6 +465,11 @@ PLATFORM_BUTTON: Final = "button"
 PLATFORM_DEVICE_TRACKER: Final = "device_tracker"
 PLATFORM_SENSOR: Final = "sensor"
 PLATFORM_SWITCH: Final = "switch"
+# A group and a user assignment are the same Firewalla protocol object (a host tag),
+# so every surface that reports membership discriminates it with these two values.
+MembershipKind = Literal["group", "user"]
+MEMBERSHIP_KIND_GROUP: Final = get_args(MembershipKind)[0]
+MEMBERSHIP_KIND_USER: Final = get_args(MembershipKind)[1]
 RULE_ACTION_ALLOW: Final = "allow"
 ATTR_ALARM_ACTIVE_COUNT: Final = "active_count"
 ATTR_ALARM_ARCHIVED_COUNT: Final = "archived_count"
@@ -331,9 +477,10 @@ ATTR_ALARM_PENDING_COUNT: Final = "pending_count"
 ATTR_ALARM_CATEGORY_COUNTS: Final = "active_by_category"
 ATTR_ALARM_CATEGORY_COUNTS_COMPLETE: Final = "active_by_category_complete"
 ATTR_ALARM_TYPE: Final = "alarm_type"
-ATTR_ALARM_DEVICE_NAME: Final = "device_name"
+ATTR_ALARM_HOST_NAME: Final = "host_name"
 ATTR_ALARM_MESSAGE: Final = "message"
 ATTR_ALARM_FIRED_AT: Final = "fired_at"
+ATTR_ALARM_FIRED_AT_TIMESTAMP: Final = "fired_at_timestamp"
 ATTR_ALARM_ID: Final = "alarm_id"
 RULE_ACTION_BLOCK: Final = "block"
 RULE_ACTION_DISTURB: Final = "disturb"
@@ -357,18 +504,39 @@ RULE_TARGET_TYPE_IP: Final = "ip"
 RULE_TARGET_TYPE_MAC: Final = "mac"
 RULE_TARGET_TYPE_NETWORK: Final = "network"
 RULE_TARGET_TYPE_REMOTE_PORT: Final = "remotePort"
+
+# Every matcher type a live rule can carry, which is what a rule filter may ask for.
+# The read side produces all six, so a filter that accepted fewer would reject values
+# it had just returned.
+RULE_TARGET_TYPES: Final = (
+    RULE_TARGET_TYPE_CATEGORY,
+    RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_IP,
+    RULE_TARGET_TYPE_MAC,
+    RULE_TARGET_TYPE_NETWORK,
+    RULE_TARGET_TYPE_REMOTE_PORT,
+)
+
+# What `create_rule` can build. A deliberate subset: the create path is verified for
+# these three, and the wider set above describes rules the box may hold rather than
+# rules this integration can author.
+CREATE_RULE_TARGET_TYPES: Final = (
+    RULE_TARGET_TYPE_DNS,
+    RULE_TARGET_TYPE_IP,
+    RULE_TARGET_TYPE_MAC,
+)
 CONFIG_ERROR_CANNOT_CONNECT: Final = "cannot_connect"
 CONFIG_ERROR_INVALID_HOST: Final = "invalid_host"
 CONFIG_ERROR_INVALID_QR: Final = "invalid_qr"
 CONFIG_ERROR_WRONG_ACCOUNT: Final = "wrong_account"
 SERVICE_GET_RUNTIME_INVENTORY: Final = "get_runtime_inventory"
 SERVICE_GET_HOSTS: Final = "get_hosts"
-SERVICE_GET_NETWORK_SEGMENT_REPORT: Final = "get_network_segment_report"
-SERVICE_GET_NETWORK_SEGMENT_USAGE: Final = "get_network_segment_usage"
-SERVICE_GET_SPEED_TEST_RESULTS: Final = "get_speed_test_results"
-SERVICE_GET_INTERNET_QUALITY_REPORT: Final = "get_internet_quality_report"
-SERVICE_GET_TIME_USAGE_REPORT: Final = "get_time_usage_report"
-SERVICE_GET_WAN_DATA_USAGE: Final = "get_wan_data_usage"
+SERVICE_GET_NETWORK_CONFIG: Final = "get_network_config"
+SERVICE_GET_NETWORK_USAGE: Final = "get_network_usage"
+SERVICE_GET_SPEED_TESTS: Final = "get_speed_tests"
+SERVICE_GET_INTERNET_QUALITY: Final = "get_internet_quality"
+SERVICE_GET_TIME_USAGE: Final = "get_time_usage"
+SERVICE_GET_WAN_USAGE: Final = "get_wan_usage"
 SERVICE_GET_WAN_EVENTS: Final = "get_wan_events"
 SERVICE_SET_HOST_NAME: Final = "set_host_name"
 SERVICE_SET_HOST_DNS_HOSTNAME: Final = "set_host_dns_hostname"
@@ -388,6 +556,7 @@ SERVICE_GET_ALARMS: Final = "get_alarms"
 SERVICE_GET_RULES: Final = "get_rules"
 SERVICE_SYNC_RUNTIME: Final = "sync_runtime"
 SERVICE_GET_SYSTEM_OVERVIEW: Final = "get_system_overview"
+SERVICE_GET_FLOW_REPORT: Final = "get_flow_report"
 SERVICE_CREATE_RULE: Final = "create_rule"
 SERVICE_ARCHIVE_ALARMS: Final = "archive_alarms"
 SERVICE_DELETE_ALARMS: Final = "delete_alarms"
@@ -395,6 +564,9 @@ SERVICE_MUTE_ALARM: Final = "mute_alarm"
 SERVICE_UNMUTE_ALARM: Final = "unmute_alarm"
 SERVICE_DELETE_RULE: Final = "delete_rule"
 SERVICE_FIELD_ALARM_ID: Final = "alarm_id"
+SERVICE_FIELD_ALARM_TARGET_TYPE: Final = "alarm_target_type"
+SERVICE_FIELD_ALARM_TARGET_VALUE: Final = "alarm_target_value"
+SERVICE_FIELD_ALARM_STATUS: Final = "alarm_status"
 SERVICE_FIELD_ALARM_TYPE: Final = "alarm_type"
 SERVICE_FIELD_DURATION: Final = "duration"
 SERVICE_FIELD_EXCEPTION_ID: Final = "exception_id"
@@ -406,6 +578,34 @@ SERVICE_FIELD_INCLUDE_ARCHIVED: Final = "include_archived"
 SERVICE_FIELD_INCLUDE_EXCEPTIONS: Final = "include_exceptions"
 SERVICE_FIELD_RULE_ID: Final = "rule_id"
 ALARM_SERVICE_MAX_LIMIT: Final = 500
+
+# Which alarms one bulk operation acts on. The box populates three sets -- its
+# snapshot reports active, archived and pending counts -- but only these two are
+# reachable through the alarm commands, so the vocabulary names what the operation
+# can actually select rather than everything the box models.
+ALARM_STATUS_ACTIVE: Final = "active"
+ALARM_STATUS_ARCHIVED: Final = "archived"
+
+# What an alarm silence targets. The caller's vocabulary, deliberately distinct from
+# the wire's (`alarmType` / `dns` / `ip`), because the alarm's own `alarm_type` value
+# is what `alarm_target_value` carries -- naming both the same thing would make
+# "target the alarm type ALARM_INTEL" read as a contradiction.
+ALARM_TARGET_ALARM_TYPE: Final = "alarm_type"
+ALARM_TARGET_DOMAIN: Final = "domain"
+ALARM_TARGET_IP: Final = "ip"
+ALARM_TARGET_TYPES: Final = (
+    ALARM_TARGET_ALARM_TYPE,
+    ALARM_TARGET_DOMAIN,
+    ALARM_TARGET_IP,
+)
+
+# The selector field sets the alarm services enforce "exactly one of" against.
+# Naming them in one place is what lets the archive, delete and silence services
+# raise the same message for the same mistake.
+ALARM_SET_SELECTOR_FIELDS: Final = (
+    SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_STATUS,
+)
 HOST_DEVICE_TYPE_OPTIONS: Final = (
     "desktop",
     "phone",
@@ -474,18 +674,22 @@ TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS: Final = (
     "membership_user_name_ambiguous"
 )
 TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND: Final = "membership_user_not_found"
-TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED: Final = (
-    "network_segment_report_failed"
-)
-TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED: Final = "network_segment_usage_failed"
+TRANS_KEY_EXCEPTION_NETWORK_CONFIG_FAILED: Final = "network_config_failed"
+TRANS_KEY_EXCEPTION_NETWORK_USAGE_FAILED: Final = "network_usage_failed"
 TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS: Final = "network_name_ambiguous"
 TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND: Final = "network_not_found"
 TRANS_KEY_EXCEPTION_NETWORK_REQUIRED: Final = "network_required"
 TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT: Final = "network_selector_conflict"
+# One message for one rule. Every service that selects something enforces the same
+# thing -- exactly one selector field, never two and never none -- so it raises the
+# same key and the caller reads the same sentence wherever they meet it. Named for
+# the rule rather than for the scopes that first needed it, because the alarm
+# services enforce it too.
+TRANS_KEY_EXCEPTION_SELECTOR_CONFLICT: Final = "selector_conflict"
+TRANS_KEY_EXCEPTION_SELECTOR_REQUIRED: Final = "selector_required"
 TRANS_KEY_ENTITY_BUTTON_SYNC_RUNTIME: Final = "sync_runtime"
 TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT: Final = "pause_rule_timing_conflict"
 TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST: Final = "resume_at_in_past"
-TRANS_KEY_EXCEPTION_RULE_TARGET_NOT_FOUND: Final = "rule_target_not_found"
 TRANS_KEY_EXCEPTION_SSID_PROFILE_NOT_FOUND: Final = "ssid_profile_not_found"
 TRANS_KEY_EXCEPTION_RUN_INTERNET_SPEED_TEST_FAILED: Final = (
     "run_internet_speed_test_failed"
@@ -506,32 +710,34 @@ TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED: Final = "speed_test_wan_required"
 TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT: Final = (
     "speed_test_wan_selector_conflict"
 )
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN: Final = (
-    "time_usage_report_end_before_begin"
-)
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS: Final = (
-    "time_usage_report_scope_ambiguous"
-)
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND: Final = (
-    "time_usage_report_scope_not_found"
-)
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED: Final = "time_usage_report_failed"
+TRANS_KEY_EXCEPTION_TIME_USAGE_END_BEFORE_BEGIN: Final = "time_usage_end_before_begin"
+TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_AMBIGUOUS: Final = "time_usage_scope_ambiguous"
+TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_NOT_FOUND: Final = "time_usage_scope_not_found"
+TRANS_KEY_EXCEPTION_TIME_USAGE_FAILED: Final = "time_usage_failed"
+TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_AMBIGUOUS: Final = "flow_report_scope_ambiguous"
+TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_NOT_FOUND: Final = "flow_report_scope_not_found"
+TRANS_KEY_EXCEPTION_FLOW_REPORT_FAILED: Final = "flow_report_failed"
 TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED: Final = "wake_host_failed"
 TRANS_KEY_EXCEPTION_DELETE_HOST_FAILED: Final = "delete_host_failed"
 TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED: Final = "delete_host_confirm_required"
 TRANS_KEY_EXCEPTION_DELETE_RULE_CONFIRM_REQUIRED: Final = "delete_rule_confirm_required"
 TRANS_KEY_EXCEPTION_RULE_NOT_FOUND: Final = "rule_not_found"
+TRANS_KEY_EXCEPTION_RULE_SCOPE_AMBIGUOUS: Final = "rule_scope_ambiguous"
+TRANS_KEY_EXCEPTION_RULE_SCOPE_NOT_FOUND: Final = "rule_scope_not_found"
 TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND: Final = "alarm_not_found"
 TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED: Final = "alarm_scope_target_required"
 TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED: Final = "alarm_selector_required"
 TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED: Final = "alarm_operation_failed"
+TRANS_KEY_EXCEPTION_ALARM_ARCHIVED_REQUIRES_REFRESH: Final = (
+    "alarm_archived_requires_refresh"
+)
 TRANS_KEY_EXCEPTION_DELETE_ALARMS_CONFIRM_REQUIRED: Final = (
     "delete_alarms_confirm_required"
 )
 TRANS_KEY_EXCEPTION_DELETE_RULE_FAILED: Final = "delete_rule_failed"
-TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED: Final = "wan_data_usage_failed"
-TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
-    "wan_data_usage_history_period_required"
+TRANS_KEY_EXCEPTION_WAN_USAGE_FAILED: Final = "wan_usage_failed"
+TRANS_KEY_EXCEPTION_WAN_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
+    "wan_usage_history_period_required"
 )
 TRANS_KEY_EXCEPTION_WAN_EVENTS_FAILED: Final = "wan_events_failed"
 TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY: Final = "wrong_integration_entry"
@@ -584,10 +790,11 @@ TRANS_PLACEHOLDER_NETWORK_NAME: Final = "network_name"
 TRANS_PLACEHOLDER_NETWORK_UUID: Final = "network_uuid"
 TRANS_PLACEHOLDER_RESERVED_IPV4: Final = "reserved_ipv4"
 TRANS_PLACEHOLDER_RULE_NAME: Final = "rule_name"
-TRANS_PLACEHOLDER_RULE_TARGET: Final = "rule_target"
+TRANS_PLACEHOLDER_RULE_ID: Final = "rule_id"
 TRANS_PLACEHOLDER_SSID_PROFILE_ID: Final = "ssid_profile_id"
 TRANS_PLACEHOLDER_SCOPE_KIND: Final = "scope_kind"
 TRANS_PLACEHOLDER_SCOPE_TARGET: Final = "scope_target"
+TRANS_PLACEHOLDER_SELECTOR_FIELDS: Final = "selector_fields"
 TRANS_PLACEHOLDER_WAN_NAME: Final = "wan_name"
 TRANS_PLACEHOLDER_WAN_UUID: Final = "wan_uuid"
 TRANS_PLACEHOLDER_NETWORK_KIND: Final = "network_kind"

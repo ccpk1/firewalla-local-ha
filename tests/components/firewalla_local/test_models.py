@@ -1,5 +1,7 @@
 """Tests for Firewalla Local model helpers."""
 
+import pytest
+
 from custom_components.firewalla_local.models import (
     FirewallaAlarm,
     FirewallaNetworkKind,
@@ -105,6 +107,45 @@ def test_rule_template_create_value_includes_alarm_id_when_set() -> None:
     payload = template.build_create_value(updated_time=1.0)
 
     assert payload["aid"] == "1728"
+
+
+def test_rule_template_create_value_carries_the_captured_scope_forms() -> None:
+    """Test the create payload matches what the box was captured accepting.
+
+    Captured on 2026-10-05 by creating one rule per scope in the Firewalla app
+    (`policy:create` on port 8833). Each `tag` array below is the captured value
+    verbatim, so this pins the wire form against measurement rather than against the
+    read side's shape.
+
+    The user case is the one that matters. The app was used to select the **user**
+    `KADENS_DEVICES` (uid 32) and the box received `tag:31` -- the user's *affiliated
+    tag*, under the `tag:` prefix, and not the user id and not `utag:32`. The read side
+    resolves that same reference back to a user, so the round-trip closes.
+    """
+    cases = (
+        ("group", ["tag:27"]),
+        ("user", ["tag:31"]),
+        ("network", ["intf:95169e6a-a7c9-4d6a-8e83-6061b4812bf2"]),
+    )
+
+    for label, captured_refs in cases:
+        payload = FirewallaRuleTemplate(
+            source_rule_id="",
+            name="block example.com",
+            action="block",
+            target="example.com",
+            target_type="dns",
+            scope=(),
+            tag_refs=tuple(captured_refs),
+            dnsmasq_only=True,
+        ).build_create_value(updated_time=0)
+
+        assert payload["tag"] == captured_refs, f"{label} tag reference drifted"
+        # Captured as an empty scope on all three: a tag reference is the whole scope
+        # when one is present.
+        assert payload["scope"] == [], f"{label} should carry no MAC scope"
+        assert payload["type"] == "dns"
+        assert payload["dnsmasq_only"] is True
 
 
 def test_network_kind_display_name_uses_acronyms() -> None:
@@ -413,3 +454,61 @@ def test_supports_rule_switch_excludes_firewall_rules() -> None:
     )
 
     assert supports_rule_switch(rule) is False
+
+
+@pytest.mark.parametrize(
+    (
+        "enabled",
+        "idle_ts",
+        "expected_paused",
+        "expected_pause_until",
+        "expects_countdown",
+    ),
+    [
+        pytest.param(True, None, False, None, False, id="enabled"),
+        pytest.param(False, "", True, None, False, id="indefinite_pause"),
+        pytest.param(False, 4102444800.0, True, 4102444800.0, True, id="timed_pause"),
+    ],
+)
+def test_is_paused_covers_timed_and_indefinite_pauses(
+    enabled: bool,
+    idle_ts: object,
+    expected_paused: bool,
+    expected_pause_until: float | None,
+    expects_countdown: bool,
+) -> None:
+    """Test a disabled rule reports paused, boundary or not.
+
+    Firewalla keeps one underlying pair of states -- a rule is enabled or it is
+    disabled -- and `idleTs` carries the boundary at which a disabled rule should
+    resume. A timed pause sets that boundary; an indefinite pause carries none,
+    which is also the shape the app's plain "off" sends.
+
+    So `is_paused` is true for both pause kinds, and `pause_until` is what
+    separates "the box will resume this" from "this stays off until resumed".
+    Before this, only a timed pause reported paused, so an indefinite pause was
+    indistinguishable from a rule that was simply off -- which is why
+    `pause_rule` had no honest way to report what it had done.
+
+    `pause_remaining_seconds` is None whenever there is no boundary, including
+    the indefinite case, where it previously asserted its way to a crash.
+    """
+    payload: dict[str, object] = {}
+    if idle_ts is not None:
+        payload["idleTs"] = idle_ts
+
+    rule = FirewallaPolicyRule(
+        rule_id="516",
+        action="block",
+        target="TLX-fw-youtube",
+        target_type="category",
+        direction="bidirection",
+        enabled=enabled,
+        purpose="firewall",
+        scope=(),
+        raw_update_payload=payload,
+    )
+
+    assert rule.is_paused is expected_paused
+    assert rule.pause_until == expected_pause_until
+    assert (rule.pause_remaining_seconds is not None) is expects_countdown

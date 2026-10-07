@@ -56,6 +56,67 @@ def _alarm(
     )
 
 
+class _StubCoordinator:
+    """A coordinator stub whose update method republishes `data` like the real one."""
+
+    def __init__(self, data: FirewallaRuntimeSnapshot) -> None:
+        """Hold one snapshot."""
+        self.data = data
+        self.updates: list[FirewallaRuntimeSnapshot] = []
+
+    def async_set_updated_data(self, data: FirewallaRuntimeSnapshot) -> None:
+        """Replace the held snapshot, as the coordinator does."""
+        self.data = data
+        self.updates.append(data)
+
+
+def _snapshot_with(
+    alarms: tuple[FirewallaAlarm, ...],
+    *,
+    active_count: int,
+    archived_count: int,
+) -> FirewallaRuntimeSnapshot:
+    """Return a snapshot carrying the given alarm state."""
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.0.2.1",
+            group_name=None,
+            device_name=None,
+            model=None,
+            serial_number=None,
+            software_version=None,
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        alarms=alarms,
+        active_alarm_count=active_count,
+        archived_alarm_count=archived_count,
+        pending_alarm_count=0,
+    )
+
+
+def _manager_with_alarms(
+    client: FirewallaApiClient,
+    alarms: tuple[FirewallaAlarm, ...],
+    *,
+    active_count: int = 2,
+    archived_count: int = 0,
+) -> tuple[FirewallaAlarmManager, _StubCoordinator]:
+    """Return an alarm manager holding the given alarms, plus its coordinator."""
+    snapshot = _snapshot_with(
+        alarms, active_count=active_count, archived_count=archived_count
+    )
+    coordinator = _StubCoordinator(snapshot)
+    manager = FirewallaAlarmManager(
+        cast(FirewallaDataUpdateCoordinator, coordinator),
+        cast(FirewallaConfigEntry, Mock()),
+        client,
+    )
+    manager.handle_refresh(snapshot)
+    return manager, coordinator
+
+
 def _manager(client: FirewallaApiClient) -> FirewallaAlarmManager:
     """Build an alarm manager with isolated entry/coordinator dependencies."""
     return FirewallaAlarmManager(
@@ -152,7 +213,7 @@ async def test_mute_alarm_type_creates_explicit_scoped_exception() -> None:
             alarm_id=None,
             target_type="alarm_type",
             target_value="ALARM_GAME",
-            scope_kind="device",
+            scope_kind="host",
             scope_target="00:11:22:33:44:55",
             duration="always",
         )
@@ -195,7 +256,7 @@ async def test_mute_active_alarm_uses_alarm_allow_for_dns_device_scope() -> None
             alarm_id="alarm-1",
             target_type="domain",
             target_value=None,
-            scope_kind="device",
+            scope_kind="host",
             scope_target="00:11:22:33:44:55",
             duration="always",
         )
@@ -249,6 +310,7 @@ async def test_get_alarms_filters_companion_types_before_detail() -> None:
             include_archived=True,
             alarm_type="security",
             detail=True,
+            refresh=True,
         )
 
     assert [alarm.alarm_id for alarm in alarms] == [
@@ -258,3 +320,214 @@ async def test_get_alarms_filters_companion_types_before_detail() -> None:
     assert alarms[0].is_archived
     assert all(alarm.severity == "high" for alarm in alarms)
     assert get_detail.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_archive_one_alarm_updates_state_and_counts() -> None:
+    """Archiving an alarm moves it out of the active set and both counts with it.
+
+    `ARCHITECTURE.md` requires a successful command to update runtime state so the
+    next read agrees with it. Without this the alarm stayed active in every read for
+    up to the update interval, which is why these services forced a poll.
+    """
+    client = _client()
+    client.async_archive_alarm = AsyncMock()
+    first = _alarm(
+        "a1", alarm_type="ALARM_INTEL", fired_at=1_700_000_000.0, category="security"
+    )
+    second = _alarm(
+        "a2", alarm_type="ALARM_INTEL", fired_at=1_700_000_100.0, category="security"
+    )
+    manager, coordinator = _manager_with_alarms(client, (first, second))
+
+    await manager.async_archive_alarms(alarm_id="a1")
+
+    assert client.async_archive_alarm.await_count == 1
+    assert [alarm.alarm_id for alarm in manager.active_alarms] == ["a2"]
+    assert manager.active_count == 1
+    assert manager.archived_count == 1
+    # the snapshot carries the same state, so a later refresh or diagnostics read
+    # cannot disagree with the manager
+    assert coordinator.data.active_alarm_count == 1
+    assert coordinator.data.archived_alarm_count == 1
+    assert [alarm.alarm_id for alarm in coordinator.data.alarms] == ["a2"]
+
+
+@pytest.mark.asyncio
+async def test_archive_all_moves_the_whole_active_set() -> None:
+    """Bulk archive clears the active set and folds its size into the archive."""
+    client = _client()
+    client.async_archive_all_alarms = AsyncMock()
+    manager, coordinator = _manager_with_alarms(
+        client,
+        (
+            _alarm(
+                "a1",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_000.0,
+                category="security",
+            ),
+            _alarm(
+                "a2",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_100.0,
+                category="security",
+            ),
+        ),
+        archived_count=3,
+    )
+
+    await manager.async_archive_alarms(alarm_id=None)
+
+    assert manager.active_alarms == ()
+    assert manager.active_count == 0
+    assert manager.archived_count == 5
+    assert coordinator.data.archived_alarm_count == 5
+
+
+@pytest.mark.asyncio
+async def test_delete_from_the_archived_set_changes_only_the_count() -> None:
+    """Deleting the archived set leaves the active list and count alone.
+
+    The archived set is not held locally — `_alarms` is the active set — so there is
+    nothing to remove from it, and dropping the active list here would hide alarms
+    that still exist.
+    """
+    client = _client()
+    client.async_delete_all_alarms = AsyncMock()
+    manager, _ = _manager_with_alarms(
+        client,
+        (
+            _alarm(
+                "a1",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_000.0,
+                category="security",
+            ),
+        ),
+        active_count=1,
+        archived_count=4,
+    )
+
+    await manager.async_delete_alarms(alarm_id=None, alarm_status="archived")
+
+    assert [alarm.alarm_id for alarm in manager.active_alarms] == ["a1"]
+    assert manager.active_count == 1
+    assert manager.archived_count == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_one_alarm_that_is_not_held_leaves_state_untouched() -> None:
+    """A delete for an alarm outside the active set publishes nothing.
+
+    The counts include archived alarms this manager does not hold, so decrementing
+    for an id it never had would report a count that no operation justified.
+    """
+    client = _client()
+    client.async_delete_alarm = AsyncMock()
+    manager, coordinator = _manager_with_alarms(
+        client,
+        (
+            _alarm(
+                "a1",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_000.0,
+                category="security",
+            ),
+        ),
+        active_count=1,
+        archived_count=4,
+    )
+
+    await manager.async_delete_alarms(alarm_id="archived-only", alarm_status=None)
+
+    assert coordinator.updates == []
+    assert manager.active_count == 1
+    assert manager.archived_count == 4
+
+
+async def test_get_alarms_serves_the_snapshot_by_default() -> None:
+    """The default read comes from the snapshot and does not touch the box."""
+    client = _client()
+    client.async_get_alarms = AsyncMock()
+    client.async_get_archived_alarms = AsyncMock()
+    manager, _ = _manager_with_alarms(
+        client,
+        (
+            _alarm(
+                "cached-1",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_100.0,
+                category="security",
+            ),
+        ),
+        active_count=1,
+    )
+
+    alarms = await manager.async_get_alarms(
+        limit=10, include_archived=False, alarm_type=None, detail=False
+    )
+
+    assert [alarm.alarm_id for alarm in alarms] == ["cached-1"]
+    assert client.async_get_alarms.await_count == 0
+    assert client.async_get_archived_alarms.await_count == 0
+
+
+async def test_get_alarms_shows_an_archive_made_in_the_same_session() -> None:
+    """The cached read reflects a local archive, which a box read would not.
+
+    This is the reason the default is the snapshot: the tool's own description tells
+    a model that an alarm it archived is gone from the result, and only a cached read
+    can honour that before the next poll.
+    """
+    client = _client()
+    client.async_archive_alarm = AsyncMock(return_value=None)
+    client.async_get_alarms = AsyncMock()
+    manager, _ = _manager_with_alarms(
+        client,
+        (
+            _alarm(
+                "keep",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_000.0,
+                category="security",
+            ),
+            _alarm(
+                "archived",
+                alarm_type="ALARM_VIDEO",
+                fired_at=1_700_000_500.0,
+                category="av",
+            ),
+        ),
+        active_count=2,
+    )
+
+    await manager.async_archive_alarms(alarm_id="archived")
+    alarms = await manager.async_get_alarms(
+        limit=10, include_archived=False, alarm_type=None, detail=False
+    )
+
+    assert [alarm.alarm_id for alarm in alarms] == ["keep"]
+    assert client.async_get_alarms.await_count == 0
+
+
+async def test_get_alarms_refresh_polls_the_box() -> None:
+    """`refresh: true` reads the box, which is the only way to see archived alarms."""
+    client = _client()
+    client.async_get_alarms = AsyncMock(
+        return_value=({"aid": "live-1", "type": "ALARM_INTEL", "alarmTimestamp": "10"},)
+    )
+    client.async_get_archived_alarms = AsyncMock(return_value=())
+    manager, _ = _manager_with_alarms(client, (), active_count=0)
+
+    alarms = await manager.async_get_alarms(
+        limit=10,
+        include_archived=True,
+        alarm_type=None,
+        detail=False,
+        refresh=True,
+    )
+
+    assert [alarm.alarm_id for alarm in alarms] == ["live-1"]
+    assert client.async_get_alarms.await_count == 1
+    assert client.async_get_archived_alarms.await_count == 1

@@ -26,6 +26,8 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     DOMAIN,
     SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_TARGET_TYPE,
+    SERVICE_FIELD_ALARM_TARGET_VALUE,
     SERVICE_FIELD_CONFIRM,
     SERVICE_FIELD_DURATION,
     SERVICE_FIELD_ENABLED,
@@ -34,13 +36,11 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_HOST_MAC,
     SERVICE_FIELD_NEW_NAME,
     SERVICE_FIELD_RULE_DURATION,
-    SERVICE_FIELD_RULE_TARGET,
-    SERVICE_FIELD_SCOPE_KIND,
-    SERVICE_FIELD_SCOPE_TARGET,
+    SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_SSID_PROFILE_ID,
-    SERVICE_FIELD_TARGET_TYPE,
-    SERVICE_FIELD_TARGET_VALUE,
     SERVICE_FIELD_USER_NAME,
+    SERVICE_FIELD_WAN_NAME,
+    SERVICE_FIELD_WAN_UUID,
 )
 from custom_components.firewalla_local.models import (
     FirewallaAlarm,
@@ -60,7 +60,7 @@ SET_HOST_DEVICE_TYPE = "firewalla_local__set_host_device_type"
 SET_SSID_PAUSED = "firewalla_local__set_ssid_paused"
 WAKE_HOST = "firewalla_local__wake_host"
 BLOCK_ALARM_TARGET = "firewalla_local__block_alarm_target"
-SET_ALARM_MUTED = "firewalla_local__set_alarm_muted"
+MUTE_ALARM = "firewalla_local__mute_alarm"
 ARCHIVE_ALARM = "firewalla_local__archive_alarm"
 ARCHIVE_ALL_ALARMS = "firewalla_local__archive_all_alarms"
 DELETE_ALARM = "firewalla_local__delete_alarm"
@@ -71,6 +71,7 @@ SET_HOST_GROUP = "firewalla_local__set_host_group"
 CLEAR_HOST_GROUP = "firewalla_local__clear_host_group"
 SET_HOST_USER = "firewalla_local__set_host_user"
 CLEAR_HOST_USER = "firewalla_local__clear_host_user"
+RUN_INTERNET_SPEED_TEST = "firewalla_local__run_internet_speed_test"
 
 _HOST_MAC = "0C:85:E1:B0:1D:1C"
 
@@ -249,7 +250,7 @@ async def test_pause_rule_applies_and_reports_undo(hass: HomeAssistant) -> None:
             api_instance,
             PAUSE_RULE,
             {
-                SERVICE_FIELD_RULE_TARGET: "761",
+                SERVICE_FIELD_RULE_ID: "761",
                 SERVICE_FIELD_RULE_DURATION: "30m",
             },
         )
@@ -258,44 +259,81 @@ async def test_pause_rule_applies_and_reports_undo(hass: HomeAssistant) -> None:
     assert result.error is False
     assert result.data["status"] == "applied"
     assert result.data["changed"] is True
+    assert result.data["runtime"] == "updated"
     assert result.data["target"] == {"kind": "rule", "id": "761"}
     assert result.data["before"] == {"enabled": True, "is_paused": False}
     assert result.data["after"] == {"enabled": False, "is_paused": True}
-    assert 'resume_rule(rule_target="761")' in result.data["undo"]
+    assert 'resume_rule(rule_id="761")' in result.data["undo"]
+
+
+async def test_run_internet_speed_test_reports_a_network_target(
+    hass: HomeAssistant,
+) -> None:
+    """A speed test names the WAN as a network target, not as a bare `wan`.
+
+    The report services publish every network target as `kind: "network"` plus a
+    `network_kind`, so a tool result must not reintroduce the second vocabulary a
+    `kind: "wan"` here would create.
+    """
+    with patch(
+        "homeassistant.core.ServiceRegistry.async_call",
+        new=AsyncMock(return_value={"ok": True}),
+    ):
+        api_instance = await _setup(hass)
+        result = await _call(
+            api_instance,
+            RUN_INTERNET_SPEED_TEST,
+            {SERVICE_FIELD_WAN_UUID: "wan-1", SERVICE_FIELD_WAN_NAME: "WAN-ONE"},
+        )
+
+    assert result.error is False
+    assert result.data["target"] == {
+        "kind": "network",
+        "network_kind": "wan",
+        "id": "wan-1",
+        "name": "WAN-ONE",
+    }
 
 
 async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
-    """pause_rule on an already-paused rule is a no-op with no service call."""
+    """pause_rule on an already-paused rule reports a no-op *and still writes*.
+
+    A disabled rule *is* paused -- Firewalla has one pair of states, enabled or
+    disabled, and a resume boundary is what makes a pause timed rather than
+    indefinite. So a disabled rule with no boundary reports `is_paused: true`.
+
+    The write happens anyway, and that is the point. The snapshot the precheck reads
+    can be a poll interval old, so skipping the write on its say-so meant a rule
+    resumed on the box in that window was reported as already-paused and left
+    running. The call is idempotent, so making it costs one request and is the only
+    way the answer is true; the precheck now shapes the report and nothing else.
+    """
     with patch(
         "custom_components.firewalla_local.api.client.FirewallaApiClient."
         "async_update_rule_control_only",
         new=AsyncMock(),
     ) as update_rule:
         api_instance = await _setup(hass, rule_enabled=False)
-        result = await _call(
-            api_instance, PAUSE_RULE, {SERVICE_FIELD_RULE_TARGET: "761"}
-        )
+        result = await _call(api_instance, PAUSE_RULE, {SERVICE_FIELD_RULE_ID: "761"})
 
-    assert update_rule.await_count == 0
+    assert update_rule.await_count == 1
     assert result.data["status"] == "already_in_state"
     assert result.data["changed"] is False
-    assert result.data["before"] == {"enabled": False, "is_paused": False}
+    assert result.data["before"] == {"enabled": False, "is_paused": True}
     assert result.data["after"] == result.data["before"]
 
 
 async def test_resume_rule_reports_already_in_state(hass: HomeAssistant) -> None:
-    """resume_rule on an enabled rule is a no-op with no service call."""
+    """resume_rule on an enabled rule reports a no-op and still writes."""
     with patch(
         "custom_components.firewalla_local.api.client.FirewallaApiClient."
         "async_update_rule_control_only",
         new=AsyncMock(),
     ) as update_rule:
         api_instance = await _setup(hass)
-        result = await _call(
-            api_instance, RESUME_RULE, {SERVICE_FIELD_RULE_TARGET: "761"}
-        )
+        result = await _call(api_instance, RESUME_RULE, {SERVICE_FIELD_RULE_ID: "761"})
 
-    assert update_rule.await_count == 0
+    assert update_rule.await_count == 1
     assert result.data["status"] == "already_in_state"
 
 
@@ -391,7 +429,7 @@ async def test_wake_host_calls_manager(hass: HomeAssistant) -> None:
 
 
 async def test_archive_alarm_uses_single_mode(hass: HomeAssistant) -> None:
-    """archive_alarm archives exactly one alarm (mode=this)."""
+    """archive_alarm archives exactly one alarm, by id."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
         "FirewallaAlarmManager.async_archive_alarms",
@@ -403,13 +441,13 @@ async def test_archive_alarm_uses_single_mode(hass: HomeAssistant) -> None:
         )
 
     assert archive.await_args is not None
-    assert archive.await_args.kwargs == {"mode": "this", "alarm_id": "1728"}
+    assert archive.await_args.kwargs == {"alarm_id": "1728"}
     assert result.data["status"] == "applied"
     assert result.data["warnings"] == ["no un-archive"]
 
 
-async def test_set_alarm_muted_calls_alarm_manager(hass: HomeAssistant) -> None:
-    """set_alarm_muted creates a silence and offers an alarm-scoped undo."""
+async def test_mute_alarm_calls_alarm_manager(hass: HomeAssistant) -> None:
+    """mute_alarm creates a silence and offers an alarm-scoped undo."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
         "FirewallaAlarmManager.async_mute_alarm",
@@ -418,18 +456,20 @@ async def test_set_alarm_muted_calls_alarm_manager(hass: HomeAssistant) -> None:
         api_instance = await _setup(hass)
         result = await _call(
             api_instance,
-            SET_ALARM_MUTED,
+            MUTE_ALARM,
             {
                 SERVICE_FIELD_ALARM_ID: "1728",
-                SERVICE_FIELD_TARGET_TYPE: "domain",
-                SERVICE_FIELD_TARGET_VALUE: "vimeo.com",
-                SERVICE_FIELD_SCOPE_KIND: "device",
-                SERVICE_FIELD_SCOPE_TARGET: _HOST_MAC,
+                SERVICE_FIELD_ALARM_TARGET_TYPE: "domain",
+                SERVICE_FIELD_ALARM_TARGET_VALUE: "vimeo.com",
+                SERVICE_FIELD_HOST_MAC: _HOST_MAC,
                 SERVICE_FIELD_DURATION: "always",
             },
         )
 
     assert mute.await_count == 1
+    # The silence is box-side state the snapshot does not carry, so the result says
+    # so rather than implying the next read agrees.
+    assert result.data["runtime"] == "pending"
     assert 'unmute_alarm(alarm_id="1728")' in result.data["undo"]
 
 
@@ -467,7 +507,7 @@ async def test_block_requires_alarm_or_target(
 
 
 async def test_archive_all_alarms_is_bulk(hass: HomeAssistant) -> None:
-    """archive_all_alarms uses the bulk all_active mode with warnings."""
+    """archive_all_alarms names the active set explicitly."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
         "FirewallaAlarmManager.async_archive_alarms",
@@ -477,7 +517,7 @@ async def test_archive_all_alarms_is_bulk(hass: HomeAssistant) -> None:
         result = await _call(api_instance, ARCHIVE_ALL_ALARMS, {})
 
     assert archive.await_args is not None
-    assert archive.await_args.kwargs == {"mode": "all_active", "alarm_id": None}
+    assert archive.await_args.kwargs == {"alarm_id": None}
     assert "bulk action" in result.data["warnings"]
 
 
@@ -496,19 +536,21 @@ async def test_delete_alarm_uses_single_mode(hass: HomeAssistant) -> None:
         )
 
     assert delete.await_args is not None
-    assert delete.await_args.kwargs["mode"] == "this"
     assert delete.await_args.kwargs["alarm_id"] == "1728"
     assert result.data["status"] == "applied"
+    assert result.data["target"] == {"kind": "alarm", "id": "1728"}
 
 
 @pytest.mark.parametrize(
-    "mode",
+    "alarm_status",
     [
-        pytest.param("all_active", id="all_active"),
-        pytest.param("all_archived", id="all_archived"),
+        pytest.param("active", id="active"),
+        pytest.param("archived", id="archived"),
     ],
 )
-async def test_delete_all_alarms_uses_bulk_mode(hass: HomeAssistant, mode: str) -> None:
+async def test_delete_all_alarms_uses_bulk_mode(
+    hass: HomeAssistant, alarm_status: str
+) -> None:
     """delete_all_alarms deletes the requested set with a bulk warning."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
@@ -517,11 +559,13 @@ async def test_delete_all_alarms_uses_bulk_mode(hass: HomeAssistant, mode: str) 
     ) as delete:
         api_instance = await _setup(hass, mode="full")
         result = await _call(
-            api_instance, DELETE_ALL_ALARMS, {"mode": mode, SERVICE_FIELD_CONFIRM: True}
+            api_instance,
+            DELETE_ALL_ALARMS,
+            {"alarm_status": alarm_status, SERVICE_FIELD_CONFIRM: True},
         )
 
     assert delete.await_args is not None
-    assert delete.await_args.kwargs["mode"] == mode
+    assert delete.await_args.kwargs["alarm_status"] == alarm_status
     assert "irreversible" in result.data["warnings"]
 
 
@@ -561,12 +605,12 @@ async def test_delete_host_deletes_host(hass: HomeAssistant) -> None:
     assert result.data["warnings"] == ["irreversible"]
 
 
-async def test_set_host_group_deletes_the_device_rules_and_reports_them(
+async def test_set_host_group_deletes_the_host_rules_and_reports_them(
     hass: HomeAssistant,
 ) -> None:
-    """set_host_group assigns the group, deletes the device's rules, names the undo.
+    """set_host_group assigns the group, deletes the host's rules, names the undo.
 
-    A membership change deletes the rules attached to the device -- confirmed by
+    A membership change deletes the rules attached to the host -- confirmed by
     two captures -- so the tool must surface that in `warnings` rather than report
     a clean success, and its `undo` must point at the clear tool without implying
     the deleted rules come back.

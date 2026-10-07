@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from homeassistant.components.device_tracker import ScannerEntity  # type: ignore[attr-defined]
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -13,9 +11,10 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_DEVICE_TRACKER_AWAY_WINDOW_SECONDS,
     ATTR_INTEGRATION,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
-    ATTR_WATCHED_DEVICE_DEVICE_GROUP,
+    ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_DNS_DOMAIN,
     ATTR_WATCHED_DEVICE_DNS_FQDN,
     ATTR_WATCHED_DEVICE_DNS_HOSTNAME,
@@ -23,6 +22,7 @@ from .const import (
     ATTR_WATCHED_DEVICE_HOST_NAME,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
+    ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     DOMAIN,
     ENTITY_SUFFIX_DEVICE_TRACKER,
@@ -32,6 +32,7 @@ from .const import (
 from .coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
 from .managers import FirewallaHostManager
 from .models import FirewallaHostRuntime
+from .utils.values import iso_instant
 
 PARALLEL_UPDATES = 0
 
@@ -183,7 +184,7 @@ class FirewallaDeviceTracker(
             ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE: (
                 host.host_device_type if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_DEVICE_GROUP: (
+            ATTR_WATCHED_DEVICE_HOST_GROUP: (
                 host.group_name if host is not None else None
             ),
             ATTR_WATCHED_DEVICE_NETWORK_NAME: (
@@ -192,9 +193,18 @@ class FirewallaDeviceTracker(
             ATTR_WATCHED_DEVICE_CONNECTION_TYPE: (
                 host.connection_type if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_LAST_ACTIVE: (
-                datetime.fromtimestamp(host.last_active, UTC).isoformat()
-                if host is not None and host.last_active is not None
-                else None
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE: iso_instant(
+                host.last_active if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP: (
+                host.last_active if host is not None else None
+            ),
+            # Only the window, not a reference: this tracker measures from the
+            # wall clock, so a published "now" would be stale the moment the
+            # state was written and would then disagree with `is_connected`.
+            # The caller supplies its own now, which is what makes the published
+            # window sufficient here.
+            ATTR_DEVICE_TRACKER_AWAY_WINDOW_SECONDS: (
+                self.host_manager.device_tracker_away_window_seconds
             ),
         }

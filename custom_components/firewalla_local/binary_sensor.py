@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -17,8 +15,9 @@ from .const import (
     ATTR_ALARM_ARCHIVED_COUNT,
     ATTR_ALARM_CATEGORY_COUNTS,
     ATTR_ALARM_CATEGORY_COUNTS_COMPLETE,
-    ATTR_ALARM_DEVICE_NAME,
     ATTR_ALARM_FIRED_AT,
+    ATTR_ALARM_FIRED_AT_TIMESTAMP,
+    ATTR_ALARM_HOST_NAME,
     ATTR_ALARM_ID,
     ATTR_ALARM_MESSAGE,
     ATTR_ALARM_PENDING_COUNT,
@@ -36,11 +35,11 @@ from .const import (
     ATTR_AP_TIMEZONE,
     ATTR_AP_TX_POWER,
     ATTR_NETWORK_BLOCK_ICMP,
-    ATTR_NETWORK_DEVICE_COUNT,
     ATTR_NETWORK_DHCP,
     ATTR_NETWORK_DNS_SERVERS,
     ATTR_NETWORK_ENABLED,
     ATTR_NETWORK_GATEWAY,
+    ATTR_NETWORK_HOST_COUNT,
     ATTR_NETWORK_IPV4_ADDRESSES,
     ATTR_NETWORK_IPV4_SUBNETS,
     ATTR_NETWORK_IPV6_ADDRESSES,
@@ -67,34 +66,36 @@ from .const import (
     ATTR_SYSTEM_CPU_USAGE_1M,
     ATTR_SYSTEM_CURRENT_WAN_USAGE,
     ATTR_SYSTEM_DDNS,
-    ATTR_SYSTEM_DEVICES_OFFLINE,
-    ATTR_SYSTEM_DEVICES_ONLINE,
-    ATTR_SYSTEM_DEVICES_TOTAL,
     ATTR_SYSTEM_DISK_USAGE_PERCENT_BY_MOUNT,
     ATTR_SYSTEM_FIRMWARE_RELEASE_TYPE,
+    ATTR_SYSTEM_HOSTS_OFFLINE,
+    ATTR_SYSTEM_HOSTS_ONLINE,
+    ATTR_SYSTEM_HOSTS_TOTAL,
     ATTR_SYSTEM_MEMORY_FREE_MB,
     ATTR_SYSTEM_MEMORY_USAGE_PERCENT,
     ATTR_SYSTEM_PORTS,
     ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT,
+    ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT_TIMESTAMP,
     ATTR_SYSTEM_SOFTWARE_VERSION,
     ATTR_SYSTEM_TIMEZONE,
     ATTR_SYSTEM_UPTIME,
     ATTR_SYSTEM_UPTIME_SECONDS,
-    ATTR_SYSTEM_VPN_DEVICES_OFFLINE,
-    ATTR_SYSTEM_VPN_DEVICES_ONLINE,
-    ATTR_SYSTEM_VPN_DEVICES_TOTAL,
+    ATTR_SYSTEM_VPN_HOSTS_OFFLINE,
+    ATTR_SYSTEM_VPN_HOSTS_ONLINE,
+    ATTR_SYSTEM_VPN_HOSTS_TOTAL,
     ATTR_SYSTEM_WAN_IP,
     ATTR_SYSTEM_WAN_IPS,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
-    ATTR_WATCHED_DEVICE_DEVICE_GROUP,
     ATTR_WATCHED_DEVICE_DNS_DOMAIN,
     ATTR_WATCHED_DEVICE_DNS_FQDN,
     ATTR_WATCHED_DEVICE_DNS_HOSTNAME,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
     ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE,
+    ATTR_WATCHED_DEVICE_HOST_GROUP,
     ATTR_WATCHED_DEVICE_HOST_NAME,
     ATTR_WATCHED_DEVICE_IP_ADDRESS,
     ATTR_WATCHED_DEVICE_LAST_ACTIVE,
+    ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP,
     ATTR_WATCHED_DEVICE_NETWORK_NAME,
     ATTR_WATCHED_DEVICE_TOPOLOGY_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_UPLOAD_USAGE,
@@ -127,6 +128,7 @@ from .coordinator import (
     get_enabled_ssid_entities,
 )
 from .entity import FirewallaEntity
+from .helpers.usage_report import serialize_usage_summary
 from .managers.wireless_manager import (
     FirewallaAccessPoint,
     FirewallaSsidProfile,
@@ -137,22 +139,14 @@ from .models import (
     FirewallaHostRuntime,
     FirewallaNetwork,
     FirewallaNetworkKind,
-    FirewallaNetworkUsageSummary,
     FirewallaWanUsageSummary,
 )
+from .utils.values import iso_instant, normalized_int
 
 PARALLEL_UPDATES = 0
 
 _SYSTEM_STATUS_OBJECT_ID = "system_status"
 _SSID_KIND_DISPLAY_NAME = "SSID"
-
-
-def _serialize_usage_window(window: object) -> dict[str, int | None]:
-    """Serialize one usage window into download/upload byte keys."""
-    return {
-        "download_bytes": getattr(window, "download_bytes", None),
-        "upload_bytes": getattr(window, "upload_bytes", None),
-    }
 
 
 async def async_setup_entry(
@@ -223,6 +217,7 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
         system_status = self.system_status
         return {
             **self.build_state_attributes(TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS),
+            **self.build_activity_basis_attributes(),
             ATTR_SYSTEM_UPTIME: (
                 self._format_uptime(system_status.uptime_seconds)
                 if system_status is not None
@@ -257,14 +252,14 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
                 system_status.wan_ips if system_status is not None else None
             ),
             ATTR_SYSTEM_CURRENT_WAN_USAGE: self._build_current_wan_usage_attribute(),
-            ATTR_SYSTEM_DEVICES_TOTAL: self.host_manager.count_total_devices(),
-            ATTR_SYSTEM_DEVICES_ONLINE: self.host_manager.count_online_devices(),
-            ATTR_SYSTEM_DEVICES_OFFLINE: self.host_manager.count_offline_devices(),
-            ATTR_SYSTEM_VPN_DEVICES_TOTAL: self.host_manager.count_vpn_total_devices(),
-            ATTR_SYSTEM_VPN_DEVICES_ONLINE: (
+            ATTR_SYSTEM_HOSTS_TOTAL: self.host_manager.count_total_devices(),
+            ATTR_SYSTEM_HOSTS_ONLINE: self.host_manager.count_online_devices(),
+            ATTR_SYSTEM_HOSTS_OFFLINE: self.host_manager.count_offline_devices(),
+            ATTR_SYSTEM_VPN_HOSTS_TOTAL: self.host_manager.count_vpn_total_devices(),
+            ATTR_SYSTEM_VPN_HOSTS_ONLINE: (
                 self.host_manager.count_vpn_online_devices()
             ),
-            ATTR_SYSTEM_VPN_DEVICES_OFFLINE: (
+            ATTR_SYSTEM_VPN_HOSTS_OFFLINE: (
                 self.host_manager.count_vpn_offline_devices()
             ),
             ATTR_SYSTEM_CPU_USAGE_1M: (
@@ -280,6 +275,11 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ),
             ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT: (
                 self.coordinator.last_runtime_data_updated_at.isoformat()
+                if self.coordinator.last_runtime_data_updated_at is not None
+                else None
+            ),
+            ATTR_SYSTEM_RUNTIME_DATA_UPDATED_AT_TIMESTAMP: (
+                self.coordinator.last_runtime_data_updated_at.timestamp()
                 if self.coordinator.last_runtime_data_updated_at is not None
                 else None
             ),
@@ -318,18 +318,14 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
 
     @staticmethod
     def _normalized_port_speed(value: object) -> int | None:
-        """Return a port speed in Mbps, or None when unknown/inactive."""
-        if isinstance(value, bool):
-            return None
-        if isinstance(value, int):
-            return value if value > 0 else None
-        if isinstance(value, str):
-            try:
-                parsed = int(value)
-            except ValueError:
-                return None
-            return parsed if parsed > 0 else None
-        return None
+        """Return a port speed in Mbps, or None when unknown/inactive.
+
+        The box reports this as a numeric string and uses ``-1`` for an
+        inactive port, so a non-positive reading means "no link" rather than
+        "zero speed".
+        """
+        parsed = normalized_int(value)
+        return parsed if parsed is not None and parsed > 0 else None
 
     def _build_bluetooth_mac_attribute(self) -> str | None:
         """Return the box Bluetooth MAC from the init payload."""
@@ -540,11 +536,13 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_NETWORK_DHCP: (
                 self._serialize_dhcp(network.dhcp) if network is not None else None
             ),
-            ATTR_NETWORK_DEVICE_COUNT: (
+            ATTR_NETWORK_HOST_COUNT: (
                 network.device_host_count if network is not None else None
             ),
             ATTR_NETWORK_USAGE: (
-                self._serialize_usage(network.usage) if network is not None else None
+                serialize_usage_summary(network.usage)
+                if network is not None and network.usage is not None
+                else None
             ),
             ATTR_NETWORK_TOP_TALKERS: self._serialize_top_talkers(),
             ATTR_NETWORK_ENABLED: (network.enabled if network is not None else None),
@@ -570,24 +568,6 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         return attributes
 
     @staticmethod
-    def _serialize_usage(
-        usage: FirewallaNetworkUsageSummary | None,
-    ) -> dict[str, dict[str, int | None]] | None:
-        """Serialize one network usage summary into a bounded attribute dict."""
-        if usage is None:
-            return None
-        return {
-            window: _serialize_usage_window(getattr(usage, attr))
-            for attr, window in (
-                ("last_24h", "last_24h"),
-                ("last_60m", "last_60m"),
-                ("last_30d", "last_30d"),
-                ("last_12m", "last_12m"),
-                ("monthly", "monthly"),
-            )
-        }
-
-    @staticmethod
     def _serialize_dhcp(dhcp: object) -> dict[str, object] | None:
         """Serialize one DHCP config into a bounded attribute dict."""
         if dhcp is None:
@@ -610,7 +590,7 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         """
         return [
             {
-                "device_name": talker.device_name,
+                "host_name": talker.device_name,
                 "download_bytes": talker.download_bytes,
                 "upload_bytes": talker.upload_bytes,
             }
@@ -658,9 +638,14 @@ class FirewallaAlarmActiveBinarySensor(FirewallaEntity, BinarySensorEntity):
                 self.alarm_manager.active_category_counts_complete
             ),
             ATTR_ALARM_TYPE: latest_alarm.alarm_type if latest_alarm else None,
-            ATTR_ALARM_DEVICE_NAME: latest_alarm.device_name if latest_alarm else None,
+            ATTR_ALARM_HOST_NAME: latest_alarm.device_name if latest_alarm else None,
             ATTR_ALARM_MESSAGE: latest_alarm.message if latest_alarm else None,
-            ATTR_ALARM_FIRED_AT: latest_alarm.fired_at if latest_alarm else None,
+            ATTR_ALARM_FIRED_AT: (
+                iso_instant(latest_alarm.fired_at) if latest_alarm else None
+            ),
+            ATTR_ALARM_FIRED_AT_TIMESTAMP: (
+                latest_alarm.fired_at if latest_alarm else None
+            ),
             ATTR_ALARM_ID: latest_alarm.alarm_id if latest_alarm else None,
         }
 
@@ -786,6 +771,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
             **self.build_state_attributes(
                 TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY
             ),
+            **self.build_activity_basis_attributes(),
             ATTR_WATCHED_DEVICE_IP_ADDRESS: (
                 host.ip_address if host is not None else None
             ),
@@ -802,7 +788,7 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_WATCHED_DEVICE_HOST_DEVICE_TYPE: (
                 host.host_device_type if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_DEVICE_GROUP: (
+            ATTR_WATCHED_DEVICE_HOST_GROUP: (
                 host.group_name if host is not None else None
             ),
             ATTR_WATCHED_DEVICE_NETWORK_NAME: (
@@ -817,10 +803,11 @@ class FirewallaWatchedDeviceBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_WATCHED_DEVICE_UPLOAD_USAGE: (
                 host.upload_bytes if host is not None else None
             ),
-            ATTR_WATCHED_DEVICE_LAST_ACTIVE: (
-                datetime.fromtimestamp(host.last_active, UTC).isoformat()
-                if host is not None and host.last_active is not None
-                else None
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE: iso_instant(
+                host.last_active if host is not None else None
+            ),
+            ATTR_WATCHED_DEVICE_LAST_ACTIVE_TIMESTAMP: (
+                host.last_active if host is not None else None
             ),
         }
         if topology_connection := self._get_topology_connection():

@@ -20,6 +20,9 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
 
 from .const import (
+    ALARM_STATUS_ACTIVE,
+    ALARM_STATUS_ARCHIVED,
+    ALARM_TARGET_TYPES,
     DOMAIN,
     SERVICE_ARCHIVE_ALARMS,
     SERVICE_CREATE_RULE,
@@ -27,6 +30,10 @@ from .const import (
     SERVICE_DELETE_HOST,
     SERVICE_DELETE_RULE,
     SERVICE_FIELD_ALARM_ID,
+    SERVICE_FIELD_ALARM_STATUS,
+    SERVICE_FIELD_ALARM_TARGET_TYPE,
+    SERVICE_FIELD_ALARM_TARGET_VALUE,
+    SERVICE_FIELD_ALL_HOSTS,
     SERVICE_FIELD_CLEAR,
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIRM,
@@ -43,13 +50,9 @@ from .const import (
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_NEW_NAME,
-    SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
-    SERVICE_FIELD_RULE_TARGET,
-    SERVICE_FIELD_SCOPE_KIND,
-    SERVICE_FIELD_SCOPE_TARGET,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TARGET_VALUE,
@@ -71,44 +74,65 @@ from .const import (
     SERVICE_SET_SSID_PAUSED,
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
+    TARGET_KIND_ALARM,
+    TARGET_KIND_HOST,
+    TARGET_KIND_NETWORK,
+    TARGET_KIND_RULE,
+    TARGET_KIND_SILENCE,
+    TARGET_KIND_SSID,
 )
-from .llm_tools_common import format_tool_name
+from .llm_tools_common import (
+    CONTROL_INJECTION,
+    DESTRUCTIVE_INJECTION,
+    format_tool_name,
+)
+from .models import FirewallaNetworkKind
 
+# Every tool here acts on the user's Firewalla box, not on Home Assistant, so
+# `open_world` is true for all of them: the server the data comes from and the
+# thing a control tool changes are both outside Home Assistant. A caller that
+# treats these as closed-world would under-warn about what a call reaches.
 _CONTROL_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=False,
     destructive=False,
     idempotent=True,
-    open_world=False,
+    open_world=True,
 )
 
 _DESTRUCTIVE_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=False,
     destructive=True,
     idempotent=True,
-    open_world=False,
+    open_world=True,
 )
 
 _NON_IDEMPOTENT_ANNOTATIONS: Final = llm.ToolAnnotations(
     read_only=False,
     destructive=False,
     idempotent=False,
-    open_world=False,
+    open_world=True,
 )
+
+# The `runtime` field's two values. A control tool that updates the in-memory
+# snapshot reports `updated`; one that does not reports `pending`, which is the
+# honest answer for a write whose effect only the next poll will show. A tool
+# declaring nothing gets `pending`, so forgetting the declaration under-claims
+# freshness rather than asserting a read that would still serve pre-change state.
+RUNTIME_UPDATED: Final = "updated"
+RUNTIME_PENDING: Final = "pending"
 
 _HOST_MAC_DESCRIPTION: Final = (
-    "Optional. The device's MAC address (from list_hosts). Provide this or host_name."
+    "Optional. The host's MAC address (from get_hosts). Provide this or host_name."
 )
-
 _HOST_NAME_DESCRIPTION: Final = (
-    "Optional. The device's host name. Provide this or host_mac; names must be "
-    "unique among hosts."
+    "Optional. The host's name. Provide this or host_mac; names must be "
 )
 
 # Every membership tool carries this. A membership change deletes the rules
-# attached to the device -- confirmed by two captures, for both a group and a user
+# attached to the host -- confirmed by two captures, for both a group and a user
 # target -- while leaving rules attached to a group or user untouched.
 _MEMBERSHIP_RULE_WARNING: Final = (
-    "DELETES the rules attached to this device, including rules you created, and "
+    "DELETES the rules attached to this host, including rules you created, and "
     "they cannot be restored. Rules attached to groups or users are NOT affected."
 )
 
@@ -119,14 +143,26 @@ class _FirewallaControlTool(llm.Tool):
     integration = DOMAIN
     annotations = _CONTROL_ANNOTATIONS
 
+    # Prepended at construction rather than written into each description, so a new
+    # control tool cannot be added without the family block. The genuinely
+    # destructive tools override this with `DESTRUCTIVE_INJECTION`.
+    _injection: str = CONTROL_INJECTION
+
     _service: str
     # True for SupportsResponse.ONLY services (returns a payload); False for
     # SupportsResponse.NONE services (returns nothing).
     _returns_response: bool = False
+    # Whether a successful call updates the local snapshot. Every concrete tool
+    # declares this explicitly so its result says plainly whether an immediate read
+    # agrees with it -- `ARCHITECTURE.md` requires the update, so a tool that does
+    # not apply it is stating a known gap rather than relying on a default.
+    _updates_runtime: bool = False
 
     def __init__(self, *, entry_id: str) -> None:
         """Bind the tool to the config entry it was registered for."""
         self._entry_id = entry_id
+        if self.description:
+            self.description = f"{self._injection}\n\n{self.description}"
 
     def _args(self, tool_input: llm.ToolInput) -> dict[str, Any]:
         """Return tool args validated against the declared schema.
@@ -142,7 +178,7 @@ class _FirewallaControlTool(llm.Tool):
         """Echo the host selector the caller supplied."""
         args = tool_input.tool_args
         return {
-            "kind": "host",
+            "kind": TARGET_KIND_HOST,
             "id": args.get(SERVICE_FIELD_HOST_MAC),
             "name": args.get(SERVICE_FIELD_HOST_NAME),
         }
@@ -179,11 +215,14 @@ class _FirewallaControlTool(llm.Tool):
 
         ``before`` is the state observed before the action, when the tool read
         it. ``after`` is the state the action requested — a statement of intent,
-        not a re-read of the box.
+        not a re-read of the box. ``runtime`` says whether the local snapshot now
+        reflects the change, which is what tells the model whether its next read
+        can be trusted.
         """
         data: dict[str, Any] = {
             "status": status,
             "changed": changed,
+            "runtime": (RUNTIME_UPDATED if self._updates_runtime else RUNTIME_PENDING),
             "target": target,
             "before": before,
             "after": after,
@@ -207,15 +246,24 @@ class PauseRuleTool(_FirewallaControlTool):
     name = format_tool_name("pause_rule")
     title = "Pause rule"
     description = (
-        "Temporarily disable one firewall rule. Resolve rule_target from "
-        "list_rules. Fully reversible: undo with resume_rule. Pausing an "
-        "already-paused rule is a no-op."
+        "Pause one firewall rule, either for a set time or until it is resumed. "
+        "Resolve `rule_id` from `get_rules`. Fully reversible: `undo` is "
+        "`resume_rule`, and the rule keeps its id.\n"
+        "\n"
+        "- **timed** — pass `duration` or `resume_at`. The box stores a resume "
+        "boundary and brings the rule back on its own.\n"
+        "- **indefinite** — pass neither. The rule stays off until `resume_rule`. "
+        "That is the same state as switching the rule off in the app.\n"
+        "\n"
+        "A rule pause applies to every host the rule governs, so pausing a group "
+        "or user rule pauses it for all of that group's or user's hosts. Allow a "
+        "short delay before the change takes effect on the wire."
     )
     parameters = vol.Schema(
         {
             vol.Required(
-                SERVICE_FIELD_RULE_TARGET,
-                description="Required. The rule id from list_rules.",
+                SERVICE_FIELD_RULE_ID,
+                description="Required. The rule id from get_rules.",
             ): str,
             vol.Optional(
                 SERVICE_FIELD_DURATION,
@@ -235,6 +283,8 @@ class PauseRuleTool(_FirewallaControlTool):
     )
     _service = SERVICE_PAUSE_RULE
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -244,31 +294,40 @@ class PauseRuleTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Pause one rule, reporting a no-op when it is already paused."""
         args = self._args(tool_input)
-        rule_id = args[SERVICE_FIELD_RULE_TARGET]
-        target = {"kind": "rule", "id": rule_id}
-        before: dict[str, Any] | None = None
+        rule_id = args[SERVICE_FIELD_RULE_ID]
+        target = {"kind": TARGET_KIND_RULE, "id": rule_id}
         after = {"enabled": False, "is_paused": True}
+
+        # The precheck decides only what to *report*, never whether to write. The
+        # snapshot can be a poll interval old, so treating it as authoritative meant
+        # a rule resumed on the box in that window read as already-paused here and the
+        # write was skipped — the user asked to pause a running rule and was told
+        # nothing needed doing, on the strength of stale data. The service refreshes
+        # before it validates, so the call is what makes the answer true.
+        before: dict[str, Any] | None = None
+        already_paused = False
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
             if rule is not None:
                 before = {"enabled": rule.enabled, "is_paused": rule.is_paused}
-                if rule.is_paused or not rule.enabled:
-                    return self._result(
-                        status="already_in_state",
-                        changed=False,
-                        target=target,
-                        before=before,
-                        after=before,
-                    )
+                already_paused = rule.is_paused
 
         await self._call_service(hass, llm_context, args)
+        if already_paused:
+            return self._result(
+                status="already_in_state",
+                changed=False,
+                target=target,
+                before=before,
+                after=before,
+            )
         return self._result(
             status="applied",
             changed=True,
             target=target,
             before=before,
             after=after,
-            undo=f'firewalla_local__resume_rule(rule_target="{rule_id}")',
+            undo=f'firewalla_local__resume_rule(rule_id="{rule_id}")',
         )
 
 
@@ -278,18 +337,25 @@ class ResumeRuleTool(_FirewallaControlTool):
     name = format_tool_name("resume_rule")
     title = "Resume rule"
     description = (
-        "Resume (re-enable) one firewall rule. This is the undo for pause_rule. "
-        "Resuming an already-running rule is a no-op."
+        "Resume one paused rule, clearing any resume boundary. This is the undo "
+        "for `pause_rule`, and it works for a timed pause, an indefinite one, and "
+        "a rule switched off in the Firewalla app — all the same state. Resuming "
+        "an already-enabled rule is a no-op.\n"
+        "\n"
+        "Afterwards `get_rules` reports `is_paused: false` and `pause_until: "
+        "null`. Allow a short delay before the change takes effect on the wire."
     )
     parameters = vol.Schema(
         {
             vol.Required(
-                SERVICE_FIELD_RULE_TARGET,
-                description="Required. The rule id from list_rules.",
+                SERVICE_FIELD_RULE_ID,
+                description="Required. The rule id from get_rules.",
             ): str,
         }
     )
     _service = SERVICE_RESUME_RULE
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -300,31 +366,35 @@ class ResumeRuleTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Resume one rule, reporting a no-op when it is already enabled."""
         args = self._args(tool_input)
-        rule_id = args[SERVICE_FIELD_RULE_TARGET]
-        target = {"kind": "rule", "id": rule_id}
-        before: dict[str, Any] | None = None
+        rule_id = args[SERVICE_FIELD_RULE_ID]
+        target = {"kind": TARGET_KIND_RULE, "id": rule_id}
         after = {"enabled": True, "is_paused": False}
+
+        # Same reasoning as `pause_rule`: the precheck may only shape the report.
+        before: dict[str, Any] | None = None
+        already_enabled = False
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
             if rule is not None:
                 before = {"enabled": rule.enabled, "is_paused": rule.is_paused}
-                if rule.enabled:
-                    return self._result(
-                        status="already_in_state",
-                        changed=False,
-                        target=target,
-                        before=before,
-                        after=before,
-                    )
+                already_enabled = rule.enabled
 
         await self._call_service(hass, llm_context, args)
+        if already_enabled:
+            return self._result(
+                status="already_in_state",
+                changed=False,
+                target=target,
+                before=before,
+                after=before,
+            )
         return self._result(
             status="applied",
             changed=True,
             target=target,
             before=before,
             after=after,
-            undo=f'firewalla_local__pause_rule(rule_target="{rule_id}")',
+            undo=f'firewalla_local__pause_rule(rule_id="{rule_id}")',
         )
 
 
@@ -353,6 +423,8 @@ class SetSsidPausedTool(_FirewallaControlTool):
     )
     _service = SERVICE_SET_SSID_PAUSED
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -364,7 +436,7 @@ class SetSsidPausedTool(_FirewallaControlTool):
         args = self._args(tool_input)
         profile_id = args[SERVICE_FIELD_SSID_PROFILE_ID]
         paused = args[SERVICE_FIELD_ENABLED]
-        target = {"kind": "ssid", "id": profile_id}
+        target = {"kind": TARGET_KIND_SSID, "id": profile_id}
         await self._call_service(hass, llm_context, args)
         return self._result(
             status="applied",
@@ -384,7 +456,7 @@ class SetHostNameTool(_FirewallaControlTool):
     name = format_tool_name("set_host_name")
     title = "Set host name"
     description = (
-        "Rename a device. Cosmetic and fully reversible. For a DNS name use "
+        "Rename a host. Cosmetic and fully reversible. For a DNS name use "
         "set_host_dns_hostname instead."
     )
     parameters = vol.Schema(
@@ -397,12 +469,14 @@ class SetHostNameTool(_FirewallaControlTool):
             ): str,
             vol.Required(
                 SERVICE_FIELD_NEW_NAME,
-                description="Required. The new display name for the device.",
+                description="Required. The new display name for the host.",
             ): str,
         }
     )
     _service = SERVICE_SET_HOST_NAME
     _returns_response = True
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -451,6 +525,8 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
     _service = SERVICE_SET_HOST_DNS_HOSTNAME
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -472,12 +548,12 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
 
 
 class SetHostDeviceTypeTool(_FirewallaControlTool):
-    """Set the device-type classification for one Firewalla host."""
+    """Set the Firewalla host device type."""
 
     name = format_tool_name("set_host_device_type")
     title = "Set host device type"
     description = (
-        "Classify a device (desktop, phone, tablet, tv, …) so reports and "
+        "Classify a host (desktop, phone, tablet, tv, …) so reports and "
         "summaries make sense. Cosmetic and reversible."
     )
     parameters = vol.Schema(
@@ -490,12 +566,14 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
             ): str,
             vol.Required(
                 SERVICE_FIELD_HOST_DEVICE_TYPE,
-                description="Required. The device type to assign.",
+                description="Required. The host device type to assign.",
             ): str,
         }
     )
     _service = SERVICE_SET_HOST_DEVICE_TYPE
     _returns_response = True
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -512,7 +590,7 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
             status="applied",
             changed=True,
             target=target,
-            after={"device_type": args[SERVICE_FIELD_HOST_DEVICE_TYPE]},
+            after={"host_device_type": args[SERVICE_FIELD_HOST_DEVICE_TYPE]},
             result=result,
         )
 
@@ -523,8 +601,8 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
     name = format_tool_name("set_host_dhcp_reservation")
     title = "Set host DHCP reservation"
     description = (
-        "Give a device a fixed IP address (or return it to dynamic). Pair with "
-        "list_hosts to find devices without a reservation. Strong built-in "
+        "Give a host a fixed IP address (or return it to dynamic). Pair with "
+        "get_hosts to find hosts without a reservation. Strong built-in "
         "validation rejects conflicting, in-use, or out-of-range addresses. "
         "Reversible by setting mode back to 'dynamic'."
     )
@@ -567,6 +645,8 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
     _service = SERVICE_SET_HOST_DHCP_RESERVATION
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -591,18 +671,22 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
 
 
 class _SetHostMembershipTool(_FirewallaControlTool):
-    """Base for the four device-membership tools.
+    """Base for the four host-membership tools.
 
-    A device holds exactly one membership, so each tool either sets that slot to
+    A host holds exactly one membership, so each tool either sets that slot to
     a group or a user, or clears it. All four are destructive, because a
-    membership change deletes the rules attached to the device: two captures on
-    the dev box show the app sending `policy:delete` for every rule the device
+    membership change deletes the rules attached to the host: two captures on
+    the dev box show the app sending `policy:delete` for every rule the host
     owned, then the tags write, in one batch. Rules attached to a group or a user
-    are not affected, including the user the device is leaving.
+    are not affected, including the user the host is leaving.
     """
 
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _returns_response = True
+
+    _updates_runtime = False
 
     @override
     async def async_call(
@@ -611,12 +695,12 @@ class _SetHostMembershipTool(_FirewallaControlTool):
         tool_input: llm.ToolInput,
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
-        """Set or clear one device's membership."""
+        """Set or clear one host's membership."""
         args = self._args(tool_input)
         target = self._host_target(tool_input)
         result = await self._call_service(hass, llm_context, args)
         membership = (result or {}).get("membership") or {}
-        removed = ((result or {}).get("device_rules") or {}).get("removed") or []
+        removed = ((result or {}).get("host_rules") or {}).get("removed") or []
         return self._result(
             status="applied",
             changed=bool(membership.get("changed")),
@@ -635,7 +719,7 @@ class _SetHostMembershipTool(_FirewallaControlTool):
         count = len(removed)
         noun = "rule" if count == 1 else "rules"
         return [
-            f"Deleted {count} {noun} attached to this device (ids: "
+            f"Deleted {count} {noun} attached to this host (ids: "
             f"{', '.join(str(rule_id) for rule_id in removed)}). "
             "They cannot be restored."
         ]
@@ -646,16 +730,16 @@ class _SetHostMembershipTool(_FirewallaControlTool):
 
 
 class SetHostGroupTool(_SetHostMembershipTool):
-    """Assign a device to one Firewalla group."""
+    """Assign a host to one Firewalla group."""
 
     name = format_tool_name("set_host_group")
     title = "Set host group"
     description = (
-        "Put a device in one Firewalla group, so it follows that group's rules. "
-        "A device has exactly one membership, so this replaces any group or user "
-        "it currently belongs to, as the app does. Resolve the group from "
-        "get_system_overview (include 'identifiers') first; group and user names "
-        "are separate, and a user's name is never a valid group. "
+        "Put a host in one Firewalla group. This replaces whatever group or user "
+        "the host currently belongs to, as the app does. Resolve the group from "
+        "`get_system_overview` (`include: ['identifiers']`) first — groups and users "
+        "are separate collections there and a user name is not a group there, even "
+        "though a host's `group_name` reads the user's name once assigned. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
@@ -689,14 +773,14 @@ class SetHostGroupTool(_SetHostMembershipTool):
 
 
 class ClearHostGroupTool(_SetHostMembershipTool):
-    """Remove a device's group or user membership."""
+    """Remove a host's group or user membership."""
 
     name = format_tool_name("clear_host_group")
     title = "Clear host group"
     description = (
-        "Remove a device's group or user membership so it belongs to neither and "
-        "no longer inherits that group's or user's rules. Use it to release a "
-        "device, or to undo set_host_group or set_host_user. "
+        "Remove a host's group membership. The group and its rules are untouched "
+        "and keep covering its other hosts — only this host leaves. The inverse of "
+        "`set_host_group`, and it also clears a user membership. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
@@ -719,16 +803,17 @@ class ClearHostGroupTool(_SetHostMembershipTool):
 
 
 class SetHostUserTool(_SetHostMembershipTool):
-    """Assign a device to one Firewalla user."""
+    """Assign a host to one Firewalla user."""
 
     name = format_tool_name("set_host_user")
     title = "Set host user"
     description = (
-        "Assign a device to one Firewalla user, so it follows that user's rules. "
-        "A device has exactly one membership, so this replaces any group or user "
-        "it currently belongs to. Resolve the user from get_system_overview "
-        "(include 'identifiers') first; users and groups are separate collections "
-        "and a group's name is never a valid user. " + _MEMBERSHIP_RULE_WARNING
+        "Assign a host to one Firewalla user. This replaces whatever group or user "
+        "the host currently belongs to. Resolve the user from `get_system_overview` "
+        "(`include: ['identifiers']`) first — users and groups are separate "
+        "collections there and a group name is not a user there, even though a "
+        "host's `group_name` reads the user's name once assigned. "
+        + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
 
@@ -761,15 +846,14 @@ class SetHostUserTool(_SetHostMembershipTool):
 
 
 class ClearHostUserTool(_SetHostMembershipTool):
-    """Remove a device's user or group membership."""
+    """Remove a host's user or group membership."""
 
     name = format_tool_name("clear_host_user")
     title = "Clear host user"
     description = (
-        "Remove a device's user or group membership so it belongs to neither and "
-        "no longer inherits that user's rules. The user and their rules are left "
-        "untouched and keep covering their other devices; only this device leaves. "
-        "Use it to release a device, or to undo set_host_user or set_host_group. "
+        "Remove a host's user membership. The user and their rules are untouched "
+        "and keep covering their other hosts — only this host leaves. The inverse "
+        "of `set_host_user`, and it also clears a group membership. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
@@ -795,6 +879,8 @@ class _SetHostNotifyTool(_FirewallaControlTool):
     """Base for the host notification-preference toggles."""
 
     _returns_response = True
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -839,7 +925,7 @@ class SetHostNotifyWhenNextOnlineTool(_SetHostNotifyTool):
     name = format_tool_name("set_host_notify_when_next_online")
     title = "Set host notify when next online"
     description = (
-        "Turn the 'notify when this device comes online' preference on or off. "
+        "Turn the 'notify when this host comes online' preference on or off. "
         "Notification preference only, no network effect. Reversible."
     )
     _service = SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_ONLINE
@@ -851,7 +937,7 @@ class SetHostNotifyWhenNextOfflineTool(_SetHostNotifyTool):
     name = format_tool_name("set_host_notify_when_next_offline")
     title = "Set host notify when next offline"
     description = (
-        "Turn the 'notify when this device drops offline' preference on or off. "
+        "Turn the 'notify when this host drops offline' preference on or off. "
         "Notification preference only, no network effect. Reversible."
     )
     _service = SERVICE_SET_HOST_NOTIFY_WHEN_NEXT_OFFLINE
@@ -863,7 +949,7 @@ class WakeHostTool(_FirewallaControlTool):
     name = format_tool_name("wake_host")
     title = "Wake host"
     description = (
-        "Send a Wake-on-LAN packet to wake a device. Sends one packet and makes "
+        "Send a Wake-on-LAN packet to wake a host. Sends one packet and makes "
         "no persistent change; not idempotent, since each call sends a packet."
     )
     parameters = vol.Schema(
@@ -879,6 +965,8 @@ class WakeHostTool(_FirewallaControlTool):
     annotations = _NON_IDEMPOTENT_ANNOTATIONS
     _service = SERVICE_WAKE_HOST
     _returns_response = True
+
+    _updates_runtime = False
 
     @override
     async def async_call(
@@ -921,6 +1009,8 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
     _service = SERVICE_RUN_INTERNET_SPEED_TEST
     _returns_response = True
 
+    _updates_runtime = False
+
     @override
     async def async_call(
         self,
@@ -931,7 +1021,8 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
         """Run a speed test."""
         args = self._args(tool_input)
         target = {
-            "kind": "wan",
+            "kind": TARGET_KIND_NETWORK,
+            "network_kind": FirewallaNetworkKind.WAN.value,
             "id": args.get(SERVICE_FIELD_WAN_UUID),
             "name": args.get(SERVICE_FIELD_WAN_NAME),
         }
@@ -944,13 +1035,13 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
 class SetAlarmMutedTool(_FirewallaControlTool):
     """Mute or unmute an alarm silence."""
 
-    name = format_tool_name("set_alarm_muted")
+    name = format_tool_name("mute_alarm")
     title = "Set alarm muted"
     description = (
         "Create or remove a silence so matching alarms stop alerting. This does "
         "NOT block traffic (use block_alarm_target) and does not clear the alarm "
         "(use archive_alarm). Scope is required: an 'all' scope silences the "
-        "target for every device. Reversible."
+        "target for every host. Reversible."
     )
     parameters = vol.Schema(
         {
@@ -962,30 +1053,58 @@ class SetAlarmMutedTool(_FirewallaControlTool):
                 ),
             ): str,
             vol.Required(
-                SERVICE_FIELD_TARGET_TYPE,
+                SERVICE_FIELD_ALARM_TARGET_TYPE,
                 description="Required. What to silence.",
-            ): vol.In(("alarm_type", "domain", "ip")),
+            ): vol.In(ALARM_TARGET_TYPES),
             vol.Optional(
-                SERVICE_FIELD_TARGET_VALUE,
+                SERVICE_FIELD_ALARM_TARGET_VALUE,
                 description=(
-                    "Optional. The domain or IP to silence (required unless "
-                    "alarm_id supplies it)."
+                    "Optional. What the type refers to: the alarm type to "
+                    "silence (e.g. 'ALARM_VIDEO') when alarm_target_type is "
+                    "'alarm_type', or the domain or IP when it is 'domain' or "
+                    "'ip'. Required unless alarm_id supplies it."
                 ),
             ): str,
-            vol.Required(
-                SERVICE_FIELD_SCOPE_KIND,
-                description=(
-                    "Required. Where the silence applies. Choose narrowly — "
-                    "'all' silences for every device."
-                ),
-            ): vol.In(("device", "group", "user", "network", "all")),
             vol.Optional(
-                SERVICE_FIELD_SCOPE_TARGET,
-                description=(
-                    "Optional. The scope value for the chosen kind (a MAC for "
-                    "device, etc.)."
-                ),
+                SERVICE_FIELD_HOST_MAC,
+                description="Optional. Scope by host MAC.",
             ): str,
+            vol.Optional(
+                SERVICE_FIELD_HOST_NAME,
+                description="Optional. Scope by host name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_ID,
+                description="Optional. Scope by group id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_NAME,
+                description="Optional. Scope by group name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_ID,
+                description="Optional. Scope by user id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_NAME,
+                description="Optional. Scope by user name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_UUID,
+                description="Optional. Scope by network UUID.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_NAME,
+                description="Optional. Scope by network name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_ALL_HOSTS,
+                default=False,
+                description=(
+                    "Optional. Apply to every host. The wide scope must be "
+                    "stated, because an empty scope means every host on the wire."
+                ),
+            ): bool,
             vol.Required(
                 SERVICE_FIELD_DURATION,
                 description="Required. How long the silence lasts.",
@@ -993,6 +1112,8 @@ class SetAlarmMutedTool(_FirewallaControlTool):
         }
     )
     _service = SERVICE_MUTE_ALARM
+
+    _updates_runtime = False
 
     @override
     async def async_call(
@@ -1005,9 +1126,9 @@ class SetAlarmMutedTool(_FirewallaControlTool):
         args = self._args(tool_input)
         alarm_id = args.get(SERVICE_FIELD_ALARM_ID)
         target = {
-            "kind": "silence",
+            "kind": TARGET_KIND_SILENCE,
             "id": alarm_id,
-            "name": args.get(SERVICE_FIELD_TARGET_VALUE),
+            "name": args.get(SERVICE_FIELD_ALARM_TARGET_VALUE),
         }
         await self._call_service(hass, llm_context, args)
         undo = (
@@ -1031,7 +1152,7 @@ class UnmuteAlarmTool(_FirewallaControlTool):
     title = "Unmute alarm"
     description = (
         "Remove a silence so matching alarms alert again. This is the undo for "
-        "set_alarm_muted. Provide either the alarm id or the silence (exception) "
+        "mute_alarm. Provide either the alarm id or the silence (exception) "
         "id."
     )
     parameters = vol.Schema(
@@ -1051,6 +1172,8 @@ class UnmuteAlarmTool(_FirewallaControlTool):
     )
     _service = SERVICE_UNMUTE_ALARM
 
+    _updates_runtime = False
+
     @override
     async def async_call(
         self,
@@ -1061,7 +1184,7 @@ class UnmuteAlarmTool(_FirewallaControlTool):
         """Remove an alarm silence."""
         args = self._args(tool_input)
         target = {
-            "kind": "silence",
+            "kind": TARGET_KIND_SILENCE,
             "id": args.get(SERVICE_FIELD_ALARM_ID),
         }
         await self._call_service(hass, llm_context, args)
@@ -1083,7 +1206,7 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
         "recording the alarm id on it. Provide either `alarm_id`, or "
         "`target_type` and `target_value` (optionally with `scope_kind` / "
         "`scope_target`) to widen or narrow where the block applies. This "
-        "actually blocks traffic (unlike set_alarm_muted). Reversible with "
+        "actually blocks traffic (unlike mute_alarm). Reversible with "
         "unblock_alarm_target."
     )
     parameters = vol.Schema(
@@ -1091,7 +1214,7 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
             vol.Optional(
                 SERVICE_FIELD_ALARM_ID,
                 description=(
-                    "Optional. Derive the blocked target and device scope from "
+                    "Optional. Derive the blocked target and host scope from "
                     "this alarm. Provide this or target_type and target_value."
                 ),
             ): str,
@@ -1106,17 +1229,51 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
                 description="Optional. The domain, IP, or MAC to block.",
             ): str,
             vol.Optional(
-                SERVICE_FIELD_SCOPE_KIND,
-                description="Optional. Where the block applies.",
-            ): vol.In(("device", "network", "all")),
-            vol.Optional(
-                SERVICE_FIELD_SCOPE_TARGET,
-                description="Optional. The scope value for the chosen kind.",
+                SERVICE_FIELD_HOST_MAC,
+                description="Optional. Scope by host MAC.",
             ): str,
+            vol.Optional(
+                SERVICE_FIELD_HOST_NAME,
+                description="Optional. Scope by host name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_ID,
+                description="Optional. Scope by group id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_GROUP_NAME,
+                description="Optional. Scope by group name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_ID,
+                description="Optional. Scope by user id.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_USER_NAME,
+                description="Optional. Scope by user name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_UUID,
+                description="Optional. Scope by network UUID.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_NETWORK_NAME,
+                description="Optional. Scope by network name.",
+            ): str,
+            vol.Optional(
+                SERVICE_FIELD_ALL_HOSTS,
+                default=False,
+                description=(
+                    "Optional. Apply to every host. The wide scope must be "
+                    "stated, because an empty scope means every host on the wire."
+                ),
+            ): bool,
         }
     )
     _service = SERVICE_CREATE_RULE
     _returns_response = True
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1130,7 +1287,7 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
         result = await self._call_service(hass, llm_context, args)
         rule_id = result.get("rule_id") if isinstance(result, dict) else None
         target = {
-            "kind": "rule",
+            "kind": TARGET_KIND_RULE,
             "id": rule_id,
             "name": args.get(SERVICE_FIELD_TARGET_VALUE),
         }
@@ -1162,12 +1319,14 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
         {
             vol.Required(
                 SERVICE_FIELD_RULE_ID,
-                description="Required. The rule id to remove (from list_rules).",
+                description="Required. The rule id to remove (from get_rules).",
             ): str,
         }
     )
     _service = SERVICE_DELETE_RULE
     _returns_response = True
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1181,7 +1340,7 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
         rule_id = data[SERVICE_FIELD_RULE_ID]
         data[SERVICE_FIELD_CONFIRM] = True
         result = await self._call_service(hass, llm_context, data)
-        target = {"kind": "rule", "id": rule_id}
+        target = {"kind": TARGET_KIND_RULE, "id": rule_id}
         return self._result(
             status="applied",
             changed=True,
@@ -1198,7 +1357,7 @@ class ArchiveAlarmTool(_FirewallaControlTool):
     title = "Archive alarm"
     description = (
         "Dismiss one alarm from the active list while keeping the record. This "
-        "does NOT stop future matching alarms (use set_alarm_muted). Note there "
+        "does NOT stop future matching alarms (use mute_alarm). Note there "
         "is no un-archive if you change your mind."
     )
     parameters = vol.Schema(
@@ -1211,6 +1370,8 @@ class ArchiveAlarmTool(_FirewallaControlTool):
     )
     _service = SERVICE_ARCHIVE_ALARMS
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -1220,9 +1381,9 @@ class ArchiveAlarmTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Archive a single alarm."""
         alarm_id = self._args(tool_input)[SERVICE_FIELD_ALARM_ID]
-        data = {SERVICE_FIELD_MODE: "this", SERVICE_FIELD_ALARM_ID: alarm_id}
+        data = {SERVICE_FIELD_ALARM_ID: alarm_id}
         await self._call_service(hass, llm_context, data)
-        target = {"kind": "alarm", "id": alarm_id}
+        target = {"kind": TARGET_KIND_ALARM, "id": alarm_id}
         return self._result(
             status="applied",
             changed=True,
@@ -1244,7 +1405,11 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
     )
     parameters = vol.Schema({})
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_ARCHIVE_ALARMS
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1254,12 +1419,18 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
         llm_context: llm.LLMContext,
     ) -> llm.ToolResult:
         """Archive every active alarm."""
-        await self._call_service(hass, llm_context, {SERVICE_FIELD_MODE: "all_active"})
+        await self._call_service(
+            hass,
+            llm_context,
+            {SERVICE_FIELD_ALARM_STATUS: ALARM_STATUS_ACTIVE},
+        )
         return self._result(
             status="applied",
             changed=True,
-            target={"kind": "alarm", "id": "all_active"},
-            after={"archived": "all_active"},
+            # No single alarm identity, so the set is named in `after` rather than
+            # invented as a target id.
+            target={"kind": TARGET_KIND_ALARM, "id": None},
+            after={"archived": ALARM_STATUS_ACTIVE},
             warnings=["bulk action", "no un-archive"],
         )
 
@@ -1287,7 +1458,11 @@ class DeleteAlarmTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_ALARMS
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1300,7 +1475,6 @@ class DeleteAlarmTool(_FirewallaControlTool):
         args = self._args(tool_input)
         alarm_id = args[SERVICE_FIELD_ALARM_ID]
         data = {
-            SERVICE_FIELD_MODE: "this",
             SERVICE_FIELD_ALARM_ID: alarm_id,
             SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
         }
@@ -1308,7 +1482,7 @@ class DeleteAlarmTool(_FirewallaControlTool):
         return self._result(
             status="applied",
             changed=True,
-            target={"kind": "alarm", "id": alarm_id},
+            target={"kind": TARGET_KIND_ALARM, "id": alarm_id},
             after={"deleted": True},
             warnings=["irreversible"],
         )
@@ -1328,9 +1502,11 @@ class DeleteAlarmsTool(_FirewallaControlTool):
     parameters = vol.Schema(
         {
             vol.Required(
-                SERVICE_FIELD_MODE,
-                description="Required. Which set to delete permanently.",
-            ): vol.In(("all_active", "all_archived")),
+                SERVICE_FIELD_ALARM_STATUS,
+                description=(
+                    "Required. Which set to delete permanently: 'active' or 'archived'."
+                ),
+            ): vol.In((ALARM_STATUS_ACTIVE, ALARM_STATUS_ARCHIVED)),
             vol.Required(
                 SERVICE_FIELD_CONFIRM,
                 description="Required. Set true to confirm the bulk delete.",
@@ -1338,7 +1514,11 @@ class DeleteAlarmsTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_ALARMS
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1349,17 +1529,17 @@ class DeleteAlarmsTool(_FirewallaControlTool):
     ) -> llm.ToolResult:
         """Delete all alarms in the chosen set."""
         args = self._args(tool_input)
-        mode = args[SERVICE_FIELD_MODE]
+        alarm_status = args[SERVICE_FIELD_ALARM_STATUS]
         data = {
-            SERVICE_FIELD_MODE: mode,
+            SERVICE_FIELD_ALARM_STATUS: alarm_status,
             SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
         }
         await self._call_service(hass, llm_context, data)
         return self._result(
             status="applied",
             changed=True,
-            target={"kind": "alarm", "id": mode},
-            after={"deleted": mode},
+            target={"kind": TARGET_KIND_ALARM, "id": None},
+            after={"deleted": alarm_status},
             warnings=["bulk action", "irreversible"],
         )
 
@@ -1370,9 +1550,9 @@ class DeleteHostTool(_FirewallaControlTool):
     name = format_tool_name("delete_host")
     title = "Delete host"
     description = (
-        "Destructive: permanently delete a device record from Firewalla. This "
+        "Destructive: permanently delete a host record from Firewalla. This "
         "is irreversible. It removes the host's identity, reservations, and "
-        "history; the device reappears as a new host if it rejoins the network."
+        "history; the host reappears as a new host if it rejoins the network."
     )
     parameters = vol.Schema(
         {
@@ -1387,8 +1567,12 @@ class DeleteHostTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_HOST
     _returns_response = True
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1403,13 +1587,12 @@ class DeleteHostTool(_FirewallaControlTool):
         data = {
             SERVICE_FIELD_HOST_MAC: host_mac,
             SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
-            SERVICE_FIELD_REFRESH: True,
         }
         result = await self._call_service(hass, llm_context, data)
         return self._result(
             status="applied",
             changed=True,
-            target={"kind": "host", "id": host_mac},
+            target={"kind": TARGET_KIND_HOST, "id": host_mac},
             after={"deleted": True},
             warnings=["irreversible"],
             result=result,
@@ -1424,13 +1607,13 @@ class DeleteRuleTool(_FirewallaControlTool):
     description = (
         "Destructive: permanently delete a firewall rule. This is irreversible. "
         "To disable a rule reversibly use pause_rule instead. Resolve rule_id "
-        "from list_rules."
+        "from get_rules."
     )
     parameters = vol.Schema(
         {
             vol.Required(
                 SERVICE_FIELD_RULE_ID,
-                description="Required. The rule id to delete (from list_rules).",
+                description="Required. The rule id to delete (from get_rules).",
             ): str,
             vol.Required(
                 SERVICE_FIELD_CONFIRM,
@@ -1439,7 +1622,11 @@ class DeleteRuleTool(_FirewallaControlTool):
         }
     )
     annotations = _DESTRUCTIVE_ANNOTATIONS
+    # Overrides the family block: this one cannot be undone.
+    _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_RULE
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1459,7 +1646,7 @@ class DeleteRuleTool(_FirewallaControlTool):
         return self._result(
             status="applied",
             changed=True,
-            target={"kind": "rule", "id": rule_id},
+            target={"kind": TARGET_KIND_RULE, "id": rule_id},
             after={"deleted": True},
             warnings=["irreversible"],
         )
@@ -1488,7 +1675,7 @@ _CONTROL_TOOL_CLASSES: Final = (
 # irreversible (no undo) or bulk, so they require an explicit, informed opt-in.
 #
 # The four membership tools are here because a membership change deletes the rules
-# attached to the device and nothing can restore them. The membership slot itself
+# attached to the host and nothing can restore them. The membership slot itself
 # is reversible, which is why each set tool names its clear tool as `undo`, but the
 # deleted rules are gone.
 _DESTRUCTIVE_TOOL_CLASSES: Final = (

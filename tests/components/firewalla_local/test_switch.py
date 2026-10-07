@@ -25,6 +25,7 @@ from custom_components.firewalla_local.const import (
     ATTR_RULE_NOTES,
     ATTR_RULE_PAUSE_REMAINING_SECONDS,
     ATTR_RULE_PAUSE_UNTIL,
+    ATTR_RULE_PAUSE_UNTIL_TIMESTAMP,
     ATTR_RULE_PURPOSE,
     ATTR_RULE_SCHEDULE_DAYS,
     ATTR_RULE_SCHEDULE_DURATION,
@@ -58,9 +59,9 @@ from custom_components.firewalla_local.const import (
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
+    FirewallaFlowRecord,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
-    FirewallaRuleHit,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
 )
@@ -102,7 +103,7 @@ def _snapshot_with_rule(
     dnsmasq_only: bool | None = True,
     auto_delete_when_expires: bool | None = None,
     hit_count: int | None = None,
-    last_hit: FirewallaRuleHit | None = None,
+    last_hit: FirewallaFlowRecord | None = None,
     raw_update_overrides: dict[str, object] | None = None,
 ) -> FirewallaRuntimeSnapshot:
     """Return a runtime snapshot with an optional AV_SMART_TV social rule."""
@@ -262,17 +263,28 @@ async def test_selected_rule_switch_turns_rule_off_and_on(hass: HomeAssistant) -
         # from a rule that has fired.
         assert attributes[ATTR_RULE_HIT_COUNT] is None
         assert attributes[ATTR_RULE_LAST_HIT] == {
-            "timestamp": None,
-            "at": None,
-            "device_mac": None,
-            "device_ip": None,
+            "matched_at_timestamp": None,
+            "matched_at": None,
+            "is_blocked": None,
+            "block_type": None,
+            "blocked_by_rule_id": None,
+            "host_id": None,
+            "host_ip": None,
             "destination": None,
             "destination_kind": None,
             "destination_ip": None,
+            "destination_mac": None,
             "port": None,
+            "host_port": None,
             "protocol": None,
+            "download_bytes": None,
+            "upload_bytes": None,
+            "duration_seconds": None,
+            "event_count": None,
+            "network_id": None,
             "app": None,
             "category": None,
+            "region": None,
         }
         assert "source_rule_id" not in attributes
         assert "backing_rule_present" not in attributes
@@ -702,6 +714,7 @@ async def test_selected_rule_switch_exposes_pause_and_notes_attributes(
     assert attributes[ATTR_RULE_NOTES] == "Pause for maintenance"
     assert attributes[ATTR_RULE_IS_PAUSED] is True
     assert attributes[ATTR_RULE_PAUSE_UNTIL] == "2026-03-25T12:00:00+00:00"
+    assert attributes[ATTR_RULE_PAUSE_UNTIL_TIMESTAMP] == 1774440000.0
     assert attributes[ATTR_RULE_PAUSE_REMAINING_SECONDS] == 600
     assert attributes[ATTR_RULE_CURRENT_STATE_REASON] == RULE_STATE_REASON_PAUSED
 
@@ -755,9 +768,9 @@ async def test_selected_rule_switch_exposes_hit_data(
             return_value=_snapshot_with_rule(
                 "744",
                 hit_count=26617,
-                last_hit=FirewallaRuleHit(
+                last_hit=FirewallaFlowRecord(
                     timestamp=timestamp,
-                    device_mac="74:A7:EA:24:44:44",
+                    device_id="74:A7:EA:24:44:44",
                     device_ip="192.168.202.43",
                     destination="www.youtube.com",
                     destination_kind="domain",
@@ -778,17 +791,28 @@ async def test_selected_rule_switch_exposes_hit_data(
 
     assert attributes[ATTR_RULE_HIT_COUNT] == 26617
     assert attributes[ATTR_RULE_LAST_HIT] == {
-        "timestamp": timestamp,
-        "at": "2026-10-03T01:17:14.243000+00:00",
-        "device_mac": "74:A7:EA:24:44:44",
-        "device_ip": "192.168.202.43",
+        "matched_at_timestamp": timestamp,
+        "matched_at": "2026-10-03T01:17:14.243000+00:00",
+        "is_blocked": None,
+        "block_type": None,
+        "blocked_by_rule_id": None,
+        "host_id": "74:A7:EA:24:44:44",
+        "host_ip": "192.168.202.43",
         "destination": "www.youtube.com",
         "destination_kind": "domain",
         "destination_ip": None,
+        "destination_mac": None,
         "port": 53,
+        "host_port": None,
         "protocol": "dns",
+        "download_bytes": None,
+        "upload_bytes": None,
+        "duration_seconds": None,
+        "event_count": None,
+        "network_id": None,
         "app": "youtube",
         "category": "av",
+        "region": None,
     }
 
 

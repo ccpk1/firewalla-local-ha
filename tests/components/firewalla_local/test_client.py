@@ -14,6 +14,8 @@ from custom_components.firewalla_local.api.crypto import aes256_cbc_encrypt_to_b
 from custom_components.firewalla_local.api.exceptions import (
     FirewallaAuthError,
     FirewallaLocalRuntimeNotReadyError,
+    FirewallaProtocolError,
+    FirewallaValidationError,
 )
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
@@ -558,13 +560,15 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
             mount="/home", capacity_ratio=0.62, used_bytes=None, size_bytes=None
         ),
     )
-    assert snapshot.speed_test_results[1] == FirewallaSpeedTestRecord(
+    assert snapshot.speed_tests[1] == FirewallaSpeedTestRecord(
         tested_at_timestamp=1774293094.481,
         download_mbps=507.17651748657227,
         upload_mbps=49.001976013183594,
         latency_ms=29.107863,
         jitter_ms=1.703425,
-        packet_loss_percent=-1,
+        # The box sends -1 for "not measured", so the model holds absent rather
+        # than an impossible negative loss.
+        packet_loss_percent=None,
         download_megabytes=276.21396827697754,
         upload_megabytes=60.733930587768555,
         isp="Atlantic Broadband",
@@ -579,7 +583,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
         vendor="ookla",
         wan_uuid="wan-1",
     )
-    assert snapshot.speed_test_results[0].wan_uuid == "wan-2"
+    assert snapshot.speed_tests[0].wan_uuid == "wan-2"
     assert rules[0].rule_id == "739"
     assert rules[0].enabled is False
     assert rules[0].target_name == "Kitchen speaker"
@@ -708,7 +712,7 @@ async def test_rule_hits_are_normalized_with_one_destination(
     assert rule.last_hit is not None
     assert rule.last_hit.destination == expected_destination
     assert rule.last_hit.destination_kind == expected_kind
-    assert rule.last_hit.device_mac == raw_flow["device"]
+    assert rule.last_hit.device_id == raw_flow["device"]
     assert rule.last_hit.timestamp == raw_flow["ts"]
 
 
@@ -867,6 +871,7 @@ async def test_get_runtime_snapshot_normalizes_host_inventory() -> None:
             dhcp_name=None,
             ip_address="192.168.200.25",
             group_name="KADEN",
+            membership_kind="user",
             network_name="VLAN10 CORE",
             network_uuid="5799d896-5e0f-40a5-a776-38a5d7746204",
             connection_type="phone",
@@ -1153,6 +1158,7 @@ async def test_get_runtime_snapshot_normalizes_wg_peers_into_host_inventory() ->
             host_name="chads-phone-wgvpn",
             ip_address="192.168.250.199",
             group_name="CHADS_PHONE",
+            membership_kind="group",
             network_name="WireGuard",
             network_uuid="wg0",
             connection_type="vpn",
@@ -1229,6 +1235,7 @@ async def test_get_runtime_snapshot_normalizes_awg_peers_into_host_inventory() -
             host_name="chads-phone-amvpn",
             ip_address="10.190.68.226",
             group_name="CHADS_PHONE",
+            membership_kind="group",
             network_name="AmneziaWG",
             network_uuid="awg0",
             connection_type="vpn",
@@ -1306,6 +1313,7 @@ async def test_get_runtime_snapshot_derives_user_totals_and_group_links() -> Non
             dns_fqdn="Payton iPad",
             ip_address=None,
             group_name="PAYTON",
+            membership_kind="user",
             network_name=None,
             connection_type=None,
             last_active=None,
@@ -1556,7 +1564,7 @@ async def test_get_runtime_snapshot_omits_latest_speed_test_without_success() ->
     assert snapshot.appliance_runtime.memory_usage_ratio == 0.25
     assert snapshot.appliance_runtime.total_memory_mb == 1000
     assert snapshot.appliance_runtime.uptime_seconds is None
-    assert snapshot.speed_test_results == (
+    assert snapshot.speed_tests == (
         FirewallaSpeedTestRecord(
             tested_at_timestamp=1774300000,
             download_mbps=None,
@@ -2461,7 +2469,14 @@ async def test_get_wan_events_payload_sends_paged_get_request() -> None:
 
 @pytest.mark.asyncio
 async def test_get_network_interface_payload_sends_targeted_get_request() -> None:
-    """Test item=intf pulls use the confirmed targeted get shape."""
+    """Test item=intf pulls use the confirmed targeted get shapes.
+
+    Two requests, because the box returns two disjoint family sets: a bare read
+    carries the app and category families, and adding `apiVer: 2` plus `local`
+    swaps them for the eleven traffic families. Asserting only the first request
+    is what let the ranking families go unrequested -- an empty top-talker list
+    looked like a quiet network rather than a missing call.
+    """
     async with ClientSession() as session:
         client = FirewallaApiClient(
             session=session,
@@ -2482,11 +2497,97 @@ async def test_get_network_interface_payload_sends_targeted_get_request() -> Non
                 network_uuid="5799d896-5e0f-40a5-a776-38a5d7746204"
             )
 
-    assert mock_send.await_args.kwargs == {
+    assert mock_send.await_count == 2
+    first, second = (call.kwargs for call in mock_send.await_args_list)
+    assert first == {
         "message_type": "get",
         "data": {"item": "intf"},
         "target": "5799d896-5e0f-40a5-a776-38a5d7746204",
     }
+    assert second == {
+        "message_type": "get",
+        "data": {"item": "intf", "apiVer": 2, "local": True},
+        "target": "5799d896-5e0f-40a5-a776-38a5d7746204",
+    }
+    # The window is deliberately absent: measured, sending start/end on this call
+    # reduces the response from 11 families to 3.
+    assert "start" not in second["data"]
+    assert "end" not in second["data"]
+
+
+@pytest.mark.asyncio
+async def test_network_interface_payload_merges_both_family_sets() -> None:
+    """Test the two intf responses are merged rather than one chosen.
+
+    The v1 and v2 payloads are complementary, not alternatives: merging them is
+    what gives one view both the app/category families and the traffic rankings.
+    """
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        app_payload = {
+            "uuid": "net-1",
+            "flows": {"appDetails": {"youtube": []}, "recent": []},
+            "hosts": {"AA:BB": {"download": 0}},
+        }
+        traffic_payload = {
+            "uuid": "net-1",
+            "flows": {"download": [{"device": "AA:BB", "count": "10"}], "upload": []},
+        }
+
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(side_effect=[app_payload, traffic_payload]),
+        ):
+            merged = await client.async_get_network_interface_payload(
+                network_uuid="net-1"
+            )
+
+    assert sorted(merged["flows"]) == ["appDetails", "download", "recent", "upload"]
+    # Non-family keys come from the primary payload untouched.
+    assert merged["hosts"] == {"AA:BB": {"download": 0}}
+
+
+@pytest.mark.asyncio
+async def test_network_interface_payload_survives_a_failed_traffic_read() -> None:
+    """Test a failing ranking read degrades instead of failing the refresh.
+
+    The app and category families are still useful on their own, so a network
+    whose v2 read fails must keep its v1 data rather than losing the whole view.
+    """
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        app_payload = {"uuid": "net-1", "flows": {"appDetails": {}}}
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(
+                side_effect=[app_payload, FirewallaProtocolError("no traffic data")]
+            ),
+        ):
+            payload = await client.async_get_network_interface_payload(
+                network_uuid="net-1"
+            )
+
+    assert payload == app_payload
 
 
 @pytest.mark.asyncio
@@ -2608,3 +2709,295 @@ def test_extract_internet_quality_samples_skips_invalid_keys() -> None:
             wan_uuid="wan-1",
         ),
     )
+
+
+def _flow_client(session: ClientSession) -> FirewallaApiClient:
+    """Return a client for flow-reporting request-shape tests."""
+    return FirewallaApiClient(
+        session=session,
+        host="192.168.200.1",
+        gid="gid-123",
+        eid="eid-123",
+        aid="aid-123",
+        symmetric_key=TEST_SYMMETRIC_KEY,
+        device_name="Home Assistant",
+    )
+
+
+@pytest.mark.asyncio
+async def test_flow_rollup_request_matches_the_app_shape() -> None:
+    """Test the rollup sends `local` and not `audit`.
+
+    `local: true` is what the app sends and what enables the four LAN-to-LAN
+    families (11 families with it, 7 without, measured live). `audit` has no
+    effect on the rollup at all, so it is not sent.
+    """
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={}),
+        ) as mock_send:
+            await client.async_get_flow_rollup_payload(
+                target_type="tag",
+                target="31",
+                start_timestamp=1_790_949_600,
+                end_timestamp=1_791_036_000,
+                hourblock=24,
+            )
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "tag",
+            "apiVer": 2,
+            "local": True,
+            "start": 1_790_949_600,
+            "end": 1_791_036_000,
+            "hourblock": 24,
+        },
+        "target": "31",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hourblock",
+    [
+        pytest.param(0, id="zero"),
+        pytest.param(1, id="one"),
+        pytest.param(-5, id="negative"),
+    ],
+)
+async def test_flow_rollup_clamps_hourblock_so_the_response_is_not_empty(
+    hourblock: int,
+) -> None:
+    """Test hourblock is raised to at least 2.
+
+    Measured live: `hourblock` 0 and 1 both return an **empty** response with no
+    error, and every value from 2 to 168 returns identical full data. So passing
+    0 or 1 yields silence, which is why it is clamped rather than forwarded.
+    """
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={}),
+        ) as mock_send:
+            await client.async_get_flow_rollup_payload(
+                target_type="host",
+                target="CC:28:AA:11:06:B7",
+                start_timestamp=1,
+                end_timestamp=2,
+                hourblock=hourblock,
+            )
+
+    assert mock_send.await_args.kwargs["data"]["hourblock"] == 2
+
+
+@pytest.mark.asyncio
+async def test_flow_log_request_sends_the_audit_flag_and_a_count() -> None:
+    """Test the flow log matches the app's captured request shape."""
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={"flows": [], "count": 0, "nextTs": None}),
+        ) as mock_send:
+            await client.async_get_flow_log_payload(
+                target_type="tag",
+                target="31",
+                count=300,
+                since_timestamp=1_791_035_214.683,
+                include_blocked=True,
+            )
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "flows",
+            "type": "tag",
+            "audit": True,
+            "count": 300,
+            "exclude": [],
+            "ts": 1_791_035_214.683,
+        },
+        "target": "31",
+    }
+
+
+@pytest.mark.asyncio
+async def test_block_log_request_sends_no_audit_flag() -> None:
+    """Test the block log omits `audit` and reads the `logs` record key.
+
+    `auditLogs` is the blocked-only query. The app sends no `audit` with it, and
+    the records come back under `logs` rather than `flows`.
+    """
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={"logs": [{"ltype": "audit"}], "count": 1}),
+        ) as mock_send:
+            page = await client.async_get_block_log_payload(
+                target_type="tag",
+                target="31",
+                count=300,
+                since_timestamp=1_791_036_000,
+                category="games",
+                end_timestamp=1_791_032_400,
+            )
+
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "auditLogs",
+            "type": "tag",
+            "count": 300,
+            "exclude": [],
+            "ts": 1_791_036_000,
+            "category": "games",
+            "ets": 1_791_032_400,
+        },
+        "target": "31",
+    }
+    assert page.records == ({"ltype": "audit"},)
+    assert page.reported_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        pytest.param(-1, 50, id="negative_would_return_everything"),
+        pytest.param(0, 50, id="zero_is_undefined"),
+        pytest.param(1, 50, id="one_returns_zero_rows"),
+        pytest.param(50, 50, id="at_the_floor"),
+        pytest.param(300, 300, id="honoured"),
+        pytest.param(5000, 5000, id="at_the_ceiling"),
+        pytest.param(9999, 5000, id="clamped_at_the_ceiling"),
+    ],
+)
+async def test_flow_log_count_is_clamped_into_the_answered_range(
+    requested: int,
+    expected: int,
+) -> None:
+    """Test a caller-supplied count is never forwarded unvalidated.
+
+    A non-positive count is the dangerous case: the box returns the ENTIRE
+    retained window (~6,956 rows measured) rather than nothing, which is the
+    opposite of the intuitive reading. Above 5,000 it silently caps.
+    """
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={"flows": [], "count": 0}),
+        ) as mock_send:
+            await client.async_get_flow_log_payload(
+                target_type="tag",
+                target="31",
+                count=requested,
+            )
+
+    assert mock_send.await_args.kwargs["data"]["count"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target_type",
+    [
+        pytest.param("device", id="device_is_a_scope_not_a_flow_target"),
+        pytest.param("user", id="user_is_a_scope_not_a_flow_target"),
+        pytest.param("", id="empty"),
+    ],
+)
+async def test_flow_queries_reject_a_target_type_the_box_does_not_accept(
+    target_type: str,
+) -> None:
+    """Test only `tag` and `host` reach the wire.
+
+    The flow queries take a tag id or a host MAC. A `device` or `user` selector
+    belongs to the service layer's scope resolution, which maps it to one of
+    these before the client is called.
+    """
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with pytest.raises(FirewallaValidationError):
+            await client.async_get_flow_log_payload(
+                target_type=target_type,
+                target="31",
+                count=300,
+            )
+
+
+@pytest.mark.asyncio
+async def test_a_flow_page_surfaces_the_box_count_and_cursor_separately() -> None:
+    """Test the page keeps the reported count apart from the rows returned.
+
+    The box caps a requested page silently, so rows returned can be fewer than
+    the count it reports, and a caller needs both to tell a truncated page from a
+    quiet target. The cursor stays a float: rounding it could skip records.
+    """
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(
+                return_value={
+                    "flows": [{"ltype": "flow"}, "not-a-dict", {"ltype": "audit"}],
+                    "count": 9001,
+                    "nextTs": 1_791_017_277.18,
+                }
+            ),
+        ):
+            page = await client.async_get_flow_log_payload(
+                target_type="tag",
+                target="31",
+                count=300,
+            )
+
+    assert page.records == ({"ltype": "flow"}, {"ltype": "audit"})
+    assert page.reported_count == 9001
+    assert page.next_cursor == 1_791_017_277.18
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param("not-a-dict", id="not_an_object"),
+        pytest.param({"count": 1}, id="no_records_list"),
+        pytest.param({"flows": {"not": "a list"}}, id="records_not_a_list"),
+    ],
+)
+async def test_a_malformed_flow_page_raises_rather_than_returning_nothing(
+    payload: object,
+) -> None:
+    """Test a shape change raises, so the caller can report it as unavailable.
+
+    The client does not swallow this: every other method raises
+    `FirewallaProtocolError` on an unexpected shape, and fail-soft is the
+    manager's decision so it can report what it could not read.
+    """
+    async with ClientSession() as session:
+        client = _flow_client(session)
+        with (
+            patch.object(
+                client,
+                "_async_send_local_message_data",
+                AsyncMock(return_value=payload),
+            ),
+            pytest.raises(FirewallaProtocolError),
+        ):
+            await client.async_get_flow_log_payload(
+                target_type="tag",
+                target="31",
+                count=300,
+            )

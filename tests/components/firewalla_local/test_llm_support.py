@@ -291,7 +291,7 @@ async def test_read_mode_registers_the_full_read_set(
 
     names = {tool.name for tool in api_instance.tools}
     assert "firewalla_local__get_system_overview" in names
-    assert "firewalla_local__list_hosts" in names
+    assert "firewalla_local__get_hosts" in names
 
 
 async def test_setup_succeeds_without_llm_tools_on_old_core(

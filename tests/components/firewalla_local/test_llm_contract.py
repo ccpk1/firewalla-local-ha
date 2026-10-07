@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from importlib import import_module
 from pathlib import Path
 from typing import Final
 from unittest.mock import AsyncMock, patch
@@ -29,7 +30,12 @@ from custom_components.firewalla_local.const import (
     CONF_SYMMETRIC_KEY,
     DOMAIN,
 )
-from custom_components.firewalla_local.llm_tools_common import PROMPT
+from custom_components.firewalla_local.llm_tools_common import (
+    CONTROL_INJECTION,
+    DESTRUCTIVE_INJECTION,
+    PROMPT,
+    READ_INJECTION,
+)
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
@@ -59,6 +65,190 @@ _UNIT_SUFFIXES: Final = (
 # pair is the one place an epoch could be mistaken for an ISO string.
 _EPOCH_ONLY_SUFFIX: Final = "_timestamp"
 _ISO_ONLY_SUFFIX: Final = "_at"
+
+# Keys a response carries by passing the box's own object through unchanged, so they
+# exist in the payload and can never appear as a literal in this package. Named as a
+# **category** rather than a work list of exemptions: these are unreachable by any
+# static scan, which is a different thing from a name we forgot to rename.
+_PASSTHROUGH_PAYLOAD_KEYS: Final = frozenset(
+    {"adblock", "safeSearch", "family", "doh", "monitor", "qos"}
+)
+
+# Backticked values a description quotes as literal data rather than naming a field.
+_PROSE_IDENTIFIERS: Final = frozenset(
+    {"null", "true", "false", "applied", "already_in_state", "failed"}
+)
+
+# Tools whose name intentionally differs from the service they call, because the
+# tool exposes a narrower slice of one general service. Every other tool must be
+# named exactly like the service behind it.
+_TOOL_SERVICE_EXCEPTIONS: Final = frozenset(
+    {
+        # One membership service, multiplexed across four tools by a `clear` flag.
+        "set_host_group",
+        "clear_host_group",
+        "set_host_user",
+        "clear_host_user",
+        # One archive service and one delete service, each reached by a single-object
+        # tool and a bulk tool.
+        "archive_alarm",
+        "archive_all_alarms",
+        "delete_alarm",
+        "delete_all_alarms",
+        # The alarm pair borrows the generic rule services rather than owning one.
+        "block_alarm_target",
+        "unblock_alarm_target",
+    }
+)
+
+# The control tools whose manager applies the write to the in-memory snapshot, so
+# their result reports `runtime: updated`. Everything else reports `pending`, either
+# because it deliberately does not update local state or because it has none to
+# update. Pinned here so a change to a tool's optimism is a deliberate edit.
+_EXPECTED_UPDATED_TOOLS: Final = frozenset(
+    {
+        "PauseRuleTool",
+        "ResumeRuleTool",
+        "SetSsidPausedTool",
+        "SetHostNameTool",
+        "SetHostDnsHostnameTool",
+        "SetHostDeviceTypeTool",
+        "SetHostDhcpReservationTool",
+        "SetHostNotifyWhenNextOnlineTool",
+        "SetHostNotifyWhenNextOfflineTool",
+        "BlockAlarmTargetTool",
+        "UnblockAlarmTargetTool",
+        "ArchiveAlarmTool",
+        "ArchiveAllAlarmsTool",
+        "DeleteAlarmTool",
+        "DeleteAlarmsTool",
+        "DeleteHostTool",
+        "DeleteRuleTool",
+    }
+)
+
+# Constants whose *value* names something a client sends or reads: an argument, an
+# entity attribute, or a key this integration writes into a request to the box.
+_NAME_CONSTANT_PREFIXES: Final = (
+    "SERVICE_FIELD_",
+    "ATTR_",
+    "DETAIL_",
+    "TARGET_KIND_",
+    "_RAW_",
+    "_COMMAND_",
+)
+
+_IDENTIFIER = re.compile(r"`([A-Za-z][A-Za-z0-9_.]*)`")
+
+_PACKAGE_ROOT: Final = (
+    Path(__file__).resolve().parents[3] / "custom_components" / "firewalla_local"
+)
+
+
+def _docstring_nodes(tree: ast.Module) -> set[int]:
+    """Return the ids of Constant nodes that are docstrings.
+
+    Docstrings are the one kind of string literal that must **not** be in the corpus,
+    and they are why the first attempt at this guard was decorative: a docstring in
+    ``host_manager.py`` says ``host.last_active``, so collecting every string pulled
+    the internal attribute name in and the stale reference resolved. They are
+    identifiable by position — the first statement of a module, class or function —
+    which is a property of where they sit rather than of what they say.
+    """
+    docstrings: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                docstrings.add(id(body[0].value))
+    return docstrings
+
+
+def _published_key_corpus() -> set[str]:
+    """Return every name a description may legitimately reference.
+
+    Three positions, and the distinction is the whole difference between a working
+    guard and a decorative one.
+
+    **Every string literal except a docstring.** That covers an enum value, a tool
+    action, a field name, and a payload key wherever it is written — including the
+    inline form ``"kind": "mac_host" if ... else "pseudo_host"``, whose strings are
+    values inside a conditional and so are invisible to a scan that reads only dict
+    keys. Excluding docstrings is what keeps it honest: they describe the code rather
+    than the payload, so a docstring naming an internal attribute would let a stale
+    field name resolve. The first version of this function collected every string,
+    docstrings included, and passed on the very defect it exists to find.
+
+    **A key in key position**, which is the payload field a description names.
+
+    **A constant whose value is an argument or attribute name**, since
+    `SERVICE_FIELD_*` and `ATTR_*` are how those are declared.
+    """
+    corpus: set[str] = set()
+
+    for path in _PACKAGE_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        docstrings = _docstring_nodes(tree)
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+            ):
+                corpus.add(node.value)
+            elif isinstance(node, ast.Dict):
+                for key in node.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        corpus.add(key.value)
+            elif isinstance(node, ast.Subscript):
+                subscript = node.slice
+                if isinstance(subscript, ast.Constant) and isinstance(
+                    subscript.value, str
+                ):
+                    corpus.add(subscript.value)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                if (
+                    node.target.id.startswith(_NAME_CONSTANT_PREFIXES)
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, str)
+                ):
+                    corpus.add(node.value.value)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "format_tool_name"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                corpus.add(node.args[0].value)
+
+    return corpus
+
+
+def _unresolved_identifiers(text: str, corpus: set[str]) -> list[str]:
+    """Return the identifiers one description names that resolve to nothing.
+
+    A dotted path resolves if either the whole path or its final segment is known, so
+    ``summary.host_count`` is satisfied by ``host_count``.
+    """
+    misses: list[str] = []
+    for identifier in _IDENTIFIER.findall(text):
+        head = identifier.split("(")[0].strip()
+        if head in _PASSTHROUGH_PAYLOAD_KEYS or head in _PROSE_IDENTIFIERS:
+            continue
+        if head in corpus or head.rsplit(".", 1)[-1] in corpus:
+            continue
+        misses.append(head)
+    return misses
 
 
 def _entry(*, mode: str = "full") -> MockConfigEntry:
@@ -168,8 +358,9 @@ async def test_every_tool_declares_the_full_contract(hass: HomeAssistant) -> Non
         assert tool.title, tool.name
         assert tool.description, tool.name
         assert tool.integration == DOMAIN, tool.name
-        # open_world is always false: these tools act on the user's own box.
-        assert tool.annotations.open_world is False, tool.name
+        # open_world is always true: these tools reach the user's Firewalla box,
+        # which is outside Home Assistant.
+        assert tool.annotations.open_world is True, tool.name
 
 
 async def test_every_parameter_has_a_description(hass: HomeAssistant) -> None:
@@ -245,6 +436,367 @@ def test_at_and_timestamp_are_distinct_representations() -> None:
     assert _ISO_ONLY_SUFFIX != _EPOCH_ONLY_SUFFIX
 
 
+async def test_every_identifier_in_a_description_resolves(
+    hass: HomeAssistant,
+) -> None:
+    """No description names a field the package cannot produce.
+
+    A description is prose *about* the payload, so it drifts the moment a field is
+    renamed — and nothing noticed. The Time and Derived State renames updated the
+    payload, the constants, the translations and the reference document, and left
+    ``get_hosts`` telling the model to read ``` `last_active` ``` (epoch seconds)
+    for a field that no longer existed under that name, in a form that had moved to
+    its twin. The pairing guards could not see it: they assert key names in
+    *payloads*, and a description is a string literal.
+
+    Read from the **registered tools** rather than from source, so this checks the
+    text a client actually receives — after composition, and including any family
+    block. An AST scan of `description =` assignments misses the five membership
+    tools, which build theirs by concatenating a shared constant, and those are the
+    highest-risk descriptions on the surface.
+    """
+    api_instance = await _api_instance(hass)
+    corpus = _published_key_corpus()
+
+    unresolved = {
+        tool.name: misses
+        for tool in api_instance.tools
+        if (misses := _unresolved_identifiers(tool.description, corpus))
+    }
+
+    assert unresolved == {}, (
+        "these tool descriptions name identifiers the package does not produce, so a "
+        "model is being told to read fields that do not exist — most likely a rename "
+        f"that reached the payload but not the prose: {unresolved}"
+    )
+
+
+def test_the_description_identifier_scan_reads_real_text() -> None:
+    """Test the scan found a corpus and reports a stale name, so a pass means something.
+
+    Both failure modes are pinned. A corpus collected wrongly resolves too much: the
+    first attempt took every string literal, which pulled ``last_active`` in through
+    the model's own docstrings and made the scan pass on the exact defect it exists
+    to find. A corpus collected too narrowly would flag every tool. So this asserts
+    size, asserts a known key resolves, and **replays the defect** to prove the scan
+    can still see it.
+    """
+    corpus = _published_key_corpus()
+
+    assert len(corpus) > 500, (
+        f"the corpus holds only {len(corpus)} names, so it is not reading the "
+        "package; too little would resolve and every tool would fail"
+    )
+    assert "last_active_at" in corpus, "the corpus is missing a known published key"
+    assert "get_rules" in corpus, "the corpus is missing a known tool action"
+
+    # The defect, replayed. If prose naming the pre-rename field resolves, the corpus
+    # has been contaminated by an internal name and the guard proves nothing.
+    stale = _unresolved_identifiers("Read `last_active` for the last activity.", corpus)
+    assert stale == ["last_active"], (
+        "the scan does not report a stale field name — the corpus is resolving a name "
+        "the package no longer publishes, so this guard would pass on the defect "
+        "that prompted it"
+    )
+
+    # And a valid identifier must pass, so the scan is not flagging everything.
+    assert _unresolved_identifiers("Read `last_active_at` instead.", corpus) == []
+
+
+async def test_every_tool_carries_its_family_injection(
+    hass: HomeAssistant,
+) -> None:
+    """Every description is composed as `injection + body`, and no tool is missed.
+
+    The failure mode this guards is not a *wrong* block but a **missing** one. The
+    composition lives in the base classes so a tool cannot be registered without it,
+    and this asserts that from the outside — against the registered tools, so it
+    holds for the composed text rather than for the class attribute.
+
+    It also pins the destructive split in both directions. A destructive tool that
+    kept the plain control block would omit the one thing a caller must know before
+    writing, and a tool that is *not* destructive must not claim to be — that is how
+    a model learns to distrust the warning.
+
+    The channels are not equivalent, which is why this matters more than it looks:
+    the API prompt reaches an MCP client only through MCP's `prompts` primitive,
+    which the client must invoke explicitly, and `system_model` only arrives once
+    `get_system_overview` has been called. A client that sends `tools/list` and goes
+    straight to a write tool receives **only** these descriptions.
+    """
+    api_instance = await _api_instance(hass)
+
+    control_names = {
+        "firewalla_local__pause_rule",
+        "firewalla_local__resume_rule",
+    }
+
+    missing: list[str] = []
+    wrong_family: list[str] = []
+    destructive_misfiled: list[str] = []
+
+    for tool in api_instance.tools:
+        carries_read = tool.description.startswith(READ_INJECTION)
+        carries_control = tool.description.startswith(CONTROL_INJECTION)
+        carries_destructive = tool.description.startswith(DESTRUCTIVE_INJECTION)
+
+        if not (carries_read or carries_control or carries_destructive):
+            missing.append(tool.name)
+            continue
+
+        # A destructive tool is the only kind that may carry the destructive block.
+        if carries_destructive and not tool.annotations.destructive:
+            destructive_misfiled.append(tool.name)
+
+        if tool.name in control_names and carries_read:
+            wrong_family.append(tool.name)
+
+    assert missing == [], (
+        "these tools carry no family injection, so a client that sends only "
+        "`tools/list` receives none of the cross-cutting context: "
+        f"{missing}"
+    )
+    assert destructive_misfiled == [], (
+        "these tools carry the destructive block without being destructive, which "
+        f"teaches a model to distrust it: {destructive_misfiled}"
+    )
+    assert wrong_family == [], (
+        f"these control tools carry the read block: {wrong_family}"
+    )
+
+    # Every destructive tool must carry the destructive block, checked as its own
+    # direction so a whole family cannot silently keep the weaker one.
+    undecorated = [
+        tool.name
+        for tool in api_instance.tools
+        if tool.annotations.destructive
+        and not tool.description.startswith(DESTRUCTIVE_INJECTION)
+    ]
+    assert undecorated == [], (
+        f"these destructive tools do not warn that they cannot be undone: {undecorated}"
+    )
+
+
+async def test_family_injections_say_what_the_model_cannot_get_elsewhere(
+    hass: HomeAssistant,
+) -> None:
+    """Each block carries a rule the system model genuinely lacks.
+
+    Modelled on the Control D finding that the control block should add *nothing*
+    beyond orientation, because every control-wide rule it could carry (read state
+    before writing, confirm wide-reaching changes, act on `undo`) was already in the
+    system model — and repeating it would mean paying for the same sentence on every
+    control tool.
+
+    So this asserts the split rather than the wording: the read block adds the
+    bounded-result rule, the destructive block adds no-undo, and the control block
+    adds only orientation. If a future edit moves a rule into the control block that
+    the model already states, this fails and the rule goes back.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+
+    # Read adds the bounded-result rule, which is not in the model.
+    read_body = tools["firewalla_local__get_hosts"].description
+    assert "truncated" in read_body
+    assert "truncated" not in PROMPT, (
+        "the model already covers truncated results, so the read block is repeating "
+        "it on every read tool"
+    )
+
+    # Destructive adds no-undo, which is also not in the model.
+    destructive_body = tools["firewalla_local__delete_host"].description
+    assert "cannot be undone" in destructive_body
+    assert "cannot be undone" not in PROMPT, (
+        "the model already covers irreversibility, so the destructive block is "
+        "repeating it on every destructive tool"
+    )
+
+    # Control adds orientation only, so it must be exactly that plus nothing.
+    control_body = tools["firewalla_local__pause_rule"].description
+    assert CONTROL_INJECTION in control_body
+    assert len(CONTROL_INJECTION) < len(READ_INJECTION), (
+        "the control block is longer than the read block, which suggests a rule "
+        "crept in that the system model already states"
+    )
+
+
+async def test_every_control_tool_declares_its_runtime_contract(
+    hass: HomeAssistant,
+) -> None:
+    """Each control result states whether the next read agrees with it.
+
+    `ARCHITECTURE.md` requires a successful command to update in-memory runtime
+    state. Some tools do not, deliberately: a membership change is not applied
+    locally, muting an alarm changes nothing the snapshot carries, and neither a
+    wake nor a speed test has state to reflect. So the contract is not "always
+    true" — it is "always *stated*", and the result answers it in `runtime`.
+
+    The declaration is checked per tool rather than against the base-class default,
+    because that default is `pending`: a tool that forgets to declare under-claims
+    freshness, which is recoverable, while a wrong `updated` would have a model
+    present pre-change state as current. A family base may declare it for its
+    members, but `_FirewallaControlTool` may not — that *is* the default.
+
+    The expected split is pinned both ways, so flipping a tool's optimism means
+    changing this list too, and cannot happen by accident.
+    """
+    control_module = import_module(
+        "custom_components.firewalla_local.llm_tools_control"
+    )
+    control_base = control_module._FirewallaControlTool
+    tool_classes = (
+        *control_module._CONTROL_TOOL_CLASSES,
+        *control_module._DESTRUCTIVE_TOOL_CLASSES,
+    )
+
+    undeclared: list[str] = []
+    reporting_updated: set[str] = set()
+    for tool_class in tool_classes:
+        declares = [
+            base
+            for base in tool_class.__mro__
+            if "_updates_runtime" in base.__dict__ and base is not control_base
+        ]
+        if not declares:
+            undeclared.append(tool_class.__name__)
+            continue
+        if tool_class._updates_runtime:
+            reporting_updated.add(tool_class.__name__)
+
+    assert undeclared == [], (
+        "these control tools inherit the default instead of stating whether the "
+        f"local snapshot reflects the write: {undeclared}"
+    )
+    assert reporting_updated == _EXPECTED_UPDATED_TOOLS, (
+        "the set of tools reporting `runtime: updated` changed; either the "
+        "optimistic update was removed, or the declaration is wrong"
+    )
+
+    # And the field has to reach the model, because no tool description explains
+    # the envelope: `status`, `undo` and `warnings` are enumerated in the system
+    # model, so `runtime` belongs there with them and not in a family block.
+    assert "`runtime`" in PROMPT
+    assert "`runtime`" not in CONTROL_INJECTION, (
+        "the envelope is documented in the system model; one field of it in the "
+        "control block would make control the only family carrying envelope text"
+    )
+
+
+async def test_every_destructive_tool_requires_approval_for_that_action(
+    hass: HomeAssistant,
+) -> None:
+    """A destructive tool states the intent and waits, and for that action only.
+
+    The requirement is per action because consent does not compose. A user who agreed
+    to delete one host has agreed to that, not to the same deletion re-issued later,
+    and not to a deletion of something else — and an agent that reuses an earlier yes
+    is the failure this guards, because nothing downstream can catch it. A wrong write
+    against a live network is unrecoverable here.
+
+    It is stated in the family block rather than the system model on purpose, and the
+    second half of this test pins that split. The API prompt reaches an MCP client
+    only through MCP's `prompts` primitive, which a client must invoke explicitly, and
+    `system_model` only arrives once `get_system_overview` has been called — so a
+    client that sends `tools/list` and goes straight to a delete receives the
+    descriptions and nothing else. A consent rule that can be absent is not a
+    safeguard.
+    """
+    api_instance = await _api_instance(hass)
+    destructive = [tool for tool in api_instance.tools if tool.annotations.destructive]
+
+    # Guard against the test passing because there are no destructive tools registered
+    # in this mode.
+    assert destructive, "no destructive tools were registered, so this proves nothing"
+
+    missing: list[str] = []
+    for tool in destructive:
+        if "wait for their agreement" not in tool.description:
+            missing.append(tool.name)
+        if "that one action and nothing else" not in tool.description:
+            missing.append(f"{tool.name} (single-use scope)")
+
+    assert missing == [], (
+        "these destructive tools do not require approval for the specific action "
+        f"before they run: {missing}"
+    )
+
+    # The per-action scope must not live in the model only, because the model is the
+    # one channel a write-first client might never receive.
+    assert "that one action and nothing else" in DESTRUCTIVE_INJECTION
+    assert "that one action and nothing else" not in PROMPT
+
+    # The model names the boundary rather than leaving it to the qualifier. "Routine
+    # single-host changes can proceed" already excluded a delete, because a delete is
+    # not routine — but "routine" is undefined, so the boundary rested on the model's
+    # judgment about which single-host changes it covers.
+    assert "anything destructive needs the approval" in PROMPT
+
+
+async def test_a_tool_and_its_service_share_one_name(hass: HomeAssistant) -> None:
+    """A tool and the service behind it name one operation, so they name it alike.
+
+    Fourteen read tools and eight control tools disagreed with their service, so the
+    same operation had two names depending on which layer you were reading: the
+    model asked for `get_network_config` while the automation called
+    `get_network_config`, and neither name was discoverable from the other.
+    Names are the only index either surface has.
+
+    A tool that is deliberately narrower than its service is listed in
+    `_TOOL_SERVICE_EXCEPTIONS` with the reason, so the divergence is a decision
+    rather than an oversight — that is what the list is for.
+    """
+    api_instance = await _api_instance(hass)
+    by_action = {
+        tool.name.removeprefix(f"{DOMAIN}__"): tool for tool in api_instance.tools
+    }
+
+    mismatched: list[str] = []
+    for action, tool in by_action.items():
+        if action in _TOOL_SERVICE_EXCEPTIONS:
+            continue
+        if action != tool._service:
+            mismatched.append(f"{action} -> {tool._service}")
+
+    assert mismatched == [], (
+        "these tools call a service with a different name, so one operation has two "
+        f"names: {mismatched}"
+    )
+
+    # And the exception list has to stay a list of genuine divergences, so it cannot
+    # be used to silence a tool that drifted.
+    unnecessary = [
+        action
+        for action in _TOOL_SERVICE_EXCEPTIONS
+        if action not in by_action or by_action[action]._service == action
+    ]
+    assert unnecessary == [], (
+        "these tools are excepted from the naming rule but no longer need to be: "
+        f"{unnecessary}"
+    )
+
+
+async def test_the_injection_check_distinguishes_the_families(
+    hass: HomeAssistant,
+) -> None:
+    """Test the blocks are genuinely different, so the check above means something.
+
+    A guard asserting "every tool carries its family block" is vacuous if all three
+    blocks are the same string or if one is a prefix of another. This pins that each
+    opens with the shared orientation sentence, that the three are distinct, and that
+    none is a prefix of another.
+    """
+    assert READ_INJECTION != CONTROL_INJECTION != DESTRUCTIVE_INJECTION
+    assert not CONTROL_INJECTION.startswith(DESTRUCTIVE_INJECTION)
+    assert not DESTRUCTIVE_INJECTION.startswith(CONTROL_INJECTION)
+
+    # All three open with the same orientation question, which is the one thing they
+    # are meant to share.
+    assert READ_INJECTION.startswith("**If you cannot clearly explain")
+    assert CONTROL_INJECTION.startswith("**If you cannot clearly explain")
+    assert DESTRUCTIVE_INJECTION.startswith("**If you cannot clearly explain")
+
+
 async def test_prompt_is_non_empty_and_covers_the_contract(
     hass: HomeAssistant,
 ) -> None:
@@ -269,9 +821,9 @@ async def test_prompt_is_non_empty_and_covers_the_contract(
         "once per session",
         # 5.6 — action reporting, blast-radius confirmation, and the rule model.
         "before` and `after`",
-        "wait for the user to agree",
+        "wait for agreement",
         "applies_to",
-        "Attachment replaces",
+        "Attachment **replaces**",
         # A smoke test caught invented IP addresses, so the no-guessing rule is
         # part of the contract rather than a nicety.
         "Never guess at data",
@@ -292,8 +844,8 @@ async def test_write_descriptions_guide_the_model(hass: HomeAssistant) -> None:
     assert "resume_rule" in tools["firewalla_local__pause_rule"].description
     assert "reversible" in tools["firewalla_local__set_ssid_paused"].description
     # Overlapping-name tools must contrast their near neighbour.
-    assert "set_alarm_muted" in tools["firewalla_local__archive_alarm"].description
-    assert "archive_alarm" in tools["firewalla_local__set_alarm_muted"].description
+    assert "mute_alarm" in tools["firewalla_local__archive_alarm"].description
+    assert "archive_alarm" in tools["firewalla_local__mute_alarm"].description
     # The block tool must name its key fields.
     for field in ("alarm_id", "target_type", "target_value"):
         assert field in tools["firewalla_local__block_alarm_target"].description
@@ -312,7 +864,7 @@ async def test_policy_guidance_sits_with_the_tool_that_shows_it(
     tools = {tool.name: tool for tool in api_instance.tools}
     config_description = tools["firewalla_local__get_network_config"].description
 
-    assert "settings, not rules" in config_description
+    assert "settings**, not rules" in config_description
     assert "`family` rule purpose" in config_description
     assert "policy" not in PROMPT
 
@@ -320,24 +872,24 @@ async def test_policy_guidance_sits_with_the_tool_that_shows_it(
 async def test_rule_scope_precedence_is_stated_consistently(
     hass: HomeAssistant,
 ) -> None:
-    """The prompt and list_rules agree that attachment replaces device rules.
+    """The prompt and get_rules agree that attachment replaces device rules.
 
     Two different mental models here would be worse than one imprecise one: the
     agent would have to guess which to believe when asked what covers a device.
     """
     api_instance = await _api_instance(hass)
     tools = {tool.name: tool for tool in api_instance.tools}
-    rules_description = tools["firewalla_local__list_rules"].description
+    rules_description = tools["firewalla_local__get_rules"].description
 
-    assert "Attachment replaces" in PROMPT
-    assert "no longer apply" in PROMPT
-    assert "no longer apply" in rules_description
+    assert "Attachment **replaces**" in PROMPT
+    assert "no longer reach it" in PROMPT
+    assert "attachment replaces" in rules_description
 
 
-async def test_membership_change_warns_that_it_deletes_device_rules(
+async def test_membership_change_warns_that_it_deletes_host_rules(
     hass: HomeAssistant,
 ) -> None:
-    """The prompt says a membership change deletes the device's rules.
+    """The prompt says a membership change deletes the host's rules.
 
     This is destructive and cannot be undone by the tool, so a model that
     discovers it only from the call result has already done the damage. Verified
@@ -348,24 +900,76 @@ async def test_membership_change_warns_that_it_deletes_device_rules(
     Checked against the prompt, which is served as the API prompt, because the
     four membership tools are added in a later phase and this guidance must exist
     before a model can call one.
+
+    It reaches through a second channel that this test predates: the destructive
+    tools carry `DESTRUCTIVE_INJECTION` in every description, and all four
+    membership tools are in that family. That matters because the API prompt
+    reaches an MCP client only if it invokes MCP's `prompts` primitive
+    explicitly, so before the injections existed a client could reach
+    `set_host_group` having received none of this.
     """
-    assert "DELETES THE RULES ATTACHED TO THAT DEVICE" in PROMPT
+    assert "destroys the host's own rules" in PROMPT
     assert "enabled rules the user created" in PROMPT
-    assert "device_rules.removed" in PROMPT
+    assert "host_rules.removed" in PROMPT
     # The blast radius must be bounded, or a model will over-warn and a user may
-    # refuse a harmless change: only this device's rules go.
-    assert "are NOT affected" in PROMPT
+    # refuse a harmless change: only this host's rules go.
+    assert "are unaffected" in PROMPT
     # And it must check first, so the confirmation is proportionate rather than
     # blanket on a call that often destroys nothing.
-    assert "Check before you ask" in PROMPT
+    assert "something to lose" in PROMPT
     # It must also be in the confirm-first list, or a model scanning that list
-    # would classify a membership change as routine.
-    confirm_paragraph = PROMPT.split("Confirm before wide-reaching changes", 1)[1]
-    assert "membership" in confirm_paragraph.split(".", 2)[1]
+    # would classify a membership change as routine. Asserted against the whole
+    # paragraph rather than a sentence index, so rewording the block cannot make
+    # this pass or fail for a reason unrelated to what it checks.
+    confirm_section = PROMPT.split("Confirm before anything wide-reaching", 1)[1]
+    confirm_paragraph = confirm_section.split("\n\n", 1)[0]
+    assert "membership change" in confirm_paragraph
+
+
+async def test_the_user_filter_description_matches_what_the_filters_do(
+    hass: HomeAssistant,
+) -> None:
+    """The two membership filters are described as they behave, not as they read.
+
+    `group_name` matches the host's membership *label*, and for a host assigned to a
+    user that label is the **user's name** — the box stores a group and a user as the
+    same tag and resolves the label through the affiliated user first. Measured on
+    the dev box: 32 of 218 hosts carry a user's name in `group_name`, and no name
+    appears in both collections.
+
+    The descriptions used to claim the opposite — "a user's name does not match here",
+    "a user's name is never a valid group" — which was wrong in the one place a model
+    would act on it. A model told a user's name cannot match would have chosen the
+    wrong filter for "which hosts belong to KADENS_PHONE", or concluded the user had
+    no hosts.
+
+    The `user` filter is the exact one for that question, because it resolves the
+    affiliated tag rather than matching a label, so the descriptions must point at it
+    rather than deny the overlap exists.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+
+    hosts = tools["firewalla_local__get_hosts"]
+    # The description lives on the marker, not on the schema value.
+    group_param = next(
+        marker for marker in hosts.parameters.schema if marker.schema == "group_name"
+    )
+    user_param = next(
+        marker for marker in hosts.parameters.schema if marker.schema == "user"
+    )
+
+    # Neither may deny that a user's name appears in a host's membership label.
+    assert "does not match" not in group_param.description
+    assert "never a valid" not in group_param.description
+    # The group filter states it takes either kind's name.
+    assert "user's name" in group_param.description
+    # The user filter says how it differs — exact by tag, not by label.
+    assert "affiliated tag" in user_param.description
 
 
 async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
-    """A host's group_name is named as the input to list_rules' applies_to.
+    """A host's group_name is named as the input to get_rules' applies_to.
 
     A smoke test asked "what rules apply to <device>", and the model found the
     host and its group_name, then stopped. Both descriptions were individually
@@ -376,15 +980,15 @@ async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
     api_instance = await _api_instance(hass)
     tools = {tool.name: tool for tool in api_instance.tools}
 
-    hosts_description = tools["firewalla_local__list_hosts"].description
+    hosts_description = tools["firewalla_local__get_hosts"].description
     applies_to = next(
         marker.description
-        for marker in tools["firewalla_local__list_rules"].parameters.schema
+        for marker in tools["firewalla_local__get_rules"].parameters.schema
         if marker.schema == "applies_to"
     )
 
     assert "`group_name`" in hosts_description
-    assert "rule lookup" in hosts_description
+    assert "as `applies_to` to find the rules" in hosts_description
     assert "group_name" in applies_to
     assert "`applies_to`" in PROMPT
     assert "group_name" in PROMPT
@@ -393,10 +997,10 @@ async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
 # Each entry pairs a tool that returns a large payload with the phrase in its
 # description that tells the model how to avoid paying for all of it.
 _PAYLOAD_GUIDANCE: Final = (
-    ("firewalla_local__list_hosts", "filters to narrow"),
-    ("firewalla_local__list_rules", "Filters narrow the result"),
-    ("firewalla_local__get_network_config", "not included by default"),
-    ("firewalla_local__get_user_usage", "pass `sections`"),
+    ("firewalla_local__get_hosts", "filters narrow on the box"),
+    ("firewalla_local__get_rules", "User-visible rules only by default"),
+    ("firewalla_local__get_network_config", "off by default"),
+    ("firewalla_local__get_time_usage", "pass `sections`"),
 )
 
 
@@ -406,31 +1010,31 @@ async def test_count_totals_are_not_presented_as_connected(
     """The counts describe themselves, so `total` is not read as "connected".
 
     A smoke test asked "are there any VPN devices connected?" and got five, all
-    named, because `list_hosts` returned every configured peer with no
+    named, because `get_hosts` returned every configured peer with no
     connectivity signal and the overview's counts were the only place `online`
     appeared. Every surface that reports a total now says what it means, and
-    `list_hosts` carries the per-device `online` the answer actually needs.
+    `get_hosts` carries the per-device `online` the answer actually needs.
     """
     api_instance = await _api_instance(hass)
     tools = {tool.name: tool for tool in api_instance.tools}
 
     for tool_name in (
         "firewalla_local__get_system_overview",
-        "firewalla_local__list_hosts",
+        "firewalla_local__get_hosts",
     ):
         description = tools[tool_name].description
         assert "connected" in description, tool_name
         assert "online" in description, tool_name
 
-    # Past devices ARE included: the init request sets includeInactiveHosts,
+    # Past hosts ARE included: the init request sets includeInactiveHosts,
     # which is what the app's "Show past devices" toggle does. A live Quarantine
-    # group returned 10 devices, 7 of them long-idle, so membership here is the
-    # group's full device list.
+    # group returned 10 hosts, 7 of them long-idle, so membership here is the
+    # group's full host list.
     assert (
-        "Past devices are included" in tools["firewalla_local__list_hosts"].description
+        "Inactive hosts are included" in tools["firewalla_local__get_hosts"].description
     )
 
-    config = tools["firewalla_local__list_hosts"].parameters.schema
+    config = tools["firewalla_local__get_hosts"].parameters.schema
     assert any(marker.schema == "online" for marker in config)
 
 
@@ -441,15 +1045,32 @@ _INTENTIONAL_OMISSIONS: Final = frozenset(
         # The destructive gate is set internally; asking the model to confirm
         # itself would prove nothing.
         ("unblock_alarm_target", "confirm"),
-        # Bulk tools act on a fixed mode; single-alarm tools act on an alarm id.
-        # Splitting them means neither tool exposes the other's selector, and
-        # `mode` is never taken from the model because "all_active" is the bulk
-        # archive the destructive tier gates separately.
-        ("archive_alarm", "mode"),
-        ("archive_all_alarms", "mode"),
+        # The flow report's `detail` and `record_count` ARE exposed, because
+        # diagnosis needs the individual records: a record names the rule that
+        # blocked it, and the rollup's blocked families carry no rule reference at
+        # all -- verified by dumping every key of a live rollup, where the only
+        # `policy` key is the target's own policy block, not a rule id. So
+        # "which rule stopped this" is answerable only at records detail.
+        #
+        # `fetch_all_records` stays internal: it walks the cursor to exhaustion
+        # with only a wall-clock deadline as a stop, so a single call could return
+        # an unbounded number of rows into a model's context.
+        ("get_flow_report", "fetch_all_records"),
+        # Flow data is read live on every call, so this only refreshes the
+        # runtime snapshot the report's names are resolved from. The service
+        # defaults it to true, which is what the tool wants, so omitting it
+        # avoids a lever the model would have no reason to move.
+        ("get_flow_report", "refresh"),
+        # Bulk tools act on the set they name; single-alarm tools act on an
+        # alarm id. Splitting them means neither tool exposes the other's
+        # selector: `archive_all_alarms` acts on the active set, which its own
+        # name already states, and `archive_alarm`/`delete_alarm` act on one
+        # alarm, so a status would be a second selector for a call that has
+        # already made its choice.
+        ("archive_alarm", "alarm_status"),
         ("archive_all_alarms", "alarm_id"),
-        ("delete_alarm", "mode"),
-        ("delete_all_alarms", "mode"),
+        ("archive_all_alarms", "alarm_status"),
+        ("delete_alarm", "alarm_status"),
         ("delete_all_alarms", "alarm_id"),
         # `detail` and `include: ['subperiods']` both select the nested
         # breakdown, so the tool offers one lever rather than two.
@@ -650,7 +1271,7 @@ async def test_read_envelope_is_json_serializable(hass: HomeAssistant) -> None:
     api_instance = await _api_instance(hass)
 
     result = await api_instance.async_call_tool(
-        llm.ToolInput(tool_name="firewalla_local__list_rules", tool_args={})
+        llm.ToolInput(tool_name="firewalla_local__get_rules", tool_args={})
     )
 
     assert result.error is False
@@ -673,7 +1294,7 @@ async def test_action_result_envelope_is_json_serializable(
         result = await api_instance.async_call_tool(
             llm.ToolInput(
                 tool_name="firewalla_local__pause_rule",
-                tool_args={"rule_target": "761"},
+                tool_args={"rule_id": "761"},
             )
         )
 

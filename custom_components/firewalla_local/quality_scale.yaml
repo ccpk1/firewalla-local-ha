@@ -15,7 +15,9 @@ rules:
     comment: Config-flow coverage now includes user cannot-connect handling, reauth failure and wrong-account paths, reconfigure validation, and options-flow drift behavior with all auth tests kept internal-only and fully mocked.
   config-flow: done
   dependency-transparency: done
-  docs-actions: done
+  docs-actions:
+    status: done
+    comment: USER_GUIDE names every service in the catalog and documents the report services, including the flow report's window, detail levels, and what the host_detail include adds and why it is off by default.
   docs-high-level-description: done
   docs-installation-instructions:
     status: done
@@ -42,6 +44,11 @@ rules:
       Runtime inventory, rule deletion, and alarm services validate entry scope,
       alarm/rule selectors, mute scope, and destructive confirmations with
       specific service errors.
+      The report services validate their scope selectors as well. A device, group,
+      or user that matches nothing raises flow_report_scope_not_found, and an
+      ambiguous one raises flow_report_scope_ambiguous, each naming the scope kind
+      and the selector the caller supplied. A report the box would not return
+      raises flow_report_failed rather than returning a partial envelope.
       Mutating services and runtime inventory are administrator-only while
       automation calls without a user context remain supported.
   config-entry-unloading: done
@@ -72,7 +79,7 @@ rules:
     comment: "Rule-backed switches plus watched-device and watched-user entities are created only when the user selects them in options, while core appliance-monitoring and alarm entities remain always available."
   entity-translations:
     status: done
-    comment: "Rule-backed switches, appliance-monitoring entities, alarm entities, watched-device entities, and watched-user entities use translation-backed names, states, and attributes without inline user-facing strings."
+    comment: "Rule-backed switches, appliance-monitoring entities, alarm entities, watched-device entities, and watched-user entities use translation-backed names, states, and attributes without inline user-facing strings. Now enforced rather than asserted: two tests in test_vocabulary.py hold the published attribute set and the translated label set to each other in both directions, because this rule was marked done while seven attributes shipped unlabelled. Five had never had a label (dns_hostname, dns_domain, dns_fqdn, host_device_type, host_ip) and the other two were twins added without one; the ip_address to host_ip rename had also left a dead label behind, since a translation key is keyed by the attribute name and is not carried by a constant rename."
   exception-translations:
     status: done
     comment: Config flow and service validation now use distinct translation keys for host, QR, entry-scope, duration, and rule-target failures.

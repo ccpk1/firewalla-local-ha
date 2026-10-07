@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from homeassistant.util import dt as dt_util
 
@@ -18,7 +19,11 @@ from ..const import (
     MIN_WATCHED_DEVICE_ONLINE_WINDOW_MINUTES,
 )
 from ..coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
-from ..models import FirewallaHostRuntime, FirewallaRuntimeSnapshot
+from ..models import (
+    FirewallaActivityBasis,
+    FirewallaHostRuntime,
+    FirewallaRuntimeSnapshot,
+)
 from ..utils.host_activity import (
     count_online_hosts,
     is_host_online,
@@ -137,6 +142,111 @@ class FirewallaHostManager(FirewallaBaseManager):
             if (normalized_mac := normalize_mac_address(host.mac)) is not None
         }
 
+    def apply_optimistic_host_update(
+        self,
+        mac: str,
+        *,
+        transform: Callable[[FirewallaHostRuntime], FirewallaHostRuntime] | None = None,
+        removed: bool = False,
+    ) -> None:
+        """Publish a successful host mutation to the in-memory snapshot.
+
+        `ARCHITECTURE.md` requires a successful command to update runtime state so
+        the next read agrees with it, with the coordinator refresh as the later
+        source of truth. Without this a host write was invisible until the next poll
+        — up to the update interval — which is why these services forced a poll
+        instead.
+
+        `transform` is a callable rather than a field mapping because it keeps the
+        dataclass field types checkable: `replace(host, **mapping)` erases them, and
+        the caller knows the concrete field it is setting, so it should say so.
+
+        The index and the snapshot are republished together and from the same tuple.
+        That is the fix for a real inconsistency: deletion popped the host out of
+        `_host_index` while `coordinator.data.hosts` still carried it, so
+        `get_host(mac)` returned nothing while `get_hosts` — which reads the
+        snapshot — still listed it. One inventory, two answers.
+        """
+        snapshot = self.coordinator.data
+        if snapshot is None:
+            return
+
+        normalized_mac = normalize_mac_address(mac)
+        if normalized_mac is None:
+            return
+
+        if removed:
+            updated_hosts = tuple(
+                host
+                for host in snapshot.hosts
+                if normalize_mac_address(host.mac) != normalized_mac
+            )
+        elif transform is not None:
+            updated_hosts = tuple(
+                (
+                    transform(host)
+                    if normalize_mac_address(host.mac) == normalized_mac
+                    else host
+                )
+                for host in snapshot.hosts
+            )
+        else:
+            return
+
+        if updated_hosts == snapshot.hosts:
+            return
+
+        updated_snapshot = replace(snapshot, hosts=updated_hosts)
+        # rebuilds `_host_index` from the same tuple, so the two cannot disagree
+        self.handle_refresh(updated_snapshot)
+        self.coordinator.async_set_updated_data(updated_snapshot)
+
+    def apply_optimistic_host_policy(
+        self, mac: str, policy_value: dict[str, object]
+    ) -> None:
+        """Apply a successful host policy write to the cached raw host payload.
+
+        A host's IP assignment and notification settings are not in the normalized
+        snapshot. Every surface that publishes them — `get_hosts` and the network
+        config host rows — resolves them from `coordinator.last_init_payload`, so the
+        update has to land there for the next read to agree with the write instead of
+        serving pre-change values until the next poll.
+
+        The update is shallow because the payload is: the IP-allocation builder
+        publishes the complete allocation map rather than one network's entry, so a
+        nested value carries its whole subtree and no stale leaf can survive it.
+
+        The payload is replaced wholesale on every refresh, so this only has to hold
+        until the next poll — the same guarantee the snapshot update carries.
+        """
+        normalized_mac = normalize_mac_address(mac)
+        if normalized_mac is None:
+            return
+
+        payload = self.coordinator.last_init_payload
+        if payload is None:
+            return
+
+        raw_hosts = payload.get("hosts")
+        if not isinstance(raw_hosts, list):
+            return
+
+        for raw_host in raw_hosts:
+            if not isinstance(raw_host, dict):
+                continue
+            raw_mac = raw_host.get("mac")
+            if not isinstance(raw_mac, str):
+                continue
+            if normalize_mac_address(raw_mac) != normalized_mac:
+                continue
+
+            raw_policy = raw_host.get("policy")
+            if not isinstance(raw_policy, dict):
+                raw_policy = {}
+                raw_host["policy"] = raw_policy
+            raw_policy.update(policy_value)
+            return
+
     def remove_host_from_index(self, mac: str) -> None:
         """Drop one normalized MAC from the host index after a deletion."""
         if normalized_mac := normalize_mac_address(mac):
@@ -210,20 +320,36 @@ class FirewallaHostManager(FirewallaBaseManager):
             * 60
         )
 
+    def activity_basis(self) -> FirewallaActivityBasis:
+        """Return the frame this manager's connectivity booleans are measured in.
+
+        Every connectivity surface measures from the freshness of the whole host
+        inventory rather than from the wall clock, so a stale snapshot does not
+        mark the entire network offline. It is published as a pair so a caller
+        that reports a boolean can also report what it was measured against: the
+        reference and the window are only meaningful together, and a surface that
+        paired the appliance reference with a window of its own would reopen
+        exactly the disagreement this replaced.
+        """
+        return FirewallaActivityBasis(
+            reference_at=reference_last_active(self.get_hosts()),
+            window_seconds=self.watched_device_online_window_seconds,
+        )
+
     def count_total_devices(self) -> int:
         """Return the total number of normalized hosts in the latest snapshot."""
         return len(self.get_hosts())
 
     def is_watched_device_online(self, host: FirewallaHostRuntime) -> bool | None:
         """Return whether one normalized host appears online for watched devices."""
-        hosts = self.get_hosts()
-        if not hosts:
+        if not self.get_hosts():
             return None
 
+        basis = self.activity_basis()
         return is_host_online(
             host,
-            reference_activity=reference_last_active(hosts),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
 
     def is_device_tracker_home(self, host: FirewallaHostRuntime) -> bool | None:
@@ -239,9 +365,11 @@ class FirewallaHostManager(FirewallaBaseManager):
 
     def count_online_devices(self) -> int:
         """Return the number of hosts that appear online in the latest snapshot."""
+        basis = self.activity_basis()
         return count_online_hosts(
             self.get_hosts(),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
 
     def count_offline_devices(self) -> int:
@@ -265,10 +393,18 @@ class FirewallaHostManager(FirewallaBaseManager):
 
         Peers carry ``last_active`` from the peer inventory, so the shared
         online definition applies unchanged — no peer-specific window.
+
+        The reference is the *appliance-wide* freshest activity, not the freshest
+        peer. Measuring from the peers alone made the newest peer online by
+        construction, however long ago it was: it reported one connected VPN peer
+        whose last activity was 4.5 days earlier, while the host list -- using the
+        appliance reference -- showed all five offline.
         """
+        basis = self.activity_basis()
         return count_online_hosts(
             self.get_vpn_peers(),
-            online_window_seconds=self.watched_device_online_window_seconds,
+            reference_activity=basis.reference_at,
+            online_window_seconds=basis.window_seconds,
         )
 
     def count_vpn_offline_devices(self) -> int:

@@ -1033,7 +1033,7 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 | IPv6 subnet | `item=intf` → `ipv6Subnets` | `FirewallaNetwork.ipv6_subnets` | `ipv6_subnets` |
 | Gateway | `networkProfiles[uuid].gateway`, falls back to `networkConfig.dhcp[<intf>].gateway` | `FirewallaNetwork.gateway` | `gateway` |
 | DHCP | `networkConfig.dhcp[<intf>]` (gateway, subnetMask, lease, range, nameservers, searchDomain) | `FirewallaNetwork.dhcp` | `dhcp` |
-| Device count | `hosts[]` with `host.intf == <network uuid>`, excluding the Firewalla box (`macVendor` contains `firewalla`) | `FirewallaNetwork.device_host_count` | `device_count` |
+| Device count | `hosts[]` with `host.intf == <network uuid>`, excluding the Firewalla box (`macVendor` contains `firewalla`) | `FirewallaNetwork.device_host_count` | `host_count` |
 
 ### Advanced options
 
@@ -1053,14 +1053,14 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 Per-network usage is surfaced via a **single logic path**: the integration
 manager fetches `item=intf` once per poll (resilient to per-network failures —
 OpenVPN returns a 500 for `item=intf`, all others work) and the entity
-`network_usage` attribute, the `get_network_segment_report` usage section, and
-the `get_network_segment_usage` service all consume the same manager views.
+`network_usage` attribute, the `get_network_config` usage section, and
+the `get_network_usage` service all consume the same manager views.
 WAN networks have **no windowed source** — a WAN's `item=intf` windows are all
 zero and the box-wide init windows are aggregate (not per-WAN) — so a WAN
 `network_usage` carries only the **`monthly`** key (current calendar month from
 `monthlyDataUsageOnWans`), never conflated with the rolling `last_30d` window.
 WAN monthly totals also remain on the System Status `current_wan_usage` /
-`get_wan_data_usage` surface.
+`get_wan_usage` surface.
 
 #### Per-host flow and block counters (`item=intf`)
 
@@ -1078,8 +1078,8 @@ per-device rather than per-network. Each host entry exposes:
 
 Normalized to `FirewallaNetworkHostTotals` and surfaced through
 `_serialize_network_host_totals` as `dns_blocked` / `ip_blocked` / `ip_denied`,
-reachable via the `get_network_segment_report` (`hosts[]`) and
-`get_network_segment_usage` services. `view.activity_hosts` carries the richer
+reachable via the `get_network_config` (`hosts[]`) and
+`get_network_usage` services. `view.activity_hosts` carries the richer
 per-host rows built from the payload's `flows` families
 (`_build_network_activity_hosts`).
 
@@ -1334,7 +1334,7 @@ which is honest for the visible rule set.
 The one place that matters: **the omission correlates with rule family.** All 184
 Device Active Protect rules (`purpose == 'dap'`) fall in the "neither" group and
 none carry a count, so for those the field is untracked rather than zero. DAP
-rules are excluded from `list_rules` by default, so a `0` is reliable within the
+rules are excluded from `get_rules` by default, so a `0` is reliable within the
 visible set but would be wrong if DAP rules were included.
 
 The block case is the useful one. A `block` rule carrying a `lastHitFlow` names
@@ -1348,6 +1348,72 @@ hours, and there is no per-rule history — only the most recent match. But a
 300 records per call with `nextTs` pagination. See *Flow reporting endpoints*
 below. An earlier revision of this document claimed no local blocked-history
 query existed; that was wrong.
+
+**`lastHitFlow` is a full flow record, not a reduced summary.** This was not
+apparent at first and it matters: the table above lists 35 possible keys, and the
+integration currently reads **10** of them. The fields it drops include the ones a
+rule report most wants:
+
+| Dropped field | Coverage | Why it matters |
+| --- | --- | --- |
+| **`count`** | 48/48 | how many sessions matched |
+| **`ltype`**, **`type`** | 48/48 | blocked vs regular, and `dns` vs `ip` |
+| **`intf`** | 48/48 | the local network |
+| `devicePort` | 40/48 | the client's source port |
+| **`download`**, **`upload`**, `duration` | 21/48 | **the bytes and time the rule matched** |
+| `dstMac`, `dstTags` | 21/48 | local-destination attribution |
+| `dIntf`, `oIntf`, `wanIntf` | 6–21/48 | interface joins |
+| `pid` | 27/48 | the originating rule id |
+| `country`, `category`, `app`, `apid` | 9–21/48 | intel enrichment |
+| `local`, `fd`, `aid`-like `rl`/`drl` | 1–21/48 | routing detail |
+
+The field coverage pattern settles it: `ltype`, `type`, `count`, `intf`,
+`protocol`, `port`, `device`, `deviceIP` and `ts` are on **all** 48, exactly as
+they are on every flow-log record, and the remaining fields appear together in the
+same proportions as they do on a flow-log page. So the box is storing a **flow-log
+record** on the rule, and `lastHitFlow` should be read with the *same reader* the
+flow report uses rather than a second hand-built subset.
+
+**Consequence:** `FirewallaRuleHit` was built before this was known and parses a
+subset. It should be superseded by the shared flow-record model, which both fixes
+the dropped fields and removes the second reader.
+
+### Device IDs are not always MAC addresses
+
+Firewalla's own model defines a device id as **an id string prefixed by device
+type**, defaulting to the MAC:
+
+| Prefix | Meaning |
+| --- | --- |
+| `wg_peer:` | WireGuard client, followed by its profile id |
+| `awg_peer:` | AmneziaWG client (local only; not in the published list) |
+| `ovpn:` | OpenVPN client (published; **not observed locally**) |
+| `if:` | **a network interface** (observed locally; not in the published list) |
+| *(none)* | a MAC address |
+
+Measured on the dev box: `awg_peer:` ×2 and `wg_peer:` ×1 in the host inventory,
+and **`if:` ×1** appearing in a rule's `lastHitFlow.device` — an interface that has
+no host-inventory entry at all.
+
+**So a device id can name something that is not a host.** Two consequences:
+
+1. **A flow or rule-hit `device` may not resolve to the host inventory.** The join
+   must tolerate that and report the id rather than dropping the record.
+2. **The rule-hit field is published as `host_id`, not `device_mac`** (renamed
+   2026-10-04, then renamed again to `host_id` on 2026-10-06). On the dev box **3 of 48** rule hits (6%) held a prefixed id rather
+   than a MAC, so the previous name reported
+   `device_mac: "wg_peer:wWDLO7..."`. The vendor calls this a **Device ID**, and
+   the field and its attribute key now match. **This renames a shipped attribute**
+   (`last_hit.device_mac` → `last_hit.device_id` → `last_hit.host_id`, and on the rule switch
+   attributes) — a breaking change accepted while the surface is still beta.
+   The *model* field keeps the vendor's name (`FirewallaFlowRecord.device_id`); only
+   the published key says `host`, because Home Assistant already owns `device`.
+
+`is_vpn_peer` checks for `wg_peer`/`awg_peer` prefixes, which matches how peers
+are actually synthesized locally (from `wgPeers`/`awgPeers`). The published `ovpn:`
+prefix is not a local risk because OpenVPN appears locally as a **network**
+(`networkConfig.interface.openvpn`), not as a device.
+
 
 Used by: `_normalize_rule_hit` in `api/client.py`, surfaced identically to the
 `get_rules` service payload (`_serialize_rule_summary`) and to rule-backed switch
@@ -1375,13 +1441,186 @@ capturing the app while it displays the report.
 | Query | `item` | Target | Answers | Pagination |
 | --- | --- | --- | --- | --- |
 | **Rollup** | `tag` / `host` | tag id / MAC | top destinations, per-member ranking, byte totals | none (windowed) |
-| **Event log** | `flows` | tag id / MAC | what was blocked, by which rule, for which device | `nextTs` |
-| **Audit log** | `auditLogs` | tag id / MAC | same as `flows`, plus `category` / `ets` filters | `nextTs` |
+| **Flow log** | `flows` | tag id / MAC | regular traffic, and blocked records too when `audit: true` | `nextTs` |
+| **Block log** | `auditLogs` | tag id / MAC | **blocked records only** | `nextTs` |
+
+**The `audit` flag adds records, it does not filter to them.** Measured on the
+same tag with `count: 300`:
+
+| Query | Rows | `ltype` breakdown |
+| --- | --- | --- |
+| `item: "flows"`, `audit: true` | 300 | **26 `audit` + 274 `flow`** |
+| `item: "flows"`, `audit: false` | 300 | **300 `flow`** |
+| `item: "auditLogs"`, `audit: true` | 300 | **300 `audit`** |
+
+So `flows` is the **flow** log and `auditLogs` is the **block** log.
+`audit: true` means "also include blocked records", not "blocked only" — an
+earlier revision of this document read it as a blocked-only filter, which is
+wrong and would have produced a report that was 91% regular traffic while
+claiming to show blocks.
 
 **Drilling down switches the `type`, not just the target.** Selecting a member
 inside a group changes `type` from `tag` to `host` and `target` from the tag id to
 the device MAC. The same three queries serve both levels, so a group report and a
 device report are the same code path with a different target.
+
+### A user scope is its affiliated tag, not the user id
+
+A user carries **two** ids in the init payload: `userTags[].uid` (the user) and
+`userTags[].affiliatedTag` (the plain tag that backs it). The `appTimeUsage` query
+accepts either — measured, **both ids returned byte-identical 19,821-byte
+payloads** for the same user. The flow queries do **not**.
+
+Measured on all 10 users, `type: "tag"`, 24h window:
+
+| User | `uid` rows | `affiliatedTag` rows | |
+| --- | --- | --- | --- |
+| `KADENS_DEVICES` | **0** | 578 | uid returns nothing |
+| `CHADS_DEVICES` | **0** | 461 | uid returns nothing |
+| `CARENS_DEVICES` | **0** | 430 | uid returns nothing |
+| `SHARED` | **0** | 398 | uid returns nothing |
+| `KADENS_PHONE` | **0** | 398 | uid returns nothing |
+| `PAYTONS_PHONE` | **0** | 404 | uid returns nothing |
+| `CHADS_PHONE` | **0** | 398 | uid returns nothing |
+| `CARENS_PHONE` | **0** | 401 | uid returns nothing |
+| `PAYTONS_DEVICES` | 0 | 0 | idle — not a counterexample |
+| `SHARED_GAMING` | 0 | 0 | idle — not a counterexample |
+
+So 8 of 10 users have traffic that the user id cannot reach and the affiliated tag
+can, in the same 24 hours, with **no error** from the box either way. The two
+zero/zero rows are idle targets, which is why the comparison is against a
+non-zero known-good tag rather than against the uid alone.
+
+**A user id is never a valid flow target.** Resolving a user scope to its
+`uid` — which is what the `appTimeUsage` path does and what looks correct from the
+init payload — returns a populated-looking empty report. This is the same failure
+shape as the `audit` reading above: accepted, answered, and wrong.
+
+### A block names its rule only in the block log
+
+The app shows which rule matched a block, but that reference is **not** in the
+rollup. Verified by dumping every key of a live `tag` rollup: the top-level keys are
+`uid`, `name`, `createTs`, `policy`, `flows`, `hosts`, `last60`, `last30`,
+`newLast24`, `last12Months`, and the union of keys across every blocked row
+(`dnsB`, `ipB:in`, `ipB:out`, `local:ipB:*`) is exactly:
+
+```
+begin, count, country, device, end, fd, host, ip, port
+```
+
+No `pid`, no `ruleId`, no policy reference. The single `policy` key in the payload
+is the target's **own** policy block (adblock and friends), not an attribution. So a
+rollup row answers "what was blocked and how much" and cannot answer "by which rule".
+
+**Attribution lives on the flow record.** A blocked record from `item: "auditLogs"`
+carries `pid`, which joins to `policyRules`:
+
+```json
+{"ts": 1791142981.754, "ltype": "audit", "type": "ip", "pid": 371,
+ "device": "CC:28:AA:11:06:B7", "deviceIP": "192.168.200.122",
+ "dstMac": "EC:0D:51:CC:BA:BC", "fd": "out", "protocol": "tcp",
+ "port": 57022, "devicePort": 54620, "local": true,
+ "intf": "95169e6a-...", "ip": "192.168.202.101",
+ "tags": ["31"], "userTags": ["32"],
+ "dstTags": {"tags": ["79"], "userTags": ["80"], "dTags": ["2"]}}
+```
+
+So the two levels answer different questions and neither is redundant: the rollup
+gives the shape of the window cheaply, and the record log gives attribution. A
+diagnosis surface must read records; a summary cannot be made to carry rules without
+reading them anyway.
+
+**How many rules are actually involved is small.** Measured across every group in one
+24-hour window, the distinct blocking rules per group were **1, 1, 1, 1, 1, 2, and
+4** — the worst case being `KADENS_DEVICES` at 4 rules over 744 blocked records. So
+attribution is a bounded question even though the record count is not.
+
+### Blocked records and regular flows are different shapes
+
+The two record families share an envelope and almost nothing else. `ltype` is the
+discriminator, and `pid` is present if and only if the record is blocked.
+
+| Field | `ltype: "audit"` (blocked) | `ltype: "flow"` (regular) |
+| --- | --- | --- |
+| `pid` (the blocking rule) | **300/300** | **absent** |
+| `type` (`dns` / `ip`) | **300/300** | **absent** |
+| `domain` | 265/300 | **absent** |
+| `download`, `upload` | **absent** | **300/300** |
+| `duration`, `devicePort` | absent (35/300 when resolved) | **300/300** |
+| `fd`, `host`, `ip`, `country`, `wanIntf` | 35/300 (only when the destination resolved) | 274–300/300 |
+| `oIntf`, `apid` | absent | 299 / 298 of 300 |
+| `tags`, `userTags`, `dTags`, `count`, `ts`, `protocol`, `port`, `intf`, `device`, `deviceIP` | 300/300 | 300/300 |
+
+**A byte total has three states, and all three occur.** Measured across 12,315
+records from four live pages and the init payload:
+
+| State | Wire | Meaning |
+| --- | --- | --- |
+| a number | `"download": "488722371"` | the measured transfer |
+| **explicit zero** | **`"download": 0`** | **a measured empty transfer** |
+| absent | the key is missing | the record never transferred |
+
+Firewalla's documentation explains the third: a blocked flow is "intercepted
+before traveling through your network", so there is no download or upload to
+report.
+
+**The middle state is the one worth stating**, because it is easy to assume it
+cannot happen and then treat `0` as a sentinel. It does happen: **188 of one
+5,000-record page** carried `download: 0` and 17 carried `upload: 0`; a second
+page carried 129 and 11; and even the small init-payload set of 48 hits had one of
+each. So `0` is a real measurement, and a consumer that renders it as "no data"
+is wrong in the same way that rendering an absent field as `0` would be.
+
+The three are therefore kept distinct: a number reads as itself, `0` reads as `0`,
+and an absent field reads as absent.
+
+**`ltype` takes exactly two values.** Across all 12,315 records measured it was
+`"flow"` (8,501) or `"audit"` (3,814) and nothing else, so `ltype` is a reliable
+discriminator and a third state has never been observed. Anything built on it
+should still decline to classify an unreadable record rather than calling it
+"allowed", but that is a guard against a shape change, not a live case.
+
+### LAN-to-LAN traffic is in a rule's hit, but not in the record logs
+
+This is a **population** difference between two sources that share a field set, and
+it is easy to assume away because the fields line up.
+
+| Source | Records with `dstMac` / `local: true` |
+| --- | --- |
+| `lastHitFlow` (init payload) | **21 of 48** |
+| live flow log, tag target, 4 pages × 5,000 | **0** |
+| live block log, tag target, 2 pages | **0** |
+| the 2,100 records in the 2026-10-03 capture | **0** |
+
+So a **rule** can have last matched a purely LAN flow, while `item=flows` and
+`item=auditLogs` never return one. Two consequences:
+
+- A consumer must not assume the two sources describe the same population. Quoting
+  a rule hit and a flow-log page side by side compares a LAN-capable set with a
+  WAN-only one.
+- The rollup's `local:` families are the **only** place LAN traffic is aggregated
+  for a target, which is why those families are separate rather than merged into
+  the destination lists: they are the only view of it a report can offer.
+
+**A `dstMac` is a device id, not necessarily a MAC.** Of the 21 local records, 20
+held a MAC and **1 held an `awg_peer:` id**. In that record the *MAC was in
+`device` and the peer id in `dstMac`*, and the mirror case also appears — so
+`device` and `dstMac` are both device ids and **the field a MAC appears in says
+nothing about which side of the flow is the peer**. Reporting a `mac` destination
+kind from `dstMac` is therefore wrong twice over.
+
+**`count` means different things per family**, which Firewalla documents as
+"number of TCP connections or UDP sessions for flow, or block count for blocked
+flow". Measured:
+
+| Family | `count` is |
+| --- | --- |
+| `download`, `upload`, `local:download`, `local:upload` | **bytes** |
+| `dnsB`, `ipB:*`, `local:*B:*` | **block count** |
+| `local:in`, `local:out` | connection count |
+| a `ltype: "flow"` record | sessions for that one flow |
+
+A single generic `count` therefore cannot be reported as one kind of measurement.
 
 ### 1. The rollup — `item: "tag"` or `item: "host"`
 
@@ -1416,90 +1655,300 @@ init payload caches. Its response carries:
   same windows the `item=intf` payload uses.
 - **`policy`**, **`name`**, **`uid`**, **`createTs`**.
 
-### 2. The event log — `item: "flows"`
+### 2. The flow log — `item: "flows"`
 
 ```json
 {"item": "flows", "type": "tag", "target": "31", "audit": true,
  "count": 300, "ts": 1791036000, "exclude": []}
 ```
 
-**This is the block log, and it is the most useful of the three.** Response:
-`{count, flows[], nextTs}`. Verified live: **300 records per call**, and `nextTs`
-feeds the next call's `ts` — the app paginates by walking `ts` backwards,
+Response: `{count, flows[], nextTs}`. Verified live: **300 records per call**, and
+`nextTs` feeds the next call's `ts` — the app paginates by walking `ts` backwards,
 observed calling it three times in a row with descending `ts`.
 
-`audit: true` restricts it to audit events, which is the "blocked only" filter in
-the app's UI.
+**This query returns regular traffic.** With `audit: true` it returns blocked
+records *as well* (26 of 300 in one measured page); with `audit: false` it returns
+regular traffic only. It is **not** a blocked-only filter — see *Blocked records
+and regular flows are different shapes* above for the `ltype` breakdown, and
+`item: "auditLogs"` below for the blocked-only query.
 
-Each record names the rule that blocked it. Field coverage measured over a
-300-row response:
+A regular (`ltype: "flow"`) record carries the byte counts and the end-to-end
+session detail:
+
+```json
+{"ltype": "flow", "ts": 1791035180.04, "count": 1, "duration": 54.44,
+ "protocol": "tcp", "port": 443, "devicePort": 54568, "fd": "in",
+ "download": 80, "upload": 86,
+ "device": "CC:28:AA:11:06:B7", "deviceIP": "192.168.200.122",
+ "host": "dealer.spotify.com", "ip": "35.186.224.39", "country": "US",
+ "apid": 40, "category": "social", "app": "spotify",
+ "tags": ["31"], "userTags": ["32"], "dTags": ["1"],
+ "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2",
+ "oIntf": "8d5a7f20-2923-49a3-8e2b-338f9428a632"}
+```
+
+A blocked (`ltype: "audit"`) record in the same page carries no bytes and names
+the rule that blocked it. Field coverage over a 300-row page, blocked records
+only:
 
 | Field | Coverage | Meaning |
 | --- | --- | --- |
 | `device`, `deviceIP`, `tags`, `userTags`, `dTags` | 300/300 | Full attribution |
 | `ts`, `count`, `port`, `protocol`, `intf`, `ltype` | 300/300 | `ltype: "audit"` |
-| **`pid`** | **296/300** | **The blocking rule's id** |
-| `type` | 296/300 | `dns` / `ip` |
-| `domain` | 283/300 | DNS match |
-| `flowTags` | 238/300 | `["noise"]` marks background traffic |
-| `category`, `app` | 91 / 30 | When the box identified them |
-| `host`, `ip`, `fd`, `devicePort` | 15–17/300 | Resolved connection detail |
+| **`pid`** | **300/300** | **The blocking rule's id** |
+| `type` | 300/300 | `dns` / `ip` |
+| `domain` | 265/300 | DNS match |
+| `flowTags` | 144/300 | `["noise"]` marks background traffic |
+| `category`, `app` | 52 / 10 | When the box identified them |
+| `fd`, `host`, `ip`, `devicePort`, `country`, `wanIntf` | 35/300 | Only when the destination resolved |
 
-Example record:
-
-```json
-{"ltype": "audit", "ts": 1791035437.587, "pid": 6, "type": "dns",
- "device": "CC:28:AA:11:06:B7", "deviceIP": "192.168.200.122",
- "domain": "graph.oculus.com", "port": 53, "protocol": "dns",
- "tags": ["31"], "userTags": ["32"], "dTags": ["1"],
- "flowTags": ["noise"], "count": 2,
- "intf": "95169e6a-a7c9-4d6a-8e83-6061b4812bf2"}
-```
-
-**`pid` is the join back to `policyRules`**, so a blocked event can be attributed
+**`pid` is the join back to `policyRules`**, so a blocked record can be attributed
 to **the rule that caused it** — which the rollup cannot do. That makes the
 chain complete: *device → membership → rules → the rule that blocked this flow →
 the destination it blocked*.
 
-### 3. The audit log — `item: "auditLogs"`
+### 3. The block log — `item: "auditLogs"`
 
 ```json
 {"item": "auditLogs", "type": "tag", "target": "31", "count": 300,
  "ts": 1791036000, "exclude": []}
 ```
 
-Response: `{count, logs[], nextTs}`. Same pagination. Accepts two filters the
-`flows` query does not: **`category`** (e.g. `games`) and **`ets`** (an end
-bound), so a caller can narrow to one category or a sub-window without paging
-through everything.
+**This is the blocked-only query.** Response: `{count, logs[], nextTs}` — note
+`logs`, not `flows`, as the record key. Measured: **300/300 records at
+`ltype: "audit"`**.
+
+It also carries richer destination detail than the same record does inside a
+`flows` page: `wanIntf`, `fd`, `devicePort`, `host`, `ip`, and `country` are
+present on 35/300 there but appear on the same records here, so a blocked
+destination can be resolved to a hostname and interface when the box has them.
+
+Same pagination. Accepts two filters the `flows` query does not: **`category`**
+(e.g. `games`) and **`ets`** (an end bound), so a caller can narrow to one
+category or a sub-window without paging through everything.
+
+### Cross-check against Firewalla's published API
+
+Firewalla documents the flow model for its **MSP** cloud API, which the
+integration does not use — local access has no MSP layer. Sources:
+`docs.firewalla.net/api-reference/flow` and `/data-models/flow`.
+
+**Read the published model as *intent*, never as a wire reference.** MSP is a
+**remapping layer**, not a mirror of the box, and the evidence for that is direct:
+
+| Feature | Published (MSP) | Local wire | Same? |
+| --- | --- | --- | --- |
+| Hit data | `hit: {count, lastHitTs, statsResetTs}` — a **summary struct** | `hitCount` + `lastHitFlow`, a **full flow record** (35 fields) | **No — reshaped** |
+| Blocked-ness | `block: boolean` **+** `blockType: ip\|dns` | `ltype: audit\|flow` **+** `type: ip\|dns` | **No — decomposed differently** |
+| Destination | nested `destination: {id, ip, name}` | flat `host` / `domain` / `ip`, or `dstMac` | **No — restructured** |
+| Region | `region` | `country` | **No — renamed** |
+| Rule target vocabulary | `app category domain internet intranet ip net region remotePort targetlist` | `category country dns intranet ip mac net network remotePort` | **No — different set** |
+| Target lists | `targetlist` as a **distinct type** | typed `category`, value prefixed `TL-` / `TLX-` | **No — different modelling** |
+| Flow direction | `direction: inbound\|outbound\|local` | **no flow direction field at all** | **No — absent locally** |
+| Rule direction | `direction: bidirection\|inbound\|outbound` | local `direction`, same values | **Yes** |
+| Scope | `scope.type ∈ device\|group\|user\|network` | flow queries take `type: tag\|host`; rule targeting uses a different axis | **Not comparable** |
+
+Two local-only target types (`mac`, `network`) and two MSP-only ones (`app`,
+`internet`) exist in the same place, and **the same `category` field carries real
+categories *and* `TL-`/`TLX-` target-list ids *and* `dap_*` rule ids locally** —
+which the codebase already handles by prefix rather than by closed set.
+
+**So a documented field name is not evidence of a local field, and the reverse is
+the common case here.** Everything below is classified by where the evidence
+actually comes from.
+
+**Genuinely confirmed by local measurement, with MSP agreeing on the concept:**
+
+| Finding | Local evidence |
+| --- | --- |
+| Hit data exists per rule | measured: 48 rules carry `lastHitFlow`, 76 carry `hitCount` |
+| `count` is overloaded | measured across families; MSP documents the same overload |
+| Blocked records carry no bytes | measured absent, not zero; MSP states the reason |
+| The window defaults to ~24h | measured: 26h back returns 0; MSP documents the same default |
+| `dnsOnly` defaults true on block rules | measured: `useBf: ""` ⇔ `dnsmasq_only: True` on 60/60 rules; MSP documents the default |
+
+**Corrected — two readings in this document were wrong:**
+
+1. **`audit: true` is not a blocked-only filter.** MSP's `block` field corresponds
+   to the local `ltype`, and *neither* is the request flag. See
+   *The three queries at a glance*.
+2. **`fd` is not `direction`.** MSP has an explicit per-flow `direction`; local
+   records carry `fd`, which is constant `"in"` on regular flows and both
+   `download` and `upload` families. It is not a usable direction field — see
+   *`fd` is not the traffic direction*.
+
+**Newly informed — fields we had not classified:**
+
+- **`ltype` discriminates blocked from regular**, and `pid` is present if and only
+  if blocked. MSP's `block` boolean maps to this.
+- **Blocked records use `type` (`dns` / `ip`) where regular records use `protocol`
+  (`tcp` / `udp`).** Local `protocol` can also be `"dns"` (1404/1500 event rows),
+  so it must not be validated against MSP's `tcp` / `udp` enum.
+- **`apid` (numeric, e.g. `40`) and `app` (name, e.g. `"spotify"`) are two
+  representations of one concept**; MSP exposes only the name.
+- **`port` and `devicePort` are lists on rollup rows and scalars on event rows.**
+  Measured: `rollup.download.port` is `list` 207/207; `event.port` is `int`
+  1500/1500; and `devicePort` is `["8080"]` on a rollup row but `54568` on an
+  event row. Any reader must accept both.
+- **`local:` families identify the peer by MAC** (`dstMac`) and carry no
+  `host` / `domain` / `country`, because a LAN peer has no hostname. MSP's
+  `destination.id` note covers this ("device ID if local"), so a third
+  destination kind is needed alongside domain and ip.
+- **`dstMac` is the only local-destination identifier**, and it points at another
+  host in the same inventory.
+
+### Cross-check against the published Device and Rule models
+
+Same sources, other models: `docs.firewalla.net/data-models/device`,
+`/api-reference/device`, `/data-models/rule`, `/api-reference/rule`. **Same
+caveat as above: MSP remaps, so a documented name is not a local name.** What
+follows is only what local measurement supports.
+
+**Confirmed locally, where the published model supplied the *concept* rather than
+the field:**
+
+| Finding | Evidence |
+| --- | --- |
+| A device **id** is prefixed by device type, defaulting to a MAC | measured: `wg_peer:` ×1, `awg_peer:` ×2 in the host inventory; `if:` ×1 in a rule hit |
+| A device id may name something that is **not a host** | `if:913620a3-…` has no host-inventory entry |
+| A device belongs to **one** group | confirmed by the owner; MSP also documents `group` as singular |
+| `category` on a rule target is **not reliably a category** | measured: the local `category` target field holds `TL-` / `TLX-` target-list ids and `dap_*` rule ids alongside real categories, plus `''` and the literal `'none'` |
+| The local target vocabulary is its own | measured: `category country dns intranet ip mac net network remotePort` — `mac` and `network` have **no MSP equivalent**, and MSP's `app` / `internet` / `domain` / `region` / `targetlist` **do not appear locally** |
+
+**Local findings that the published model actively misled on**, now corrected:
+
+1. **The rule-hit device field was named from an assumption, and is now
+   `host_id`** (model field `device_id`). Local measurement shows 3 of 48 live rule hits carry `wg_peer:` /
+   `awg_peer:` / `if:`. The published term "Device ID" is a better description of
+   the same thing, but the *finding* is local — the published model does not
+   establish it. Renamed 2026-10-04, published as `host_id` 2026-10-06.
+2. **The published `hit` object is not our `lastHitFlow`.** MSP publishes
+   `{count, lastHitTs, statsResetTs}`; the box stores a full 35-field flow record.
+   So the published model is not evidence about the local shape, and the
+   full-record finding rests entirely on the 48 measured records.
+3. **The published `category` enums describe MSP's own two lists** (12 for flow,
+   11 for rule target). Neither matches the local field, which is an open set
+   carrying identifiers. **Validating a local `category` against either list would
+   drop valid rows.**
+4. **MSP's `scope.type ∈ device|group|user|network` is not comparable to our
+   `scope_kind`** (device/group/user). MSP's scope targets *rules*; local flow and
+   usage queries take `type: tag|host`, a different axis. `network` is a local
+   **rule target type**, not a missing flow scope.
+
+**One genuine divergence, left alone:** `timeUsage` is `{quota, used}` in minutes
+in the published model, while locally time limits use `disturbLevel` /
+`disturbMethod` / `appTimeUsage`. The local shape is what the box accepts.
+
+
 
 ### What the time filter actually is
 
-The app's window selector is **two separate parameters**:
+The app's window selector sends **three separate parameters**:
 
 - **`start` / `end`** — the window bounds, in epoch seconds
-- **`hourblock`** — the granularity: `24` for the default 24-hour view, `1` after
-  narrowing
+- **`local`** — whether to include LAN-to-LAN families (see below)
+- **`hourblock`** — **not a granularity, despite the name**
 
-Captured transitions on the same tag: `start=1790949600, end=1791036000,
-hourblock=24` → `start=1791032400, end=1791036000, hourblock=1`. So narrowing
-moved `start` forward and dropped `hourblock` to 1 in one step, which is why the
-two must not be conflated.
+Captured transition on the same tag: `start=1790949600, end=1791036000,
+hourblock=24` → `start=1791032400, end=1791036000, hourblock=1`. An earlier
+revision of this section read that as "narrowing the window drops the granularity
+to 1". **Measured, that reading is wrong on both counts.**
+
+**`hourblock` gates the response and changes nothing else.** Over a fixed 24-hour
+window:
+
+| `hourblock` | Result |
+| --- | --- |
+| `0` | **200, empty** — the families are present but every one is a zero-row list |
+| **`1`** | **200, empty** — same |
+| `2`, `3`, `6`, `12`, `24`, `48`, `168` | **identical** — 592 rows, 11 families, span 24.00h |
+| `-1` | same as `>= 2` |
+
+So it must be **at least 2** to be served at all, and above that it has **no
+observable effect**: the row set, the families and the covered span are byte-identical
+for every value from 2 to 168. The window is not the gate either — a 1-hour window
+with `hourblock: 2` returns the full data, and a 24-hour window with `hourblock: 1`
+returns nothing.
+
+Whether `hourblock` is the intended bucket size for a chart axis the local API does
+not expose is unresolved. What is established is the operational rule: **never send
+below 2**, because 0 and 1 produce silence rather than an error.
+
+**`local: true` is what turns on the LAN-to-LAN families.** Measured with everything
+else held constant:
+
+| Request | Families | Rows |
+| --- | --- | --- |
+| `local: true` (or `local: true, audit: true`) | **11** | 592 |
+| no `local`, `local: false`, or `audit: true` alone | 7 | 574 |
+
+`local: true` adds `local:download`, `local:upload`, `local:in` and `local:out`.
+Those four answer "what is talking to what **inside** the LAN", which the WAN-facing
+families cannot. **`audit` on the rollup does nothing at all** — `{local: true}` and
+`{local: true, audit: true}` returned byte-identical responses, and `{audit: true}`
+alone matched `{}` exactly. `audit` is meaningful only on `item: "flows"`.
 
 **The app offers no window beyond about 24 hours.** The `start`/`end` parameters
-may accept more, but nothing observed does, so a longer window is unverified —
-see *Open questions*.
+accept more and then **silently clamp** — see *Limits: retention, page size, and
+window validity*.
 
 ### Live data volume
 
 Measured against the dev box for one group (`tag: 31`, KADENS_DEVICES):
 
 - the rollup returned **6 blocked families** plus per-member rows
-- one `flows` page returned **300 records**, and the app immediately asked for
-  another
+- one `flows` page returned **300 records** — 274 regular and 26 blocked — and
+  the app immediately asked for another
 
 So a single "what was blocked" question is hundreds of records. Any surface built
 on this must bound the response and lead with the summary, never dump the log.
+
+### `fd` is not the traffic direction — do not use it as one
+
+Measured on a live rollup (`tag: 31`, 24-hour window) and a live `flows` page.
+`fd` looks like a direction field and is not usable as one:
+
+| Family | rows | `fd` |
+| --- | --- | --- |
+| `download` | 199 | `"in"` ×199 |
+| `upload` | 199 | `"in"` ×199 |
+| `ipB:in` | 67 | `"in"` ×67 |
+| `local:ipB:out` | 2 | `"out"` ×2 |
+| `dnsB` | 139 | **absent** |
+| a `ltype: "flow"` record | 300 | `"in"` ×300 |
+
+Three facts settle it:
+
+1. **`download` and `upload` are both `"in"`.** If `fd` were the byte direction
+   that would be a contradiction, not a rounding detail.
+2. **100 endpoints appear in both families with the same `fd` and different
+   totals** — e.g. one endpoint with `download: 142320680` and
+   `upload: 62436`, both `fd: "in"`. One endpoint cannot have two byte
+   directions that both read `"in"`.
+3. **Where `fd` does vary, it only repeats the family name.** `ipB:in` is `"in"`
+   and `local:ipB:out` is `"out"`, so it carries no information the family does
+   not already carry; and `dnsB`, which has only one direction, has no `fd` at
+   all.
+
+**Direction must be taken from the family** — `download` / `upload`,
+`local:download` / `local:upload`, and the `:in` / `:out` suffix on the blocked
+families. What `fd` does mean is unresolved and does not matter for reporting;
+the honest reading is that it duplicates the family name where it is populated
+and is unreliable elsewhere.
+
+### `intf` joins to a network the integration already resolves
+
+`intf` on a flow record is the **local** network's uuid, and `oIntf` / `wanIntf`
+is the **remote-side** interface — the WAN. Both resolve through
+`build_network_inventory` against the init payload, with no extra request:
+
+| Field | uuid | Resolves to |
+| --- | --- | --- |
+| `intf` | `95169e6a-a7c9-4d6a-8e83-6061b4812bf2` | `VLAN10 CORE`, kind `vlan`, interface `bond0.10` |
+| `oIntf` / `wanIntf` | `8d5a7f20-2923-49a3-8e2b-338f9428a632` | `WAN-ONE`, kind `wan`, interface `eth0` |
+
+So a flow can name its local network without a new protocol call, and the rollup
+row's `device` MAC joins to the host inventory the same way.
 
 ### Artifacts
 
@@ -1510,6 +1959,11 @@ on this must bound the response and lead with the summary, never dump the log.
   attempt, which established the request shapes
 - decoded with `.tmp/dump_all.py`, summarised by
   `.tmp/summarise_flow_capture.py`, record shapes via `.tmp/show_flow_records.py`
+- `.tmp/probe_fd_semantics.py` — the `fd` / direction probe,
+  `.tmp/probe_blocked_query.py` — the `flows` versus `auditLogs` split,
+  `.tmp/probe_window_default.py` — the served-window and default probe, and
+  `.tmp/probe_count_semantics.py` / `.tmp/probe_window_errors.py` — the count
+  ceiling, the negative-count behaviour, and the fact that nothing is rejected
 - `.artifacts/flow_reporting/20261003-134922/` and
   `.artifacts/block_reporting/20261003-132758/` — the accompanying pulls
 
@@ -1534,20 +1988,65 @@ So the event log spans roughly the last day and nothing older. **Do not promise 
 wider window**, and do not treat an empty result as "nothing happened" without
 also reporting the window that was searched.
 
-**`count` is caller-controlled, with no fixed cap observed.** `count: 300`
-returned 300 rows spanning ~0.3h; `count: 2000` returned 2000 rows spanning
-~5.7h. So a busier target fills a page faster — the page is a record count, not a
-time slice. Retrieving a full 24 hours on a busy target therefore needs
-`nextTs` pagination.
+**The box validates almost nothing, and silently clamps or ignores the rest.**
+This is the most important operational finding, and it inverts the earlier reading
+that the endpoints reject a bad window. Every one of these returned **code 200**:
 
-**`hourblock` accepts 1 through at least 168.** Every value tested (1, 2, 3, 6,
-12, 24, 48, 96, 168) succeeded. An earlier `hourblock: 168` failure was **not**
-the hourblock: it was caused by a `start` older than the retention horizon.
+| Request | Result |
+| --- | --- |
+| `start` after `end` | normal response |
+| `end` seven days in the future | normal response |
+| `start` 30 days back, or **1 year** back | normal response, same 24h of data |
+| `hourblock: 168`, `999` | normal response |
+| **`hourblock: 0`** | **200, and an empty response** |
+| **`hourblock: 1`** | **200, and an empty response** |
+| `ts: -1` | 200, zero rows |
+| `ts: 0` | 200, treated as absent (falsy) and defaulted to now |
+| `count: -5` | **200, and ~6,950 rows** |
 
-**An out-of-range window returns a protocol error, not an empty result.** A
-`tag` rollup with a `start` 7 days back returned **code 500**. So a caller that
-asks for too much gets a hard failure rather than zero rows, and the client must
-clamp the window rather than forward whatever it is given.
+So there is **no rejection to catch and no fallback to write**. Validation has to
+happen client-side, because the box will accept nonsense and answer it with
+something plausible-looking.
+
+**The rollup serves 24 hours regardless of what is asked for.** A `tag` rollup
+requested with a 1h, 24h, 25h, 48h or 168h window returned an identical response
+covering exactly **24.00h** every time (verified from the row `begin`/`end`). The
+window is therefore **read from the response, never assumed from the request** — a
+caller who asks for 48 hours and reports 48 hours would be describing data they do
+not have.
+
+**`count` has a hard ceiling of 5,000 on a positive value.** Measured:
+
+| `count` | rows |
+| --- | --- |
+| 50 / 100 / 300 / 1000 / 2000 / 4999 / 5000 | exactly that many |
+| **5001 / 6000 / 10000 / 100000** | **5000** (silently capped) |
+
+An earlier revision of this document said "no fixed cap observed", having only
+tested 300 and 2000. The cap is real and it is the reason a full day needs
+pagination: one busy group had **6,956 records** in its 24-hour window, so a
+complete read costs two calls.
+
+**A non-positive `count` bypasses the ceiling and returns the whole retained
+window.** `count: -1` returned 6,956 records — the entire 24 hours — while
+`count: -100000` returned 0 and `count: 0` returned 100. A negative value is
+therefore **not** "no results" but "everything available", which is the reverse of
+the intuitive reading and an easy way to pull far more than intended from a busy
+box. A caller-supplied count must never be forwarded without validation.
+
+**Low `count` values are unreliable.** `count: 1` returned **0** rows while
+`count: 0` returned **100**, so neither means what it says. Treat anything at or
+below the low single digits as undefined rather than as a row limit.
+
+**A page costs little.** 2,000 records took **0.36s**, so a two-page day on a busy
+group is about a second. The ceiling is not a performance problem; it is a
+completeness problem.
+
+**`hourblock` must be at least 2.** `0` and `1` both return an **empty** response
+with no error, while every value from `2` to `168` returns identical full data. It
+is a gate rather than the granularity its name suggests — see *What the time filter
+actually is*.
+
 
 ### The rollup is the app's report, in one response
 
@@ -2334,6 +2833,43 @@ Implementation note:
 
 ## Next capture targets
 
+### Rule scope — how a rule names what it applies to
+
+**Resolved (2026-10-05).** Lane B capture (`port 8833`, phone client), one
+internet-block rule created per scope in the app, then the pushed runtime diffed
+against a pre-action pull (325 → 328 rules).
+
+The `policy:create` `value` carries the scope twice, and only one of them holds
+anything for a tag-scoped rule:
+
+| Created as | `scope` | `tag` |
+| --- | --- | --- |
+| group `AV_AUDIO` | `""` | `["tag:27"]` |
+| **user `KADENS_DEVICES` (uid 32)** | `""` | **`["tag:31"]`** |
+| network `VLAN10 CORE` | `""` | `["intf:95169e6a-a7c9-4d6a-8e83-6061b4812bf2"]` |
+
+Findings:
+
+- **A user is written as its affiliated tag under the group prefix.** Selecting the
+  *user* `KADENS_DEVICES` (uid 32) produced `tag:31` — the affiliated backing tag —
+  and **not** the user id and **not** the unused `utag:` prefix. This is the same
+  substitution the flow queries require, now confirmed on the rule path.
+- **A network is `intf:` plus the network's `uuid`** from `networkConfig.interface`,
+  which is the same id the flow records carry in their `intf` field.
+- **`scope` is empty for a tag-scoped rule.** It is not a second copy of the
+  reference and not a MAC list.
+- The pushed rule echoes the reference in `tag` (singular), and omits `scope`
+  entirely. The read side already keys on `tag`, so a tag-scoped rule resolves back
+  to its group, user, or network label and kind — measured end to end by running the
+  real normalizer over the captured payload, which returned
+  `applies_to_kind = ("group",) / ("user",) / ("network",)` respectively.
+
+**Still open, and cheap to settle:** the app sent `scope` as the empty *string*
+`""`, while this integration's payload builder sends the empty *list* `[]`. Both are
+an empty scope, and nothing here shows whether the box is strict about the type —
+our create path has never been captured. One device-scoped rule create would settle
+it *and* capture the non-empty `scope` form, which is also uncaptured.
+
 ### Internet quality (ping latency / packet loss)
 
 **Resolved (2026-09-10):** The read contract is confirmed from a live pull. See
@@ -2409,9 +2945,6 @@ window is not reachable through the UI.
 
 These items remain unconfirmed and should stay visible.
 
-- whether all internet-block rules share the same `target: TAG` and
-  `type: mac` contract across other scopes such as users, networks, and other
-  groups
 - confirm the full persistent category-rule lifecycle for `Always block`,
   especially whether later off uses `policy:update`, `policy:delete`, or a mixed
   contract depending on the UI path
@@ -2435,10 +2968,12 @@ These items remain unconfirmed and should stay visible.
   removal the app deletes **every** rule the device owns — not only disabled ones,
   and not only `dap` — ahead of the tags write, in the same batch
 - whether `flows` / `auditLogs` / `tag` accept a `start`/`end` window wider than
-  the ~24 hours the app's UI offers — **answered: they do not. Retention is about
-  24 hours with a hard cutoff at ~26 hours, and asking for a window starting
-  before it returns a protocol error rather than partial data.** See *Limits:
-  retention, page size, and window validity*
+  the ~24 hours the app's UI offers — **answered: a wider window is accepted and
+  then silently served as 24 hours.** No error and no indication: 1h, 24h, 25h,
+  48h and 168h requests all returned identical data spanning exactly 24.00h. An
+  earlier revision of this entry claimed the box returns a protocol error, which
+  could not be reproduced; see *Limits: retention, page size, and window
+  validity*
 - ~~whether the `flows` pagination has a depth limit, or whether `nextTs` will walk
   back through retained history indefinitely~~
   — **answered: there is nothing to walk. `nextTs` only reaches back to the ~24h
@@ -2449,6 +2984,51 @@ These items remain unconfirmed and should stay visible.
   zero
 - whether `exclude` on `flows` / `auditLogs` filters out specific categories or
   devices: it was sent empty in every capture, so its accepted values are unknown
+- what `fd` on a flow row means, given it is constant `"in"` on regular flows and
+  both byte families, and absent on `dnsB`. **Not blocking**: direction is taken
+  from the family name instead, so nothing depends on the answer
+- ~~whether a `host`-level `flows` response is genuinely device-scoped. A rollup
+  checked at both levels returns the same rows and an empty `hosts` block on the
+  `host` request, which suggests a `host` response is filtered by `device` rather
+  than scoped by the query~~
+  — **answered: it is filtered by device.** Measured across five hosts, every
+  rollup row carried the target's own device id and **zero** rows carried any
+  other device — `devices_other_than_target=0` for all five. So a `host` response
+  is genuinely scoped, and the earlier observation that it repeats a tag's rows
+  was the special case of a tag with a single active member rather than a general
+  behaviour. The `hosts` block is empty on a `host` request because a device has
+  no members to rank, not because the scope leaked.
+
+### Answered: the two boolean encodings, and `useBf`
+
+Boolean-valued fields are not typed consistently on the wire, and this was
+unresolved in `Open questions` for `useBf`. Measured across a live init payload
+(259 rules, the network and host inventories, the WAN event feed):
+
+| Field | Encodings seen |
+| --- | --- |
+| `active`, `ready`, `enabled`, `monitoring`, `pendingTest`, `trust`, `devicePresence`, `deviceOffline`, `stale`, `success`, `manual`, `bootingComplete`, `cloudConnected`, `wanSwitched`, `dnsmasq_only`, `echoRequest` | real JSON `bool` |
+| `state_value`, `ok_value`, `action_value` | `int` (a measurement, not a flag) |
+| **`autoDeleteWhenExpires`** | **`"0"` ×24, `"1"` ×1** — numeric **strings** |
+| **`useBf`** | **`""` ×36, `True` ×24** |
+| `disabled` | `"1"` / `"0"` strings, or a bool |
+| `enabled` on network interfaces | `bool` |
+| `state` | `bool` 1002, `str` 262 |
+| `upnp` | `bool` 259, plus 2 dicts and 1 list (it becomes an object on some networks) |
+
+**`useBf` is present exactly on DNS-only rules, and `""` means the flag is set.**
+Correlated against rule properties: the 36 rules with `[text: ""]` and the 24 with
+`True` are **60/60 `dnsmasq_only: True`**, and all 60 are `block` rules. The 199
+rules where the key is absent are almost all `dnsmasq_only: False`.
+
+So `""` is **not** a false value — reading it as `False` would invert the flag
+when a rule template is created from one of these rules, since the create payload
+sends `useBf` verbatim. The integration already behaves correctly here by mapping
+`""` to `None` and defaulting the template to `True`; the finding pins *why* that
+is required rather than leaving it as an accident.
+
+**The rule:** an empty string is not a boolean. It is an opaque marker whose
+meaning is per-field, so the shared coercion policy declines it.
 
 ## AP7 wireless controller findings
 
@@ -2747,9 +3327,9 @@ Result:
 
 Implementation impact:
 
-- a future network-segment report can safely expose DHCP ranges from
+- `get_network_config` can safely expose DHCP ranges from
   `networkConfig.dhcp`
-- host detail inside that report can safely expose:
+- host detail inside that payload can safely expose:
   - IP assignment mode derived from host policy allocations
   - reserved IPv4 when present
   - device-type feedback when present
@@ -4393,7 +4973,7 @@ be invented:**
 | Where | Shape | Status |
 | --- | --- | --- |
 | Rule create payload (`models.py`) | `scope: list[str]` — flat identifiers, e.g. `["0C:85:E1:B0:1D:1C"]` | **Existing** |
-| Usage history (`get_time_usage_report`) | `scope_kind` + `scope_target` — kind enum plus one value | **Existing** |
+| Usage history (`get_time_usage`) | `scope_kind` + `scope_target` — kind enum plus one value | **Existing** |
 | Alarm mute (proposed) | `scope` + `scope_value` | ❌ **Would have been a duplicate of the row above** |
 
 **The established convention is `scope_kind` + `scope_target`.** Used verbatim:
@@ -4710,7 +5290,9 @@ field to the alarm model.
   a target (`dnsOnly`, defaulting true for block rules on `category`/`app`/
   `targetlist`/`domain`). Locally, `dns` is a **target *type*** and the payload
   key is `dnsmasq_only`. Structural difference, not just a name: MSP qualifies a
-  target, we select one. Both are valid; do not force alignment.
+  target, we select one. Both are valid; do not force alignment. Note also that
+  the local rule payload pairs this flag with `useBf`, whose `""` value marks a
+  DNS-only rule — see *Answered: the two boolean encodings, and `useBf`*.
 - **Time limits use different models.** MSP has an `action: "timelimit"` with a
   `timeUsage` object (`quota`, `used` in minutes). Locally, time limits are
   expressed through `disturbLevel` / `disturbMethod` / `appTimeUsage` and the

@@ -162,17 +162,20 @@
           "alarm_type": {
             "name": "Latest alarm type"
           },
-          "device_name": {
-            "name": "Latest alarm device"
-          },
           "message": {
             "name": "Latest alarm message"
           },
           "fired_at": {
             "name": "Latest alarm time"
           },
+          "fired_at_timestamp": {
+            "name": "Fired at (epoch)"
+          },
           "alarm_id": {
             "name": "Latest alarm ID"
+          },
+          "host_name": {
+            "name": "Latest alarm host"
           }
         }
       },
@@ -203,15 +206,6 @@
           "current_wan_usage": {
             "name": "Current WAN usage"
           },
-          "devices_offline": {
-            "name": "Devices offline"
-          },
-          "devices_online": {
-            "name": "Devices online"
-          },
-          "devices_total": {
-            "name": "Devices total"
-          },
           "ddns": {
             "name": "DDNS"
           },
@@ -230,20 +224,14 @@
           "runtime_data_updated_at": {
             "name": "Runtime data updated at"
           },
+          "runtime_data_updated_at_timestamp": {
+            "name": "Runtime data updated at (epoch)"
+          },
           "uptime": {
             "name": "Uptime"
           },
           "uptime_seconds": {
             "name": "Uptime seconds"
-          },
-          "vpn_devices_offline": {
-            "name": "VPN devices offline"
-          },
-          "vpn_devices_online": {
-            "name": "VPN devices online"
-          },
-          "vpn_devices_total": {
-            "name": "VPN devices total"
           },
           "purpose": {
             "name": "Purpose",
@@ -265,6 +253,33 @@
           },
           "timezone": {
             "name": "Timezone"
+          },
+          "hosts_online": {
+            "name": "Hosts online"
+          },
+          "hosts_offline": {
+            "name": "Hosts offline"
+          },
+          "hosts_total": {
+            "name": "Hosts total"
+          },
+          "vpn_hosts_online": {
+            "name": "VPN hosts online"
+          },
+          "vpn_hosts_offline": {
+            "name": "VPN hosts offline"
+          },
+          "vpn_hosts_total": {
+            "name": "VPN hosts total"
+          },
+          "activity_reference_at": {
+            "name": "Activity reference"
+          },
+          "activity_reference_at_timestamp": {
+            "name": "Activity reference (epoch)"
+          },
+          "online_window_seconds": {
+            "name": "Online window (seconds)"
           }
         }
       },
@@ -360,9 +375,6 @@
           "dhcp": {
             "name": "DHCP"
           },
-          "device_count": {
-            "name": "Device count"
-          },
           "network_usage": {
             "name": "Network usage"
           },
@@ -380,6 +392,9 @@
           },
           "block_icmp": {
             "name": "Block ICMP"
+          },
+          "host_count": {
+            "name": "Host count"
           }
         }
       },
@@ -433,17 +448,17 @@
           "connection_type": {
             "name": "Connection type"
           },
-          "device_group": {
-            "name": "Device group"
-          },
           "download_usage": {
             "name": "Data downloaded"
           },
-          "ip_address": {
+          "host_ip": {
             "name": "IP address"
           },
-          "last_active": {
+          "last_active_at": {
             "name": "Last active"
+          },
+          "last_active_at_timestamp": {
+            "name": "Last active (epoch)"
           },
           "network_name": {
             "name": "Network name"
@@ -465,6 +480,30 @@
           },
           "wifi_ssid": {
             "name": "WiFi network"
+          },
+          "host_group": {
+            "name": "Host group"
+          },
+          "activity_reference_at": {
+            "name": "Activity reference"
+          },
+          "activity_reference_at_timestamp": {
+            "name": "Activity reference (epoch)"
+          },
+          "online_window_seconds": {
+            "name": "Online window (seconds)"
+          },
+          "dns_hostname": {
+            "name": "DNS hostname"
+          },
+          "dns_domain": {
+            "name": "DNS domain"
+          },
+          "dns_fqdn": {
+            "name": "DNS fully qualified name"
+          },
+          "host_device_type": {
+            "name": "Device type"
           }
         }
       }
@@ -501,17 +540,35 @@
           "connection_type": {
             "name": "Connection type"
           },
-          "device_group": {
-            "name": "Device group"
-          },
-          "ip_address": {
+          "host_ip": {
             "name": "IP address"
           },
-          "last_active": {
+          "last_active_at": {
             "name": "Last active"
+          },
+          "last_active_at_timestamp": {
+            "name": "Last active (epoch)"
           },
           "network_name": {
             "name": "Network name"
+          },
+          "host_group": {
+            "name": "Host group"
+          },
+          "away_window_seconds": {
+            "name": "Away window (seconds)"
+          },
+          "dns_hostname": {
+            "name": "DNS hostname"
+          },
+          "dns_domain": {
+            "name": "DNS domain"
+          },
+          "dns_fqdn": {
+            "name": "DNS fully qualified name"
+          },
+          "host_device_type": {
+            "name": "Device type"
           }
         }
       }
@@ -600,6 +657,9 @@
           "tested_at": {
             "name": "Tested at"
           },
+          "tested_at_timestamp": {
+            "name": "Tested at (epoch)"
+          },
           "upload_megabytes": {
             "name": "Upload megabytes"
           },
@@ -670,6 +730,9 @@
           },
           "tested_at": {
             "name": "Tested at"
+          },
+          "tested_at_timestamp": {
+            "name": "Tested at (epoch)"
           },
           "upload_megabytes": {
             "name": "Upload megabytes"
@@ -742,6 +805,9 @@
           "tested_at": {
             "name": "Tested at"
           },
+          "tested_at_timestamp": {
+            "name": "Tested at (epoch)"
+          },
           "upload_megabytes": {
             "name": "Upload megabytes"
           },
@@ -776,6 +842,9 @@
           },
           "sampled_at": {
             "name": "Sampled at"
+          },
+          "sampled_at_timestamp": {
+            "name": "Sampled at (epoch)"
           },
           "ping_latency": {
             "name": "Ping latency (ms)"
@@ -818,6 +887,9 @@
           "sampled_at": {
             "name": "Sampled at"
           },
+          "sampled_at_timestamp": {
+            "name": "Sampled at (epoch)"
+          },
           "ping_latency": {
             "name": "Ping latency (ms)"
           },
@@ -856,20 +928,23 @@
           "app_usage_by_app": {
             "name": "App usage by app"
           },
-          "associated_device_count": {
-            "name": "Associated device count"
-          },
-          "associated_device_group": {
-            "name": "Associated device group"
-          },
-          "associated_devices": {
-            "name": "Associated devices"
-          },
-          "last_active": {
+          "last_active_at": {
             "name": "Last active"
+          },
+          "last_active_at_timestamp": {
+            "name": "Last active (epoch)"
           },
           "unique_usage_today": {
             "name": "Unique usage today"
+          },
+          "associated_hosts": {
+            "name": "Associated hosts"
+          },
+          "associated_host_count": {
+            "name": "Associated host count"
+          },
+          "associated_host_group": {
+            "name": "Associated host group"
           }
         }
       }
@@ -923,6 +998,9 @@
           "pause_until": {
             "name": "Pause until"
           },
+          "pause_until_timestamp": {
+            "name": "Paused until (epoch)"
+          },
           "pause_remaining_seconds": {
             "name": "Pause remaining seconds"
           },
@@ -961,6 +1039,12 @@
               "time_limit_active": "Time limit active",
               "time_limit_reached": "Time limit reached"
             }
+          },
+          "hit_count": {
+            "name": "Match count"
+          },
+          "last_hit": {
+            "name": "Last match"
           }
         }
       },
@@ -1012,6 +1096,9 @@
           "pause_until": {
             "name": "Pause until"
           },
+          "pause_until_timestamp": {
+            "name": "Paused until (epoch)"
+          },
           "pause_remaining_seconds": {
             "name": "Pause remaining seconds"
           },
@@ -1050,6 +1137,12 @@
               "time_limit_active": "Time limit active",
               "time_limit_reached": "Time limit reached"
             }
+          },
+          "hit_count": {
+            "name": "Match count"
+          },
+          "last_hit": {
+            "name": "Last match"
           }
         }
       },
@@ -1178,11 +1271,20 @@
     "unavailable_user": {
       "message": "Unavailable user"
     },
-    "network_segment_report_failed": {
+    "network_config_failed": {
       "message": "The integration could not read the network segment report. Check the Firewalla connection and try again."
     },
-    "network_segment_usage_failed": {
+    "network_usage_failed": {
       "message": "The integration could not read the network segment usage report. Check the Firewalla connection and try again."
+    },
+    "flow_report_failed": {
+      "message": "The integration could not read the flow report. Check the Firewalla connection and try again."
+    },
+    "flow_report_scope_ambiguous": {
+      "message": "More than one {scope_kind} matched \"{scope_target}\". Use a stable ID for that scope instead."
+    },
+    "flow_report_scope_not_found": {
+      "message": "No {scope_kind} matched \"{scope_target}\". Check the selector and try again."
     },
     "network_name_ambiguous": {
       "message": "More than one Firewalla network matches the name \"{network_name}\". Use the network UUID instead."
@@ -1205,8 +1307,8 @@
     "run_internet_speed_test_failed": {
       "message": "The integration could not start the internet speed test. Check the Firewalla connection and try again."
     },
-    "rule_target_not_found": {
-      "message": "The rule target \"{rule_target}\" does not match a managed live rule."
+    "rule_not_found": {
+      "message": "No live Firewalla rule matched \"{rule_id}\". Refresh the runtime inventory and try again."
     },
     "ssid_profile_not_found": {
       "message": "The SSID profile \"{ssid_profile_id}\" does not match a current wireless network. Provide the profile UUID or the SSID name."
@@ -1241,16 +1343,16 @@
     "speed_test_wan_selector_conflict": {
       "message": "Provide either a WAN UUID or a WAN name, not both."
     },
-    "time_usage_report_end_before_begin": {
+    "time_usage_end_before_begin": {
       "message": "The end time must be after the begin time."
     },
-    "time_usage_report_scope_ambiguous": {
+    "time_usage_scope_ambiguous": {
       "message": "More than one {scope_kind} matched \"{scope_target}\". Use a stable ID for that scope instead."
     },
-    "time_usage_report_scope_not_found": {
+    "time_usage_scope_not_found": {
       "message": "No {scope_kind} matched \"{scope_target}\". Check the selector and try again."
     },
-    "time_usage_report_failed": {
+    "time_usage_failed": {
       "message": "The integration could not read the time usage report. Check the Firewalla connection and try again."
     },
     "wake_host_failed": {
@@ -1271,9 +1373,6 @@
     "delete_rule_failed": {
       "message": "The integration could not delete the rule. Check the Firewalla connection and try again."
     },
-    "rule_not_found": {
-      "message": "No live Firewalla rule matched that rule ID. Refresh the runtime inventory and try again."
-    },
     "alarm_not_found": {
       "message": "No active or archived alarm matched that alarm ID."
     },
@@ -1283,13 +1382,22 @@
     "alarm_selector_required": {
       "message": "Provide the required alarm target or identifier for this operation."
     },
+    "selector_conflict": {
+      "message": "Provide only one of {selector_fields}."
+    },
+    "selector_required": {
+      "message": "Provide exactly one of {selector_fields}."
+    },
     "alarm_operation_failed": {
       "message": "The integration could not complete the alarm operation. Check the Firewalla connection and try again."
     },
-    "wan_data_usage_failed": {
+    "alarm_archived_requires_refresh": {
+      "message": "Archived alarms are read from the box, not the cached snapshot. Set refresh to true to include them."
+    },
+    "wan_usage_failed": {
       "message": "The integration could not read WAN data usage. Check the Firewalla connection and try again."
     },
-    "wan_data_usage_history_period_required": {
+    "wan_usage_history_period_required": {
       "message": "History period is required when history count is greater than zero."
     },
     "wan_events_failed": {
@@ -1310,7 +1418,11 @@
         },
         "include_archived": {
           "name": "Include archived",
-          "description": "Optional. Include archived alarms in the result."
+          "description": "Optional. Include archived alarms in the result. Requires refresh to be true, because the archived set is box-retained history the cached snapshot does not hold."
+        },
+        "refresh": {
+          "name": "Refresh",
+          "description": "Optional. Defaults to false, reading the cached snapshot, which reflects an archive already made in this session. Set true to poll the box; required when include_archived is true."
         },
         "alarm_type": {
           "name": "Alarm type",
@@ -1369,6 +1481,10 @@
         "include_system_managed": {
           "name": "Include system-managed",
           "description": "Optional. Include rules owned by a Firewalla subsystem, such as alarm-intel auto-blocks. Hidden by default."
+        },
+        "alarm_id": {
+          "name": "Alarm ID",
+          "description": "Optional. Filter to the rule an alarm created, by alarm id. Pair it with include_system_managed, since those rules are hidden by default. Use it to find the rule to unblock."
         }
       }
     },
@@ -1420,14 +1536,6 @@
           "name": "Target value",
           "description": "Optional. Required with target_type when alarm_id is omitted. The domain, IP, or MAC to block."
         },
-        "scope_kind": {
-          "name": "Scope kind",
-          "description": "Optional. Where the rule applies. Defaults to everywhere when omitted."
-        },
-        "scope_target": {
-          "name": "Scope target",
-          "description": "Optional. The scope value for the chosen kind (a MAC for device, a network uuid for network)."
-        },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
           "description": "Use this when you have more than one Firewalla setup."
@@ -1435,20 +1543,56 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        },
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "host_name": {
+          "name": "Host name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_uuid": {
+          "name": "Network UUID",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_name": {
+          "name": "Network name",
+          "description": "Apply the rule to this scope. Optional. Provide exactly one scope selector."
+        },
+        "all_hosts": {
+          "name": "All hosts",
+          "description": "Optional. The wide scope must be stated explicitly, because on the wire an empty scope means every host."
         }
       }
     },
     "archive_alarms": {
       "name": "Archive alarms",
-      "description": "Move one or all active alarms to the archive. Archived alarms remain retrievable.",
+      "description": "Move one alarm or the whole active set to the archive. Archived alarms remain retrievable.",
       "fields": {
-        "mode": {
-          "name": "Mode",
-          "description": "Choose this alarm or all active alarms."
-        },
         "alarm_id": {
-          "name": "Alarm ID",
-          "description": "Required when mode is this."
+          "name": "Alarm ID (Optional)",
+          "description": "Archive one alarm. Provide either this or Alarm status."
+        },
+        "alarm_status": {
+          "name": "Alarm status (Optional)",
+          "description": "Archive the whole set. Only active, since an already-archived alarm has nothing left to archive. Provide either this or Alarm ID."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -1462,15 +1606,15 @@
     },
     "delete_alarms": {
       "name": "Delete alarms",
-      "description": "Permanently delete one alarm or all active/archived alarms. This cannot be undone.",
+      "description": "Permanently delete one alarm or a whole set. This cannot be undone.",
       "fields": {
-        "mode": {
-          "name": "Mode",
-          "description": "Choose this, all_active, or all_archived."
-        },
         "alarm_id": {
-          "name": "Alarm ID",
-          "description": "Required when mode is this."
+          "name": "Alarm ID (Optional)",
+          "description": "Delete one alarm. Provide exactly one of Alarm ID or Alarm status."
+        },
+        "alarm_status": {
+          "name": "Alarm status (Optional)",
+          "description": "Delete the active or archived set. Provide exactly one of Alarm ID or Alarm status."
         },
         "confirm": {
           "name": "Confirm permanent deletion",
@@ -1494,21 +1638,13 @@
           "name": "Alarm ID (Optional)",
           "description": "Use an active or archived alarm to resolve an omitted domain/IP target."
         },
-        "target_type": {
-          "name": "Target type",
+        "alarm_target_type": {
+          "name": "Alarm target type",
           "description": "Choose alarm_type, domain, or ip."
         },
-        "target_value": {
-          "name": "Target value (Optional)",
+        "alarm_target_value": {
+          "name": "Alarm target value (Optional)",
           "description": "Raw ALARM_* identifier, domain, or IP. May be resolved from alarm_id where available."
-        },
-        "scope_kind": {
-          "name": "Scope kind",
-          "description": "Required. Choose device, group, user, network, or all. Global scope must be selected explicitly."
-        },
-        "scope_target": {
-          "name": "Scope target (Optional)",
-          "description": "Required unless scope_kind is all. Use the ID for the selected device, group, user, or network."
         },
         "duration": {
           "name": "Duration",
@@ -1521,6 +1657,42 @@
         "config_entry_name": {
           "name": "Config entry name (Optional)",
           "description": "Use this when setup names are unique. If names repeat, use Config Entry ID."
+        },
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "host_name": {
+          "name": "Host name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_uuid": {
+          "name": "Network UUID",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "network_name": {
+          "name": "Network name",
+          "description": "Silence for this scope. Optional. Provide exactly one scope selector."
+        },
+        "all_hosts": {
+          "name": "All hosts",
+          "description": "Optional. The wide scope must be stated explicitly, because on the wire an empty scope means every host."
         }
       }
     },
@@ -1632,7 +1804,7 @@
         }
       }
     },
-    "get_network_segment_report": {
+    "get_network_config": {
       "name": "Get network segment report",
       "description": "Return one configuration-oriented network segment report in the shared report envelope from the Firewalla local API.",
       "fields": {
@@ -1662,7 +1834,69 @@
         }
       }
     },
-    "get_network_segment_usage": {
+    "get_flow_report": {
+      "name": "Get flow report",
+      "description": "Return one flow report for a device, group, or user in the shared report envelope from the Firewalla local API.",
+      "fields": {
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Optional. Scope the report to a host by MAC. Provide exactly one scope selector."
+        },
+        "host_name": {
+          "name": "Host name",
+          "description": "Optional. Scope the report to a host by name. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Optional. Scope the report to a group by id. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Optional. Scope the report to a group by name. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Optional. Scope the report to a user by id. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Optional. Scope the report to a user by name. Provide exactly one scope selector."
+        },
+        "window_hours": {
+          "name": "Window hours (Optional)",
+          "description": "Optional. Defaults to 24, which is the window Firewalla itself serves. There is no maximum, but the box retains about 24 hours of flow data, so a wider request is silently served as 24 hours: read window_is_clamped and window_hours_served in the response rather than assuming the requested window."
+        },
+        "detail": {
+          "name": "Detail (Optional)",
+          "description": "Optional. Defaults to summary. Summary returns totals, ranked destinations, the blocked breakdown, LAN peers, and the member ranking. Records adds the blocked and regular flow records, which are separate reads."
+        },
+        "record_count": {
+          "name": "Record count (Optional)",
+          "description": "Optional. Defaults to 300. The page size for a records read. Firewalla caps a single response at 5000 records and needs pagination beyond that, so ask for everything with fetch_all_records rather than a larger count."
+        },
+        "fetch_all_records": {
+          "name": "Fetch all records (Optional)",
+          "description": "Optional. Defaults to false. Walk the record cursor until the box stops returning more, instead of fetching one page. A walk that hits its deadline returns truncated true with a cursor, so a partial result is never mistaken for a complete one."
+        },
+        "include": {
+          "name": "Include",
+          "description": "Optional. 'host_detail' adds the host identifiers the caller did not itself name: the member ranking, each destination's host IDs, and each record's host ID and address. It is absent by default because a group report would otherwise carry the household's device inventory. Destination hostnames and addresses are always returned, and a host scope needs no flag, since it names nothing beyond the host asked for."
+        },
+        "refresh": {
+          "name": "Refresh first",
+          "description": "Optional. Defaults to true. Refresh the Firewalla runtime before resolving the scope and building the report. Flow data itself is always read live."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
+    "get_network_usage": {
       "name": "Get network segment usage",
       "description": "Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API.",
       "fields": {
@@ -1700,7 +1934,7 @@
         }
       }
     },
-    "get_speed_test_results": {
+    "get_speed_tests": {
       "name": "Get speed test results",
       "description": "Return normalized Firewalla internet speed test results from the coordinator refresh path.",
       "fields": {
@@ -1730,7 +1964,7 @@
         }
       }
     },
-    "get_internet_quality_report": {
+    "get_internet_quality": {
       "name": "Get internet quality report",
       "description": "Return normalized Firewalla internet-quality samples (ping latency and packet loss) from the manager cache.",
       "fields": {
@@ -2082,17 +2316,33 @@
         }
       }
     },
-    "get_time_usage_report": {
+    "get_time_usage": {
       "name": "Get time usage report",
       "description": "Return one normalized scoped time-usage report from the Firewalla local API.",
       "fields": {
-        "scope_kind": {
-          "name": "Scope kind",
-          "description": "Required. Choose whether the target is a device, group, or user."
+        "host_mac": {
+          "name": "Host MAC",
+          "description": "Optional. Scope the report to a host by MAC. Provide exactly one scope selector."
         },
-        "scope_target": {
-          "name": "Scope target",
-          "description": "Required. Use a stable ID or the current display label for the selected scope."
+        "host_name": {
+          "name": "Host name",
+          "description": "Optional. Scope the report to a host by name. Provide exactly one scope selector."
+        },
+        "group_id": {
+          "name": "Group ID",
+          "description": "Optional. Scope the report to a group by id. Provide exactly one scope selector."
+        },
+        "group_name": {
+          "name": "Group name",
+          "description": "Optional. Scope the report to a group by name. Provide exactly one scope selector."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "Optional. Scope the report to a user by id. Provide exactly one scope selector."
+        },
+        "user_name": {
+          "name": "User name",
+          "description": "Optional. Scope the report to a user by name. Provide exactly one scope selector."
         },
         "begin": {
           "name": "Begin",
@@ -2108,7 +2358,7 @@
         },
         "sections": {
           "name": "Sections (Optional)",
-          "description": "Limit the report to the named major sections. When omitted, standard returns all major sections and summary returns internet plus app totals. A non-empty app filter also keeps the apps section visible."
+          "description": "Limit the report to the named major sections. When omitted, full returns all major sections and summary returns internet plus app totals. A non-empty app filter also keeps the apps section visible."
         },
         "include": {
           "name": "Include detail (Optional)",
@@ -2132,7 +2382,7 @@
         }
       }
     },
-    "get_wan_data_usage": {
+    "get_wan_usage": {
       "name": "Get WAN data usage",
       "description": "Return one normalized WAN data-usage report with current and history month, week, and day sections.",
       "fields": {
@@ -2220,9 +2470,9 @@
       "name": "Pause rule",
       "description": "Pause one managed Firewalla rule. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.",
       "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        "rule_id": {
+          "name": "Rule ID",
+          "description": "Enter the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
         },
         "duration": {
           "name": "Duration",
@@ -2268,9 +2518,9 @@
       "name": "Resume rule",
       "description": "Resume one managed Firewalla rule immediately.",
       "fields": {
-        "rule_target": {
-          "name": "Rule target",
-          "description": "Enter the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
+        "rule_id": {
+          "name": "Rule ID",
+          "description": "Enter the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory for this Firewalla setup."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
@@ -2308,6 +2558,10 @@
       "name": "Get wireless status",
       "description": "Returns the current wireless configuration (SSID profiles and access points) as structured data. SSID profiles include the SSID, band, encryption, paused state, VLAN, and interface. Access points include the name, model, channels, and LED state. For Firewalla boxes without AP7 access points, the returned sections are empty.",
       "fields": {
+        "refresh": {
+          "name": "Refresh",
+          "description": "Set to true to poll the Firewalla box for current data first. Defaults to false, which reads the last snapshot — fast, and current to within the polling interval."
+        },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",
           "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."

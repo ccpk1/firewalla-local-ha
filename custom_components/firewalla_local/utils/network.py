@@ -9,6 +9,7 @@ from ..models import (
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkKind,
 )
+from .values import normalized_bool, normalized_int, normalized_string
 
 # Raw keys/literals for the unified Firewalla network registry.
 _RAW_NETWORK_CONFIG_KEY: Final = "networkConfig"
@@ -79,39 +80,9 @@ _NETWORK_KIND_BY_INTERFACE_CATEGORY: Final = {
 }
 
 
-def _normalized_network_name(value: object) -> str | None:
-    """Return a stripped network name when one is present."""
-    if not isinstance(value, str):
-        return None
-    stripped_value = value.strip()
-    return stripped_value or None
-
-
-def _normalized_int(value: object) -> int | None:
-    """Return an integer when one is present."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
-
-
 def _normalized_bool(value: object) -> bool | None:
     """Return a boolean when one is present."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        stripped_value = value.strip().casefold()
-        if stripped_value == "true":
-            return True
-        if stripped_value == "false":
-            return False
-    return None
+    return normalized_bool(value)
 
 
 def _normalized_string_tuple(value: object) -> tuple[str, ...]:
@@ -146,6 +117,8 @@ def _resolve_network_display_name(raw_profile: dict[str, object]) -> str | None:
 
 def _collect_network_interface_entries(
     raw_category: dict[str, object],
+    *,
+    category: str,
     kind: FirewallaNetworkKind,
     networks: dict[str, FirewallaNetwork],
 ) -> None:
@@ -164,10 +137,10 @@ def _collect_network_interface_entries(
             meta_uuid = raw_meta.get(_RAW_UUID_KEY)
             if isinstance(meta_uuid, str) and meta_uuid:
                 network_id = meta_uuid
-            meta_name = _normalized_network_name(raw_meta.get(_RAW_NAME_KEY))
+            meta_name = normalized_string(raw_meta.get(_RAW_NAME_KEY))
             if meta_name is not None:
                 network_name = meta_name
-            meta_type = _normalized_network_name(raw_meta.get(_RAW_TYPE_KEY))
+            meta_type = normalized_string(raw_meta.get(_RAW_TYPE_KEY))
 
         # Unnamed physical ports (eth1/2/3 on the Gold) carry no friendly
         # identity and are not user-facing networks; skip them. A phy port is
@@ -182,7 +155,8 @@ def _collect_network_interface_entries(
             name=network_name,
             kind=kind,
             interface_name=interface_name,
-            vlan_id=_normalized_int(raw_entry.get(_RAW_VID_KEY)),
+            interface_category=category,
+            vlan_id=normalized_int(raw_entry.get(_RAW_VID_KEY)),
             ports=_normalized_string_tuple(raw_entry.get(_RAW_INTF_KEY)),
             enabled=_normalized_bool(raw_entry.get(_RAW_ENABLED_KEY)),
             ipv4_addresses=_normalized_string_tuple(raw_entry.get(_RAW_IPV4_KEY)),
@@ -203,9 +177,7 @@ def _collect_wan_status_fallback(
                 wan_uuid = raw_port.get(_RAW_WAN_INTERFACE_UUID_KEY)
                 if not isinstance(wan_uuid, str) or not wan_uuid:
                     continue
-                wan_name = _normalized_network_name(
-                    raw_port.get(_RAW_WAN_INTERFACE_NAME_KEY)
-                )
+                wan_name = normalized_string(raw_port.get(_RAW_WAN_INTERFACE_NAME_KEY))
                 resolved_name = wan_name if wan_name is not None else wan_uuid
                 existing = networks.get(wan_uuid)
                 if existing is None or existing.name == wan_uuid:
@@ -266,7 +238,12 @@ def build_network_inventory(data: dict[str, object]) -> tuple[FirewallaNetwork, 
                 raw_category = raw_interfaces.get(category)
                 if not isinstance(raw_category, dict):
                     continue
-                _collect_network_interface_entries(raw_category, kind, networks)
+                _collect_network_interface_entries(
+                    raw_category,
+                    category=category,
+                    kind=kind,
+                    networks=networks,
+                )
 
     # A VLAN referenced by a bridge's ``intf`` is transport for that bridge
     # (e.g. ``eth3.101`` tagging the Guest bridge), not a standalone network;
@@ -346,6 +323,7 @@ def _enrich_network_addressing(
             name=existing.name,
             kind=existing.kind,
             interface_name=existing.interface_name,
+            interface_category=existing.interface_category,
             vlan_id=existing.vlan_id,
             ports=existing.ports,
             ipv4_addresses=(
@@ -360,7 +338,7 @@ def _enrich_network_addressing(
             ipv6_subnets=_normalized_string_tuple(
                 raw_profile.get(_RAW_IPV6_SUBNETS_KEY)
             ),
-            gateway=_normalized_network_name(raw_profile.get(_RAW_GATEWAY_KEY)),
+            gateway=normalized_string(raw_profile.get(_RAW_GATEWAY_KEY)),
             dns_servers=_normalized_string_tuple(raw_profile.get(_RAW_DNS_KEY)),
             dhcp=existing.dhcp,
             device_host_count=existing.device_host_count,
@@ -407,7 +385,7 @@ def _enrich_network_ports(
                 continue
             direct = _normalized_string_tuple(raw_entry.get(_RAW_INTF_KEY))
             parent_members[interface_name] = direct
-            vlan_id = _normalized_int(raw_entry.get(_RAW_VID_KEY))
+            vlan_id = normalized_int(raw_entry.get(_RAW_VID_KEY))
             if vlan_id is not None:
                 member_vlan_ids[interface_name] = vlan_id
 
@@ -464,6 +442,7 @@ def _enrich_network_ports(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=vlan_id,
             ports=ports,
             ipv4_addresses=network.ipv4_addresses,
@@ -505,10 +484,10 @@ def _enrich_network_dhcp(
         range_start = None
         range_end = None
         if isinstance(raw_range, dict):
-            range_start = _normalized_network_name(raw_range.get(_RAW_FROM_KEY))
-            range_end = _normalized_network_name(raw_range.get(_RAW_TO_KEY))
+            range_start = normalized_string(raw_range.get(_RAW_FROM_KEY))
+            range_end = normalized_string(raw_range.get(_RAW_TO_KEY))
 
-        dhcp_gateway = _normalized_network_name(raw_dhcp.get(_RAW_GATEWAY_KEY))
+        dhcp_gateway = normalized_string(raw_dhcp.get(_RAW_GATEWAY_KEY))
         gateway = network.gateway or dhcp_gateway
 
         networks[network.uuid] = FirewallaNetwork(
@@ -516,6 +495,7 @@ def _enrich_network_dhcp(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=network.vlan_id,
             ports=network.ports,
             ipv4_addresses=network.ipv4_addresses,
@@ -526,10 +506,8 @@ def _enrich_network_dhcp(
             dns_servers=network.dns_servers,
             dhcp=FirewallaNetworkDhcpConfig(
                 gateway=dhcp_gateway,
-                subnet_mask=_normalized_network_name(
-                    raw_dhcp.get(_RAW_SUBNET_MASK_KEY)
-                ),
-                lease_seconds=_normalized_int(raw_dhcp.get(_RAW_LEASE_KEY)),
+                subnet_mask=normalized_string(raw_dhcp.get(_RAW_SUBNET_MASK_KEY)),
+                lease_seconds=normalized_int(raw_dhcp.get(_RAW_LEASE_KEY)),
                 range_start=range_start,
                 range_end=range_end,
                 name_servers=_normalized_string_tuple(
@@ -597,6 +575,7 @@ def _enrich_network_advanced_options(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=network.vlan_id,
             ports=network.ports,
             ipv4_addresses=network.ipv4_addresses,
@@ -675,6 +654,7 @@ def _enrich_network_device_counts(
             name=network.name,
             kind=network.kind,
             interface_name=network.interface_name,
+            interface_category=network.interface_category,
             vlan_id=network.vlan_id,
             ports=network.ports,
             ipv4_addresses=network.ipv4_addresses,

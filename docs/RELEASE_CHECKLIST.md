@@ -47,6 +47,45 @@ Checklist:
 - [ ] `docs/USER_GUIDE.md` still matches the actual setup, removal, and runtime behavior.
 - [ ] `CONTRIBUTING.md`, `SUPPORT.md`, and `SECURITY.md` still reflect the real repository process.
 - [ ] Any user-visible change has a short release summary prepared for the GitHub release body.
+- [ ] **Any breaking change is called out in the release body**, naming the old and new
+      value so an upgrading user can find it. `plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` is the source;
+      the release body summarises it.
+
+### Known breaking change pending release
+
+Renamed the entity attribute keys, service-response keys and labels from `device` to
+`host`, because `host` is this integration's word for a Firewalla endpoint on every
+surface. Firewalla's own payloads say `device` (`deviceIP`, `devicePort`, `deviceTags`)
+but that word is not echoed, because in Home Assistant a *device* is a device-registry
+entry. `device_tracker` is unaffected — it is a Home Assistant platform. Full
+old-to-new table in `plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` §2.
+
+| What | Detail |
+| --- | --- |
+| Breaks | A template or automation reading `devices_online`, `devices_offline`, `devices_total`, `vpn_devices_*`, `device_count`, `device_group`, `associated_devices`, `associated_device_count`, `associated_device_group` or `device_name` from an entity attribute or a service response. Also `device_id` / `device_ip` / `device_port` in `get_rules` `last_hit`, `device_id` / `device_name` in `get_time_usage`, `device_type` / `device_host_count` / the `devices` section in `get_network_config`, `active_device_count` in `get_network_usage`, the `device_*` keys and `destination_kind: "device"` on `get_flow_report`, the `devices` and `vpn_devices` sections of `get_system_overview`, the `devices` rows in `get_time_usage`, and `device_rules.removed` in the membership responses. Two further renames: the abbreviated `conn` / `dns` / `dns_blocked` / `ip_blocked` / `ip_denied` / `ntp` counters in `get_network_usage` host rows, and `config_entry_id`, which every response no longer echoes. Also `ip_address` is now `host_ip` wherever a host record or the watched-device attribute publishes it, the network configuration section's `kind` / `type` are now `network_kind` / `interface_type`, and a tag-scoped rule reports `target: null` instead of the box's `TAG` sentinel, with the new `applies_to_kind` naming each `applies_to` entry |
+| Fix | Read the `hosts_*` / `host_*` / `associated_hosts*` name instead. `device_host_count` was a duplicate of `host_count` in the same response — read `host_count` |
+| Not affected | `device_tracker` entities and their platform; entity ids; entity names |
+| Migration | One-to-one rename; no value, type or availability changed |
+
+### Known breaking change pending release — time and derived state
+
+Every published moment now names what it is an instant of, and appears twice: a date
+(`<name>_at`) and epoch seconds (`<name>_at_timestamp`). Derived windowed values such as
+`online` are published alongside the reference instant and window they were measured in,
+so they can be checked from the payload. Full old-to-new table in
+`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` §2.
+
+| What | Detail |
+| --- | --- |
+| Breaks | A template, automation or agent read of `last_active` on the watched-host, device-tracker and watched-user surfaces (`last_active_at` + `last_active_at_timestamp` now); `fired_at` on the alarm sensor, which was an epoch number and is now a date; `get_rules`' `last_hit.at` / `.timestamp` (`matched_at` / `matched_at_timestamp`); `timestamp` in `get_flow_report` records (`occurred_at` + `occurred_at_timestamp`), in `get_wan_events` (`occurred_at_timestamp` + `occurred_at`) and in `get_network_usage` metric samples (`sampled_at_timestamp` + `sampled_at`); `begin_timestamp_iso` / `end_timestamp_iso` / `anchor_timestamp_iso` in the report `time_basis` blocks (`begin` / `end` / `anchor`); and `activated_time` / `updated_time` / `last_activated_time` in `get_runtime_inventory` rule records (`activated_at` / `updated_at` / `last_activated_at`). `get_runtime_inventory` also changed `expires_at` and `pause_until` from epoch numbers to dates, matching the rule service surface. Bare `timestamp` is gone from every response |
+| Fix | Read the `_at` form for a date and the `_at_timestamp` twin for arithmetic. Where a value was already correct but unpaired (`tested_at`, `sampled_at`, `pause_until`, `runtime_data_updated_at`, `expires_at`, `begin` / `end` / `anchor`), the key is unchanged and the twin is new, so nothing breaks. `online` is unchanged and now carries `activity_reference_at` / `activity_reference_at_timestamp` / `online_window_seconds` beside it |
+| Not affected | Entity ids, entity names, device registry entries, all attribute *values* other than `fired_at`, `expires_at` and `pause_until` in the runtime inventory, and the local-time report boundaries, which keep their `time_zone` and offset |
+| Migration | Rename and pair only; no value, type or availability changed except the three epoch-to-date corrections above, each of which keeps its number under the new `_timestamp` twin |
+
+**No shim, alias or deprecation period accompanies this break.** An alias would leave two
+names for one value, which is the defect this change removes. The tables in
+`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` §2 are the migration, and a reviewer
+should not ask for a compatibility layer.
 
 ## 5) HACS and Home Assistant posture
 

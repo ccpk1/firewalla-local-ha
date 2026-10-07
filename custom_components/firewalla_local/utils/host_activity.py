@@ -88,10 +88,25 @@ def is_host_online(
 def count_online_hosts(
     hosts: Sequence[FirewallaHostRuntime],
     *,
+    reference_activity: float | None,
     online_window_seconds: int,
 ) -> int:
-    """Return how many hosts count as online for the given window."""
-    reference_activity = reference_last_active(hosts)
+    """Return how many of ``hosts`` count as online against one reference point.
+
+    ``reference_activity`` is required rather than derived from ``hosts``. It used
+    to be computed here as ``max(last_active)`` over whatever sequence was passed,
+    which made the reference a property of the *subset* being counted instead of a
+    property of the appliance. Every caller that counted a subset therefore got a
+    different baseline: the VPN peer count used the freshest *peer*, so the newest
+    peer was always "online" by construction -- on the dev box that reported one
+    online peer whose last activity was 4.5 days earlier, while the host list,
+    using the appliance-wide reference, correctly showed it offline.
+
+    One window was not enough, because the window is only half the answer; the
+    reference is the other half. Making it a parameter means a caller has to state
+    which instant it is measuring from, so a subset can no longer silently become
+    its own clock.
+    """
     return sum(
         1
         for host in hosts

@@ -52,17 +52,18 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_CONFIG_ENTRY_ID,
     SERVICE_FIELD_CONFIG_ENTRY_NAME,
     SERVICE_GET_ALARMS,
+    SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
-    SERVICE_GET_INTERNET_QUALITY_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_USAGE,
+    SERVICE_GET_INTERNET_QUALITY,
+    SERVICE_GET_NETWORK_CONFIG,
+    SERVICE_GET_NETWORK_USAGE,
     SERVICE_GET_RULES,
     SERVICE_GET_RUNTIME_INVENTORY,
-    SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SPEED_TESTS,
     SERVICE_GET_SYSTEM_OVERVIEW,
-    SERVICE_GET_TIME_USAGE_REPORT,
-    SERVICE_GET_WAN_DATA_USAGE,
+    SERVICE_GET_TIME_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WAN_USAGE,
     SERVICE_GET_WIRELESS_STATUS,
     SERVICE_MUTE_ALARM,
     SERVICE_PAUSE_RULE,
@@ -1268,18 +1269,19 @@ async def test_setup_multiple_entries_registers_domain_services_once(
         [
             (DOMAIN, SERVICE_ARCHIVE_ALARMS),
             (DOMAIN, SERVICE_DELETE_ALARMS),
+            (DOMAIN, SERVICE_GET_FLOW_REPORT),
             (DOMAIN, SERVICE_GET_HOSTS),
             (DOMAIN, SERVICE_GET_ALARMS),
-            (DOMAIN, SERVICE_GET_INTERNET_QUALITY_REPORT),
-            (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_REPORT),
-            (DOMAIN, SERVICE_GET_NETWORK_SEGMENT_USAGE),
+            (DOMAIN, SERVICE_GET_INTERNET_QUALITY),
+            (DOMAIN, SERVICE_GET_NETWORK_CONFIG),
+            (DOMAIN, SERVICE_GET_NETWORK_USAGE),
             (DOMAIN, SERVICE_GET_RULES),
             (DOMAIN, SERVICE_GET_RUNTIME_INVENTORY),
-            (DOMAIN, SERVICE_GET_SPEED_TEST_RESULTS),
+            (DOMAIN, SERVICE_GET_SPEED_TESTS),
             (DOMAIN, SERVICE_GET_SYSTEM_OVERVIEW),
-            (DOMAIN, SERVICE_GET_TIME_USAGE_REPORT),
+            (DOMAIN, SERVICE_GET_TIME_USAGE),
             (DOMAIN, SERVICE_GET_WAN_EVENTS),
-            (DOMAIN, SERVICE_GET_WAN_DATA_USAGE),
+            (DOMAIN, SERVICE_GET_WAN_USAGE),
             (DOMAIN, SERVICE_GET_WIRELESS_STATUS),
             (DOMAIN, SERVICE_SYNC_RUNTIME),
             (DOMAIN, SERVICE_CREATE_RULE),
@@ -1305,19 +1307,20 @@ async def test_setup_multiple_entries_registers_domain_services_once(
     assert set(hass.services.async_services()[DOMAIN]) == {
         SERVICE_ARCHIVE_ALARMS,
         SERVICE_DELETE_ALARMS,
+        SERVICE_GET_FLOW_REPORT,
         SERVICE_GET_HOSTS,
         SERVICE_GET_ALARMS,
-        SERVICE_GET_INTERNET_QUALITY_REPORT,
-        SERVICE_GET_NETWORK_SEGMENT_REPORT,
-        SERVICE_GET_NETWORK_SEGMENT_USAGE,
+        SERVICE_GET_INTERNET_QUALITY,
+        SERVICE_GET_NETWORK_CONFIG,
+        SERVICE_GET_NETWORK_USAGE,
         SERVICE_GET_RULES,
         SERVICE_GET_RUNTIME_INVENTORY,
         SERVICE_CREATE_RULE,
-        SERVICE_GET_SPEED_TEST_RESULTS,
+        SERVICE_GET_SPEED_TESTS,
         SERVICE_GET_SYSTEM_OVERVIEW,
-        SERVICE_GET_TIME_USAGE_REPORT,
+        SERVICE_GET_TIME_USAGE,
         SERVICE_GET_WAN_EVENTS,
-        SERVICE_GET_WAN_DATA_USAGE,
+        SERVICE_GET_WAN_USAGE,
         SERVICE_GET_WIRELESS_STATUS,
         SERVICE_SYNC_RUNTIME,
         SERVICE_DELETE_RULE,
@@ -1558,7 +1561,6 @@ async def test_get_runtime_inventory_service_returns_markdown(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
     assert "# Firewalla runtime inventory" in response["markdown"]
     # Tag 10 is a user's affiliated backing tag, so it is not a plain group.
     assert response["inventory"]["summary"]["group_count"] == 0
@@ -1618,7 +1620,6 @@ async def test_get_runtime_inventory_service_uses_single_loaded_entry(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
 
 
 async def test_get_runtime_inventory_service_accepts_entry_name(
@@ -1674,7 +1675,6 @@ async def test_get_runtime_inventory_service_accepts_entry_name(
         )
 
     assert response is not None
-    assert response["config_entry_id"] == entry.entry_id
 
 
 async def test_setup_populates_raw_payload_for_live_rule_filtering(

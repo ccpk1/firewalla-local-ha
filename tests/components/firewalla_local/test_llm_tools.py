@@ -28,19 +28,20 @@ from custom_components.firewalla_local.models import (
     FirewallaRuntimeSnapshot,
 )
 
-LIST_HOSTS_TOOL = "firewalla_local__list_hosts"
-LIST_RULES_TOOL = "firewalla_local__list_rules"
+GET_HOSTS_TOOL = "firewalla_local__get_hosts"
+GET_RULES_TOOL = "firewalla_local__get_rules"
 
 # Every read tool and the response_type it reports in meta.
 _READ_TOOLS: tuple[tuple[str, str], ...] = (
     ("firewalla_local__get_system_overview", "system_overview"),
-    ("firewalla_local__list_hosts", "hosts"),
-    ("firewalla_local__list_rules", "rules"),
+    ("firewalla_local__get_hosts", "hosts"),
+    ("firewalla_local__get_rules", "rules"),
     ("firewalla_local__get_network_config", "network_config"),
     ("firewalla_local__get_network_usage", "network_usage"),
     ("firewalla_local__get_wan_usage", "wan_usage"),
     ("firewalla_local__get_wan_events", "wan_events"),
-    ("firewalla_local__get_user_usage", "user_usage"),
+    ("firewalla_local__get_time_usage", "user_usage"),
+    ("firewalla_local__get_flow_report", "flow_report"),
     ("firewalla_local__get_internet_quality", "internet_quality"),
     ("firewalla_local__get_speed_tests", "speed_tests"),
     ("firewalla_local__get_wireless_status", "wireless_status"),
@@ -151,8 +152,8 @@ async def _setup_hass(hass: HomeAssistant) -> MockConfigEntry:
 @pytest.mark.parametrize(
     ("tool_name", "response_type"),
     [
-        pytest.param(LIST_HOSTS_TOOL, "hosts", id="list_hosts"),
-        pytest.param(LIST_RULES_TOOL, "rules", id="list_rules"),
+        pytest.param(GET_HOSTS_TOOL, "hosts", id="get_hosts"),
+        pytest.param(GET_RULES_TOOL, "rules", id="get_rules"),
     ],
 )
 async def test_read_tool_returns_envelope(
@@ -174,13 +175,13 @@ async def test_read_tool_returns_envelope(
     assert isinstance(result.data["result"], dict)
 
 
-async def test_list_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
-    """list_rules surfaces the flat rule shape including the alarm reference."""
+async def test_get_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
+    """get_rules surfaces the flat rule shape including the alarm reference."""
     await _setup_hass(hass)
     api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     result = await api_instance.async_call_tool(
-        llm.ToolInput(tool_name=LIST_RULES_TOOL, tool_args={})
+        llm.ToolInput(tool_name=GET_RULES_TOOL, tool_args={})
     )
 
     rules = result.data["result"]["rules"]
@@ -196,13 +197,13 @@ async def test_list_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
     assert rule["alarm_id"] == "1728"
 
 
-async def test_list_hosts_returns_host_records(hass: HomeAssistant) -> None:
-    """list_hosts surfaces the host identity records from the host service."""
+async def test_get_hosts_returns_host_records(hass: HomeAssistant) -> None:
+    """get_hosts surfaces the host identity records from the host service."""
     await _setup_hass(hass)
     api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     result = await api_instance.async_call_tool(
-        llm.ToolInput(tool_name=LIST_HOSTS_TOOL, tool_args={})
+        llm.ToolInput(tool_name=GET_HOSTS_TOOL, tool_args={})
     )
 
     hosts = result.data["result"]["hosts"]
@@ -229,7 +230,10 @@ async def test_read_tools_are_annotated_read_only(
     assert tool.annotations.read_only is True
     assert tool.annotations.destructive is False
     assert tool.annotations.idempotent is True
-    assert tool.annotations.open_world is False
+    # open_world is true: the data comes from the user's box, which is outside
+    # Home Assistant. The flag describes where the data lives, not whether the
+    # call writes anything.
+    assert tool.annotations.open_world is True
 
 
 async def test_read_tool_catalog_matches_spec(hass: HomeAssistant) -> None:
@@ -308,7 +312,7 @@ _CONTROL_TOOLS: tuple[str, ...] = (
     "firewalla_local__set_host_notify_when_next_offline",
     "firewalla_local__wake_host",
     "firewalla_local__run_internet_speed_test",
-    "firewalla_local__set_alarm_muted",
+    "firewalla_local__mute_alarm",
     "firewalla_local__unmute_alarm",
     "firewalla_local__block_alarm_target",
     "firewalla_local__unblock_alarm_target",
@@ -369,7 +373,7 @@ async def test_control_tools_absent_in_read_only_mode(hass: HomeAssistant) -> No
     registered = {tool.name for tool in api_instance.tools}
     assert not registered.intersection(_CONTROL_TOOLS)
     assert not registered.intersection(_DESTRUCTIVE_TOOLS)
-    assert "firewalla_local__list_hosts" in registered
+    assert "firewalla_local__get_hosts" in registered
 
 
 async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> None:
@@ -380,7 +384,7 @@ async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> Non
     registered = {tool.name for tool in api_instance.tools}
     assert registered.issuperset(_CONTROL_TOOLS)
     assert not registered.intersection(_DESTRUCTIVE_TOOLS)
-    assert "firewalla_local__list_hosts" in registered
+    assert "firewalla_local__get_hosts" in registered
 
 
 async def test_destructive_tools_only_in_full_mode(hass: HomeAssistant) -> None:
@@ -408,7 +412,7 @@ async def test_control_tools_are_non_read_only(
     assert tool.title
     assert tool.description
     assert tool.annotations.read_only is False
-    assert tool.annotations.open_world is False
+    assert tool.annotations.open_world is True
     for marker in tool.parameters.schema:
         assert marker.description, f"{tool_name} field {marker} lacks a description"
 
@@ -427,7 +431,7 @@ async def test_destructive_tools_are_annotated_destructive(
     assert tool.integration == DOMAIN
     assert tool.annotations.read_only is False
     assert tool.annotations.destructive is True
-    assert tool.annotations.open_world is False
+    assert tool.annotations.open_world is True
     for marker in tool.parameters.schema:
         assert marker.description, f"{tool_name} field {marker} lacks a description"
 
@@ -441,3 +445,44 @@ def _api_id(hass: HomeAssistant) -> str:
     return next(
         api.id for api in llm.async_get_apis(hass) if api.id.startswith(f"{DOMAIN}-")
     )
+
+
+async def test_flow_report_tool_can_reach_the_records_it_needs_to_diagnose(
+    hass: HomeAssistant,
+) -> None:
+    """The flow report tool must be able to ask for the individual records.
+
+    A record names the rule that blocked it; the rollup's blocked families carry no
+    rule reference at all -- verified by dumping every key of a live rollup, where
+    the only `policy` key is the target's own policy block. So "which rule stopped
+    this" is answerable *only* at full detail, and a tool that could ask for the
+    summary alone could not diagnose anything. The description has to say so, or
+    the model will not know the level exists.
+    """
+    await _setup_hass(hass)
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
+    tool = next(
+        tool for tool in api_instance.tools if tool.name.endswith("get_flow_report")
+    )
+
+    declared = {marker.schema for marker in tool.parameters.schema}
+    assert "detail" in declared
+    assert "record_count" in declared
+
+    # Both levels validate, so the model can actually select the diagnostic one.
+    validated = tool.parameters(
+        {
+            "group_name": "KIDS",
+            "detail": "full",
+            "record_count": 50,
+        }
+    )
+    assert validated["detail"] == "full"
+    assert validated["record_count"] == 50
+    # Summary stays the default, so an ordinary question does not pay for records.
+    assert tool.parameters({"group_name": "KIDS"})["detail"] == "summary"
+
+    # The description is the model's only cue that full detail carries the rule.
+    description = tool.description.lower()
+    assert "rule" in description
+    assert "diagnos" in description

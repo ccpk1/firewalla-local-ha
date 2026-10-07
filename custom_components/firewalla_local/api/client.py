@@ -20,6 +20,27 @@ from ..const import (
     FIREWALLA_PROTOCOL_CLIENT_ID,
     FIREWALLA_PROTOCOL_CLIENT_VERSION,
     LOGGER,
+    MAX_FLOW_LOG_PAGE_SIZE,
+    MIN_FLOW_LOG_PAGE_SIZE,
+    MembershipKind,
+)
+from ..const import (
+    TAG_REF_PREFIX_DEVICE as _RAW_TAG_PREFIX_DEVICE,
+)
+from ..const import (
+    TAG_REF_PREFIX_GROUP as _RAW_TAG_PREFIX_GROUP,
+)
+from ..const import (
+    TAG_REF_PREFIX_NETWORK as _RAW_TAG_PREFIX_NETWORK,
+)
+from ..const import (
+    TAG_REF_PREFIX_USER as _RAW_TAG_PREFIX_USER,
+)
+from ..const import (
+    TAG_REF_PREFIX_USER_ALT as _RAW_TAG_PREFIX_USER_ALT,
+)
+from ..const import (
+    TAG_REF_SEPARATOR as _RAW_TAG_SEPARATOR,
 )
 from ..models import (
     FirewallaAlarm,
@@ -27,26 +48,36 @@ from ..models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaDiskUsageInput,
+    FirewallaFlowRecord,
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaHostVpnClient,
     FirewallaInternetQualitySample,
     FirewallaPolicyRule,
-    FirewallaRuleHit,
     FirewallaRuleTemplate,
     FirewallaRuntimeSnapshot,
     FirewallaSpeedTestRecord,
     FirewallaUserAppUsage,
     FirewallaUserRuntime,
 )
+from ..utils.flow import build_flow_record
 from ..utils.network import build_network_inventory
+from ..utils.values import (
+    normalized_bool,
+    normalized_float,
+    normalized_int,
+    normalized_packet_loss_percent,
+)
 from .crypto import aes256_cbc_decrypt_from_base64, aes256_cbc_encrypt_to_base64
 from .exceptions import (
+    FirewallaApiError,
     FirewallaAuthError,
     FirewallaConnectionError,
     FirewallaLocalRuntimeNotReadyError,
     FirewallaProtocolError,
+    FirewallaValidationError,
 )
+from .models import FlowLogPage
 
 _FWMESSAGE_TYPE_MSG: Final = "msg"
 _FWMESSAGE_TYPE_JSONDATA: Final = "jsondata"
@@ -88,6 +119,44 @@ _HTTP_CONNECTION_HEADER: Final = "Connection"
 _HTTP_CONNECTION_CLOSE_VALUE: Final = "close"
 _COMMAND_ITEM_KEY: Final = "item"
 _COMMAND_VALUE_KEY: Final = "value"
+
+# Flow reporting. Three queries share a target of a tag id or a host id and differ
+# in `item` and in which parameters they accept. Verified against the app's own
+# requests and by live probe on 2026-10-04.
+_FLOW_API_VERSION: Final = 2
+_FLOW_LOG_ITEM: Final = "flows"
+_FLOW_BLOCK_LOG_ITEM: Final = "auditLogs"
+_FLOW_TARGET_TYPES: Final = ("tag", "host")
+_RAW_FLOW_API_VER_KEY: Final = "apiVer"
+_RAW_FLOW_AUDIT_KEY: Final = "audit"
+_RAW_FLOW_CATEGORY_KEY: Final = "category"
+_RAW_FLOW_COUNT_KEY: Final = "count"
+_RAW_FLOW_END_KEY: Final = "end"
+_RAW_FLOW_ETS_KEY: Final = "ets"
+_RAW_FLOW_EXCLUDE_KEY: Final = "exclude"
+_RAW_FLOW_HOURBLOCK_KEY: Final = "hourblock"
+_RAW_FLOW_LOCAL_KEY: Final = "local"
+_RAW_FLOW_START_KEY: Final = "start"
+_RAW_FLOW_TS_KEY: Final = "ts"
+# The same wire key names the flow target type and the user-scope type. They are
+# different concepts that collide on the name, so each keeps its own constant.
+_RAW_FLOW_TARGET_TYPE_KEY: Final = "type"
+_RAW_FLOW_RECORDS_KEY: Final = "flows"
+_RAW_FLOW_BLOCK_RECORDS_KEY: Final = "logs"
+_RAW_FLOW_NEXT_CURSOR_KEY: Final = "nextTs"
+
+# The box honours a positive `count` up to MAX_FLOW_LOG_PAGE_SIZE and silently
+# caps anything larger, so a bigger request buys no more rows. Below
+# MIN_FLOW_LOG_PAGE_SIZE its behaviour is undefined rather than merely small --
+# measured: `count: 1` returned zero rows while `count: 0` returned 100 -- and a
+# non-positive value returns the ENTIRE retained window (~6,956 rows), so a
+# caller-supplied count is clamped rather than forwarded.
+# `hourblock` is a gate, not the granularity the name implies. Measured across a
+# fixed 24h window: 0 and 1 both return an **empty** response, while 2 and every
+# value above it return identical data -- 592 rows over 11 families, span 24.00h,
+# unchanged. So it must be at least 2 to be served at all, and it is clamped
+# rather than forwarded because a caller passing 1 gets silence, not an error.
+_MIN_FLOW_HOURBLOCK: Final = 2
 _COMMAND_GET_KEY: Final = "get"
 _COMMAND_INIT_INCLUDE_INACTIVE_HOSTS_KEY: Final = "includeInactiveHosts"
 _COMMAND_SET_POLICY: Final = "policy"
@@ -131,16 +200,6 @@ _RAW_RULE_AUTO_DELETE_WHEN_EXPIRES_KEY: Final = "autoDeleteWhenExpires"
 _RAW_RULE_DNSMASQ_ONLY_KEY: Final = "dnsmasq_only"
 _RAW_RULE_HIT_COUNT_KEY: Final = "hitCount"
 _RAW_RULE_LAST_HIT_FLOW_KEY: Final = "lastHitFlow"
-_RAW_HIT_DEVICE_KEY: Final = "device"
-_RAW_HIT_DEVICE_IP_KEY: Final = "deviceIP"
-_RAW_HIT_TS_KEY: Final = "ts"
-_RAW_HIT_HOST_KEY: Final = "host"
-_RAW_HIT_DOMAIN_KEY: Final = "domain"
-_RAW_HIT_IP_KEY: Final = "ip"
-_RAW_HIT_PORT_KEY: Final = "port"
-_RAW_HIT_PROTOCOL_KEY: Final = "protocol"
-_RAW_HIT_APP_KEY: Final = "app"
-_RAW_HIT_CATEGORY_KEY: Final = "category"
 
 _RAW_SYSTEM_MODEL_KEY: Final = "model"
 _RAW_SYSTEM_CPU_ID_KEY: Final = "cpuid"
@@ -263,13 +322,6 @@ _RAW_INTERNET_QUALITY_MAX_KEY: Final = "max"
 _RAW_INTERNET_QUALITY_MEDIAN_KEY: Final = "median"
 _RAW_INTERNET_QUALITY_MIN_KEY: Final = "min"
 
-_RAW_TAG_PREFIX_GROUP: Final = "tag"
-_RAW_TAG_PREFIX_DEVICE: Final = "dtag"
-_RAW_TAG_PREFIX_USER: Final = "utag"
-_RAW_TAG_PREFIX_USER_ALT: Final = "userTag"
-_RAW_TAG_PREFIX_NETWORK: Final = "intf"
-_RAW_TAG_SEPARATOR: Final = ":"
-
 _RULE_TARGET_TAG: Final = "TAG"
 _RULE_TARGET_LIST_PREFIX: Final = "TL-"
 _RULE_TARGET_TYPE_CATEGORY: Final = "category"
@@ -279,8 +331,10 @@ _RULE_TARGET_TYPE_NETWORK: Final = "network"
 _QOS_PREFIX: Final = "qos_"
 _QOS_LABEL_PREFIX: Final = "QoS "
 _DEFAULT_BOX_NAME: Final = "Firewalla"
-_BOOLISH_TRUE_VALUES: Final = {"1", "true", "yes"}
-_BOOLISH_FALSE_VALUES: Final = {"0", "false", "no", ""}
+# A rule's ``disabled`` flag is its own encoding, not a general boolean: the box
+# sends it as the string "1"/"0" or as a real bool, and ``True == 1`` in Python,
+# so a single membership test covers both without a coercer. Kept separate from
+# the shared boolean policy because this is a rule *state*, read in one place.
 _DISABLED_TRUE_VALUES: Final = {"1", "true", "True", 1}
 _RAW_RULE_DISABLED_FALSE_VALUE: Final = 0
 _RAW_RULE_DISABLED_TRUE_VALUE: Final = 1
@@ -296,6 +350,40 @@ def _extract_created_rule_id(response: dict[str, object]) -> str | None:
     if isinstance(raw_id, (int, str)):
         return str(raw_id)
     return None
+
+
+def _merge_network_interface_payloads(
+    primary: dict[str, object],
+    traffic: dict[str, object],
+) -> dict[str, object]:
+    """Merge the v1 and v2 ``item=intf`` payloads into one.
+
+    The two calls return the same envelope with **disjoint** ``flows`` families,
+    so the merge is a union: the v2 traffic families are added to the v1 app and
+    category families rather than replacing them. Every other key is identical
+    between the two, so the primary is kept and only ``flows`` is combined.
+
+    ``hosts`` is deliberately taken from the primary. The block is present on both
+    and reads all-zero on both -- the per-device counters come from the families,
+    not from here -- so there is nothing to reconcile.
+    """
+    merged = dict(primary)
+
+    primary_flows = primary.get("flows")
+    traffic_flows = traffic.get("flows")
+    if not isinstance(traffic_flows, dict):
+        return merged
+
+    combined: dict[str, object] = (
+        dict(primary_flows) if isinstance(primary_flows, dict) else {}
+    )
+    for family, rows in traffic_flows.items():
+        # A family present in both is kept from the traffic payload: it is the
+        # one that was asked for the ranking data, so its rows are the better
+        # source if they ever differ.
+        combined[family] = rows
+    merged["flows"] = combined
+    return merged
 
 
 class FirewallaApiClient:
@@ -1106,7 +1194,32 @@ class FirewallaApiClient:
         *,
         network_uuid: str,
     ) -> dict[str, object]:
-        """Fetch one network-interface summary payload from the local runtime."""
+        """Fetch one network-interface summary payload from the local runtime.
+
+        **Two requests, because the box returns two disjoint family sets.** With a
+        bare ``item=intf`` the response carries ``appDetails`` and
+        ``categoryDetails`` and **no** ``download`` / ``upload``; adding
+        ``apiVer: 2`` and ``local: true`` swaps them for the eleven traffic
+        families (``download``, ``upload``, ``dnsB``, ``ipB:*``, ``local:*``) and
+        drops the app families entirely. Measured on VLAN10 CORE: bare returned 3
+        families, ``apiVer: 2`` returned 11, and neither returned both. So one call
+        cannot answer "what is using the most bandwidth on this network" -- the
+        ranking families are simply absent from the v1 response.
+
+        This is why top talkers read empty for networks whose app families were
+        populated: the per-request ``download`` list was never requested. A bare v1
+        read is also *inconsistent* -- polling VLAN20 CORE-AUX at 20-second
+        intervals returned ``download`` present, present, absent, present -- so
+        relying on it is not merely incomplete, it is unreliable.
+
+        **Do not send ``start`` / ``end`` / ``hourblock``.** The app's own request
+        carries them, but measured here they reduce the response to **3 families**,
+        the same as a bare read. The window is what breaks it, not what improves it.
+
+        The v2 read is best-effort: a failure keeps the v1 result rather than
+        failing the refresh, since the app and category families are still useful
+        on their own.
+        """
         data_payload = await self._async_send_local_message_data(
             message_type=_GET_MESSAGE_TYPE,
             data={_COMMAND_ITEM_KEY: "intf"},
@@ -1117,7 +1230,28 @@ class FirewallaApiClient:
                 "Firewalla local runtime payload did not include an intf object"
             )
 
-        return data_payload
+        try:
+            traffic_payload = await self._async_send_local_message_data(
+                message_type=_GET_MESSAGE_TYPE,
+                data={
+                    _COMMAND_ITEM_KEY: "intf",
+                    _RAW_FLOW_API_VER_KEY: _FLOW_API_VERSION,
+                    _RAW_FLOW_LOCAL_KEY: True,
+                },
+                target=network_uuid,
+            )
+        except FirewallaApiError as err:
+            LOGGER.debug(
+                "Traffic ranking families unavailable for %s: %s",
+                network_uuid,
+                err,
+            )
+            return data_payload
+
+        if not isinstance(traffic_payload, dict):
+            return data_payload
+
+        return _merge_network_interface_payloads(data_payload, traffic_payload)
 
     async def async_get_internet_quality_payload(self) -> dict[str, object]:
         """Fetch the internet-quality payload for all WANs from the local runtime."""
@@ -1136,6 +1270,176 @@ class FirewallaApiClient:
             )
 
         return data_payload
+
+    async def async_get_flow_rollup_payload(
+        self,
+        *,
+        target_type: str,
+        target: str,
+        start_timestamp: int,
+        end_timestamp: int,
+        hourblock: int,
+    ) -> dict[str, object]:
+        """Fetch the windowed flow rollup for one tag or host target.
+
+        The window actually covered must be read from the returned rows'
+        ``begin`` and ``end``. The box **silently clamps** rather than rejecting:
+        measured, requests for 1h, 24h, 25h, 48h and 168h windows all returned
+        identical data spanning 24.00h with code 200 and no indication of the
+        difference.
+
+        ``local: True`` is what the app sends, and it is required for
+        completeness: a live comparison showed it adds the four LAN-to-LAN
+        families (``local:download`` / ``upload`` / ``in`` / ``out``), taking the
+        response from 7 families to 11.
+
+        ``hourblock`` is **clamped to at least 2**, and despite its name it is not
+        a granularity: measured over a fixed 24h window, ``0`` and ``1`` return an
+        empty response while ``2`` and every value above it return identical data
+        (592 rows, 11 families, span 24.00h). Passing 1 therefore yields silence
+        rather than an error, which is why it is clamped here.
+        """
+        self._validate_flow_target_type(target_type)
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: target_type,
+                _RAW_FLOW_API_VER_KEY: _FLOW_API_VERSION,
+                _RAW_FLOW_LOCAL_KEY: True,
+                _RAW_FLOW_START_KEY: start_timestamp,
+                _RAW_FLOW_END_KEY: end_timestamp,
+                _RAW_FLOW_HOURBLOCK_KEY: max(_MIN_FLOW_HOURBLOCK, hourblock),
+            },
+            target=target,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                "Firewalla flow rollup response did not include a JSON object"
+            )
+
+        return data_payload
+
+    async def async_get_flow_log_payload(
+        self,
+        *,
+        target_type: str,
+        target: str,
+        count: int,
+        since_timestamp: float | None = None,
+        include_blocked: bool = False,
+    ) -> FlowLogPage:
+        """Fetch one page of flow-log records for one tag or host target.
+
+        This is the **flow** log, not the block log. ``include_blocked`` *adds*
+        blocked records to the page rather than filtering to them: measured, one
+        300-record page carried 26 blocked and 274 regular records. Use
+        :meth:`async_get_block_log_payload` for blocked records alone.
+
+        A record is identified by ``ltype`` -- ``"audit"`` for blocked, ``"flow"``
+        for regular -- and ``pid`` is present only when blocked.
+        """
+        self._validate_flow_target_type(target_type)
+        data: dict[str, object] = {
+            _COMMAND_ITEM_KEY: _FLOW_LOG_ITEM,
+            _RAW_FLOW_TARGET_TYPE_KEY: target_type,
+            _RAW_FLOW_AUDIT_KEY: include_blocked,
+            _RAW_FLOW_COUNT_KEY: self._resolve_flow_log_page_size(count),
+            _RAW_FLOW_EXCLUDE_KEY: [],
+        }
+        if since_timestamp is not None:
+            data[_RAW_FLOW_TS_KEY] = since_timestamp
+
+        return await self._async_get_flow_records(
+            data=data,
+            target=target,
+            records_key=_RAW_FLOW_RECORDS_KEY,
+            description="flow log",
+        )
+
+    async def async_get_block_log_payload(
+        self,
+        *,
+        target_type: str,
+        target: str,
+        count: int,
+        since_timestamp: float | None = None,
+        category: str | None = None,
+        end_timestamp: int | None = None,
+    ) -> FlowLogPage:
+        """Fetch one page of blocked-only records for one tag or host target.
+
+        This is the query that returns blocked records alone, and the record key
+        is ``logs`` rather than ``flows``. It takes no ``audit`` parameter -- the
+        app does not send one, and the rollup ignores one entirely.
+
+        ``category`` and ``end_timestamp`` (``ets``) narrow the result on the box,
+        which this query accepts and the flow log does not.
+        """
+        self._validate_flow_target_type(target_type)
+        data: dict[str, object] = {
+            _COMMAND_ITEM_KEY: _FLOW_BLOCK_LOG_ITEM,
+            _RAW_FLOW_TARGET_TYPE_KEY: target_type,
+            _RAW_FLOW_COUNT_KEY: self._resolve_flow_log_page_size(count),
+            _RAW_FLOW_EXCLUDE_KEY: [],
+        }
+        if since_timestamp is not None:
+            data[_RAW_FLOW_TS_KEY] = since_timestamp
+        if category is not None:
+            data[_RAW_FLOW_CATEGORY_KEY] = category
+        if end_timestamp is not None:
+            data[_RAW_FLOW_ETS_KEY] = end_timestamp
+
+        return await self._async_get_flow_records(
+            data=data,
+            target=target,
+            records_key=_RAW_FLOW_BLOCK_RECORDS_KEY,
+            description="block log",
+        )
+
+    async def _async_get_flow_records(
+        self,
+        *,
+        data: dict[str, object],
+        target: str,
+        records_key: str,
+        description: str,
+    ) -> FlowLogPage:
+        """Send one flow-log or block-log query and narrow its page envelope."""
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data=data,
+            target=target,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                f"Firewalla {description} response did not include a JSON object"
+            )
+
+        raw_records = data_payload.get(records_key)
+        if not isinstance(raw_records, list):
+            raise FirewallaProtocolError(
+                f"Firewalla {description} response did not include a {records_key} list"
+            )
+
+        return FlowLogPage(
+            records=tuple(item for item in raw_records if isinstance(item, dict)),
+            reported_count=normalized_int(data_payload.get(_RAW_FLOW_COUNT_KEY)),
+            next_cursor=normalized_float(data_payload.get(_RAW_FLOW_NEXT_CURSOR_KEY)),
+        )
+
+    @staticmethod
+    def _resolve_flow_log_page_size(count: int) -> int:
+        """Clamp a requested page size into the range the box answers predictably."""
+        return max(MIN_FLOW_LOG_PAGE_SIZE, min(count, MAX_FLOW_LOG_PAGE_SIZE))
+
+    @staticmethod
+    def _validate_flow_target_type(target_type: str) -> None:
+        """Reject a flow target type the box does not accept."""
+        if target_type not in _FLOW_TARGET_TYPES:
+            raise FirewallaValidationError(
+                "Firewalla flow queries accept a target type of "
+                f"{' or '.join(_FLOW_TARGET_TYPES)}, not {target_type!r}"
+            )
 
     def _extract_appliance_identity(
         self, data: dict[str, object]
@@ -1334,7 +1638,7 @@ class FirewallaApiClient:
                     jitter_ms=self._coerce_float(
                         measurement.get(_RAW_SPEED_TEST_JITTER_KEY)
                     ),
-                    packet_loss_percent=self._coerce_float(
+                    packet_loss_percent=normalized_packet_loss_percent(
                         measurement.get(_RAW_SPEED_TEST_PACKET_LOSS_KEY)
                     ),
                     download_megabytes=self._coerce_float(
@@ -1510,7 +1814,9 @@ class FirewallaApiClient:
                         ping_latency_median_ms=median_latency,
                         ping_latency_min_ms=min_latency,
                         ping_packet_loss_percent=(
-                            round(lossrate * 100, 2) if lossrate is not None else None
+                            normalized_packet_loss_percent(round(lossrate * 100, 2))
+                            if lossrate is not None
+                            else None
                         ),
                         wan_uuid=wan_uuid if wan_uuid else None,
                     )
@@ -1787,31 +2093,87 @@ class FirewallaApiClient:
 
         return self._normalized_optional_string(raw_detect.get(_RAW_HOST_TYPE_KEY))
 
-    def _resolve_host_group_name(
+    def _resolve_host_membership(
         self,
         raw_host: dict[str, object],
         *,
         tags: dict[str, str],
         affiliated_users: dict[str, tuple[str, ...]],
-    ) -> str | None:
-        """Resolve one readable group label from host tag references."""
+    ) -> tuple[str | None, MembershipKind | None]:
+        """Resolve a host's membership label and which kind it names.
+
+        A group and a user assignment are the same protocol object — a host tag — so
+        the label alone cannot say which. This resolver already knows, because it looks
+        the tag up in `affiliated_users` before `tags`; that branch is the kind.
+        """
         raw_tags = raw_host.get("tags")
         if not isinstance(raw_tags, list):
-            return None
+            return None, None
 
-        resolved_tags: list[str] = []
+        label_names: list[str] = []
+        kinds: list[MembershipKind] = []
         for raw_tag_id in raw_tags:
             if not isinstance(raw_tag_id, str) or not raw_tag_id:
                 continue
             if user_names := affiliated_users.get(raw_tag_id):
-                resolved_tags.append(", ".join(user_names))
+                label_names.append(", ".join(user_names))
+                kinds.append("user")
                 continue
             if tag_name := tags.get(raw_tag_id):
-                resolved_tags.append(tag_name)
+                label_names.append(tag_name)
+                kinds.append("group")
 
-        if not resolved_tags:
-            return None
-        return ", ".join(dict.fromkeys(resolved_tags))
+        if not label_names:
+            return None, None
+
+        label = ", ".join(dict.fromkeys(label_names))
+        # A host holds exactly one membership, so a single kind is the normal case. A
+        # mixed pair is not expected, and reporting no kind is honest where picking one
+        # would assert which of two labels the kind belongs to.
+        distinct = set(kinds)
+        kind = distinct.pop() if len(distinct) == 1 else None
+        return label, kind
+
+    def _resolve_host_network_fields(
+        self, interface_id: str | None, network_lookup: dict[str, str]
+    ) -> tuple[str | None, str | None]:
+        """Return one host's `(network_name, network_uuid)` from its interface.
+
+        The name is display-only and the uuid is the deterministic match, so both are
+        resolved together: they come from the same interface id and a caller that took
+        one without the other would publish a name from a different network.
+        """
+        return (
+            network_lookup.get(interface_id) if interface_id is not None else None,
+            interface_id,
+        )
+
+    def _resolve_host_flow_bytes(
+        self, flowsummary: object
+    ) -> tuple[int | None, int | None]:
+        """Return one host's `(download_bytes, upload_bytes)` from its flow summary.
+
+        A peer and an ordinary host carry the same flow-summary shape, so the same
+        extraction serves both.
+        """
+        if not isinstance(flowsummary, dict):
+            return None, None
+        return (
+            self._coerce_int(flowsummary.get("inbytes")),
+            self._coerce_int(flowsummary.get("outbytes")),
+        )
+
+    @staticmethod
+    def _sorted_raw_ids(value: object) -> tuple[str, ...]:
+        """Return the non-empty strings in one raw id list, deduplicated and sorted.
+
+        Used for the tag references on both an ordinary host and a VPN peer, which
+        hold the same kind of list and were otherwise read by two copies of this
+        expression.
+        """
+        if not isinstance(value, list):
+            return ()
+        return tuple(sorted({item for item in value if isinstance(item, str) and item}))
 
     def _resolve_host_connection_type(
         self,
@@ -1923,6 +2285,15 @@ class FirewallaApiClient:
             )
             interface_id = self._normalized_optional_string(raw_peer.get(_RAW_INTF_KEY))
             flowsummary = raw_peer.get(_RAW_HOST_FLOWSUMMARY_KEY)
+            membership_name, membership_kind = self._resolve_host_membership(
+                {"tags": raw_tags} if isinstance(raw_tags, list) else {},
+                tags=tags,
+                affiliated_users=affiliated_users,
+            )
+            network_name, network_uuid = self._resolve_host_network_fields(
+                interface_id, network_lookup
+            )
+            download_bytes, upload_bytes = self._resolve_host_flow_bytes(flowsummary)
 
             normalized_peers.append(
                 FirewallaHostRuntime(
@@ -1933,41 +2304,18 @@ class FirewallaApiClient:
                         or f"{mac_prefix}:{peer_uid}"
                     ),
                     ip_address=peer_ip_address,
-                    group_name=self._resolve_host_group_name(
-                        {"tags": raw_tags} if isinstance(raw_tags, list) else {},
-                        tags=tags,
-                        affiliated_users=affiliated_users,
-                    ),
-                    network_name=(
-                        network_lookup.get(interface_id)
-                        if interface_id is not None
-                        else None
-                    ),
-                    network_uuid=interface_id,
+                    group_name=membership_name,
+                    membership_kind=membership_kind,
+                    network_name=network_name,
+                    network_uuid=network_uuid,
                     connection_type="vpn",
                     last_active=self._coerce_float(
                         raw_peer.get(_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY)
                     ),
-                    download_bytes=(
-                        self._coerce_int(flowsummary.get("inbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
-                    upload_bytes=(
-                        self._coerce_int(flowsummary.get("outbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
+                    download_bytes=download_bytes,
+                    upload_bytes=upload_bytes,
                     stale=None,
-                    group_ids=tuple(
-                        sorted(
-                            raw_group_id
-                            for raw_group_id in raw_tags
-                            if isinstance(raw_group_id, str) and raw_group_id
-                        )
-                    )
-                    if isinstance(raw_tags, list)
-                    else (),
+                    group_ids=self._sorted_raw_ids(raw_tags),
                 )
             )
 
@@ -2012,6 +2360,15 @@ class FirewallaApiClient:
                 ),
             )
             flowsummary = raw_host.get(_RAW_HOST_FLOWSUMMARY_KEY)
+            membership_name, membership_kind = self._resolve_host_membership(
+                raw_host,
+                tags=tag_lookup,
+                affiliated_users=affiliated_user_lookup,
+            )
+            network_name, network_uuid = self._resolve_host_network_fields(
+                interface_id, network_lookup
+            )
+            download_bytes, upload_bytes = self._resolve_host_flow_bytes(flowsummary)
             normalized_hosts.append(
                 FirewallaHostRuntime(
                     mac=host_mac,
@@ -2023,17 +2380,10 @@ class FirewallaApiClient:
                     dns_domain=dns_domain,
                     dns_fqdn=dns_fqdn,
                     dhcp_name=dhcp_name,
-                    group_name=self._resolve_host_group_name(
-                        raw_host,
-                        tags=tag_lookup,
-                        affiliated_users=affiliated_user_lookup,
-                    ),
-                    network_name=(
-                        network_lookup.get(interface_id)
-                        if interface_id is not None
-                        else None
-                    ),
-                    network_uuid=interface_id,
+                    group_name=membership_name,
+                    membership_kind=membership_kind,
+                    network_name=network_name,
+                    network_uuid=network_uuid,
                     connection_type=self._resolve_host_connection_type(
                         raw_host,
                         device_tags=device_tag_lookup,
@@ -2041,37 +2391,13 @@ class FirewallaApiClient:
                     last_active=self._coerce_float(
                         raw_host.get(_RAW_HOST_LAST_ACTIVE_KEY)
                     ),
-                    download_bytes=(
-                        self._coerce_int(flowsummary.get("inbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
-                    upload_bytes=(
-                        self._coerce_int(flowsummary.get("outbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
+                    download_bytes=download_bytes,
+                    upload_bytes=upload_bytes,
                     stale=self._coerce_boolish(raw_host.get(_RAW_HOST_STALE_KEY)),
                     host_device_type=self._resolve_host_device_type(raw_host),
                     vpn_client=self._normalize_host_vpn_client(raw_host),
-                    group_ids=tuple(
-                        sorted(
-                            raw_group_id
-                            for raw_group_id in raw_host.get("tags", [])
-                            if isinstance(raw_group_id, str) and raw_group_id
-                        )
-                    )
-                    if isinstance(raw_host.get("tags"), list)
-                    else (),
-                    user_ids=tuple(
-                        sorted(
-                            raw_user_id
-                            for raw_user_id in raw_host.get(_RAW_USER_TAGS_KEY, [])
-                            if isinstance(raw_user_id, str) and raw_user_id
-                        )
-                    )
-                    if isinstance(raw_host.get(_RAW_USER_TAGS_KEY), list)
-                    else (),
+                    group_ids=self._sorted_raw_ids(raw_host.get("tags")),
+                    user_ids=self._sorted_raw_ids(raw_host.get(_RAW_USER_TAGS_KEY)),
                 )
             )
 
@@ -2313,7 +2639,9 @@ class FirewallaApiClient:
             return None
         if tag_prefix == _RAW_TAG_PREFIX_DEVICE:
             if tag_name := device_tags.get(tag_value):
-                return tag_name, "device"
+                # The machine register: a device tag names a host, and `device` is
+                # reserved for the Firewalla box itself.
+                return tag_name, "host"
             return None
         if tag_prefix in {_RAW_TAG_PREFIX_USER, _RAW_TAG_PREFIX_USER_ALT}:
             if tag_name := user_tags.get(tag_value):
@@ -2423,44 +2751,33 @@ class FirewallaApiClient:
         return None
 
     def _coerce_float(self, value: object) -> float | None:
-        """Coerce Firewalla numeric-like values to float when possible."""
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, str) and value:
-            try:
-                return float(value)
-            except ValueError:
-                return None
-        return None
+        """Coerce a Firewalla numeric-like value to float.
+
+        Delegates to the shared coercion policy; the API layer owns parsing but
+        not the numeric policy, which every layer now shares.
+        """
+        return normalized_float(value)
 
     def _coerce_int(self, value: object) -> int | None:
-        """Coerce Firewalla numeric-like values to int when possible."""
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        if isinstance(value, str) and value:
-            try:
-                return int(float(value))
-            except ValueError:
-                return None
-        return None
+        """Coerce a Firewalla numeric-like value to int.
+
+        Delegates to the shared coercion policy. Unlike the previous local
+        implementation this no longer reads ``True`` as ``1``: a boolean where a
+        count belongs is a protocol anomaly, and a wrong number is worse than an
+        absent one.
+        """
+        return normalized_int(value)
 
     def _coerce_boolish(self, value: object) -> bool | None:
-        """Coerce Firewalla bool-like values to bool when possible."""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, int):
-            return bool(value)
-        if isinstance(value, str):
-            lowered = value.strip().lower()
-            if lowered in _BOOLISH_TRUE_VALUES:
-                return True
-            if lowered in _BOOLISH_FALSE_VALUES:
-                return False
-        return None
+        """Coerce a Firewalla bool-like value to bool.
+
+        Delegates to the shared boolean policy. That policy rejects the empty
+        string; this method previously read it as ``False``, which is wrong for
+        the one field that actually sends it (``useBf``, see the policy
+        docstring). No field routed through here sends an empty string today, so
+        the change is a latent-trap removal rather than a behaviour change.
+        """
+        return normalized_bool(value)
 
     def _normalize_policy_rules(
         self,
@@ -2603,50 +2920,22 @@ class FirewallaApiClient:
 
     def _normalize_rule_hit(
         self, raw_rule: dict[str, object]
-    ) -> FirewallaRuleHit | None:
+    ) -> FirewallaFlowRecord | None:
         """Normalize the last flow a rule matched, when the box reports one.
 
         Firewalla keeps only the most recent match per rule, so an absent value
-        means "never matched", not "no data available". The destination arrives
-        under `host` or `domain` for DNS matches and `ip` otherwise, so the pair
-        is resolved into one destination plus its kind.
+        means "never matched", not "no data available".
+
+        Read with the shared flow-record reader rather than locally: measured,
+        ``lastHitFlow`` is the *same shape* a flow-log record is -- all 32 fields
+        a live flow-log record carried appear here too -- so a local reader would
+        be a second subset that silently drops whatever it did not list.
         """
         raw_flow = raw_rule.get(_RAW_RULE_LAST_HIT_FLOW_KEY)
         if not isinstance(raw_flow, dict):
             return None
 
-        host = self._normalized_optional_string(raw_flow.get(_RAW_HIT_HOST_KEY))
-        domain = self._normalized_optional_string(raw_flow.get(_RAW_HIT_DOMAIN_KEY))
-        ip_address = self._normalized_optional_string(raw_flow.get(_RAW_HIT_IP_KEY))
-        if host is not None:
-            destination, destination_kind = host, "host"
-        elif domain is not None:
-            destination, destination_kind = domain, "domain"
-        elif ip_address is not None:
-            destination, destination_kind = ip_address, "ip"
-        else:
-            destination, destination_kind = None, None
-
-        return FirewallaRuleHit(
-            timestamp=self._coerce_float(raw_flow.get(_RAW_HIT_TS_KEY)),
-            device_mac=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_DEVICE_KEY)
-            ),
-            device_ip=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_DEVICE_IP_KEY)
-            ),
-            destination=destination,
-            destination_kind=destination_kind,
-            destination_ip=ip_address,
-            port=self._coerce_int(raw_flow.get(_RAW_HIT_PORT_KEY)),
-            protocol=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_PROTOCOL_KEY)
-            ),
-            app=self._normalized_optional_string(raw_flow.get(_RAW_HIT_APP_KEY)),
-            category=self._normalized_optional_string(
-                raw_flow.get(_RAW_HIT_CATEGORY_KEY)
-            ),
-        )
+        return build_flow_record(raw_flow)
 
     def _count_exception_rules(self, data: dict[str, object]) -> int:
         """Return the number of exception rules exposed by the init payload."""
@@ -2778,9 +3067,13 @@ class FirewallaApiClient:
 
     @staticmethod
     def _alarm_count(data: dict[str, object], key: str) -> int:
-        """Return a non-negative integer alarm count from the init payload."""
-        value = data.get(key)
-        return value if isinstance(value, int) and not isinstance(value, bool) else 0
+        """Return a non-negative integer alarm count from the init payload.
+
+        Uses the shared coercion policy rather than a bare ``isinstance`` check:
+        the box sends several other counts as numeric strings, so an inline
+        integer test would silently report zero if these ever followed suit.
+        """
+        return normalized_int(data.get(key)) or 0
 
     def build_runtime_snapshot(
         self, data: dict[str, object]
@@ -2800,7 +3093,7 @@ class FirewallaApiClient:
             hosts=hosts,
             groups=groups,
             users=users,
-            speed_test_results=self._extract_speed_test_records(data),
+            speed_tests=self._extract_speed_test_records(data),
             alarms=self._normalize_alarms(data),
             alarm_exceptions=self._normalize_alarm_exceptions(data),
             active_alarm_count=self._alarm_count(data, _RAW_ACTIVE_ALARM_COUNT_KEY),

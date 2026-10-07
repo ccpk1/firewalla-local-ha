@@ -10,6 +10,12 @@ from typing import TYPE_CHECKING
 from homeassistant.util import dt as dt_util
 
 from ..api import FirewallaApiClient
+from ..const import (
+    ALARM_STATUS_ARCHIVED,
+    ALARM_TARGET_ALARM_TYPE,
+    ALARM_TARGET_DOMAIN,
+    ALARM_TARGET_IP,
+)
 from ..models import FirewallaAlarm, FirewallaAlarmException, FirewallaRuntimeSnapshot
 from ..utils.duration import parse_duration_to_seconds
 from .base_manager import FirewallaBaseManager
@@ -107,8 +113,44 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         include_archived: bool,
         alarm_type: str | None,
         detail: bool,
+        refresh: bool = False,
     ) -> tuple[FirewallaAlarm, ...]:
-        """Fetch and normalize active alarms, optionally archived and enriched."""
+        """Return alarms from the cached snapshot, or from the box on request.
+
+        The default reads the snapshot this manager already holds, so the call is
+        fast and — the reason it matters — agrees with a write made in the same
+        session: an archive applied optimistically is visible here immediately, where
+        a live fetch would still show the alarm until the next poll.
+
+        The snapshot carries the **active** set only, because the archived set is
+        box-retained history that never enters it. `include_archived` therefore cannot
+        be answered from the cache, and the service refuses that combination rather
+        than polling quietly behind a read that reports itself as cached.
+        """
+        alarms = (
+            await self._async_fetch_alarms(
+                limit=limit, include_archived=include_archived
+            )
+            if refresh
+            else list(self._alarms)
+        )
+
+        if alarm_type is not None:
+            matching_types = _ALARM_TYPE_GROUPS.get(alarm_type, (alarm_type,))
+            alarms = [alarm for alarm in alarms if alarm.alarm_type in matching_types]
+
+        alarms.sort(
+            key=lambda alarm: (alarm.fired_at or 0, alarm.alarm_id), reverse=True
+        )
+        alarms = alarms[:limit]
+        if detail:
+            alarms = [await self._async_enrich_alarm(alarm) for alarm in alarms]
+        return tuple(alarms)
+
+    async def _async_fetch_alarms(
+        self, *, limit: int, include_archived: bool
+    ) -> list[FirewallaAlarm]:
+        """Poll the box for the active alarms, plus the archived set when asked."""
         active_records = await self.client.async_get_alarms(limit=limit)
         alarms = [
             alarm
@@ -127,18 +169,7 @@ class FirewallaAlarmManager(FirewallaBaseManager):
                 )
                 is not None
             )
-
-        if alarm_type is not None:
-            matching_types = _ALARM_TYPE_GROUPS.get(alarm_type, (alarm_type,))
-            alarms = [alarm for alarm in alarms if alarm.alarm_type in matching_types]
-
-        alarms.sort(
-            key=lambda alarm: (alarm.fired_at or 0, alarm.alarm_id), reverse=True
-        )
-        alarms = alarms[:limit]
-        if detail:
-            alarms = [await self._async_enrich_alarm(alarm) for alarm in alarms]
-        return tuple(alarms)
+        return alarms
 
     async def _async_enrich_alarm(self, alarm: FirewallaAlarm) -> FirewallaAlarm:
         """Return an alarm copy carrying opt-in detail payload keys."""
@@ -150,23 +181,129 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             severity=severity.strip() if isinstance(severity, str) else alarm.severity,
         )
 
-    async def async_archive_alarms(self, *, mode: str, alarm_id: str | None) -> None:
-        """Archive one active alarm or the complete active set."""
-        if mode == "this":
-            if alarm_id is None:
-                return
+    async def async_archive_alarms(self, *, alarm_id: str | None) -> None:
+        """Archive one alarm, or the active set when no id is given.
+
+        No set parameter: archiving is only meaningful for an active alarm, so the
+        bulk case is always the active set and a status argument would be a value the
+        caller supplies and this method ignores.
+        """
+        if alarm_id is not None:
             await self.client.async_archive_alarm(alarm_id)
+            self._apply_optimistic_archive(alarm_id=alarm_id)
             return
         await self.client.async_archive_all_alarms()
+        self._apply_optimistic_archive(alarm_id=None)
 
-    async def async_delete_alarms(self, *, mode: str, alarm_id: str | None) -> None:
-        """Permanently delete one alarm or a selected complete set."""
-        if mode == "this":
-            if alarm_id is None:
-                return
+    async def async_delete_alarms(
+        self, *, alarm_id: str | None, alarm_status: str | None
+    ) -> None:
+        """Permanently delete one alarm, or every alarm in the named set."""
+        if alarm_id is not None:
             await self.client.async_delete_alarm(alarm_id)
+            self._apply_optimistic_delete(alarm_id=alarm_id, archived=None)
             return
-        await self.client.async_delete_all_alarms(archived=mode == "all_archived")
+        archived = alarm_status == ALARM_STATUS_ARCHIVED
+        await self.client.async_delete_all_alarms(archived=archived)
+        self._apply_optimistic_delete(alarm_id=None, archived=archived)
+
+    def _apply_optimistic_archive(self, *, alarm_id: str | None) -> None:
+        """Move one alarm, or the active set, from active to archived locally.
+
+        The counts are the box's own and are authoritative, so this applies the
+        delta the operation implies rather than recomputing them: a bulk archive
+        moves exactly the active alarms this manager is holding. The coordinator
+        refresh remains the later source of truth, so an approximation here is
+        corrected within one poll interval — which is what the contract's
+        "refreshed state wins" reconciliation is for.
+
+        Only the active set is filtered: silently dropping an *archived* alarm from
+        this list would hide it from `get_alarm`, which reads the same tuple.
+        """
+        if alarm_id is not None:
+            if self.get_alarm(alarm_id) is None:
+                return
+            updated = tuple(
+                alarm for alarm in self._alarms if alarm.alarm_id != alarm_id
+            )
+            self._publish_optimistic_alarms(
+                alarms=updated,
+                active_count=max(0, self._active_count - 1),
+                archived_count=self._archived_count + 1,
+            )
+            return
+
+        self._publish_optimistic_alarms(
+            alarms=(),
+            active_count=0,
+            archived_count=self._archived_count + self._active_count,
+        )
+
+    def _apply_optimistic_delete(
+        self, *, alarm_id: str | None, archived: bool | None
+    ) -> None:
+        """Drop one alarm, or a whole set, from the local alarm state.
+
+        Unlike archiving, a delete can target the archived set, and `_alarms` holds
+        only active alarms — so deleting from the archived set changes the count and
+        nothing else.
+        """
+        if alarm_id is not None:
+            held = self.get_alarm(alarm_id)
+            if held is None:
+                return
+            self._publish_optimistic_alarms(
+                alarms=tuple(
+                    alarm for alarm in self._alarms if alarm.alarm_id != alarm_id
+                ),
+                active_count=max(0, self._active_count - 1),
+                archived_count=self._archived_count,
+            )
+            return
+
+        if archived:
+            self._publish_optimistic_alarms(
+                alarms=self._alarms,
+                active_count=self._active_count,
+                archived_count=0,
+            )
+            return
+
+        self._publish_optimistic_alarms(
+            alarms=(),
+            active_count=0,
+            archived_count=self._archived_count,
+        )
+
+    def _publish_optimistic_alarms(
+        self,
+        *,
+        alarms: tuple[FirewallaAlarm, ...],
+        active_count: int,
+        archived_count: int,
+    ) -> None:
+        """Publish updated alarm state to this manager and the coordinator snapshot.
+
+        Both, not one: entities read this manager, but `coordinator.data` is what a
+        later `handle_refresh` and the diagnostics snapshot read, so publishing to
+        one alone would leave two answers to the same question — the defect the host
+        inventory had.
+        """
+        self._alarms = alarms
+        self._active_count = active_count
+        self._archived_count = archived_count
+
+        snapshot = self.coordinator.data
+        if snapshot is None:
+            return
+        self.coordinator.async_set_updated_data(
+            replace(
+                snapshot,
+                alarms=alarms,
+                active_alarm_count=active_count,
+                archived_alarm_count=archived_count,
+            )
+        )
 
     async def async_mute_alarm(
         self,
@@ -185,7 +322,7 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             raise ValueError("Alarm was not found in the active or archived set")
         scope = self._get_scope_payload(scope_kind, scope_target)
 
-        if target_type == "alarm_type":
+        if target_type == ALARM_TARGET_ALARM_TYPE:
             muted_alarm_type = target_value or (
                 alarm.alarm_type if alarm is not None else None
             )
@@ -197,21 +334,26 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             await self.client.async_create_alarm_exception(value)
             return
 
-        match_type, match_target = self._get_match(target_type, target_value)
-        if match_target is None and alarm is not None:
-            match_target = (
-                alarm.remote_host if target_type == "domain" else alarm.remote_ip
+        # The caller's target vocabulary and the wire's are different words for the
+        # same three things, so the translation is named for what it produces rather
+        # than reusing `target_*`, which the caller's values already mean here.
+        wire_key, target = self._get_target(target_type, target_value)
+        if target is None and alarm is not None:
+            target = (
+                alarm.remote_host
+                if target_type == ALARM_TARGET_DOMAIN
+                else alarm.remote_ip
             )
-        if match_target is None:
+        if target is None:
             raise ValueError("A domain or IP target is required for this mute")
 
         if (
             alarm is not None
             and not alarm.is_archived
-            and scope_kind in ("device", "all")
+            and scope_kind in ("host", "all")
         ):
-            info: dict[str, object] = {"type": match_type, "target": match_target}
-            if scope_kind == "device":
+            info: dict[str, object] = {"type": wire_key, "target": target}
+            if scope_kind == "host":
                 info["device"] = scope_target or ""
             if expiry is not None:
                 info["expireTs"] = expiry
@@ -225,10 +367,10 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             value["type"] = alarm.alarm_type
         value.update(
             {
-                "if.type": match_type,
-                "if.target": match_target,
-                "target_name": match_target,
-                "p.dest.name" if match_type == "dns" else "p.dest.ip": match_target,
+                "if.type": wire_key,
+                "if.target": target,
+                "target_name": target,
+                "p.dest.name" if wire_key == "dns" else "p.dest.ip": target,
             }
         )
         if expiry is not None:
@@ -262,26 +404,32 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         return None
 
     @staticmethod
-    def _get_match(
+    def _get_target(
         target_type: str, target_value: str | None
     ) -> tuple[str, str | None]:
-        """Map service target kinds to the app's alarm match types."""
-        if target_type == "alarm_type":
+        """Return the wire key and target for one caller-side target selection."""
+        if target_type == ALARM_TARGET_ALARM_TYPE:
             return "alarmType", target_value
-        if target_type == "domain":
+        if target_type == ALARM_TARGET_DOMAIN:
             return "dns", target_value
-        if target_type == "ip":
+        if target_type == ALARM_TARGET_IP:
             return "ip", target_value
-        raise ValueError(f"Unsupported alarm mute target type: {target_type}")
+        raise ValueError(f"Unsupported alarm target type: {target_type}")
 
     @staticmethod
     def _get_scope_payload(
         scope_kind: str, scope_target: str | None
     ) -> dict[str, object]:
-        """Map explicit scope selections to the local exception scope keys."""
+        """Map one resolved scope onto the local exception scope keys.
+
+        The kinds are the machine vocabulary the service layer resolved, so a host is
+        `host` -- the wire key is still the wire's own `p.device.mac`. A user arrives
+        already resolved to its affiliated tag, because that is the id the box
+        addresses a user by.
+        """
         if scope_kind == "all":
             return {}
-        if scope_kind == "device":
+        if scope_kind == "host":
             return {"p.device.mac": scope_target or ""}
         if scope_kind in ("group", "user"):
             return {"p.tag.ids": [scope_target or ""]}

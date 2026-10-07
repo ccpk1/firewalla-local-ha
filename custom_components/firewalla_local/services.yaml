@@ -109,7 +109,7 @@ get_hosts:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_network_segment_report:
+get_network_config:
   name: Get network segment report
   description: Return one configuration-oriented network segment report in the shared report envelope from the Firewalla local API.
   fields:
@@ -160,7 +160,125 @@ get_network_segment_report:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_network_segment_usage:
+get_flow_report:
+  name: Get flow report
+  description: Return one flow report for a device, group, or user in the shared report envelope from the Firewalla local API.
+  fields:
+    host_mac:
+      required: false
+      example: "AA:BB:CC:DD:EE:FF"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Scope the report to a host by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Scope the report to a host by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text:
+      name: Group ID
+      description: Optional. Scope the report to a group by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Scope the report to a group by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Scope the report to a user by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text:
+      name: User name
+      description: Optional. Scope the report to a user by name. Provide exactly one scope selector.
+    window_hours:
+      required: false
+      example: 24
+      selector:
+        number:
+          min: 1
+          mode: box
+          unit_of_measurement: hours
+      name: Window hours (Optional)
+      description: Optional. Defaults to 24, which is the window Firewalla itself serves. Firewalla retains about 24 hours of flow data and quietly serves that much for a wider request, so read window_is_clamped and window_hours_served in the response rather than assuming the window you asked for.
+    detail:
+      required: false
+      example: "summary"
+      selector:
+        select:
+          options:
+            - value: "summary"
+              label: Summary only
+            - value: "full"
+              label: Summary and flow records
+      name: Detail (Optional)
+      description: Optional. Defaults to summary, which is one request. Full adds the blocked and regular flow records, which are separate reads of several thousand rows on a busy target.
+    record_count:
+      required: false
+      example: 300
+      selector:
+        number:
+          min: 50
+          max: 5000
+          mode: box
+      name: Record count (Optional)
+      description: Optional. Defaults to 300. The page size for a records read. Firewalla caps one response at 5000 records and needs pagination beyond that, so ask for everything with Fetch all records rather than a larger count.
+    fetch_all_records:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Fetch all records (Optional)
+      description: Optional. Defaults to false. Walk the record cursor until Firewalla stops returning more, instead of fetching one page. A walk that hits its deadline reports truncated true with a cursor, so a partial result is never mistaken for a complete one.
+    include:
+      required: false
+      example: "host_detail"
+      selector:
+        select:
+          multiple: true
+          options:
+            - value: "host_detail"
+              label: Include the device behind each member, destination, and record
+      name: Include
+      description: Optional. Add the device identifiers you did not yourself name — the member ranking, each destination's device IDs, and each record's device ID and address. Absent by default because a group report would otherwise carry the household's device inventory. Destination hostnames and addresses are always returned, and a device scope needs no flag, since it names nothing beyond the device you asked for.
+    refresh:
+      required: false
+      example: true
+      selector:
+        boolean:
+      name: Refresh first
+      description: Optional. Defaults to true. Refresh the Firewalla runtime before resolving the scope and building the report. The flow data itself is always read live.
+    config_entry_id:
+      required: false
+      example: "0123456789abcdef"
+      selector:
+        text:
+      name: Config entry ID (Optional)
+      description: Use this if you have more than one Firewalla setup. It targets one specific setup.
+    config_entry_name:
+      required: false
+      example: "Firewalla (192.168.1.1)"
+      selector:
+        text:
+      name: Config entry name (Optional)
+      description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
+
+get_network_usage:
   name: Get network segment usage
   description: Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API.
   fields:
@@ -840,7 +958,7 @@ set_host_membership:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_speed_test_results:
+get_speed_tests:
   name: Get speed test results
   description: Return normalized Firewalla internet speed test results from the coordinator refresh path.
   fields:
@@ -890,7 +1008,7 @@ get_speed_test_results:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_internet_quality_report:
+get_internet_quality:
   name: Get internet quality report
   description: Return normalized Firewalla internet-quality samples (ping latency and packet loss) from the manager cache.
   fields:
@@ -940,28 +1058,52 @@ get_internet_quality_report:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_time_usage_report:
+get_time_usage:
   name: Get time usage report
   description: Return one normalized scoped time-usage report from the Firewalla local API.
   fields:
-    scope_kind:
-      required: true
-      example: "device"
-      selector:
-        select:
-          options:
-            - "device"
-            - "group"
-            - "user"
-      name: Scope kind
-      description: Required. Choose whether the target is a device, group, or user.
-    scope_target:
-      required: true
+    host_mac:
+      required: false
       example: "AA:BB:CC:DD:EE:FF"
       selector:
         text: {}
-      name: Scope target
-      description: Required. Use a stable ID or the current display label for the selected scope.
+      name: Host MAC
+      description: Optional. Scope the report to a host by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text: {}
+      name: Host name
+      description: Optional. Scope the report to a host by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text: {}
+      name: Group ID
+      description: Optional. Scope the report to a group by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text: {}
+      name: Group name
+      description: Optional. Scope the report to a group by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text: {}
+      name: User ID
+      description: Optional. Scope the report to a user by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text: {}
+      name: User name
+      description: Optional. Scope the report to a user by name. Provide exactly one scope selector.
     begin:
       required: true
       example: "2026-03-20 00:00:00"
@@ -1016,16 +1158,16 @@ get_time_usage_report:
       description: Optional. Add per-device interval detail when Firewalla returns it for the selected scope and apps.
     detail:
       required: false
-      example: "standard"
+      example: "full"
       selector:
         select:
           options:
             - value: "summary"
               label: Summary
-            - value: "standard"
-              label: Standard
+            - value: "full"
+              label: Full
       name: Detail
-      description: Optional. Defaults to standard. Summary returns the smallest default section set, while standard returns the normal report depth.
+      description: Optional. Defaults to full. Summary returns the smallest default section set, while full returns the normal report depth.
     app_ids:
       required: false
       example: "internet,facebook"
@@ -1048,7 +1190,7 @@ get_time_usage_report:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_wan_data_usage:
+get_wan_usage:
   name: Get WAN data usage
   description: Return one normalized WAN data-usage report with current and history month, week, and day sections.
   fields:
@@ -1225,13 +1367,13 @@ pause_rule:
   name: Pause rule
   description: Pause a managed Firewalla rule. Provide either a duration or a resume time. If you provide neither, the rule stays paused until resumed.
   fields:
-    rule_target:
+    rule_id:
       required: true
       example: "100"
       selector:
         text:
-      name: Rule target
-      description: Use the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
+      name: Rule ID
+      description: Use the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
     duration:
       required: false
       example: "30m"
@@ -1265,13 +1407,13 @@ resume_rule:
   name: Resume rule
   description: Resume a managed Firewalla rule immediately.
   fields:
-    rule_target:
+    rule_id:
       required: true
       example: "100"
       selector:
         text:
-      name: Rule target
-      description: Use the Rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
+      name: Rule ID
+      description: Use the rule ID shown on a Firewalla rule switch, or a selected rule ID from the runtime inventory.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1366,6 +1508,17 @@ get_alarms:
         boolean:
       name: Fetch detail
       description: Optional. Fetch extended detail with one additional request per returned alarm.
+    refresh:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Refresh
+      description:
+        Optional. Defaults to false, reading the cached snapshot, which
+        reflects an archive already made in this session. Set true to poll the box;
+        required when include_archived is true, since the archived set is box-retained
+        history the snapshot does not hold.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1422,6 +1575,13 @@ get_rules:
         text:
       name: Applies to
       description: Optional. Filter to rules governing one group, user or network name.
+    alarm_id:
+      required: false
+      example: "1765"
+      selector:
+        text:
+      name: Alarm ID
+      description: Optional. Filter to the rule an alarm created, by alarm id. Pair it with include_system_managed, since those rules are hidden by default. Use it to find the rule to unblock.
     include_purpose:
       required: false
       example: "dap"
@@ -1538,27 +1698,69 @@ create_rule:
         text:
       name: Target value
       description: Optional. Required with target_type when alarm_id is omitted. The domain, IP, or MAC to block.
-    scope_kind:
+    host_mac:
       required: false
-      example: "device"
-      selector:
-        select:
-          options:
-            - value: "device"
-              label: One device
-            - value: "network"
-              label: One network
-            - value: "all"
-              label: Everywhere
-      name: Scope kind
-      description: Optional. Where the rule applies. Defaults to everywhere when omitted.
-    scope_target:
-      required: false
-      example: "0C:85:E1:B0:1D:1C"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
-      name: Scope target
-      description: Optional. The scope value for the chosen kind (a MAC for device, a network uuid for network).
+      name: Host MAC
+      description: Optional. Apply the rule to this host, by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Apply the rule to this host, by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text:
+      name: Group ID
+      description: Optional. Apply the rule to this group, by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Apply the rule to this group, by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Apply the rule to this user, by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text:
+      name: User name
+      description: Optional. Apply the rule to this user, by name. Provide exactly one scope selector.
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Optional. Apply the rule to this network, by UUID. Provide exactly one scope selector.
+    network_name:
+      required: false
+      example: "VLAN10 CORE"
+      selector:
+        text:
+      name: Network name
+      description: Optional. Apply the rule to this network, by name. Provide exactly one scope selector.
+    all_hosts:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: All hosts
+      description: Optional. Apply the rule to every host. The wide scope must be stated, because on the wire an empty scope means every host.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1576,27 +1778,25 @@ create_rule:
 
 archive_alarms:
   name: Archive alarms
-  description: Archive one active alarm or all active alarms. Archived alarms remain retrievable.
+  description: Archive one alarm or the whole active set. Archived alarms remain retrievable.
   fields:
-    mode:
-      required: true
-      example: "this"
-      selector:
-        select:
-          options:
-            - value: "this"
-              label: One alarm
-            - value: "all_active"
-              label: All active alarms
-      name: Mode
-      description: Choose one alarm or the entire active set.
     alarm_id:
       required: false
       example: "1001"
       selector:
         text:
-      name: Alarm ID
-      description: Required when mode is this.
+      name: Alarm ID (Optional)
+      description: Archive one alarm. Provide exactly one of Alarm ID or Alarm status.
+    alarm_status:
+      required: false
+      example: "active"
+      selector:
+        select:
+          options:
+            - value: "active"
+              label: The active set
+      name: Alarm status (Optional)
+      description: Archive the whole set. Only active, since an already-archived alarm has nothing left to archive. Provide exactly one of Alarm ID or Alarm status.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -1614,29 +1814,27 @@ archive_alarms:
 
 delete_alarms:
   name: Delete alarms
-  description: Permanently delete one alarm or a selected active/archive set. This cannot be undone.
+  description: Permanently delete one alarm or a whole set. This cannot be undone.
   fields:
-    mode:
-      required: true
-      example: "this"
-      selector:
-        select:
-          options:
-            - value: "this"
-              label: One alarm
-            - value: "all_active"
-              label: All active alarms
-            - value: "all_archived"
-              label: All archived alarms
-      name: Mode
-      description: Select which alarm set to permanently delete.
     alarm_id:
       required: false
       example: "1001"
       selector:
         text:
-      name: Alarm ID
-      description: Required when mode is this.
+      name: Alarm ID (Optional)
+      description: Delete one alarm. Provide exactly one of Alarm ID or Alarm status.
+    alarm_status:
+      required: false
+      example: "active"
+      selector:
+        select:
+          options:
+            - value: "active"
+              label: The active set
+            - value: "archived"
+              label: The archived set
+      name: Alarm status (Optional)
+      description: Delete the active or archived set. Provide exactly one of Alarm ID or Alarm status.
     confirm:
       required: true
       example: true
@@ -1670,7 +1868,7 @@ mute_alarm:
         text:
       name: Alarm ID (Optional)
       description: Use an alarm to infer an omitted target value where available.
-    target_type:
+    alarm_target_type:
       required: true
       example: "domain"
       selector:
@@ -1682,40 +1880,78 @@ mute_alarm:
               label: DNS domain
             - value: "ip"
               label: IP address
-      name: Target type
-      description: Choose the type of silence to create.
-    target_value:
+      name: Alarm target type
+      description: Choose what the silence targets.
+    alarm_target_value:
       required: false
       example: "example.com"
       selector:
         text:
-      name: Target value
+      name: Alarm target value
       description: Raw ALARM_* type, domain, or IP. May be inferred from alarm_id where available.
-    scope_kind:
-      required: true
-      example: "device"
-      selector:
-        select:
-          options:
-            - value: "device"
-              label: Device
-            - value: "group"
-              label: Group
-            - value: "user"
-              label: User
-            - value: "network"
-              label: Network
-            - value: "all"
-              label: All devices
-      name: Scope kind
-      description: Required. Choose all explicitly to create a box-wide silence.
-    scope_target:
+    host_mac:
       required: false
-      example: "00:11:22:33:44:55"
+      example: "AA:BB:CC:DD:EE:FF"
       selector:
         text:
-      name: Scope target
-      description: Required unless scope kind is all. Provide the target ID for the selected scope.
+      name: Host MAC
+      description: Optional. Silence for this host, by MAC. Provide exactly one scope selector.
+    host_name:
+      required: false
+      example: "Living Room TV"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Silence for this host, by name. Provide exactly one scope selector.
+    group_id:
+      required: false
+      example: "53"
+      selector:
+        text:
+      name: Group ID
+      description: Optional. Silence for this group, by id. Provide exactly one scope selector.
+    group_name:
+      required: false
+      example: "Guest Devices"
+      selector:
+        text:
+      name: Group name
+      description: Optional. Silence for this group, by name. Provide exactly one scope selector.
+    user_id:
+      required: false
+      example: "63"
+      selector:
+        text:
+      name: User ID
+      description: Optional. Silence for this user, by id. Provide exactly one scope selector.
+    user_name:
+      required: false
+      example: "KADEN"
+      selector:
+        text:
+      name: User name
+      description: Optional. Silence for this user, by name. Provide exactly one scope selector.
+    network_uuid:
+      required: false
+      example: "5799d896-5e0f-40a5-a776-38a5d7746204"
+      selector:
+        text:
+      name: Network UUID
+      description: Optional. Silence for this network, by UUID. Provide exactly one scope selector.
+    network_name:
+      required: false
+      example: "VLAN10 CORE"
+      selector:
+        text:
+      name: Network name
+      description: Optional. Silence for this network, by name. Provide exactly one scope selector.
+    all_hosts:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: All hosts
+      description: Optional. Silence for every host. The box-wide case must be stated, because on the wire an empty scope means every host.
     duration:
       required: true
       example: "1h"
@@ -1815,6 +2051,13 @@ get_wireless_status:
   name: Get wireless status
   description: Returns the current Firewalla wireless configuration (SSID profiles and access points) as structured data.
   fields:
+    refresh:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Refresh
+      description: Set to true to poll the Firewalla box for current data first. Defaults to false, which reads the last snapshot — fast, and current to within the polling interval.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

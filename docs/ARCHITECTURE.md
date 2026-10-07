@@ -82,6 +82,69 @@ Critical rule:
 - never use `domain` to describe a Firewalla item type, record type, or rule-specific behavior
 - never use `device` for Firewalla endpoint inventory, naming fields, or selector behavior unless the code is explicitly referring to a Home Assistant device registry concept
 
+### Vocabulary: `host`, with one exception
+
+**`host` is the word for a Firewalla endpoint, on every surface** — machine and human
+alike. There is no second register. A service field, an enum value, a published
+discriminator, an entity attribute key **and its label**, a service description, and
+an LLM tool description all say `host`.
+
+This replaced an earlier two-register rule — "machine says `host`, human says
+`device`" — which measurement did not support. Service-facing text already said `host`
+**111 times against 26** for `device`, so the human register was never `device`; the
+attribute labels were the outlier, and the rule was describing an intention rather
+than the code. One word is both simpler and what the code was already doing.
+
+**The one exception: where `device` means a Home Assistant device-registry concept.**
+This is the critical rule above, not a carve-out from it:
+
+- **`device_tracker`** — Home Assistant's own platform name. It is not ours, it is not
+  translatable, and it must not be renamed. Our options text that talks about
+  *device trackers* is naming an HA concept and stays.
+- **the device registry** — entities that create device-registry entries, and the
+  options a user picks to do so (*"Devices to expose as device trackers"*), are about
+  Home Assistant devices.
+
+Everything else that names a Firewalla endpoint is `host`. Measured support: all 15
+device selector fields are `host_*`, every device-facing service name uses `host`
+(`get_hosts`, `wake_host`, `set_host_membership`), no service is named `*device*`, and
+service text says `host` four times for every `device`. A new field that departs from
+this is the deviation, and must say what forced it.
+
+**The vendor says `device` for a host, and we do not echo it.** Firewalla's flow rows
+name the host `device`, `deviceIP` and `devicePort`, and its host tag names are
+`deviceTags`. None of that survives into a published key, because in Home Assistant a
+*device* is already a device-registry entry — a different concept — and a `host` that
+is sometimes a `device` is the ambiguity this vocabulary exists to remove.
+
+This is not a special case for one word. Translating the vendor's record keys into ours
+is what the record layer does generally, and it is visible in the same row: `dstMac`
+publishes as `destination_mac`, `pid` as `blocked_by_rule_id`, `type` as `block_type`,
+`intf` as `network_id`, `country` as `region`. The keys kept verbatim are the ones that
+are already exact and are not the host concept — `port`, `protocol`, `apid`, `category`,
+`app`. `device` was the one vendor word that could not be kept, so it becomes `host`
+everywhere it is published.
+
+**A published *value* follows the same rule as a published key.** `destination_kind` is
+`host` / `domain` / `ip` / `peer`; it was `host` / `domain` / `ip` / `device`, and that
+fourth one was ours rather than the vendor's — it meant a destination named by a LAN
+peer's id. `peer` is what the record layer already called it everywhere else
+(`peer_id`, `local_peers`, `_serialize_local_peer`), so the value now matches the
+vocabulary the code had already chosen, and no published value names a host as a
+`device`.
+
+Two published keys are still easy to misread once the prefix is gone, and are documented
+at their source: `host_port` is a **port on** that host rather than a host, and `host_id`
+is **not always a MAC** — a VPN peer's id is not one.
+
+The separate rule for wire *values* is unchanged: where the box or its API uses a word in
+input we must send, the wire's spelling stays (`target_type`'s `remotePort`, the `tag` /
+`utag` / `intf` reference prefixes).
+
+So the boundary is: **the vendor's record keys are read at the record layer and
+published in our vocabulary**, and the reconciliation happens where the raw row is
+normalized into a model, never in the published row.
+
 Identity presentation rule:
 
 - when Firewalla exposes both an app-visible user identity and a backing group or tag used only to model assignment, Home Assistant-facing surfaces must prefer the user-facing identity
@@ -133,6 +196,97 @@ Rules:
 - entity unique IDs must remain stable across IP changes, host changes, and re-pairing that preserves the same box identity
 
 This rule keeps registry identity independent from mutable connection details.
+
+### Scoped identity
+
+A scope is a device, a group, or a user. Each has exactly one caller-facing
+identity, and every surface must use it. The published `kind` is a machine value, so
+per the register boundary it is `host` for a device.
+
+| Scope | Published `kind` | Published identity |
+| --- | --- | --- |
+| device | `host` | the MAC |
+| group | `group` | the group id |
+| user | `user` | **the user id** |
+
+Rules:
+
+- **The caller-facing identity is not the protocol target.** The box keys flow data
+  by a protocol pair (`host` / `tag`), and for a user that pair means the
+  **affiliated backing tag**, not the user id. The affiliated tag is an
+  implementation detail of how the box addresses a user; it is not who the user is.
+- **A service reports the scope's identity as the target.** `target.id` is the
+  device MAC, the group id, or the user id. A protocol target that differs from the
+  identity is reported **separately and explicitly** as a resolution, never as the
+  target.
+- **`target.kind` uses the machine register** — `host`, `group`, `user`, `network`,
+  `rule`, `alarm`, `silence`, `ssid`. The protocol's own word (`tag`) must not appear
+  as a target kind, and neither must the human word `device`; one is an internal
+  detail, the other is prose. This is the register boundary applied to `kind`.
+  The set covers every object the integration publishes as a target, not only the
+  report scopes: a control tool's result names a rule, an alarm, a silence or an
+  SSID, and that is the same question. One vocabulary, so a reader who learns it
+  from a report is not contradicted by a tool result.
+- **Anything a service reports as an id, it must also accept as a selector.** A
+  report that hands out an id its own resolver rejects is a defect, not a
+  limitation. Where a protocol target is remapped (a user), the resolver accepts the
+  identity, the human label, **and** the reported resolution, so a caller echoing
+  a value from a previous response keeps working.
+- **An association is not an identity.** Where the box models something as a
+  backing object plus metadata (a user's affiliated tag, a host's watched state),
+  the association is surfaced as an attribute describing a relationship, never
+  promoted to the identity.
+- **A network reports `kind: network` and carries its own type separately.** The
+  box's `lan` / `vlan` / `vpn` / `wan` distinction is real information, so
+  collapsing it into the kind loses it; it belongs on a `network_kind` field.
+- **Where a coarse kind is lossy, publish the specific one beside it.** `kind`
+  collapses **eight** vendor categories into four — `bond` and `bridge` both become
+  LAN, `wireguard`/`amneziawg`/`openvpn` all become VPN, `phy` and `wlan` both
+  become WAN. That collapse is deliberate and worth keeping: it is what lets a
+  caller ask for a VPN without knowing the three ways a VPN can be built. But it
+  was previously also the *only* thing published, so AmneziaWG and WireGuard were
+  indistinguishable. `interface_category` carries the vendor's own category
+  verbatim beside the kind, which recovers all three collapses in one field, at no
+  cost to the coarse filter. Splitting the enum instead would have been the wrong
+  move: it destroys the coarse filter, renames entities, and changes a published
+  attribute value, all to gain what one additive field gives.
+
+### Selecting a scope
+
+Every service that takes a scope takes it the same way, and the shape is not a matter
+of taste — it is what makes the mistakes impossible rather than merely detectable.
+
+- **Typed pairs, never a kind plus free text.** A scope is selected by `host_mac` or
+  `host_name`, `group_id` or `group_name`, `user_id` or `user_name`, `network_uuid`
+  or `network_name`. An identifier field matches identifiers and a label field matches
+  labels, which is the point: one free-text field cannot make that distinction, so it
+  will match a group id against a user's *name* and return the wrong scope's data.
+- **Exactly one, and nothing else.** None is an error and two is an error. Two fields
+  of the *same* pair is also an error, because supplying both is an ambiguous request
+  rather than a preference. One shared helper enforces it and one pair of translation
+  keys reports it, so the caller reads one sentence wherever they meet it.
+- **The wide scope is a flag, not an omission.** `all_hosts: true`. On the wire the
+  wide scope *is* an empty selection, so a selector that gets dropped by mistake would
+  silently widen a rule or a silence instead of failing. The flag means an accidental
+  global change has no representation.
+- **A user is addressed by its affiliated tag, and selected by either of its ids.** The
+  tag collection holds groups and users together, and a user entry's `group_id` is its
+  affiliated backing tag. A rule's user attachment is therefore written as a
+  *group-prefixed* reference to that tag — not as the user id, and not under a `utag:`
+  prefix. A group and a user are never interchangeable, so the substitution lives in
+  one resolver rather than in each service. **A user selector accepts both ids**: the
+  user id, because that is the identity every surface publishes, and the affiliated
+  tag, because that is what the services which write it report back. A selector that
+  accepts only one of the two is broken in one direction or the other.
+
+These rules exist because they were broken twice, in opposite directions. A service
+published a user by its affiliated tag and used the protocol vocabulary for its
+target kind, making it the only surface to disagree with the watched-user entities
+and `get_time_usage` about how a user is named. The correction then set the
+kind to `device` — fixing the protocol leak and introducing a lexicon violation,
+because the register boundary was not consulted. Both are recorded here so the next
+change has a rule rather than a precedent. Consistency here is a correctness
+property, not a style preference.
 
 ## Layered architecture
 
@@ -441,10 +595,16 @@ All rule mutations flow through the manager layer.
 Rules:
 
 - the manager is the only integration layer above `api/` that may orchestrate create, update, delete, enable, disable, or pause operations
-- successful commands may update in-memory runtime state optimistically for immediate UI correctness
+- **a successful command must update in-memory runtime state**, so the next read agrees with it. This is required rather than optional: when it was optional, only the two managers whose entities needed it implemented it, and every other mutation forced a box poll to make a write visible
+- **both views of an inventory are republished together** — a manager holding a derived index beside the coordinator snapshot must rebuild the index from the same tuple it publishes, or the two disagree. A host deletion once popped the host out of the index while the snapshot still carried it, so `get_host` returned nothing while `get_hosts` still listed it
+- a derived count may be adjusted by the delta the operation implies rather than recomputed, because it is the box's own number and the next refresh is the authority
 - the coordinator refresh remains the later source of truth
 - optimistic state must remain in memory only
 - if later polling disagrees with the optimistic state, the refreshed state wins and the discrepancy is treated as a runtime reconciliation concern
+
+**A pre-write read may inform the report; it may never suppress the write.** A check against current state reads the cached snapshot, which can be a poll interval old. On a stale "already in state" it would skip the write and report success while the box is in the other state — `pause_rule` did exactly that, so a rule resumed on the box in that window looked already-paused and the user was told nothing needed doing. The call happens regardless, and these operations are idempotent, so the cost is one request.
+
+**A write that cannot resolve its target re-reads before failing.** Resolution uses the snapshot, so a host that just joined or was just renamed is absent from the *view* rather than from the box. Raising `not_found` there is wrong: a miss is retried once after a refresh, costing a poll only in the case that would otherwise have failed.
 
 ## Config-entry scope contract
 
@@ -486,6 +646,86 @@ Home Assistant exposes a registered LLM API through `mcp_server`, which serves i
 Assist and to any MCP client. Each entry therefore appears as its own selectable API
 with its own URL; several can be merged, and Home Assistant then namespaces the tools
 by entry title.
+
+#### How guidance reaches a model
+
+Three layers of text, each with one job, and no two of them say the same thing.
+
+| Layer | Scope | Delivered by |
+| --- | --- | --- |
+| `SYSTEM_MODEL` | true across every tool | the API prompt, and `system_model` on `get_system_overview` |
+| Family injection | true across one family | prepended to every description in that family |
+| Description body | true of one tool only | that tool's own description |
+
+Three layers rather than one because **no single channel reaches every client**:
+
+- The **API prompt** is Assist's, and Home Assistant's MCP server serves it only
+ through MCP's `prompts` primitive. A client must invoke that explicitly; the
+ clients in common use send `tools/list` and nothing else. (The server does not
+ populate `InitializeResult.instructions`, and the MCP client ignores the field
+ anyway.)
+- **`system_model`** arrives only if the agent has already called
+ `get_system_overview`. An agent that goes straight to a write tool never sees it.
+- A description's **family injection** arrives with `tools/list`, unconditionally.
+
+So the tool descriptions are the only text every client is guaranteed to receive,
+and the injection is how a rule is stated once and still reaches all of them. An
+agent that lists tools and immediately calls `set_host_group` therefore knows the
+membership warning, because it is in that description rather than only in a prompt
+it was never sent.
+
+Each family block opens with the same **orientation question** — whether the agent
+can explain what a Firewalla host is and how a rule reaches one, and if not, that
+`get_system_overview` returns the model defining it. It is phrased as a question the
+model can answer about its own state rather than a request to be careful, names one
+concrete remedy, and bounds itself to once per session, so it does not cause a call
+before every read. The control and destructive variants bind it *before writing*,
+since a wrong write against a live network costs more than a wrong read.
+
+The division of labour, and the rule for deciding where a sentence belongs:
+
+- **`SYSTEM_MODEL`** carries anything true of all 39 tools: the vocabulary, units
+ and the `_at`/`_timestamp` pair, both result envelopes, `undo`, the rule-scope
+ model, and the membership-deletes-rules warning.
+- **A family injection** carries what is true across that family *and absent from
+ the model*. Read adds that a default result omits optional detail. Destructive
+ adds that the family cannot be undone. **Control adds nothing beyond
+ orientation**, because every control-wide rule it could carry is already in the
+ model.
+- **A description body** carries what is true of one tool: its arguments, its
+ enums, its own failure modes.
+
+A rule that applies to two tools rather than a whole family belongs in those two
+bodies, not in a block repeated across twenty-five.
+
+#### The injection is structural
+
+Both base classes carry an `_injection` class attribute and prepend it in
+`__init__`:
+
+```python
+class _FirewallaControlTool(llm.Tool):
+    _injection: str = CONTROL_INJECTION
+```
+
+The destructive tools override it with `DESTRUCTIVE_INJECTION`. A tool therefore
+cannot be added without a block: subclass the base and it inherits the family
+injection, or override it deliberately. `test_every_tool_carries_its_family_injection`
+enforces it in both directions — every tool starts with a block, every destructive
+tool gets the destructive one, and no other tool does. The failure being guarded
+against is not a wrong block but a **missing** one, which is how the description
+prose once drifted a rename behind without anything failing.
+
+Two rules for this layer:
+
+- `llm_tools_common.py` must stay free of `homeassistant.helpers.llm` imports. The
+ tool modules are guard-loaded for the Core 2026.10 LLM contract, but `SYSTEM_MODEL`
+ is imported by `services.py` to serve on the overview, so this module has to stay
+ importable outside that guard
+- a description is written for a **machine consumer**: field → meaning, one fact per
+ line, no justification clauses. Prose explaining why a rule exists costs tokens on
+ every request and changes no behaviour. `test_every_identifier_in_a_description_resolves`
+ keeps the prose honest about the payload it describes
 
 ## Entity architecture
 
@@ -600,6 +840,45 @@ Rules:
 - normalized host identity must keep human-facing naming separate from DNS-facing naming
 - the normalized host contract is `host_name`, `dns_hostname`, `dns_domain`, `dns_fqdn`, `dhcp_name`, and `host_device_type`
 - compatibility aliases such as duplicate `display_name` or `fallback_name` fields must not be reintroduced once a normalized host contract exists
+
+### Reuse before invention
+
+New work must follow the field names, identity vocabulary, and result shapes that
+already exist for the same concept. Introducing a second name for one thing, or one
+name for two things, is a defect even when the new code is internally consistent.
+
+Before adding a field, an identity, or a service parameter, find the existing
+pattern and match it:
+
+- **A name is a contract.** Reuse the established term. `user_id` is a user id
+  everywhere; it must not become `uid`, `target_id`, or an affiliated tag in one
+  surface.
+- **Units live in the name.** A field carrying bytes is not `count`; a field
+  carrying a block count is not `bytes`. The box overloads `count` per family, so a
+  generic name is how two incompatible measurements become interchangeable.
+- **One concept, one shape.** If two services answer a related question, their
+  envelopes, target blocks, and vocabulary must agree. The shared `_serialize_report_*`
+  helpers exist so this is the path of least resistance.
+- **Identity is cross-service.** A consumer must be able to correlate two reports
+  about the same device, group, or user without a mapping table.
+
+### Deviations must be justified
+
+A deviation from an existing name, identity, or shape is allowed only when it is
+**necessary**, and it must be recorded in three places:
+
+1. **The plan** — what is different, and the measurement or wire evidence that
+   forces it.
+2. **The code** — a comment at the point of deviation stating why the established
+   pattern could not be used, so the next reader does not "fix" it back.
+3. **The user-facing docs** — if a caller can observe the difference.
+
+A deviation with no backing detail is not a design decision; it is drift. "It
+seemed clearer" is not a justification. "The endpoint rejects the user id and
+returns zero rows while the affiliated tag returns 578, measured on 10 users" is.
+
+Where a name is genuinely new because the concept is new, say so explicitly rather
+than leaving a reader to infer whether it is a mistake.
 
 ## Translation and error contract
 

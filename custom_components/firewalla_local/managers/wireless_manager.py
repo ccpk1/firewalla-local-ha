@@ -592,8 +592,16 @@ class FirewallaWirelessManager(FirewallaBaseManager):
         self.coordinator.async_update_listeners()
 
     def get_wireless_status(self) -> JsonObjectType:
-        """Return a structured view of the current wireless config."""
+        """Return a structured view of the current wireless config.
+
+        `manages_access_points` is what makes an empty result readable: a box with
+        no Firewalla APs legitimately reports no SSIDs and no access points, and
+        without this a caller cannot tell that from a read that returned nothing.
+        `set_ssid_paused` has nothing to act on in that case.
+        """
+        access_points = self.get_access_points()
         return {
+            "manages_access_points": bool(access_points),
             "ssid_profiles": [
                 {
                     "profile_uuid": profile.profile_uuid,
@@ -623,6 +631,6 @@ class FirewallaWirelessManager(FirewallaBaseManager):
                     "disable_acl": ap.disable_acl,
                     "client_count": ap.client_count,
                 }
-                for ap in self.get_access_points()
+                for ap in access_points
             ],
         }

@@ -11,13 +11,18 @@ from custom_components.firewalla_local.managers.rule_manager import (
     is_user_visible_rule,
 )
 from custom_components.firewalla_local.models import (
+    FirewallaActivityBasis,
     FirewallaHostRuntime,
     FirewallaPolicyRule,
     format_policy_rule_label,
     format_policy_rule_name,
 )
-from custom_components.firewalla_local.utils.host_activity import count_online_hosts
+from custom_components.firewalla_local.utils.host_activity import (
+    count_online_hosts,
+    reference_last_active,
+)
 from custom_components.firewalla_local.utils.network import build_network_inventory
+from custom_components.firewalla_local.utils.values import iso_instant
 
 _RAW_POLICY_STATE_KEY: Final = "state"
 _RAW_USERS_KEY: Final = "userTags"
@@ -70,13 +75,11 @@ _RULE_MATCH_KIND_CATEGORY: Final = "category"
 _RULE_MATCH_KIND_OTHER: Final = "other"
 
 _RULE_TARGET_LIST_PREFIX: Final = "TL-"
-_RULE_TARGET_TAG: Final = "TAG"
 _RULE_TARGET_TYPE_CATEGORY: Final = "category"
 _RULE_TARGET_TYPE_COUNTRY: Final = "country"
 _RULE_TARGET_TYPE_DNS: Final = "dns"
 _RULE_TARGET_TYPE_IP: Final = "ip"
 _RULE_TARGET_TYPE_LOCAL_PORT: Final = "localPort"
-_RULE_TARGET_TYPE_MAC: Final = "mac"
 _RULE_TARGET_TYPE_NETWORK: Final = "network"
 _RULE_TARGET_TYPE_REMOTE_PORT: Final = "remotePort"
 
@@ -198,18 +201,30 @@ def _build_rule_record(
         "enabled": rule.enabled,
         "scope": list(rule.scope),
         "applies_to": list(rule.applies_to),
-        "activated_time": rule.activated_time,
-        "updated_time": rule.updated_time,
-        "last_activated_time": rule.last_activated_time,
+        # Every rule instant appears twice: `_at` to read, `_at_timestamp` to compute
+        # with. These arrive from the box as epoch floats, which is why they need the
+        # readable half added rather than corrected -- but `expires_at` and
+        # `pause_until` needed the reverse. Both held epoch while this same name holds
+        # ISO on the rule service surface, so one name meant a date in one tool and a
+        # number in another. Both are ISO here now, matching that surface, and the
+        # epoch form moved to its own key.
+        "activated_at": iso_instant(rule.activated_time),
+        "activated_at_timestamp": rule.activated_time,
+        "updated_at": iso_instant(rule.updated_time),
+        "updated_at_timestamp": rule.updated_time,
+        "last_activated_at": iso_instant(rule.last_activated_time),
+        "last_activated_at_timestamp": rule.last_activated_time,
         "expire_seconds": rule.expire_seconds,
-        "expires_at": rule.expires_at,
+        "expires_at": iso_instant(rule.expires_at),
+        "expires_at_timestamp": rule.expires_at,
         "auto_delete_when_expires": rule.auto_delete_when_expires,
         "dnsmasq_only": rule.dnsmasq_only,
         "is_temporary": rule.is_temporary,
         "tag_refs": tag_refs,
         "notes": rule.notes,
         "is_paused": rule.is_paused,
-        "pause_until": rule.pause_until,
+        "pause_until": iso_instant(rule.pause_until),
+        "pause_until_timestamp": rule.pause_until,
         "pause_remaining_seconds": rule.pause_remaining_seconds,
         "active_time_schedule": rule.active_time_schedule,
         "app_time_period": rule.app_time_period,
@@ -476,7 +491,7 @@ def _build_group_policy_controls(
 
 def _build_rule_matching_info(rule: FirewallaPolicyRule) -> RuleMatchingInfo:
     """Classify the matching object shape for one rule."""
-    if rule.target_type == _RULE_TARGET_TYPE_MAC and rule.target == _RULE_TARGET_TAG:
+    if rule.is_tag_scoped:
         kind = _RULE_MATCH_KIND_INTERNET_SCOPE
     elif rule.target.startswith(_RULE_TARGET_LIST_PREFIX):
         kind = _RULE_MATCH_KIND_TARGET_LIST
@@ -572,9 +587,14 @@ def build_runtime_inventory_report(
 ) -> dict[str, object]:
     """Build a mapping report for groups, users, and normalized rules.
 
-    ``hosts`` is the normalized host inventory and ``online_window_seconds`` is
-    the configured activity window, so the device counts reported here use the
+        ``hosts`` is the normalized host inventory and ``online_window_seconds`` is
+        the configured activity window, so the host counts reported here use the
     exact same online definition as the entities rather than a second one.
+
+        The reference is taken from the same ``hosts`` sequence the counts are
+        computed over. Deriving it anywhere else would let the published reference
+        describe one inventory while the counts describe another, which is the
+        disagreement this reporting exists to avoid.
     """
     raw_policy_rules = payload.get(_RAW_POLICY_RULES_KEY)
     raw_rule_index: dict[str, dict[str, object]] = {}
@@ -643,10 +663,15 @@ def build_runtime_inventory_report(
     group_count = sum(1 for group in groups if group["kind"] == "group")
     group_policy_controls = _build_group_policy_controls(groups)
     target_list_references = _build_target_list_references(rules)
-    devices_total = len(hosts)
-    devices_online = count_online_hosts(
+    hosts_total = len(hosts)
+    basis = FirewallaActivityBasis(
+        reference_at=reference_last_active(hosts),
+        window_seconds=online_window_seconds,
+    )
+    hosts_online = count_online_hosts(
         hosts,
-        online_window_seconds=online_window_seconds,
+        reference_activity=basis.reference_at,
+        online_window_seconds=basis.window_seconds,
     )
 
     return {
@@ -665,9 +690,16 @@ def build_runtime_inventory_report(
             "rules_needing_review_count": len(rules_needing_review),
             "target_list_reference_count": len(target_list_references),
             "host_count": host_count,
-            "devices_total": devices_total,
-            "devices_online": devices_online,
-            "devices_offline": devices_total - devices_online,
+            "hosts_total": hosts_total,
+            "hosts_online": hosts_online,
+            "hosts_offline": hosts_total - hosts_online,
+            "activity_reference_at": (
+                iso_instant(basis.reference_at)
+                if basis.reference_at is not None
+                else None
+            ),
+            "activity_reference_at_timestamp": basis.reference_at,
+            "online_window_seconds": basis.window_seconds,
             "network_count": network_count,
         },
         "groups": groups,
@@ -721,9 +753,9 @@ def render_runtime_inventory_markdown(report: dict[str, object]) -> str:
             "rules_needing_review_count",
             "target_list_reference_count",
             "host_count",
-            "devices_total",
-            "devices_online",
-            "devices_offline",
+            "hosts_total",
+            "hosts_online",
+            "hosts_offline",
             "network_count",
         ):
             lines.append(f"- {key}: {summary.get(key)}")

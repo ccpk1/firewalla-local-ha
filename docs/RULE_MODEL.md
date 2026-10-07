@@ -158,6 +158,21 @@ Current interpretation rules:
 - temporary rules may disappear automatically after expiry instead of remaining
   installed in a disabled or paused state
 
+## Rule identity model
+
+A rule's id is the handle this integration uses to address it. It is what a switch
+selection, an automation, and an agent's context all hold.
+
+- a deleted rule loses its id permanently
+- an expired temporary rule loses its id the same way
+- re-creating an equivalent rule produces a new id; ids are never reused
+- pause and resume are in-place state changes and preserve the id
+
+So pause and resume are how a rule is held long term here, and deletion and expiry
+are for rules the user does not intend to keep. Within the Firewalla app an
+id change is invisible, because the app addresses a rule by its contents; the id
+matters because it is the link this integration holds.
+
 ## Switch eligibility model
 
 Switch eligibility should be driven by control semantics first and presentation
@@ -181,9 +196,12 @@ The currently confirmed controllable action set is:
 - `block`
 - `disturb`
 - `qos`
+- `route`
 
 Notes:
 
+- `route` is confirmed by the same live pause or resume evidence as the other
+  families
 - app-selected rules may still appear as ordinary `block` rules with
   category-backed targets such as `TLX-fw-roblox`
 - historical `app_block` observations should be treated as a specialized app
@@ -400,6 +418,7 @@ Interpretation rules:
 | direct `block` | category, internet, app-backed category block | persistent in-place pause or resume | targeting, app, schedule, quota |
 | `disturb` | scheduled or scoped traffic shaping | persistent in-place pause or resume | disturb, schedule |
 | `qos` | internet or category QoS | persistent in-place pause or resume | QoS, app |
+| `route` | interface or network route selection | persistent in-place pause or resume | targeting, route |
 | temporary block | short-duration quick block | temporary create plus expiry or delete | expiry |
 | port forwarding | inbound allow using target lists | persistent in-place pause or resume | port-forward context |
 
