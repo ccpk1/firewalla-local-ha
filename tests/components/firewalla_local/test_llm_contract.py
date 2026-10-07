@@ -726,9 +726,10 @@ async def test_every_destructive_tool_requires_approval_for_that_action(
     assert "that one action and nothing else" in DESTRUCTIVE_INJECTION
     assert "that one action and nothing else" not in PROMPT
 
-    # The model must not authorize a destructive single-host change either. Its
-    # confirmation rule carves destructive actions out, because "routine single-host
-    # changes can proceed" otherwise read as covering a one-host delete.
+    # The model names the boundary rather than leaving it to the qualifier. "Routine
+    # single-host changes can proceed" already excluded a delete, because a delete is
+    # not routine — but "routine" is undefined, so the boundary rested on the model's
+    # judgment about which single-host changes it covers.
     assert "anything destructive needs the approval" in PROMPT
 
 
