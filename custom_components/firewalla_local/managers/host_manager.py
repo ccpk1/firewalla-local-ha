@@ -164,7 +164,7 @@ class FirewallaHostManager(FirewallaBaseManager):
         The index and the snapshot are republished together and from the same tuple.
         That is the fix for a real inconsistency: deletion popped the host out of
         `_host_index` while `coordinator.data.hosts` still carried it, so
-        `get_host(mac)` returned nothing while `list_hosts` — which reads the
+        `get_host(mac)` returned nothing while `get_hosts` — which reads the
         snapshot — still listed it. One inventory, two answers.
         """
         snapshot = self.coordinator.data
@@ -207,7 +207,7 @@ class FirewallaHostManager(FirewallaBaseManager):
         """Apply a successful host policy write to the cached raw host payload.
 
         A host's IP assignment and notification settings are not in the normalized
-        snapshot. Every surface that publishes them — `list_hosts` and the network
+        snapshot. Every surface that publishes them — `get_hosts` and the network
         config host rows — resolves them from `coordinator.last_init_payload`, so the
         update has to land there for the next read to agree with the write instead of
         serving pre-change values until the next poll.

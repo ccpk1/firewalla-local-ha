@@ -459,7 +459,7 @@ class FirewallaFlowReportTarget:
     and they follow the integration's identity contract: a device is keyed by MAC, a
     group by its group id, and a **user by its user id** -- the same key the
     watched-user entities use in their unique ids and the same value
-    ``get_time_usage_report`` reports as ``target_id``. ``kind`` is the same machine
+    ``get_time_usage`` reports as ``target_id``. ``kind`` is the same machine
     vocabulary every other published target uses, because it is read from
     :data:`SCOPE_SELECTOR_FIELDS`' kind rather than from a request enum.
 
@@ -803,7 +803,7 @@ class FirewallaNetworkTopTalker:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaNetworkHostIpAssignment:
-    """One normalized host IP assignment for a network segment report."""
+    """One normalized host IP assignment for `get_network_config`."""
 
     mode: str | None = None
     network_uuid: str | None = None
@@ -827,7 +827,7 @@ class FirewallaNetworkHostActions:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaNetworkHostDetail:
-    """One configuration-oriented host detail row for a segment report."""
+    """One configuration-oriented host detail row for `get_network_config`."""
 
     host_id: str
     host_name: str | None = None
@@ -844,7 +844,7 @@ class FirewallaNetworkHostDetail:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaNetworkDhcpConfig:
-    """One normalized DHCP configuration section for a segment report."""
+    """One normalized DHCP configuration section for `get_network_config`."""
 
     gateway: str | None = None
     subnet_mask: str | None = None
@@ -1934,7 +1934,7 @@ class FirewallaRuntimeSnapshot:
     hosts: tuple[FirewallaHostRuntime, ...] = ()
     groups: tuple[FirewallaGroupRuntime, ...] = ()
     users: tuple[FirewallaUserRuntime, ...] = ()
-    speed_test_results: tuple[FirewallaSpeedTestRecord, ...] = ()
+    speed_tests: tuple[FirewallaSpeedTestRecord, ...] = ()
     alarms: tuple[FirewallaAlarm, ...] = ()
     alarm_exceptions: tuple[FirewallaAlarmException, ...] = ()
     active_alarm_count: int = 0

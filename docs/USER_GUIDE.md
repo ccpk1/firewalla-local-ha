@@ -153,8 +153,8 @@ was. A client connected to a box's URL keeps working through a rename.
 
 **Renaming a box does change its name in a merged tool list.** The prefix in the
 section below follows the entry's title, not the URL, so renaming "Firewalla Test
-Only" to "Basement" turns `firewalla-test-only__firewalla_local__list_hosts` into
-`basement__firewalla_local__list_hosts`. The URL is untouched and no client needs
+Only" to "Basement" turns `firewalla-test-only__firewalla_local__get_hosts` into
+`basement__firewalla_local__get_hosts`. The URL is untouched and no client needs
 re-pointing, but a merged client will see the new names after the entry reloads.
 
 **Serving several boxes at once prefixes their tool names with the entry name.**
@@ -236,8 +236,8 @@ Services added after 1.0.0:
 - `firewalla_local.get_hosts`
 - `firewalla_local.get_rules`
 - `firewalla_local.create_rule`
-- `firewalla_local.get_network_segment_report`
-- `firewalla_local.get_network_segment_usage`
+- `firewalla_local.get_network_config`
+- `firewalla_local.get_network_usage`
 - `firewalla_local.run_internet_speed_test`
 - `firewalla_local.wake_host`
 - `firewalla_local.delete_host`
@@ -248,10 +248,10 @@ Services added after 1.0.0:
 - `firewalla_local.set_host_notify_when_next_offline`
 - `firewalla_local.set_host_dhcp_reservation`
 - `firewalla_local.set_host_membership`
-- `firewalla_local.get_speed_test_results`
-- `firewalla_local.get_internet_quality_report`
-- `firewalla_local.get_time_usage_report`
-- `firewalla_local.get_wan_data_usage`
+- `firewalla_local.get_speed_tests`
+- `firewalla_local.get_internet_quality`
+- `firewalla_local.get_time_usage`
+- `firewalla_local.get_wan_usage`
 - `firewalla_local.get_wan_events`
 - `firewalla_local.get_wireless_status`
 - `firewalla_local.get_alarms`
@@ -293,20 +293,20 @@ service responses and tool results:
 | Service / tool | Was | Now |
 | --- | --- | --- |
 | `get_rules` (`last_hit`) | `device_id` / `device_ip` / `device_port` | `host_id` / `host_ip` / `host_port` |
-| `get_time_usage_report` | `device_id` / `device_name` | `host_id` / `host_name` |
-| `get_network_segment_report` host rows | `device_type` | `host_device_type` |
-| `get_network_segment_report` summary | `device_host_count` | *(removed — it duplicated `host_count`)* |
+| `get_time_usage` | `device_id` / `device_name` | `host_id` / `host_name` |
+| `get_network_config` host rows | `device_type` | `host_device_type` |
+| `get_network_config` summary | `device_host_count` | *(removed — it duplicated `host_count`)* |
 | `get_flow_report` member and record rows | `device_id` / `device_name` / `device_ip` / `device_ids` | `host_id` / `host_name` / `host_ip` / `host_ids` |
 | `get_flow_report` `destination_kind` | `"device"` (a LAN peer) | `"peer"` |
 | `get_system_overview` sections | `devices` / `vpn_devices` | `hosts` / `vpn_hosts` |
-| `get_network_segment_usage` section and provenance | `devices` | `hosts` |
-| `get_network_segment_usage` summary | `active_device_count` | `active_host_count` |
-| `get_time_usage_report` app and category rows | `devices` | `hosts` |
-| `get_time_usage_report` provenance | `apps.devices.intervals` | `apps.hosts.intervals` |
-| `get_network_segment_usage` host rows | `conn` / `dns` / `dns_blocked` / `ip_blocked` / `ip_denied` / `ntp` | `connection_count` / `dns_count` / `blocked_dns_count` / `blocked_ip_count` / `denied_ip_count` / `ntp_count` |
-| host records in `get_hosts`, the network `hosts` include, `get_network_segment_usage` and `get_time_usage_report` | `ip_address` | `host_ip` |
-| `get_network_segment_report` `sections.configuration` | `kind` | `network_kind` |
-| `get_network_segment_report` `sections.configuration` | `type` | `interface_type` |
+| `get_network_usage` section and provenance | `devices` | `hosts` |
+| `get_network_usage` summary | `active_device_count` | `active_host_count` |
+| `get_time_usage` app and category rows | `devices` | `hosts` |
+| `get_time_usage` provenance | `apps.devices.intervals` | `apps.hosts.intervals` |
+| `get_network_usage` host rows | `conn` / `dns` / `dns_blocked` / `ip_blocked` / `ip_denied` / `ntp` | `connection_count` / `dns_count` / `blocked_dns_count` / `blocked_ip_count` / `denied_ip_count` / `ntp_count` |
+| host records in `get_hosts`, the network `hosts` include, `get_network_usage` and `get_time_usage` | `ip_address` | `host_ip` |
+| `get_network_config` `sections.configuration` | `kind` | `network_kind` |
+| `get_network_config` `sections.configuration` | `type` | `interface_type` |
 | `get_rules` (tag-scoped rules only) | `target: "TAG"` | `target: null` — read `applies_to` / `applies_to_kind` / `tag_refs` instead |
 | `get_rules` | *(absent)* | `applies_to_kind` added — names what each `applies_to` entry is (`group` / `user` / `network`) |
 | `set_host_group` / `set_host_user` and the group/journal variant | `device_rules.removed` | `host_rules.removed` |
@@ -354,13 +354,13 @@ Three things changed, and they can be adopted independently:
 | `get_rules` `last_hit` | `at` / `timestamp` | `matched_at` / `matched_at_timestamp` |
 | `get_flow_report` records | `timestamp` | `occurred_at` (date) with `occurred_at_timestamp` |
 | `get_wan_events` | `timestamp` / `timestamp_iso` | `occurred_at_timestamp` / `occurred_at` |
-| `get_network_segment_usage` metric samples | `timestamp` / `timestamp_iso` | `sampled_at_timestamp` / `sampled_at` |
+| `get_network_usage` metric samples | `timestamp` / `timestamp_iso` | `sampled_at_timestamp` / `sampled_at` |
 | `get_internet_quality` | `sampled_at` | unchanged form; `sampled_at_timestamp` added |
 | `binary_sensor` system status | `runtime_data_updated_at` | unchanged form; `runtime_data_updated_at_timestamp` added |
 | `sensor` speed test | `tested_at` | unchanged form; `tested_at_timestamp` added |
 | `get_runtime_inventory` rule records | `activated_time` / `updated_time` / `last_activated_time` | `activated_at` / `updated_at` / `last_activated_at`, each with an `_at_timestamp` twin |
 | `get_runtime_inventory` rule records | `expires_at` (epoch) / `pause_until` (epoch) | both are dates now, matching the rule service; read `expires_at_timestamp` / `pause_until_timestamp` for the numbers |
-| `get_time_usage_report`, `get_wan_data_usage`, the segment reports | `begin_timestamp_iso` / `end_timestamp_iso` / `anchor_timestamp_iso` | `begin` / `end` / `anchor`, beside the existing `_timestamp` forms |
+| `get_time_usage`, `get_wan_usage`, `get_network_config`, `get_network_usage` | `begin_timestamp_iso` / `end_timestamp_iso` / `anchor_timestamp_iso` | `begin` / `end` / `anchor`, beside the existing `_timestamp` forms |
 | `get_hosts`, `get_system_overview`, `get_runtime_inventory` | *(absent)* | `activity_reference_at` / `activity_reference_at_timestamp` / `online_window_seconds` added |
 
 **`online` is derived, and now reproducible.** It is
@@ -678,7 +678,7 @@ The per-network attributes include:
 
 Use these entities for a live, per-network health and usage view on your
 dashboards. For a deeper configuration or usage drill-down, use the
-`get_network_segment_report` and `get_network_segment_usage` services instead.
+`get_network_config` and `get_network_usage` services instead.
 
 ## Per-SSID wireless monitoring and control (AP7)
 
@@ -893,7 +893,7 @@ from. An absent attribute is not the same as a rule that never fired.
 
 Every rule-backed switch exposes two extra attributes, and the same values are
 returned by the `firewalla_local.get_rules` service and the AI assistant's
-`list_rules` tool:
+`get_rules` tool:
 
 - **`hit_count`** — how many times the rule has matched since it was created.
   Always a number: a rule with no recorded matches reads `0`
@@ -986,7 +986,7 @@ per-WAN speed-test and quality metrics.
   `total` is everything the box knows about, not the connected count, and
   `vpn_hosts` is a breakdown of `hosts` rather than a separate population
 - `include: ["identifiers"]` adds the group and user names and ids that
-  `get_time_usage_report` and the rule services accept as selectors. They are
+  `get_time_usage` and the rule services accept as selectors. They are
   omitted by default so the summary carries no person-level data
 - `llm_access` reports the active AI tool mode and what it reaches
 - non-admin, and the same data the AI assistant's Summary-only tier is built on
@@ -1044,10 +1044,10 @@ records: identity, IP, device type, kind, group membership, and connectivity.
 Non-admin. For the full runtime inventory (admin-gated, much larger) use
 `get_runtime_inventory`.
 
-#### Get network segment report
+#### Get network config
 
-Use `firewalla_local.get_network_segment_report` to read one configuration-
-oriented report for a single network segment.
+Use `firewalla_local.get_network_config` to read one configuration-
+oriented payload for a single network segment.
 
 - use `network_uuid` for deterministic automations or `network_name` for
   interactive use
@@ -1057,11 +1057,11 @@ oriented report for a single network segment.
 - uses the shared report envelope with `target`, `query`, `time_basis`,
   `summary`, `sections`, and `metadata`
 - for a deep per-host/app/series drill-down use
-  `firewalla_local.get_network_segment_usage` instead
+  `firewalla_local.get_network_usage` instead
 
 #### Get network segment usage
 
-Use `firewalla_local.get_network_segment_usage` to read one usage-oriented
+Use `firewalla_local.get_network_usage` to read one usage-oriented
 report for a single network segment.
 
 - choose one required `window`
@@ -1072,7 +1072,7 @@ report for a single network segment.
 
 #### Get speed test results
 
-Use `firewalla_local.get_speed_test_results` to read normalized speed test
+Use `firewalla_local.get_speed_tests` to read normalized speed test
 results.
 
 - by default it refreshes once and returns only the most recent result
@@ -1081,7 +1081,7 @@ results.
 
 #### Get internet quality report
 
-Use `firewalla_local.get_internet_quality_report` to read normalized
+Use `firewalla_local.get_internet_quality` to read normalized
 internet-quality samples (ping latency and packet loss) for one or all WANs.
 
 - by default it refreshes once and returns only the most recent sample
@@ -1094,7 +1094,7 @@ internet-quality samples (ping latency and packet loss) for one or all WANs.
 
 #### Get time usage report
 
-Use `firewalla_local.get_time_usage_report` to read scoped historical usage for
+Use `firewalla_local.get_time_usage` to read scoped historical usage for
 one host, group, or user.
 
 - select the scope with **exactly one** field: `host_mac` or `host_name`,
@@ -1119,7 +1119,7 @@ time rather than traffic.
 
 **How the target is named.** The response reports the scope in the same terms the
 rest of the integration uses, so a user appears by its **user id** — matching the
-watched-user entities and `get_time_usage_report` — and not by the internal tag the
+watched-user entities and `get_time_usage` — and not by the internal tag the
 box happens to key its flow data with:
 
 - `target.kind` is `device`, `group`, or `user`
@@ -1193,7 +1193,7 @@ behind an explicit ask:
 
 #### Get WAN data usage
 
-Use `firewalla_local.get_wan_data_usage` to read one normalized WAN data-usage
+Use `firewalla_local.get_wan_usage` to read one normalized WAN data-usage
 report for each WAN.
 
 - by default it returns one current-month report row for every discovered WAN
@@ -1247,7 +1247,7 @@ it directly.
 - if only one WAN is available, you can omit the WAN selector
 - the service returns an acknowledgement and does not wait for the completed
   measurement
-- if you want completed results, use `firewalla_local.get_speed_test_results`
+- if you want completed results, use `firewalla_local.get_speed_tests`
   or the WAN-scoped speed-test sensors
 
 #### Wake host

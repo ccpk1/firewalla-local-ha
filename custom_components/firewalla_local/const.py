@@ -531,12 +531,12 @@ CONFIG_ERROR_INVALID_QR: Final = "invalid_qr"
 CONFIG_ERROR_WRONG_ACCOUNT: Final = "wrong_account"
 SERVICE_GET_RUNTIME_INVENTORY: Final = "get_runtime_inventory"
 SERVICE_GET_HOSTS: Final = "get_hosts"
-SERVICE_GET_NETWORK_SEGMENT_REPORT: Final = "get_network_segment_report"
-SERVICE_GET_NETWORK_SEGMENT_USAGE: Final = "get_network_segment_usage"
-SERVICE_GET_SPEED_TEST_RESULTS: Final = "get_speed_test_results"
-SERVICE_GET_INTERNET_QUALITY_REPORT: Final = "get_internet_quality_report"
-SERVICE_GET_TIME_USAGE_REPORT: Final = "get_time_usage_report"
-SERVICE_GET_WAN_DATA_USAGE: Final = "get_wan_data_usage"
+SERVICE_GET_NETWORK_CONFIG: Final = "get_network_config"
+SERVICE_GET_NETWORK_USAGE: Final = "get_network_usage"
+SERVICE_GET_SPEED_TESTS: Final = "get_speed_tests"
+SERVICE_GET_INTERNET_QUALITY: Final = "get_internet_quality"
+SERVICE_GET_TIME_USAGE: Final = "get_time_usage"
+SERVICE_GET_WAN_USAGE: Final = "get_wan_usage"
 SERVICE_GET_WAN_EVENTS: Final = "get_wan_events"
 SERVICE_SET_HOST_NAME: Final = "set_host_name"
 SERVICE_SET_HOST_DNS_HOSTNAME: Final = "set_host_dns_hostname"
@@ -674,10 +674,8 @@ TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS: Final = (
     "membership_user_name_ambiguous"
 )
 TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND: Final = "membership_user_not_found"
-TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED: Final = (
-    "network_segment_report_failed"
-)
-TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED: Final = "network_segment_usage_failed"
+TRANS_KEY_EXCEPTION_NETWORK_CONFIG_FAILED: Final = "network_config_failed"
+TRANS_KEY_EXCEPTION_NETWORK_USAGE_FAILED: Final = "network_usage_failed"
 TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS: Final = "network_name_ambiguous"
 TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND: Final = "network_not_found"
 TRANS_KEY_EXCEPTION_NETWORK_REQUIRED: Final = "network_required"
@@ -712,16 +710,10 @@ TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED: Final = "speed_test_wan_required"
 TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT: Final = (
     "speed_test_wan_selector_conflict"
 )
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN: Final = (
-    "time_usage_report_end_before_begin"
-)
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS: Final = (
-    "time_usage_report_scope_ambiguous"
-)
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND: Final = (
-    "time_usage_report_scope_not_found"
-)
-TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED: Final = "time_usage_report_failed"
+TRANS_KEY_EXCEPTION_TIME_USAGE_END_BEFORE_BEGIN: Final = "time_usage_end_before_begin"
+TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_AMBIGUOUS: Final = "time_usage_scope_ambiguous"
+TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_NOT_FOUND: Final = "time_usage_scope_not_found"
+TRANS_KEY_EXCEPTION_TIME_USAGE_FAILED: Final = "time_usage_failed"
 TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_AMBIGUOUS: Final = "flow_report_scope_ambiguous"
 TRANS_KEY_EXCEPTION_FLOW_REPORT_SCOPE_NOT_FOUND: Final = "flow_report_scope_not_found"
 TRANS_KEY_EXCEPTION_FLOW_REPORT_FAILED: Final = "flow_report_failed"
@@ -740,9 +732,9 @@ TRANS_KEY_EXCEPTION_DELETE_ALARMS_CONFIRM_REQUIRED: Final = (
     "delete_alarms_confirm_required"
 )
 TRANS_KEY_EXCEPTION_DELETE_RULE_FAILED: Final = "delete_rule_failed"
-TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED: Final = "wan_data_usage_failed"
-TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
-    "wan_data_usage_history_period_required"
+TRANS_KEY_EXCEPTION_WAN_USAGE_FAILED: Final = "wan_usage_failed"
+TRANS_KEY_EXCEPTION_WAN_USAGE_HISTORY_PERIOD_REQUIRED: Final = (
+    "wan_usage_history_period_required"
 )
 TRANS_KEY_EXCEPTION_WAN_EVENTS_FAILED: Final = "wan_events_failed"
 TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY: Final = "wrong_integration_entry"

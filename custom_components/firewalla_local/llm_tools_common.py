@@ -35,7 +35,7 @@ SYSTEM_MODEL: Final = (
     "model covers only what is true across all of them.\n"
     "\n"
     "**Vocabulary.** A Firewalla endpoint is a `host` — this integration's word "
-    "for one device on the network: `list_hosts`, `host_mac`, `host_name`, "
+    "for one device on the network: `get_hosts`, `host_mac`, `host_name`, "
     "`host_group`, `hosts_online`. Nothing here names that concept `device`. "
     "Firewalla is itself inconsistent (its inventory says `mac`, its flow rows and "
     "tag names say `device`), so there is no vendor word to follow and one concept "
@@ -83,8 +83,8 @@ SYSTEM_MODEL: Final = (
     "arbitrarily.\n"
     "\n"
     "**Resolve before acting.** The write tools need exact identifiers and cannot "
-    "guess them, so read them first: a rule id from `list_rules`, a host from "
-    "`list_hosts`, an SSID from `get_wireless_status`. `get_system_overview` returns "
+    "guess them, so read them first: a rule id from `get_rules`, a host from "
+    "`get_hosts`, an SSID from `get_wireless_status`. `get_system_overview` returns "
     "the network, group and user identifiers the others need; call it once per "
     "session unless the network has changed. **`refresh` defaults to false**, so a "
     "read serves the cached snapshot: fast, and current to within the poll interval. "
@@ -98,7 +98,7 @@ SYSTEM_MODEL: Final = (
     "of those applies globally. Attachment **replaces** rather than adds: once a host "
     "belongs to a group or user, its rules come from that group or user and its "
     'host-level rules no longer reach it. So to answer "what rules apply to this '
-    'host?", read its `group_name` from `list_hosts` and pass that to `list_rules` '
+    'host?", read its `group_name` from `get_hosts` and pass that to `get_rules` '
     "as `applies_to` — which matches exactly, and a host may list several names "
     'separated by ", ", so filter one at a time.\n'
     "\n"

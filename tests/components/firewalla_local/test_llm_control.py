@@ -60,7 +60,7 @@ SET_HOST_DEVICE_TYPE = "firewalla_local__set_host_device_type"
 SET_SSID_PAUSED = "firewalla_local__set_ssid_paused"
 WAKE_HOST = "firewalla_local__wake_host"
 BLOCK_ALARM_TARGET = "firewalla_local__block_alarm_target"
-SET_ALARM_MUTED = "firewalla_local__set_alarm_muted"
+MUTE_ALARM = "firewalla_local__mute_alarm"
 ARCHIVE_ALARM = "firewalla_local__archive_alarm"
 ARCHIVE_ALL_ALARMS = "firewalla_local__archive_all_alarms"
 DELETE_ALARM = "firewalla_local__delete_alarm"
@@ -446,8 +446,8 @@ async def test_archive_alarm_uses_single_mode(hass: HomeAssistant) -> None:
     assert result.data["warnings"] == ["no un-archive"]
 
 
-async def test_set_alarm_muted_calls_alarm_manager(hass: HomeAssistant) -> None:
-    """set_alarm_muted creates a silence and offers an alarm-scoped undo."""
+async def test_mute_alarm_calls_alarm_manager(hass: HomeAssistant) -> None:
+    """mute_alarm creates a silence and offers an alarm-scoped undo."""
     with patch(
         "custom_components.firewalla_local.managers.alarm_manager."
         "FirewallaAlarmManager.async_mute_alarm",
@@ -456,7 +456,7 @@ async def test_set_alarm_muted_calls_alarm_manager(hass: HomeAssistant) -> None:
         api_instance = await _setup(hass)
         result = await _call(
             api_instance,
-            SET_ALARM_MUTED,
+            MUTE_ALARM,
             {
                 SERVICE_FIELD_ALARM_ID: "1728",
                 SERVICE_FIELD_ALARM_TARGET_TYPE: "domain",

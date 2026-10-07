@@ -291,7 +291,7 @@ def _snapshot_with_monitoring(*, with_speed_test: bool) -> FirewallaRuntimeSnaps
                 stale=True,
             ),
         ),
-        speed_test_results=(
+        speed_tests=(
             (
                 FirewallaSpeedTestRecord(
                     tested_at_timestamp=1774293094.481,

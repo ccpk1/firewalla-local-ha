@@ -175,7 +175,7 @@ class FirewallaWanSpeedTestSensor(FirewallaEntity, SensorEntity):
     @property
     def _speed_test_result(self) -> FirewallaSpeedTestResult | None:
         """Return the latest speed-test result for this WAN."""
-        results = self.integration_manager.get_speed_test_results(
+        results = self.integration_manager.get_speed_tests(
             wan_uuid=self._wan_uuid,
             limit=1,
         )

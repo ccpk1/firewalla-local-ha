@@ -73,7 +73,7 @@ You can read state or call services this way, and both return structured data yo
 
 ### **Appliance & Data Visibility**
 * **Appliance Monitoring:** Track Firewalla system status, WAN IP details, uptime, memory/disk usage, per-port link/speed/MAC, Bluetooth MAC, box time zone, and the latest successful Speed Test natively. Includes a diagnostic `Sync runtime` button to force an immediate local data refresh.
-* **Internet Quality Monitoring:** Expose per-WAN ping latency and packet-loss sensors from the box's continuous Internet Quality monitor (15-minute samples), plus a `get_internet_quality_report` service for the recent history.
+* **Internet Quality Monitoring:** Expose per-WAN ping latency and packet-loss sensors from the box's continuous Internet Quality monitor (15-minute samples), plus a `get_internet_quality` service for the recent history.
 * **Per-Network Entities:** Expose every Firewalla network (LAN, VLAN, VPN, WAN) as a native binary sensor carrying kind, VLAN ID, ports, IPv4/IPv6 + DHCP, device count, advanced options (mDNS/SSDP Relay, Block ICMP), and usage — including current-month WAN usage.
 * **Per-SSID Wireless Entities (AP7):** When Firewalla AP7 access points are present, expose every wireless network (SSID) as a native binary sensor (status + band, encryption, WPA3, VLAN, interface) and a toggle switch to pause/resume it — all under the Firewalla box device.
 * **Per-AP Device Monitoring (AP7):** Each Firewalla AP7 access point becomes its own Home Assistant device (linked to the box), with a system-status binary sensor exposing channel, LED, TX power, country, mesh mode, timezone, pause-WiFi/ACL state, and live client count.

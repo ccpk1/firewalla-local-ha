@@ -3,13 +3,13 @@
 Two defects were found on the live box, and they are the same defect: **a published
 value the reader cannot reproduce from the payload.**
 
-- **An unreadable instant.** `list_hosts` published `last_active: 1791258075.36`.
+- **An unreadable instant.** `get_hosts` published `last_active: 1791258075.36`.
   There is no date, so an agent has nothing to show a user and ends up comparing
   floats by eye.
 - **A derived value whose inputs are unpublished.** `online` is not a fact about a
   host; it is `reference - last_active <= window`, and none of the three inputs was
   published. That produced a live contradiction: `get_system_overview` reported
-  `vpn_hosts: {total: 5, online: 1}` while `list_hosts` reported all five peers
+  `vpn_hosts: {total: 5, online: 1}` while `get_hosts` reported all five peers
   offline, seconds apart, from the same box.
 
 The rule these guards enforce, stated once:

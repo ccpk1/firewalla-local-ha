@@ -283,7 +283,7 @@ def test_handle_refresh_shapes_appliance_views() -> None:
         ),
         policy_rules=(),
         exception_rule_count=0,
-        speed_test_results=(
+        speed_tests=(
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1000,
                 download_mbps=100,
@@ -444,7 +444,7 @@ def test_latest_speed_test_is_none_without_successful_records() -> None:
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
-        speed_test_results=(
+        speed_tests=(
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1000,
                 download_mbps=None,
@@ -475,7 +475,7 @@ def test_latest_speed_test_is_none_without_successful_records() -> None:
     assert manager.latest_speed_test is None
 
 
-def test_get_speed_test_results_reuses_shaped_speed_test_path() -> None:
+def test_get_speed_tests_reuses_shaped_speed_test_path() -> None:
     """Test speed-test result lists reuse the same shaping logic as the sensor view."""
     snapshot = FirewallaRuntimeSnapshot(
         appliance_identity=FirewallaApplianceIdentityInput(
@@ -489,7 +489,7 @@ def test_get_speed_test_results_reuses_shaped_speed_test_path() -> None:
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
-        speed_test_results=(
+        speed_tests=(
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1000,
                 download_mbps=100,
@@ -536,8 +536,8 @@ def test_get_speed_test_results_reuses_shaped_speed_test_path() -> None:
     )
     manager = _build_manager(snapshot)
 
-    results = manager.get_speed_test_results(limit=2)
-    wan_filtered_results = manager.get_speed_test_results(wan_uuid="wan-1", limit=2)
+    results = manager.get_speed_tests(limit=2)
+    wan_filtered_results = manager.get_speed_tests(wan_uuid="wan-1", limit=2)
 
     assert [result.tested_at_timestamp for result in results] == [2000, 1000]
     assert results[0].wan_name == "WAN-TWO"
@@ -724,7 +724,7 @@ def test_get_available_wans_ignores_speed_test_uuid_fallback() -> None:
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
-        speed_test_results=(
+        speed_tests=(
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1000,
                 download_mbps=100,
@@ -1519,7 +1519,7 @@ def test_get_available_wans_filters_wan_kind_without_speed_test_fallback() -> No
         appliance_runtime=FirewallaApplianceRuntimeInput(),
         policy_rules=(),
         exception_rule_count=0,
-        speed_test_results=(
+        speed_tests=(
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1000,
                 download_mbps=100,
@@ -1737,7 +1737,7 @@ async def test_delete_host_removes_it_from_both_views_at_once() -> None:
 
     This is the defect the optimistic update fixed rather than introduced: deletion
     popped the host out of the manager's index while `coordinator.data.hosts` still
-    carried it, so `get_host(mac)` returned nothing while `list_hosts` — which reads
+    carried it, so `get_host(mac)` returned nothing while `get_hosts` — which reads
     the snapshot — still listed the deleted host. The test asserts both views
     together, because asserting either alone is what let them disagree.
     """

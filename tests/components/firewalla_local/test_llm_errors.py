@@ -56,7 +56,7 @@ _TOOLS_REQUIRING_ARGS: tuple[tuple[str, dict[str, object]], ...] = (
     ("firewalla_local__resume_rule", {SERVICE_FIELD_RULE_ID: "761"}),
     ("firewalla_local__set_ssid_paused", {SERVICE_FIELD_ENABLED: True}),
     ("firewalla_local__set_host_name", {SERVICE_FIELD_NEW_NAME: "x"}),
-    ("firewalla_local__set_alarm_muted", {SERVICE_FIELD_TARGET_TYPE: "domain"}),
+    ("firewalla_local__mute_alarm", {SERVICE_FIELD_TARGET_TYPE: "domain"}),
     ("firewalla_local__archive_alarm", {}),
     ("firewalla_local__delete_host", {}),
     ("firewalla_local__delete_rule", {}),
@@ -262,14 +262,14 @@ async def test_block_alarm_target_requires_a_selector(
         )
 
 
-async def test_set_alarm_muted_requires_a_scope(hass: HomeAssistant) -> None:
+async def test_mute_alarm_requires_a_scope(hass: HomeAssistant) -> None:
     """A mute without an explicit scope is rejected (never a silent global mute)."""
     api_instance = await _api_instance(hass)
 
     with pytest.raises(Exception) as err:
         await api_instance.async_call_tool(
             llm.ToolInput(
-                tool_name="firewalla_local__set_alarm_muted",
+                tool_name="firewalla_local__mute_alarm",
                 tool_args={
                     SERVICE_FIELD_TARGET_TYPE: "domain",
                     SERVICE_FIELD_TARGET_VALUE: "vimeo.com",

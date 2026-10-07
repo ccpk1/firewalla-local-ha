@@ -79,6 +79,28 @@ _PROSE_IDENTIFIERS: Final = frozenset(
     {"null", "true", "false", "applied", "already_in_state", "failed"}
 )
 
+# Tools whose name intentionally differs from the service they call, because the
+# tool exposes a narrower slice of one general service. Every other tool must be
+# named exactly like the service behind it.
+_TOOL_SERVICE_EXCEPTIONS: Final = frozenset(
+    {
+        # One membership service, multiplexed across four tools by a `clear` flag.
+        "set_host_group",
+        "clear_host_group",
+        "set_host_user",
+        "clear_host_user",
+        # One archive service and one delete service, each reached by a single-object
+        # tool and a bulk tool.
+        "archive_alarm",
+        "archive_all_alarms",
+        "delete_alarm",
+        "delete_all_alarms",
+        # The alarm pair borrows the generic rule services rather than owning one.
+        "block_alarm_target",
+        "unblock_alarm_target",
+    }
+)
+
 # The control tools whose manager applies the write to the in-memory snapshot, so
 # their result reports `runtime: updated`. Everything else reports `pending`, either
 # because it deliberately does not update local state or because it has none to
@@ -422,7 +444,7 @@ async def test_every_identifier_in_a_description_resolves(
     A description is prose *about* the payload, so it drifts the moment a field is
     renamed — and nothing noticed. The Time and Derived State renames updated the
     payload, the constants, the translations and the reference document, and left
-    ``list_hosts`` telling the model to read ``` `last_active` ``` (epoch seconds)
+    ``get_hosts`` telling the model to read ``` `last_active` ``` (epoch seconds)
     for a field that no longer existed under that name, in a form that had moved to
     its twin. The pairing guards could not see it: they assert key names in
     *payloads*, and a description is a string literal.
@@ -466,7 +488,7 @@ def test_the_description_identifier_scan_reads_real_text() -> None:
         "package; too little would resolve and every tool would fail"
     )
     assert "last_active_at" in corpus, "the corpus is missing a known published key"
-    assert "list_rules" in corpus, "the corpus is missing a known tool action"
+    assert "get_rules" in corpus, "the corpus is missing a known tool action"
 
     # The defect, replayed. If prose naming the pre-rename field resolves, the corpus
     # has been contaminated by an internal name and the guard proves nothing.
@@ -575,7 +597,7 @@ async def test_family_injections_say_what_the_model_cannot_get_elsewhere(
     tools = {tool.name: tool for tool in api_instance.tools}
 
     # Read adds the bounded-result rule, which is not in the model.
-    read_body = tools["firewalla_local__list_hosts"].description
+    read_body = tools["firewalla_local__get_hosts"].description
     assert "truncated" in read_body
     assert "truncated" not in PROMPT, (
         "the model already covers truncated results, so the read block is repeating "
@@ -661,6 +683,49 @@ async def test_every_control_tool_declares_its_runtime_contract(
     )
 
 
+async def test_a_tool_and_its_service_share_one_name(hass: HomeAssistant) -> None:
+    """A tool and the service behind it name one operation, so they name it alike.
+
+    Fourteen read tools and eight control tools disagreed with their service, so the
+    same operation had two names depending on which layer you were reading: the
+    model asked for `get_network_config` while the automation called
+    `get_network_config`, and neither name was discoverable from the other.
+    Names are the only index either surface has.
+
+    A tool that is deliberately narrower than its service is listed in
+    `_TOOL_SERVICE_EXCEPTIONS` with the reason, so the divergence is a decision
+    rather than an oversight — that is what the list is for.
+    """
+    api_instance = await _api_instance(hass)
+    by_action = {
+        tool.name.removeprefix(f"{DOMAIN}__"): tool for tool in api_instance.tools
+    }
+
+    mismatched: list[str] = []
+    for action, tool in by_action.items():
+        if action in _TOOL_SERVICE_EXCEPTIONS:
+            continue
+        if action != tool._service:
+            mismatched.append(f"{action} -> {tool._service}")
+
+    assert mismatched == [], (
+        "these tools call a service with a different name, so one operation has two "
+        f"names: {mismatched}"
+    )
+
+    # And the exception list has to stay a list of genuine divergences, so it cannot
+    # be used to silence a tool that drifted.
+    unnecessary = [
+        action
+        for action in _TOOL_SERVICE_EXCEPTIONS
+        if action not in by_action or by_action[action]._service == action
+    ]
+    assert unnecessary == [], (
+        "these tools are excepted from the naming rule but no longer need to be: "
+        f"{unnecessary}"
+    )
+
+
 async def test_the_injection_check_distinguishes_the_families(
     hass: HomeAssistant,
 ) -> None:
@@ -729,8 +794,8 @@ async def test_write_descriptions_guide_the_model(hass: HomeAssistant) -> None:
     assert "resume_rule" in tools["firewalla_local__pause_rule"].description
     assert "reversible" in tools["firewalla_local__set_ssid_paused"].description
     # Overlapping-name tools must contrast their near neighbour.
-    assert "set_alarm_muted" in tools["firewalla_local__archive_alarm"].description
-    assert "archive_alarm" in tools["firewalla_local__set_alarm_muted"].description
+    assert "mute_alarm" in tools["firewalla_local__archive_alarm"].description
+    assert "archive_alarm" in tools["firewalla_local__mute_alarm"].description
     # The block tool must name its key fields.
     for field in ("alarm_id", "target_type", "target_value"):
         assert field in tools["firewalla_local__block_alarm_target"].description
@@ -757,14 +822,14 @@ async def test_policy_guidance_sits_with_the_tool_that_shows_it(
 async def test_rule_scope_precedence_is_stated_consistently(
     hass: HomeAssistant,
 ) -> None:
-    """The prompt and list_rules agree that attachment replaces device rules.
+    """The prompt and get_rules agree that attachment replaces device rules.
 
     Two different mental models here would be worse than one imprecise one: the
     agent would have to guess which to believe when asked what covers a device.
     """
     api_instance = await _api_instance(hass)
     tools = {tool.name: tool for tool in api_instance.tools}
-    rules_description = tools["firewalla_local__list_rules"].description
+    rules_description = tools["firewalla_local__get_rules"].description
 
     assert "Attachment **replaces**" in PROMPT
     assert "no longer reach it" in PROMPT
@@ -835,7 +900,7 @@ async def test_the_user_filter_description_matches_what_the_filters_do(
     api_instance = await _api_instance(hass)
     tools = {tool.name: tool for tool in api_instance.tools}
 
-    hosts = tools["firewalla_local__list_hosts"]
+    hosts = tools["firewalla_local__get_hosts"]
     # The description lives on the marker, not on the schema value.
     group_param = next(
         marker for marker in hosts.parameters.schema if marker.schema == "group_name"
@@ -854,7 +919,7 @@ async def test_the_user_filter_description_matches_what_the_filters_do(
 
 
 async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
-    """A host's group_name is named as the input to list_rules' applies_to.
+    """A host's group_name is named as the input to get_rules' applies_to.
 
     A smoke test asked "what rules apply to <device>", and the model found the
     host and its group_name, then stopped. Both descriptions were individually
@@ -865,10 +930,10 @@ async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
     api_instance = await _api_instance(hass)
     tools = {tool.name: tool for tool in api_instance.tools}
 
-    hosts_description = tools["firewalla_local__list_hosts"].description
+    hosts_description = tools["firewalla_local__get_hosts"].description
     applies_to = next(
         marker.description
-        for marker in tools["firewalla_local__list_rules"].parameters.schema
+        for marker in tools["firewalla_local__get_rules"].parameters.schema
         if marker.schema == "applies_to"
     )
 
@@ -882,10 +947,10 @@ async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
 # Each entry pairs a tool that returns a large payload with the phrase in its
 # description that tells the model how to avoid paying for all of it.
 _PAYLOAD_GUIDANCE: Final = (
-    ("firewalla_local__list_hosts", "filters narrow on the box"),
-    ("firewalla_local__list_rules", "User-visible rules only by default"),
+    ("firewalla_local__get_hosts", "filters narrow on the box"),
+    ("firewalla_local__get_rules", "User-visible rules only by default"),
     ("firewalla_local__get_network_config", "off by default"),
-    ("firewalla_local__get_user_usage", "pass `sections`"),
+    ("firewalla_local__get_time_usage", "pass `sections`"),
 )
 
 
@@ -895,17 +960,17 @@ async def test_count_totals_are_not_presented_as_connected(
     """The counts describe themselves, so `total` is not read as "connected".
 
     A smoke test asked "are there any VPN devices connected?" and got five, all
-    named, because `list_hosts` returned every configured peer with no
+    named, because `get_hosts` returned every configured peer with no
     connectivity signal and the overview's counts were the only place `online`
     appeared. Every surface that reports a total now says what it means, and
-    `list_hosts` carries the per-device `online` the answer actually needs.
+    `get_hosts` carries the per-device `online` the answer actually needs.
     """
     api_instance = await _api_instance(hass)
     tools = {tool.name: tool for tool in api_instance.tools}
 
     for tool_name in (
         "firewalla_local__get_system_overview",
-        "firewalla_local__list_hosts",
+        "firewalla_local__get_hosts",
     ):
         description = tools[tool_name].description
         assert "connected" in description, tool_name
@@ -916,11 +981,10 @@ async def test_count_totals_are_not_presented_as_connected(
     # group returned 10 hosts, 7 of them long-idle, so membership here is the
     # group's full host list.
     assert (
-        "Inactive hosts are included"
-        in tools["firewalla_local__list_hosts"].description
+        "Inactive hosts are included" in tools["firewalla_local__get_hosts"].description
     )
 
-    config = tools["firewalla_local__list_hosts"].parameters.schema
+    config = tools["firewalla_local__get_hosts"].parameters.schema
     assert any(marker.schema == "online" for marker in config)
 
 
@@ -1157,7 +1221,7 @@ async def test_read_envelope_is_json_serializable(hass: HomeAssistant) -> None:
     api_instance = await _api_instance(hass)
 
     result = await api_instance.async_call_tool(
-        llm.ToolInput(tool_name="firewalla_local__list_rules", tool_args={})
+        llm.ToolInput(tool_name="firewalla_local__get_rules", tool_args={})
     )
 
     assert result.error is False

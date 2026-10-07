@@ -109,7 +109,7 @@ get_hosts:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_network_segment_report:
+get_network_config:
   name: Get network segment report
   description: Return one configuration-oriented network segment report in the shared report envelope from the Firewalla local API.
   fields:
@@ -278,7 +278,7 @@ get_flow_report:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_network_segment_usage:
+get_network_usage:
   name: Get network segment usage
   description: Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API.
   fields:
@@ -958,7 +958,7 @@ set_host_membership:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_speed_test_results:
+get_speed_tests:
   name: Get speed test results
   description: Return normalized Firewalla internet speed test results from the coordinator refresh path.
   fields:
@@ -1008,7 +1008,7 @@ get_speed_test_results:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_internet_quality_report:
+get_internet_quality:
   name: Get internet quality report
   description: Return normalized Firewalla internet-quality samples (ping latency and packet loss) from the manager cache.
   fields:
@@ -1058,7 +1058,7 @@ get_internet_quality_report:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_time_usage_report:
+get_time_usage:
   name: Get time usage report
   description: Return one normalized scoped time-usage report from the Firewalla local API.
   fields:
@@ -1190,7 +1190,7 @@ get_time_usage_report:
       name: Config entry name (Optional)
       description: Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID.
 
-get_wan_data_usage:
+get_wan_usage:
   name: Get WAN data usage
   description: Return one normalized WAN data-usage report with current and history month, week, and day sections.
   fields:

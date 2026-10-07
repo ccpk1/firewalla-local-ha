@@ -37,7 +37,7 @@ workflow is `block_alarm_target` / `unblock_alarm_target`, not `create_rule` /
 ### Vocabulary: a Firewalla endpoint is a `host`
 
 **Use `host` for a device on the user's network — in your answers, not just in field
-names.** `list_hosts`, `host_mac`, `host_name`, `host_group`, `hosts_online`, `host`.
+names.** `get_hosts`, `host_mac`, `host_name`, `host_group`, `hosts_online`, `host`.
 Nothing these tools return names that concept `device`. This is deliberate and worth
 stating, because two other meanings of "device" surround it:
 
@@ -287,7 +287,7 @@ Each tool declares four machine-readable flags (served to MCP clients):
 
 Inputs are **flat** (nested objects are awkward for the LLM). Every parameter carries
 a `description`. Enums are described by meaning, and where a value is discoverable,
-the description says how (e.g. "`rule_id` comes from `list_rules`").
+the description says how (e.g. "`rule_id` comes from `get_rules`").
 
 **One API per Firewalla box — tools are pre-bound to their box.** Each config entry
 registers its own LLM API, so a tool already knows which box it acts on: the entry
@@ -310,13 +310,13 @@ to one host.
 |---|---|---|---|
 | Overview | `get_system_overview` | read | summary+ |
 | Overview | `sync_runtime` | read | read+ |
-| Know my network | `list_hosts` | read | read+ |
-| Know my network | `list_rules` | read | read+ |
+| Know my network | `get_hosts` | read | read+ |
+| Know my network | `get_rules` | read | read+ |
 | Know my network | `get_network_config` | read | read+ |
 | Usage & health | `get_network_usage` | read | read+ |
 | Usage & health | `get_wan_usage` | read | read+ |
 | Usage & health | `get_wan_events` | read | read+ |
-| Usage & health | `get_user_usage` | read | read+ |
+| Usage & health | `get_time_usage` | read | read+ |
 | Usage & health | `get_flow_report` | read | read+ |
 | Usage & health | `get_internet_quality` | read | read+ |
 | Usage & health | `get_speed_tests` | read | read+ |
@@ -333,7 +333,7 @@ to one host.
 | Control access | `resume_rule` | control | control+ |
 | Control access | `set_ssid_paused` | control | control+ |
 | Respond to alarms | `get_alarms` | read | read+ |
-| Respond to alarms | `set_alarm_muted` | control | control+ |
+| Respond to alarms | `mute_alarm` | control | control+ |
 | Respond to alarms | `unmute_alarm` | control | control+ |
 | Respond to alarms | `block_alarm_target` | control | control+ |
 | Respond to alarms | `unblock_alarm_target` | control | control+ |
@@ -360,10 +360,10 @@ Reads that tell you what exists — the first step before any control action.
   "Which networks, groups and users do I have?"
 - **When to use / not:** **start here.** Call it once at the beginning of a session
   for any general question. It returns counts and identifiers, never records — use
-  `list_hosts` for hosts and `list_rules` for rules, and do not answer a
+  `get_hosts` for hosts and `get_rules` for rules, and do not answer a
   per-host question from this summary.
 - **Inputs:** `include` (optional list — `"identifiers"` adds the group and user
-  names and ids that `get_user_usage` and the rule tools accept as selectors).
+  names and ids that `get_time_usage` and the rule tools accept as selectors).
 - **Returns:** read envelope — `result` with `appliance` (model, software version,
   firmware, uptime, CPU/memory/disk), `hosts` and `vpn_hosts` counts (each
   `total`/`online`/`offline` — **`total` is not the connected count**; peers are
@@ -410,7 +410,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Annotations:** `read_only=true`, `destructive=false`, `idempotent=true`,
   `open_world=true`.
 
-### `firewalla_local__list_hosts`
+### `firewalla_local__get_hosts`
 
 - **Answers:** "What hosts are on my network?" / "Which hosts have no DHCP
   reservation?" / "What is this host named?"
@@ -470,7 +470,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true.
 
-### `firewalla_local__list_rules`
+### `firewalla_local__get_rules`
 
 - **Answers:** "What firewall rules exist?" / "Which rule controls this person or
   host?" / "Is this rule paused?" — the discovery feed for `pause_rule` /
@@ -491,7 +491,7 @@ Reads that tell you what exists — the first step before any control action.
   inventory. *(Owner-provided product behaviour, 2026-10-01 — not yet reproduced from a
   live capture.)*
 - **The chain to a host's rules — state it, do not leave it to be inferred:** read the
-  host's `group_name` from `list_hosts`, then pass it to `list_rules` as `applies_to`.
+  host's `group_name` from `get_hosts`, then pass it to `get_rules` as `applies_to`.
   The two fields share one vocabulary (both resolve a tag reference through affiliated
   users first, then the tag name), which is why the value transfers. Two caveats: the
   filter matches **exactly**, and a host may list several groups separated by `", "`,
@@ -559,7 +559,7 @@ Reads that tell you what exists — the first step before any control action.
 - **Answers:** "How is my LAN segmented?" / "What networks/VLANs exist?" / "How is
   DHCP configured on this network?"
 - **When to use / not:** for network structure and DHCP config. Not for per-host
-  traffic (`get_network_usage`) or per-host reservations (`list_hosts`).
+  traffic (`get_network_usage`) or per-host reservations (`get_hosts`).
 - **Inputs:** `network_name` or `network_uuid` (**required** — one network per call;
   resolve from `get_system_overview`); `include` (`['hosts']` to add the per-network
   host list, which is absent by default); `refresh`.
@@ -595,7 +595,7 @@ Reads that explain what the network is doing and how it is performing.
 - **When to use / not:** for per-host/app/category usage **within one network
   segment, over a time window**. There is no whole-box usage tool: ask per
   network. Not for WAN totals (`get_wan_usage`) or a person's time-online
-  (`get_user_usage`).
+  (`get_time_usage`).
 - **Inputs:** `network_uuid` or `network_name` (**required** — resolve from `get_system_overview`); `window` (enum: which period — the valid windows differ by source; see the tool description), `top_n` (default 5 — a truncated ranking is flagged in `meta`), `include` (e.g. `"series"` to add raw samples), `refresh`.
 - **Returns:** read envelope — `result` with top talkers, apps, categories, activity; `meta.truncated` when `top_n` cut data.
 - **Availability:** read, default-on.
@@ -635,7 +635,7 @@ Reads that explain what the network is doing and how it is performing.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
-### `firewalla_local__get_user_usage`
+### `firewalla_local__get_time_usage`
 
 - **Answers:** "How much was X online today?" / "How much screen/internet time did a
   person get?"
@@ -659,9 +659,9 @@ Reads that explain what the network is doing and how it is performing.
 - **Answers:** "What did this host do?" / "What did the kids' group reach?" / "What
   was blocked for this host?" / "Is something talking to a host it shouldn't?"
 - **When to use / not:** a host's or group's own traffic — totals, destinations,
-  blocked breakdown, LAN peers. Use it after `list_hosts` or `get_system_overview`
+  blocked breakdown, LAN peers. Use it after `get_hosts` or `get_system_overview`
   has resolved who you are asking about. Not bandwidth over a whole network
-  (`get_network_usage`), and not time spent online (`get_user_usage`).
+  (`get_network_usage`), and not time spent online (`get_time_usage`).
 - **Coverage:** the box's own flow data, of which it retains roughly the last 24
   hours. A wider `window_hours` is accepted and quietly served as that much, so read
   `summary.window.served_hours` and `summary.window.is_clamped` and state the span
@@ -754,7 +754,7 @@ echo it in `target`. All are reversible except where noted.
 
 ### `firewalla_local__set_host_dhcp_reservation`
 - **Answers:** "Give this host a fixed IP." / "Reserve IPs for every host without one."
-- **When to use / not:** the standout host workflow. Paired with `list_hosts` (see `ip_assignment.mode`). Strong built-in validation (conflict / in-use / invalid / out-of-range / network-ambiguous) rejects bad writes with an actionable message.
+- **When to use / not:** the standout host workflow. Paired with `get_hosts` (see `ip_assignment.mode`). Strong built-in validation (conflict / in-use / invalid / out-of-range / network-ambiguous) rejects bad writes with an actionable message.
 - **Inputs:** `host` (name/MAC), `mode` (`static`/`dynamic`), `reserved_ipv4`, `network_name`/`network_uuid` (when ambiguous).
 - **Returns:** action-result (`before`/`after.ip_assignment`).
 - **Reversibility & undo:** reversible — `undo` sets `mode` back to `dynamic`.
@@ -832,7 +832,7 @@ Broad access control. Read the blast radius carefully.
 ### `firewalla_local__pause_rule`
 
 - **Answers:** "Pause the rule blocking X." / "Temporarily disable this rule."
-- **When to use / not:** temporary, reversible rule disable. Resolve `rule_id` via `list_rules`. For a permanent change use a rule switch / `delete_rule` (not exposed here). Idempotent — pausing an already-paused rule reports `already_in_state`.
+- **When to use / not:** temporary, reversible rule disable. Resolve `rule_id` via `get_rules`. For a permanent change use a rule switch / `delete_rule` (not exposed here). Idempotent — pausing an already-paused rule reports `already_in_state`.
 - **Inputs:** `rule_id` (rule id), `duration` (e.g. `30m`, `4h`, `2d 4h 30m`) **or** `resume_at` (local datetime) — omit both to pause until resumed.
 - **Returns:** action-result (`before`/`after.enabled`, `undo` = `resume_rule`).
 - **Reversibility & undo:** fully reversible — `firewalla_local__resume_rule`.
@@ -880,7 +880,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 
-### `firewalla_local__set_alarm_muted`
+### `firewalla_local__mute_alarm`
 
 - **Answers:** "Stop alerting me about this." / "Silence this alarm type / domain / IP."
 - **When to use / not:** creates a **silence** (an exception) so future matching alarms stop alerting — it does **not** block traffic and does **not** remove the alarm. For blocking traffic use `block_alarm_target`; for clearing one alarm use `archive_alarm`. Idempotent (`already_in_state`).
@@ -897,21 +897,21 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 ### `firewalla_local__unmute_alarm`
 
 - **Answers:** "Stop silencing these alarms" / "Undo that mute."
-- **When to use / not:** the undo for `set_alarm_muted`. Removing a silence only
+- **When to use / not:** the undo for `mute_alarm`. Removing a silence only
   restores alerting — it does not block traffic (`block_alarm_target`) or dismiss an
   alarm (`archive_alarm`).
 - **Inputs:** `alarm_id` **or** `exception_id` (the silence id).
 - **Returns:** action-result envelope — the `target` is the silence, `undo` is null
   (it is itself the undo).
 - **Reversibility & undo:** reversible by re-muting. No `undo` is emitted, because
-  the reversing call is `set_alarm_muted` with the same scope.
+  the reversing call is `mute_alarm` with the same scope.
 - **Annotations:** `read_only=false`, `destructive=false`, `idempotent=true`,
   `open_world=true`.
 
 ### `firewalla_local__block_alarm_target`
 
 - **Answers:** "Block this." / "Block the domain/IP/host that caused this alarm."
-- **When to use / not:** creates a **block rule** for the alarm's target (traffic is actually blocked). It is **not** a mute (that is `set_alarm_muted`) and does not by itself clear the alarm (though it auto-archives it). Idempotent — blocking an already-blocked target reports `already_in_state`.
+- **When to use / not:** creates a **block rule** for the alarm's target (traffic is actually blocked). It is **not** a mute (that is `mute_alarm`) and does not by itself clear the alarm (though it auto-archives it). Idempotent — blocking an already-blocked target reports `already_in_state`.
 - **Inputs (flat):** `alarm_id` (derive target/scope from the alarm) **or** the pair
   `target_type` / `target_value` (`dns`/`ip`/`mac`), plus **exactly one** scope
   selector: `host_mac`, `host_name`, `group_id`, `group_name`, `user_id`,
@@ -935,7 +935,7 @@ Read alarms, then act. Keep **mute (silence)** distinct from **block (rule)**.
 ### `firewalla_local__archive_alarm`
 
 - **Answers:** "Dismiss this alarm." / "Clear it from the active list."
-- **When to use / not:** archives **one** alarm — dismisses it but keeps the record (unlike delete, which is not exposed). It does **not** stop future matching alarms (that is `set_alarm_muted`). Normal dismiss operation; there is no un-archive if you change your mind.
+- **When to use / not:** archives **one** alarm — dismisses it but keeps the record (unlike delete, which is not exposed). It does **not** stop future matching alarms (that is `mute_alarm`). Normal dismiss operation; there is no un-archive if you change your mind.
 - **Inputs:** `alarm_id` — the single-alarm selector. To archive the whole active set use `archive_all_alarms`.
 - **Returns:** action-result.
 - **Reversibility & undo:** the archive itself cannot be undone, but the record is kept. No `undo`.
@@ -962,7 +962,7 @@ disable a rule reversibly.
 Deliberately **not** available as tools at any mode:
 
 - `get_runtime_inventory` — admin-gated and a very large payload (privacy + context
-  cost). Host and rule discovery are `list_hosts` and `list_rules`.
+  cost). Host and rule discovery are `get_hosts` and `get_rules`.
 - Generic `create_rule` beyond the alarm-block workflow — arbitrary rule creation has
   a wide blast radius; `block_alarm_target` is the bounded, alarm-scoped entry point.
 

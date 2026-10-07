@@ -219,9 +219,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Shape manager-owned appliance views from one refresh snapshot."""
         self._system_info = self._build_system_info(snapshot.appliance_identity)
         self._system_status = self._build_system_status(snapshot.appliance_runtime)
-        self._latest_speed_test = self._build_latest_speed_test(
-            snapshot.speed_test_results
-        )
+        self._latest_speed_test = self._build_latest_speed_test(snapshot.speed_tests)
         self._top_talkers_by_uuid = self._build_network_top_talkers(snapshot)
         if (
             host_manager := getattr(self.coordinator, "host_manager", None)
@@ -254,7 +252,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Return the latest successful shaped speed-test view."""
         if self._latest_speed_test is None and self.coordinator.data is not None:
             self._latest_speed_test = self._build_latest_speed_test(
-                self.coordinator.data.speed_test_results
+                self.coordinator.data.speed_tests
             )
         return self._latest_speed_test
 
@@ -278,7 +276,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             self._with_usage(network) for network in self._collect_networks(payload)
         )
 
-    def get_speed_test_results(
+    def get_speed_tests(
         self,
         *,
         wan_uuid: str | None = None,
@@ -288,8 +286,8 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if self.coordinator.data is None:
             return ()
 
-        return self._build_speed_test_results(
-            self.coordinator.data.speed_test_results,
+        return self._build_speed_tests(
+            self.coordinator.data.speed_tests,
             wan_uuid=wan_uuid,
             limit=limit,
         )
@@ -470,7 +468,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         )
         return self._build_current_wan_usage_summaries(raw_usage, wan_uuid=wan_uuid)
 
-    async def async_get_wan_data_usage_reports(
+    async def async_get_wan_usage_reports(
         self,
         *,
         wan_uuid: str | None = None,
@@ -498,13 +496,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         elif history_requested:
             history_raw = await self.client.async_get_last12_monthly_wan_usage_payload()
 
-        current_rows, current_day_rows = self._build_current_wan_data_usage_rows(
+        current_rows, current_day_rows = self._build_current_wan_usage_rows(
             current_raw,
             wan_uuid=wan_uuid,
             detail=detail,
             time_zone=time_zone,
         )
-        history_rows, history_day_rows = self._build_history_wan_data_usage_rows(
+        history_rows, history_day_rows = self._build_history_wan_usage_rows(
             history_raw,
             wan_uuid=wan_uuid,
             history_count=history_count,
@@ -985,7 +983,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Shape the latest successful speed-test view from protocol-facing input."""
         successful_results = tuple(
             result
-            for result in self._build_speed_test_results(speed_test_records)
+            for result in self._build_speed_tests(speed_test_records)
             if result.success is True
         )
         if not successful_results:
@@ -1418,7 +1416,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         return normalized or None
 
-    def _build_speed_test_results(
+    def _build_speed_tests(
         self,
         speed_test_records: tuple[FirewallaSpeedTestRecord, ...],
         *,
@@ -1514,7 +1512,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             )
         )
 
-    def _build_current_wan_data_usage_rows(
+    def _build_current_wan_usage_rows(
         self,
         raw_usage: object,
         *,
@@ -1540,7 +1538,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 continue
 
             if (
-                result := self._build_current_month_wan_data_usage_row(
+                result := self._build_current_month_wan_usage_row(
                     raw_period,
                     detail=detail,
                     time_zone=time_zone,
@@ -1553,7 +1551,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         return rows, day_rows_by_wan
 
-    def _build_history_wan_data_usage_rows(
+    def _build_history_wan_usage_rows(
         self,
         raw_usage: object,
         *,
@@ -1585,7 +1583,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 for raw_period in raw_periods
                 if isinstance(raw_period, dict)
                 and (
-                    result := self._build_history_month_wan_data_usage_row(
+                    result := self._build_history_month_wan_usage_row(
                         raw_period,
                         detail=detail,
                         time_zone=time_zone,
@@ -1615,7 +1613,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
 
         return rows_by_wan, day_rows_by_wan
 
-    def _build_current_month_wan_data_usage_row(
+    def _build_current_month_wan_usage_row(
         self,
         raw_stats: dict[str, object],
         *,
@@ -1623,13 +1621,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         time_zone: tzinfo,
     ) -> tuple[FirewallaWanDataUsageRow, tuple[FirewallaWanDataUsageRow, ...]] | None:
         """Build one current-month WAN data-usage row."""
-        usage = self._build_wan_data_usage(raw_stats)
+        usage = self._build_wan_usage(raw_stats)
         if usage is None:
             return None
 
         month_begin_timestamp = self._optional_int(raw_stats.get("monthlyBeginTs"))
         month_end_timestamp = self._optional_int(raw_stats.get("monthlyEndTs"))
-        all_day_rows = self._build_daily_wan_data_usage_rows(
+        all_day_rows = self._build_daily_wan_usage_rows(
             raw_stats,
             month_begin_timestamp=month_begin_timestamp,
             is_current=True,
@@ -1665,7 +1663,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             all_day_rows,
         )
 
-    def _build_history_month_wan_data_usage_row(
+    def _build_history_month_wan_usage_row(
         self,
         raw_period: dict[str, object],
         *,
@@ -1677,12 +1675,12 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if not isinstance(raw_stats, dict):
             return None
 
-        usage = self._build_wan_data_usage(raw_stats)
+        usage = self._build_wan_usage(raw_stats)
         if usage is None:
             return None
 
         month_anchor_timestamp = self._optional_int(raw_period.get("ts"))
-        all_day_rows = self._build_daily_wan_data_usage_rows(
+        all_day_rows = self._build_daily_wan_usage_rows(
             raw_stats,
             month_begin_timestamp=month_anchor_timestamp,
             is_current=False,
@@ -1722,7 +1720,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             all_day_rows,
         )
 
-    def _build_daily_wan_data_usage_rows(
+    def _build_daily_wan_usage_rows(
         self,
         raw_stats: dict[str, object],
         *,
@@ -1935,7 +1933,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Return one timestamp converted into the requested local timezone."""
         return datetime.fromtimestamp(timestamp, UTC).astimezone(time_zone)
 
-    def _build_wan_data_usage(
+    def _build_wan_usage(
         self,
         raw_stats: object,
     ) -> FirewallaWanDataUsage | None:

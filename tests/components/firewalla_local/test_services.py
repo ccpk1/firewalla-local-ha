@@ -116,15 +116,15 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_ALARMS,
     SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
-    SERVICE_GET_INTERNET_QUALITY_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_USAGE,
+    SERVICE_GET_INTERNET_QUALITY,
+    SERVICE_GET_NETWORK_CONFIG,
+    SERVICE_GET_NETWORK_USAGE,
     SERVICE_GET_RULES,
-    SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SPEED_TESTS,
     SERVICE_GET_SYSTEM_OVERVIEW,
-    SERVICE_GET_TIME_USAGE_REPORT,
-    SERVICE_GET_WAN_DATA_USAGE,
+    SERVICE_GET_TIME_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WAN_USAGE,
     SERVICE_GET_WIRELESS_STATUS,
     SERVICE_MUTE_ALARM,
     SERVICE_PAUSE_RULE,
@@ -142,7 +142,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
-    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
 )
 from custom_components.firewalla_local.coordinator import FirewallaRuntimeData
@@ -318,7 +318,7 @@ def _runtime_payload() -> dict[str, object]:
     }
 
 
-def _network_segment_report_runtime_payload() -> dict[str, object]:
+def _network_config_runtime_payload() -> dict[str, object]:
     """Return a runtime payload enriched for network segment report tests."""
     payload = deepcopy(_runtime_payload())
     payload["networkConfig"] = {
@@ -581,7 +581,7 @@ def _speed_test_snapshot(
                 stale=False,
             ),
         ),
-        speed_test_results=(
+        speed_tests=(
             FirewallaSpeedTestRecord(
                 tested_at_timestamp=1_774_519_230.541,
                 download_mbps=82.65986251831055,
@@ -2266,7 +2266,7 @@ async def test_run_internet_speed_test_service_returns_acknowledgement(
     }
 
 
-async def test_get_speed_test_results_service_defaults_to_latest_result(
+async def test_get_speed_tests_service_defaults_to_latest_result(
     hass: HomeAssistant,
 ) -> None:
     """Test the speed-test results service returns the latest result by default."""
@@ -2300,7 +2300,7 @@ async def test_get_speed_test_results_service_defaults_to_latest_result(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_SPEED_TEST_RESULTS,
+            SERVICE_GET_SPEED_TESTS,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -2319,7 +2319,7 @@ async def test_get_speed_test_results_service_defaults_to_latest_result(
     assert response["results"][0]["wan_name"] == "WAN-ONE"
 
 
-async def test_get_speed_test_results_service_filters_one_wan_without_refresh(
+async def test_get_speed_tests_service_filters_one_wan_without_refresh(
     hass: HomeAssistant,
 ) -> None:
     """Test the speed-test results service can filter one WAN from cached data."""
@@ -2353,7 +2353,7 @@ async def test_get_speed_test_results_service_filters_one_wan_without_refresh(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_SPEED_TEST_RESULTS,
+            SERVICE_GET_SPEED_TESTS,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_WAN_UUID: "wan-2",
@@ -2372,7 +2372,7 @@ async def test_get_speed_test_results_service_filters_one_wan_without_refresh(
     assert response["results"][0]["wan_uuid"] == "wan-2"
 
 
-async def test_get_internet_quality_report_service_returns_latest_sample(
+async def test_get_internet_quality_service_returns_latest_sample(
     hass: HomeAssistant,
 ) -> None:
     """Test the internet-quality report service returns the latest sample."""
@@ -2424,7 +2424,7 @@ async def test_get_internet_quality_report_service_returns_latest_sample(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_INTERNET_QUALITY_REPORT,
+            SERVICE_GET_INTERNET_QUALITY,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -2449,7 +2449,7 @@ async def test_get_internet_quality_report_service_returns_latest_sample(
     assert response["samples"][0]["ping_packet_loss_percent"] == 0.17
 
 
-async def test_get_internet_quality_report_service_filters_one_wan(
+async def test_get_internet_quality_service_filters_one_wan(
     hass: HomeAssistant,
 ) -> None:
     """Test the internet-quality report service can filter one WAN."""
@@ -2512,7 +2512,7 @@ async def test_get_internet_quality_report_service_filters_one_wan(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_INTERNET_QUALITY_REPORT,
+            SERVICE_GET_INTERNET_QUALITY,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_WAN_UUID: "wan-2",
@@ -2826,7 +2826,7 @@ async def test_wake_host_service_rejects_non_wol_host(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -4088,7 +4088,7 @@ def test_every_service_field_is_documented() -> None:
     caught `get_hosts` growing eight server-side filters for the AI
     tools while the docs still described only `refresh` and the entry selectors,
     and the same pattern in `get_rules` (six), `get_wan_events` (two), and
-    `get_network_segment_report` (one). Automations could not discover
+    `get_network_config` (one). Automations could not discover
     capabilities the services already had. Schemas are the source of truth.
     """
     from custom_components.firewalla_local.services import _SERVICE_REGISTRATIONS
@@ -4604,7 +4604,7 @@ async def test_get_hosts_defaults_to_summary_detail(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -4701,7 +4701,7 @@ async def test_get_hosts_full_detail_includes_derived_fields(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -4757,7 +4757,7 @@ async def test_get_hosts_supports_filters(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -5261,7 +5261,7 @@ async def test_set_host_dhcp_reservation_returns_acknowledgement_for_static_mode
         },
     )
     entry.add_to_hass(hass)
-    runtime_payload = _network_segment_report_runtime_payload()
+    runtime_payload = _network_config_runtime_payload()
     cast(list[dict[str, object]], runtime_payload["hosts"])[0]["policy"] = {
         "ipAllocation": {
             "allocations": {
@@ -5395,7 +5395,7 @@ async def test_set_host_dhcp_reservation_resolves_names_for_dynamic_mode(
         },
     )
     entry.add_to_hass(hass)
-    runtime_payload = _network_segment_report_runtime_payload()
+    runtime_payload = _network_config_runtime_payload()
     cast(list[dict[str, object]], runtime_payload["hosts"])[0]["policy"] = {
         "ipAllocation": {
             "allocations": {
@@ -5496,7 +5496,7 @@ async def test_set_host_dhcp_reservation_updates_the_local_snapshot(
         },
     )
     entry.add_to_hass(hass)
-    runtime_payload = _network_segment_report_runtime_payload()
+    runtime_payload = _network_config_runtime_payload()
 
     with (
         patch(
@@ -5582,7 +5582,7 @@ async def test_set_host_dhcp_reservation_requires_ipv4_for_static_mode(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -5633,7 +5633,7 @@ async def test_set_host_dhcp_reservation_infers_network_from_ipv4(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -5708,7 +5708,7 @@ async def test_set_host_dhcp_reservation_rejects_ipv4_outside_network_range(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -5756,7 +5756,7 @@ async def test_set_host_dhcp_reservation_rejects_duplicate_ipv4_on_same_network(
         },
     )
     entry.add_to_hass(hass)
-    runtime_payload = _network_segment_report_runtime_payload()
+    runtime_payload = _network_config_runtime_payload()
     cast(list[dict[str, object]], runtime_payload["hosts"])[1]["policy"] = {
         "ipAllocation": {
             "allocations": {
@@ -5801,7 +5801,7 @@ async def test_set_host_dhcp_reservation_rejects_duplicate_ipv4_on_same_network(
         )
 
 
-async def test_get_time_usage_report_service_resolves_device_label_and_serializes_data(
+async def test_get_time_usage_service_resolves_device_label_and_serializes_data(
     hass: HomeAssistant,
 ) -> None:
     """Test the time usage report service resolves one device label."""
@@ -5841,7 +5841,7 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
+            SERVICE_GET_TIME_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_HOST_NAME: "Kaden Phone (192.168.200.25)",
@@ -5955,7 +5955,7 @@ async def test_get_time_usage_report_service_resolves_device_label_and_serialize
     }
 
 
-async def test_get_time_usage_report_service_detail_intervals_keeps_intervals(
+async def test_get_time_usage_service_detail_intervals_keeps_intervals(
     hass: HomeAssistant,
 ) -> None:
     """Test include=intervals preserves per-device interval detail."""
@@ -5993,7 +5993,7 @@ async def test_get_time_usage_report_service_detail_intervals_keeps_intervals(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
+            SERVICE_GET_TIME_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_HOST_NAME: "Kaden Phone (192.168.200.25)",
@@ -6045,7 +6045,7 @@ async def test_get_time_usage_report_service_detail_intervals_keeps_intervals(
     ]
 
 
-async def test_get_time_usage_report_service_resolves_user_name_to_tag_scope(
+async def test_get_time_usage_service_resolves_user_name_to_tag_scope(
     hass: HomeAssistant,
 ) -> None:
     """Test the time usage report service resolves user names through tag scope."""
@@ -6083,7 +6083,7 @@ async def test_get_time_usage_report_service_resolves_user_name_to_tag_scope(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
+            SERVICE_GET_TIME_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_USER_NAME: "KADEN",
@@ -6116,7 +6116,7 @@ async def test_get_time_usage_report_service_resolves_user_name_to_tag_scope(
         pytest.param("10", id="user_backing_tag_id"),
     ],
 )
-async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
+async def test_get_time_usage_group_scope_rejects_a_user_entry(
     hass: HomeAssistant,
     scope_target: str,
 ) -> None:
@@ -6163,7 +6163,7 @@ async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
         with pytest.raises(ServiceValidationError) as err:
             await hass.services.async_call(
                 DOMAIN,
-                SERVICE_GET_TIME_USAGE_REPORT,
+                SERVICE_GET_TIME_USAGE,
                 {
                     SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                     SERVICE_FIELD_GROUP_NAME: scope_target,
@@ -6181,10 +6181,7 @@ async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
                 return_response=True,
             )
 
-    assert (
-        err.value.translation_key
-        == TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND
-    )
+    assert err.value.translation_key == TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_NOT_FOUND
     assert mock_get_usage_history.await_count == 0
 
 
@@ -6203,7 +6200,7 @@ async def test_get_time_usage_report_group_scope_rejects_a_user_entry(
     ],
 )
 @pytest.mark.asyncio
-async def test_get_time_usage_report_accepts_exactly_one_scope_selector(
+async def test_get_time_usage_accepts_exactly_one_scope_selector(
     hass: HomeAssistant,
     data: dict[str, object],
     expected_key: str,
@@ -6249,7 +6246,7 @@ async def test_get_time_usage_report_accepts_exactly_one_scope_selector(
         with pytest.raises(ServiceValidationError) as err:
             await hass.services.async_call(
                 DOMAIN,
-                SERVICE_GET_TIME_USAGE_REPORT,
+                SERVICE_GET_TIME_USAGE,
                 {
                     SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                     SERVICE_FIELD_USAGE_HISTORY_BEGIN: datetime.fromtimestamp(
@@ -6271,7 +6268,7 @@ async def test_get_time_usage_report_accepts_exactly_one_scope_selector(
     assert mock_get_usage_history.await_count == 0
 
 
-async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(
+async def test_get_time_usage_service_preserves_explicit_empty_app_list(
     hass: HomeAssistant,
 ) -> None:
     """Test the time usage report service preserves explicit empty app filters."""
@@ -6309,7 +6306,7 @@ async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
+            SERVICE_GET_TIME_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_GROUP_NAME: "Quarantine",
@@ -6336,7 +6333,7 @@ async def test_get_time_usage_report_service_preserves_explicit_empty_app_list(
     assert response["query"]["app_ids"] == []
 
 
-async def test_get_time_usage_report_service_honors_requested_sections(
+async def test_get_time_usage_service_honors_requested_sections(
     hass: HomeAssistant,
 ) -> None:
     """Test the time usage report includes only explicitly requested sections."""
@@ -6374,7 +6371,7 @@ async def test_get_time_usage_report_service_honors_requested_sections(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
+            SERVICE_GET_TIME_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC",
@@ -6407,7 +6404,7 @@ async def test_get_time_usage_report_service_honors_requested_sections(
     assert response["metadata"]["unavailable_sections"] == []
 
 
-async def test_get_time_usage_report_service_non_empty_app_filter_adds_apps_section(
+async def test_get_time_usage_service_non_empty_app_filter_adds_apps_section(
     hass: HomeAssistant,
 ) -> None:
     """Test a non-empty app filter still returns app usage in summary mode."""
@@ -6445,7 +6442,7 @@ async def test_get_time_usage_report_service_non_empty_app_filter_adds_apps_sect
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
+            SERVICE_GET_TIME_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC",
@@ -6475,7 +6472,7 @@ async def test_get_time_usage_report_service_non_empty_app_filter_adds_apps_sect
     assert response["sections"]["apps"][0]["key"] == "facebook"
 
 
-async def test_get_time_usage_report_service_ranks_apps_and_filters_zero_only_rows(
+async def test_get_time_usage_service_ranks_apps_and_filters_zero_only_rows(
     hass: HomeAssistant,
 ) -> None:
     """Test the time usage report surfaces meaningful app usage first."""
@@ -6513,7 +6510,7 @@ async def test_get_time_usage_report_service_ranks_apps_and_filters_zero_only_ro
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_TIME_USAGE_REPORT,
+            SERVICE_GET_TIME_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_HOST_MAC: "EC:0D:51:CC:BA:BC",
@@ -6544,7 +6541,7 @@ async def test_get_time_usage_report_service_ranks_apps_and_filters_zero_only_ro
     ]
 
 
-async def test_get_wan_data_usage_service_returns_current_month_summary_when_requested(
+async def test_get_wan_usage_service_returns_current_month_summary_when_requested(
     hass: HomeAssistant,
 ) -> None:
     """Test the WAN data usage service returns the requested current month."""
@@ -6587,7 +6584,7 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_when_req
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
+            SERVICE_GET_WAN_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_CURRENT_PERIODS: ["month"],
@@ -6658,7 +6655,7 @@ async def test_get_wan_data_usage_service_returns_current_month_summary_when_req
     assert first_report["history"]["months"] == []
 
 
-async def test_get_wan_data_usage_service_adds_daily_detail_to_current_month(
+async def test_get_wan_usage_service_adds_daily_detail_to_current_month(
     hass: HomeAssistant,
 ) -> None:
     """Test daily detail is nested under current month when requested."""
@@ -6696,7 +6693,7 @@ async def test_get_wan_data_usage_service_adds_daily_detail_to_current_month(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
+            SERVICE_GET_WAN_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_CURRENT_PERIODS: ["month"],
@@ -6728,7 +6725,7 @@ async def test_get_wan_data_usage_service_adds_daily_detail_to_current_month(
     assert first_report["current"]["month"]["days"][0]["time_period"]["kind"] == "day"
 
 
-async def test_get_wan_data_usage_service_defaults_to_day_and_week(
+async def test_get_wan_usage_service_defaults_to_day_and_week(
     hass: HomeAssistant,
 ) -> None:
     """Test the WAN data usage service defaults to the day and week periods.
@@ -6770,7 +6767,7 @@ async def test_get_wan_data_usage_service_defaults_to_day_and_week(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
+            SERVICE_GET_WAN_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
             },
@@ -6784,7 +6781,7 @@ async def test_get_wan_data_usage_service_defaults_to_day_and_week(
     assert response["summary"]["includes_history"] is False
 
 
-async def test_get_wan_data_usage_service_returns_history_months_only(
+async def test_get_wan_usage_service_returns_history_months_only(
     hass: HomeAssistant,
 ) -> None:
     """Test historical monthly usage can be returned without current periods."""
@@ -6822,7 +6819,7 @@ async def test_get_wan_data_usage_service_returns_history_months_only(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
+            SERVICE_GET_WAN_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_CURRENT_PERIODS: [],
@@ -6865,7 +6862,7 @@ async def test_get_wan_data_usage_service_returns_history_months_only(
     assert first_report["history"]["months"][0]["detail"] == "summary"
 
 
-async def test_get_wan_data_usage_service_reports_unavailable_history_include(
+async def test_get_wan_usage_service_reports_unavailable_history_include(
     hass: HomeAssistant,
 ) -> None:
     """Test include=history warns when no history rows were requested."""
@@ -6903,7 +6900,7 @@ async def test_get_wan_data_usage_service_reports_unavailable_history_include(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
+            SERVICE_GET_WAN_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_INCLUDE: ["history"],
@@ -6923,7 +6920,7 @@ async def test_get_wan_data_usage_service_reports_unavailable_history_include(
     ]
 
 
-async def test_get_network_segment_report_service_returns_configuration_report(
+async def test_get_network_config_service_returns_configuration_report(
     hass: HomeAssistant,
 ) -> None:
     """Test the network segment report returns DHCP and host detail data."""
@@ -6945,7 +6942,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -6961,7 +6958,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_REPORT,
+            SERVICE_GET_NETWORK_CONFIG,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -7122,7 +7119,7 @@ async def test_get_network_segment_report_service_returns_configuration_report(
     }
 
 
-async def test_get_network_segment_report_service_omits_hosts_by_default(
+async def test_get_network_config_service_omits_hosts_by_default(
     hass: HomeAssistant,
 ) -> None:
     """Test host rows are omitted unless explicitly included.
@@ -7149,7 +7146,7 @@ async def test_get_network_segment_report_service_omits_hosts_by_default(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -7165,7 +7162,7 @@ async def test_get_network_segment_report_service_omits_hosts_by_default(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_REPORT,
+            SERVICE_GET_NETWORK_CONFIG,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -7192,7 +7189,7 @@ async def test_get_network_segment_report_service_omits_hosts_by_default(
     assert "hosts" not in response["metadata"]["provenance"]
 
 
-async def test_get_network_segment_report_service_requires_network_selector(
+async def test_get_network_config_service_requires_network_selector(
     hass: HomeAssistant,
 ) -> None:
     """Test the network segment report requires one network selector."""
@@ -7214,7 +7211,7 @@ async def test_get_network_segment_report_service_requires_network_selector(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -7230,7 +7227,7 @@ async def test_get_network_segment_report_service_requires_network_selector(
     ):
         await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_REPORT,
+            SERVICE_GET_NETWORK_CONFIG,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_REFRESH: False,
@@ -7240,7 +7237,7 @@ async def test_get_network_segment_report_service_requires_network_selector(
         )
 
 
-async def test_get_network_segment_usage_service_returns_summary_report(
+async def test_get_network_usage_service_returns_summary_report(
     hass: HomeAssistant,
 ) -> None:
     """Test the network segment usage service returns one selected window."""
@@ -7278,7 +7275,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            SERVICE_GET_NETWORK_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -7457,7 +7454,7 @@ async def test_get_network_segment_usage_service_returns_summary_report(
     }
 
 
-async def test_get_network_segment_usage_service_derives_activity_from_flows(
+async def test_get_network_usage_service_derives_activity_from_flows(
     hass: HomeAssistant,
 ) -> None:
     """Test usage falls back to richer flow families when raw host counters are zero."""
@@ -7495,7 +7492,7 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            SERVICE_GET_NETWORK_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -7612,7 +7609,7 @@ async def test_get_network_segment_usage_service_derives_activity_from_flows(
     }
 
 
-async def test_get_network_segment_usage_service_returns_series_when_requested(
+async def test_get_network_usage_service_returns_series_when_requested(
     hass: HomeAssistant,
 ) -> None:
     """Test the network segment usage service adds raw samples when requested."""
@@ -7650,7 +7647,7 @@ async def test_get_network_segment_usage_service_returns_series_when_requested(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            SERVICE_GET_NETWORK_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -7703,7 +7700,7 @@ async def test_get_network_segment_usage_service_returns_series_when_requested(
     }
 
 
-async def test_get_network_segment_usage_service_defaults_window(
+async def test_get_network_usage_service_defaults_window(
     hass: HomeAssistant,
 ) -> None:
     """Test the network segment usage service works without a window.
@@ -7745,7 +7742,7 @@ async def test_get_network_segment_usage_service_defaults_window(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            SERVICE_GET_NETWORK_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -7759,7 +7756,7 @@ async def test_get_network_segment_usage_service_defaults_window(
     assert response["query"]["window"] == "last_60_minutes"
 
 
-async def test_get_network_segment_usage_service_requires_network_selector(
+async def test_get_network_usage_service_requires_network_selector(
     hass: HomeAssistant,
 ) -> None:
     """Test the network segment usage service requires one network selector."""
@@ -7797,7 +7794,7 @@ async def test_get_network_segment_usage_service_requires_network_selector(
     ):
         await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            SERVICE_GET_NETWORK_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_WINDOW: "last_24_hours",
@@ -7808,7 +7805,7 @@ async def test_get_network_segment_usage_service_requires_network_selector(
         )
 
 
-async def test_get_wan_data_usage_service_returns_history_days_in_local_time(
+async def test_get_wan_usage_service_returns_history_days_in_local_time(
     hass: HomeAssistant,
 ) -> None:
     """Test history-day output uses local-time ISO period boundaries."""
@@ -7848,7 +7845,7 @@ async def test_get_wan_data_usage_service_returns_history_days_in_local_time(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
+            SERVICE_GET_WAN_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_CURRENT_PERIODS: [],
@@ -7867,7 +7864,7 @@ async def test_get_wan_data_usage_service_returns_history_days_in_local_time(
     assert first_history_day["time_period"]["end"] == ("2025-06-09T00:00:00-04:00")
 
 
-async def test_get_wan_data_usage_service_returns_current_and_history_weeks(
+async def test_get_wan_usage_service_returns_current_and_history_weeks(
     hass: HomeAssistant,
 ) -> None:
     """Test derived week rows use Monday-start local calendar windows."""
@@ -7944,7 +7941,7 @@ async def test_get_wan_data_usage_service_returns_current_and_history_weeks(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_WAN_DATA_USAGE,
+            SERVICE_GET_WAN_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_CURRENT_PERIODS: ["week", "day"],
@@ -9389,7 +9386,7 @@ async def test_flow_report_resolves_a_user_to_its_affiliated_tag(
 
     assert response is not None
     # The published identity is the user id, matching the watched-user entities and
-    # `get_time_usage_report`. The affiliated tag is the *protocol* target, so it is
+    # `get_time_usage`. The affiliated tag is the *protocol* target, so it is
     # reported as the resolution rather than as the target.
     assert response["target"]["kind"] == "user"
     assert response["target"]["id"] == _FLOW_USER_ID
@@ -9690,7 +9687,7 @@ async def test_flow_report_accepts_every_user_selector_it_can_report(
     """Test a user resolves the same way by name, user id, or affiliated tag.
 
     All three forms matter. The name is what a person types; the user id is what
-    this service publishes as the identity and what `get_time_usage_report`
+    this service publishes as the identity and what `get_time_usage`
     accepts; and the affiliated tag is what the response reports as the resolved
     protocol target. Before this, echoing the resolved target back produced
     `flow_report_scope_not_found` -- the report handed out an id it would not
@@ -9751,7 +9748,7 @@ async def test_flow_report_publishes_the_same_user_id_as_the_usage_service(
 
 
 @pytest.mark.asyncio
-async def test_network_segment_usage_warns_when_rankings_were_not_returned(
+async def test_network_usage_warns_when_rankings_were_not_returned(
     hass: HomeAssistant,
 ) -> None:
     """Test an empty ranking says *why* it is empty.
@@ -9790,7 +9787,7 @@ async def test_network_segment_usage_warns_when_rankings_were_not_returned(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -9806,7 +9803,7 @@ async def test_network_segment_usage_warns_when_rankings_were_not_returned(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            SERVICE_GET_NETWORK_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -9829,7 +9826,7 @@ async def test_network_segment_usage_warns_when_rankings_were_not_returned(
 
 
 @pytest.mark.asyncio
-async def test_network_segment_usage_stays_silent_when_rankings_are_present(
+async def test_network_usage_stays_silent_when_rankings_are_present(
     hass: HomeAssistant,
 ) -> None:
     """Test a network with real rankings raises no warning."""
@@ -9850,7 +9847,7 @@ async def test_network_segment_usage_stays_silent_when_rankings_are_present(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -9866,7 +9863,7 @@ async def test_network_segment_usage_stays_silent_when_rankings_are_present(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_USAGE,
+            SERVICE_GET_NETWORK_USAGE,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -9986,7 +9983,7 @@ async def test_network_segment_configuration_names_its_three_facets(
     with (
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
-            new=AsyncMock(return_value=_network_segment_report_runtime_payload()),
+            new=AsyncMock(return_value=_network_config_runtime_payload()),
         ),
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
@@ -10002,7 +9999,7 @@ async def test_network_segment_configuration_names_its_three_facets(
 
         response = await hass.services.async_call(
             DOMAIN,
-            SERVICE_GET_NETWORK_SEGMENT_REPORT,
+            SERVICE_GET_NETWORK_CONFIG,
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_NAME: "VLAN10 CORE",

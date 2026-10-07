@@ -129,16 +129,16 @@ from .const import (
     SERVICE_GET_ALARMS,
     SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
-    SERVICE_GET_INTERNET_QUALITY_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_USAGE,
+    SERVICE_GET_INTERNET_QUALITY,
+    SERVICE_GET_NETWORK_CONFIG,
+    SERVICE_GET_NETWORK_USAGE,
     SERVICE_GET_RULES,
     SERVICE_GET_RUNTIME_INVENTORY,
-    SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SPEED_TESTS,
     SERVICE_GET_SYSTEM_OVERVIEW,
-    SERVICE_GET_TIME_USAGE_REPORT,
-    SERVICE_GET_WAN_DATA_USAGE,
+    SERVICE_GET_TIME_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WAN_USAGE,
     SERVICE_GET_WIRELESS_STATUS,
     SERVICE_MUTE_ALARM,
     SERVICE_PAUSE_RULE,
@@ -195,12 +195,12 @@ from .const import (
     TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_MEMBERSHIP_USER_NOT_FOUND,
     TRANS_KEY_EXCEPTION_MULTIPLE_ENTRIES_LOADED,
+    TRANS_KEY_EXCEPTION_NETWORK_CONFIG_FAILED,
     TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS,
     TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
     TRANS_KEY_EXCEPTION_NETWORK_REQUIRED,
-    TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED,
-    TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED,
     TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT,
+    TRANS_KEY_EXCEPTION_NETWORK_USAGE_FAILED,
     TRANS_KEY_EXCEPTION_PAUSE_RULE_TIMING_CONFLICT,
     TRANS_KEY_EXCEPTION_RESUME_AT_IN_PAST,
     TRANS_KEY_EXCEPTION_RULE_NOT_FOUND,
@@ -220,14 +220,14 @@ from .const import (
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED,
     TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_SELECTOR_CONFLICT,
     TRANS_KEY_EXCEPTION_SSID_PROFILE_NOT_FOUND,
-    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN,
-    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED,
-    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS,
-    TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_END_BEFORE_BEGIN,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_FAILED,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_AMBIGUOUS,
+    TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
-    TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED,
-    TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
     TRANS_KEY_EXCEPTION_WAN_EVENTS_FAILED,
+    TRANS_KEY_EXCEPTION_WAN_USAGE_FAILED,
+    TRANS_KEY_EXCEPTION_WAN_USAGE_HISTORY_PERIOD_REQUIRED,
     TRANS_KEY_EXCEPTION_WRONG_INTEGRATION_ENTRY,
     TRANS_PLACEHOLDER_DURATION,
     TRANS_PLACEHOLDER_HOST_MATCHES,
@@ -333,13 +333,13 @@ from .utils.values import (
     normalized_string,
 )
 
-_TIME_USAGE_REPORT_ALL_SECTIONS = (
+_TIME_USAGE_ALL_SECTIONS = (
     "internet",
     "app_totals",
     "apps",
     "categories",
 )
-_TIME_USAGE_REPORT_SUMMARY_SECTIONS = (
+_TIME_USAGE_SUMMARY_SECTIONS = (
     "internet",
     "app_totals",
 )
@@ -571,7 +571,7 @@ GET_HOST_NAME_MAPPING_SCHEMA = vol.Schema(
     }
 )
 
-GET_NETWORK_SEGMENT_REPORT_SCHEMA = vol.Schema(
+GET_NETWORK_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
@@ -585,7 +585,7 @@ GET_NETWORK_SEGMENT_REPORT_SCHEMA = vol.Schema(
     }
 )
 
-GET_NETWORK_SEGMENT_USAGE_SCHEMA = vol.Schema(
+GET_NETWORK_USAGE_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
@@ -738,7 +738,7 @@ SET_HOST_MEMBERSHIP_SCHEMA = vol.Schema(
     }
 )
 
-GET_SPEED_TEST_RESULTS_SCHEMA = vol.Schema(
+GET_SPEED_TESTS_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
@@ -749,7 +749,7 @@ GET_SPEED_TEST_RESULTS_SCHEMA = vol.Schema(
     }
 )
 
-GET_INTERNET_QUALITY_REPORT_SCHEMA = vol.Schema(
+GET_INTERNET_QUALITY_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
@@ -760,7 +760,7 @@ GET_INTERNET_QUALITY_REPORT_SCHEMA = vol.Schema(
     }
 )
 
-GET_TIME_USAGE_REPORT_SCHEMA = vol.Schema(
+GET_TIME_USAGE_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
         vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
@@ -773,7 +773,7 @@ GET_TIME_USAGE_REPORT_SCHEMA = vol.Schema(
         vol.Required(SERVICE_FIELD_USAGE_HISTORY_GRANULARITY): vol.In(("day", "hour")),
         vol.Optional(SERVICE_FIELD_SECTIONS): vol.All(
             cv.ensure_list_csv,
-            [vol.In(_TIME_USAGE_REPORT_ALL_SECTIONS)],
+            [vol.In(_TIME_USAGE_ALL_SECTIONS)],
         ),
         vol.Optional(SERVICE_FIELD_INCLUDE): vol.All(
             cv.ensure_list_csv,
@@ -789,7 +789,7 @@ GET_TIME_USAGE_REPORT_SCHEMA = vol.Schema(
     }
 )
 
-GET_WAN_DATA_USAGE_SCHEMA = vol.Schema(
+GET_WAN_USAGE_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_WAN_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
@@ -1602,7 +1602,7 @@ def _serialize_usage_history_view(
     }
 
 
-def _resolve_time_usage_report_inputs(
+def _resolve_time_usage_inputs(
     call: ServiceCall,
 ) -> tuple[
     str,
@@ -1616,7 +1616,7 @@ def _resolve_time_usage_report_inputs(
     detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
     requested_sections = _normalize_report_include(
         call.data.get(SERVICE_FIELD_SECTIONS),
-        allowed=_TIME_USAGE_REPORT_ALL_SECTIONS,
+        allowed=_TIME_USAGE_ALL_SECTIONS,
     )
     requested_include = _normalize_report_include(
         call.data.get(SERVICE_FIELD_INCLUDE),
@@ -1632,9 +1632,9 @@ def _resolve_time_usage_report_inputs(
     applied_sections = list(requested_sections)
     if not applied_sections:
         applied_sections = list(
-            _TIME_USAGE_REPORT_SUMMARY_SECTIONS
+            _TIME_USAGE_SUMMARY_SECTIONS
             if detail == "summary"
-            else _TIME_USAGE_REPORT_ALL_SECTIONS
+            else _TIME_USAGE_ALL_SECTIONS
         )
     if app_ids and "apps" not in applied_sections:
         applied_sections.append("apps")
@@ -1699,7 +1699,7 @@ def _select_usage_history_entries(
     )
 
 
-def _serialize_wan_data_usage_period(
+def _serialize_wan_usage_period(
     period: FirewallaWanDataUsagePeriod,
     *,
     time_zone: tzinfo,
@@ -1708,7 +1708,7 @@ def _serialize_wan_data_usage_period(
     return _serialize_report_time_basis(
         FirewallaReportTimeBasis(
             kind=period.kind,
-            label=_build_wan_data_usage_label(period, time_zone=time_zone),
+            label=_build_wan_usage_label(period, time_zone=time_zone),
             begin_timestamp=period.begin_timestamp,
             end_timestamp=period.end_timestamp,
             anchor_timestamp=period.anchor_timestamp,
@@ -1719,7 +1719,7 @@ def _serialize_wan_data_usage_period(
     )
 
 
-def _build_wan_data_usage_label(
+def _build_wan_usage_label(
     period: FirewallaWanDataUsagePeriod,
     *,
     time_zone: tzinfo,
@@ -1744,7 +1744,7 @@ def _build_wan_data_usage_label(
     return local_time.isoformat()
 
 
-def _serialize_wan_data_usage(
+def _serialize_wan_usage(
     usage: FirewallaWanDataUsage,
 ) -> JsonObjectType:
     """Serialize normalized WAN data-usage totals."""
@@ -1755,31 +1755,31 @@ def _serialize_wan_data_usage(
     }
 
 
-def _serialize_wan_data_usage_row(
+def _serialize_wan_usage_row(
     row: FirewallaWanDataUsageRow,
     *,
     time_zone: tzinfo,
 ) -> JsonObjectType:
     """Serialize one WAN data-usage row."""
     return {
-        "time_period": _serialize_wan_data_usage_period(
+        "time_period": _serialize_wan_usage_period(
             row.time_period,
             time_zone=time_zone,
         ),
-        "usage": _serialize_wan_data_usage(row.usage),
+        "usage": _serialize_wan_usage(row.usage),
         "detail": row.detail,
         "weeks": [
-            _serialize_wan_data_usage_row(week_row, time_zone=time_zone)
+            _serialize_wan_usage_row(week_row, time_zone=time_zone)
             for week_row in row.weeks
         ],
         "days": [
-            _serialize_wan_data_usage_row(day_row, time_zone=time_zone)
+            _serialize_wan_usage_row(day_row, time_zone=time_zone)
             for day_row in row.days
         ],
     }
 
 
-def _serialize_wan_data_usage_report(
+def _serialize_wan_usage_report(
     report: FirewallaWanDataUsageReport,
     *,
     time_zone: tzinfo,
@@ -1812,32 +1812,32 @@ def _serialize_wan_data_usage_report(
         },
         "current": {
             "month": (
-                _serialize_wan_data_usage_row(report.current_month, time_zone=time_zone)
+                _serialize_wan_usage_row(report.current_month, time_zone=time_zone)
                 if report.current_month is not None
                 else None
             ),
             "week": (
-                _serialize_wan_data_usage_row(report.current_week, time_zone=time_zone)
+                _serialize_wan_usage_row(report.current_week, time_zone=time_zone)
                 if report.current_week is not None
                 else None
             ),
             "day": (
-                _serialize_wan_data_usage_row(report.current_day, time_zone=time_zone)
+                _serialize_wan_usage_row(report.current_day, time_zone=time_zone)
                 if report.current_day is not None
                 else None
             ),
         },
         "history": {
             "months": [
-                _serialize_wan_data_usage_row(row, time_zone=time_zone)
+                _serialize_wan_usage_row(row, time_zone=time_zone)
                 for row in report.history_months
             ],
             "weeks": [
-                _serialize_wan_data_usage_row(row, time_zone=time_zone)
+                _serialize_wan_usage_row(row, time_zone=time_zone)
                 for row in report.history_weeks
             ],
             "days": [
-                _serialize_wan_data_usage_row(row, time_zone=time_zone)
+                _serialize_wan_usage_row(row, time_zone=time_zone)
                 for row in report.history_days
             ],
         },
@@ -1982,7 +1982,7 @@ def _serialize_network_host_detail(
 def _serialize_network_dhcp_config(
     dhcp: FirewallaNetworkDhcpConfig | None,
 ) -> JsonObjectType | None:
-    """Serialize one DHCP config section for a segment report."""
+    """Serialize one DHCP config section for `get_network_config`."""
     if dhcp is None:
         return None
     return {
@@ -2094,7 +2094,7 @@ def _serialize_network_time_window(
     }
 
 
-def _resolve_network_segment_usage_window(
+def _resolve_network_usage_window(
     view: FirewallaNetworkSegmentView,
     *,
     window: str,
@@ -2113,7 +2113,7 @@ def _resolve_network_segment_usage_window(
             raise ValueError(f"Unsupported network usage window: {window}")
 
 
-def _build_network_segment_usage_time_basis(
+def _build_network_usage_time_basis(
     *,
     series_list: tuple[FirewallaNetworkMetricSeries, ...],
     source: str,
@@ -2848,7 +2848,7 @@ def _build_network_host_detail_rows(
     entry: FirewallaConfigEntry,
     view: FirewallaNetworkSegmentView,
 ) -> tuple[FirewallaNetworkHostDetail, ...]:
-    """Build configuration-oriented host detail rows for one segment report."""
+    """Build configuration-oriented host detail rows for `get_network_config`."""
     raw_host_lookup = _build_raw_host_lookup(entry)
     device_tag_lookup = _build_device_tag_lookup(entry)
 
@@ -3296,7 +3296,7 @@ def _serialize_flow_report(
             FirewallaReportTarget(
                 # The caller-facing identity, in the caller's own vocabulary, so a
                 # user is named by its user id exactly as the watched-user
-                # entities and `get_time_usage_report` do. The kind is the resolved
+                # entities and `get_time_usage` do. The kind is the resolved
                 # scope's own, already in the machine vocabulary.
                 kind=target.kind,
                 id=target.identity_id,
@@ -3363,7 +3363,7 @@ def _serialize_flow_report(
     }
 
 
-def _serialize_network_segment_report(
+def _serialize_network_config(
     entry: FirewallaConfigEntry,
     *,
     view: FirewallaNetworkSegmentView,
@@ -3371,7 +3371,7 @@ def _serialize_network_segment_report(
     refresh_requested: bool,
     applied_include: tuple[str, ...] = (),
 ) -> JsonObjectType:
-    """Serialize one configuration-oriented network segment report.
+    """Serialize the configuration-oriented `get_network_config` payload.
 
     Host rows are identity-bearing (MAC, hostname, IP, reservation), so they are
     omitted unless explicitly requested, and the section is absent rather than
@@ -3410,7 +3410,7 @@ def _serialize_network_segment_report(
             "has_ipv4_addressing": bool(view.ipv4_addresses or view.ipv4_subnets),
             "has_ipv6_addressing": bool(view.ipv6_addresses or view.ipv6_subnets),
         },
-        **_network_segment_report_sections(
+        **_network_config_sections(
             view,
             network=network,
             dhcp_config=dhcp_config,
@@ -3476,7 +3476,7 @@ def _serialize_network_segment_report(
     }
 
 
-def _network_segment_report_sections(
+def _network_config_sections(
     view: FirewallaNetworkSegmentView,
     *,
     network: FirewallaNetwork,
@@ -3542,7 +3542,7 @@ def _network_segment_report_sections(
     return cast(JsonObjectType, {"sections": sections})
 
 
-def _serialize_network_segment_usage(
+def _serialize_network_usage(
     entry: FirewallaConfigEntry,
     *,
     view: FirewallaNetworkSegmentView,
@@ -3555,8 +3555,8 @@ def _serialize_network_segment_usage(
     time_zone: tzinfo,
     time_zone_name: str,
 ) -> JsonObjectType:
-    """Serialize one usage-oriented network segment report."""
-    source, label, series_list = _resolve_network_segment_usage_window(
+    """Serialize the usage-oriented `get_network_usage` payload."""
+    source, label, series_list = _resolve_network_usage_window(
         view,
         window=window,
     )
@@ -3736,7 +3736,7 @@ def _serialize_network_segment_usage(
             "time_zone": time_zone_name,
         },
         "time_basis": _serialize_report_time_basis(
-            _build_network_segment_usage_time_basis(
+            _build_network_usage_time_basis(
                 series_list=series_list,
                 source=source,
                 label=label,
@@ -4078,9 +4078,9 @@ def _usage_history_scope_error(
     """Build the usage-report error for a selector that did not resolve."""
     return _service_validation_error(
         translation_key=(
-            TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_AMBIGUOUS
+            TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_AMBIGUOUS
             if match.is_ambiguous
-            else TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_SCOPE_NOT_FOUND
+            else TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_NOT_FOUND
         ),
         translation_placeholders={
             TRANS_PLACEHOLDER_SCOPE_KIND: selection.kind or "",
@@ -4099,7 +4099,7 @@ def _resolve_flow_report_target(
     The two are not always the same, and conflating them is what made this service
     the only surface in the integration to publish a user by anything other than
     its user id. The contract every other surface follows -- the watched-user
-    entities, and ``get_time_usage_report``'s ``target_id`` -- is that a user is
+    entities, and ``get_time_usage``'s ``target_id`` -- is that a user is
     identified by its user id, with the affiliated backing tag treated as an
     association. So the identity returned here is the caller's, and the protocol
     target is carried separately.
@@ -4384,7 +4384,7 @@ def _build_network_overview_entries(
         # A host carries the box's interface id in `network_uuid`, and for a VPN
         # peer that is the network's interface name (``wg0``, ``awg0``) rather
         # than its uuid. Matching on the uuid alone counted every VPN network as
-        # empty, while the peers were listed under it by `list_hosts`.
+        # empty, while the peers were listed under it by `get_hosts`.
         network_keys = {network.uuid, network.interface_name}
         network_hosts = [host for host in hosts if host.network_uuid in network_keys]
         online = sum(1 for host in network_hosts if host.mac in online_macs)
@@ -4423,7 +4423,7 @@ def _build_wan_overview_entries(
     a record to the wrong WAN. Metrics only — never the public IP or ISP.
     """
     manager = entry.runtime_data.integration_manager
-    speed_tests = manager.get_speed_test_results(limit=1)
+    speed_tests = manager.get_speed_tests(limit=1)
     quality_samples = manager.get_internet_quality_samples(limit=1)
 
     entries: list[JsonObjectType] = []
@@ -6016,7 +6016,7 @@ async def _async_handle_set_host_dhcp_reservation(
     }
 
 
-async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectType:
+async def _async_handle_get_speed_tests(call: ServiceCall) -> JsonObjectType:
     """Return shaped speed-test results from the coordinator snapshot path."""
     entry = _get_loaded_entry(
         call.hass,
@@ -6035,13 +6035,13 @@ async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectT
         required=False,
     )
 
-    speed_test_results = entry.runtime_data.integration_manager.get_speed_test_results(
+    speed_tests = entry.runtime_data.integration_manager.get_speed_tests(
         wan_uuid=wan.uuid if wan is not None else None,
         limit=cast(int, call.data[SERVICE_FIELD_LIMIT]),
     )
     serialized_results: list[JsonValueType] = [
         _serialize_speed_test_result(speed_test_result)
-        for speed_test_result in speed_test_results
+        for speed_test_result in speed_tests
     ]
 
     return {
@@ -6054,7 +6054,7 @@ async def _async_handle_get_speed_test_results(call: ServiceCall) -> JsonObjectT
     }
 
 
-async def _async_handle_get_internet_quality_report(
+async def _async_handle_get_internet_quality(
     call: ServiceCall,
 ) -> JsonObjectType:
     """Return shaped internet-quality samples from the manager cache."""
@@ -6113,7 +6113,7 @@ def _resolve_report_time_zone(
     return time_zone, getattr(time_zone, "key", None) or hass.config.time_zone
 
 
-async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectType:
+async def _async_handle_get_time_usage(call: ServiceCall) -> JsonObjectType:
     """Return one normalized time-usage report from the local runtime."""
     entry = _get_loaded_entry(
         call.hass,
@@ -6128,7 +6128,7 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
     time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
     if end_utc <= begin_utc:
         raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_END_BEFORE_BEGIN,
+            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_END_BEFORE_BEGIN,
         )
 
     target = _resolve_usage_history_target(
@@ -6142,7 +6142,7 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
         requested_include,
         applied_include,
         app_ids,
-    ) = _resolve_time_usage_report_inputs(call)
+    ) = _resolve_time_usage_inputs(call)
 
     try:
         usage_history = (
@@ -6162,7 +6162,7 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
         _raise_runtime_service_error(
             err,
             log_message="Failed to read time usage report",
-            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_REPORT_FAILED,
+            translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_FAILED,
         )
 
     return {
@@ -6179,7 +6179,7 @@ async def _async_handle_get_time_usage_report(call: ServiceCall) -> JsonObjectTy
     }
 
 
-def _resolve_wan_data_usage_inputs(
+def _resolve_wan_usage_inputs(
     call: ServiceCall,
 ) -> tuple[
     tuple[str, ...],
@@ -6209,7 +6209,7 @@ def _resolve_wan_data_usage_inputs(
 
     if history_count > 0 and history_period is None:
         raise _service_validation_error(
-            translation_key=TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_HISTORY_PERIOD_REQUIRED,
+            translation_key=TRANS_KEY_EXCEPTION_WAN_USAGE_HISTORY_PERIOD_REQUIRED,
         )
 
     warnings: list[FirewallaReportWarning] = []
@@ -6259,7 +6259,7 @@ def _resolve_wan_data_usage_inputs(
     )
 
 
-def _iter_wan_data_usage_rows(
+def _iter_wan_usage_rows(
     reports: Sequence[FirewallaWanDataUsageReport],
 ) -> list[FirewallaWanDataUsageRow]:
     """Return all WAN data-usage rows included in the current response."""
@@ -6278,13 +6278,13 @@ def _iter_wan_data_usage_rows(
     return rows
 
 
-def _build_wan_data_usage_time_basis(
+def _build_wan_usage_time_basis(
     reports: Sequence[FirewallaWanDataUsageReport],
     *,
     time_zone_name: str,
 ) -> FirewallaReportTimeBasis:
     """Build the top-level time-basis object for WAN usage reports."""
-    rows = _iter_wan_data_usage_rows(reports)
+    rows = _iter_wan_usage_rows(reports)
     begin_values = [
         row.time_period.begin_timestamp
         for row in rows
@@ -6313,7 +6313,7 @@ def _build_wan_data_usage_time_basis(
     )
 
 
-async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
+async def _async_handle_get_wan_usage(call: ServiceCall) -> JsonObjectType:
     """Return one normalized WAN data-usage report from direct local reads."""
     entry = _get_loaded_entry(
         call.hass,
@@ -6340,7 +6340,7 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
         applied_include,
         warnings,
         unavailable_sections,
-    ) = _resolve_wan_data_usage_inputs(call)
+    ) = _resolve_wan_usage_inputs(call)
     time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
     integration_manager = entry.runtime_data.integration_manager
     manager_detail = (
@@ -6348,7 +6348,7 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
     )
 
     try:
-        usage_reports = await integration_manager.async_get_wan_data_usage_reports(
+        usage_reports = await integration_manager.async_get_wan_usage_reports(
             wan_uuid=wan.uuid if wan is not None else None,
             current_periods=current_periods,
             history_period=history_period,
@@ -6360,10 +6360,10 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
         _raise_runtime_service_error(
             err,
             log_message="Failed to read WAN data usage",
-            translation_key=TRANS_KEY_EXCEPTION_WAN_DATA_USAGE_FAILED,
+            translation_key=TRANS_KEY_EXCEPTION_WAN_USAGE_FAILED,
         )
     serialized_reports: list[JsonValueType] = [
-        _serialize_wan_data_usage_report(report, time_zone=time_zone)
+        _serialize_wan_usage_report(report, time_zone=time_zone)
         for report in usage_reports
     ]
     provenance: list[FirewallaReportProvenance] = [
@@ -6395,7 +6395,7 @@ async def _async_handle_get_wan_data_usage(call: ServiceCall) -> JsonObjectType:
                 ),
             )
         )
-    time_basis = _build_wan_data_usage_time_basis(
+    time_basis = _build_wan_usage_time_basis(
         usage_reports,
         time_zone_name=time_zone_name,
     )
@@ -6503,7 +6503,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
     )
 
 
-async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObjectType:
+async def _async_handle_get_network_config(call: ServiceCall) -> JsonObjectType:
     """Return one configuration-oriented report for the requested segment."""
     entry = _get_loaded_entry(
         call.hass,
@@ -6534,8 +6534,8 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
     except FirewallaApiError as err:
         _raise_runtime_service_error(
             err,
-            log_message="Failed to read network segment report",
-            translation_key=TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_REPORT_FAILED,
+            log_message="Failed to read network config",
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_CONFIG_FAILED,
         )
 
     if not network_views:
@@ -6544,7 +6544,7 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
             translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
         )
 
-    return _serialize_network_segment_report(
+    return _serialize_network_config(
         entry,
         view=network_views[0],
         network=full_network,
@@ -6556,7 +6556,7 @@ async def _async_handle_get_network_segment_report(call: ServiceCall) -> JsonObj
     )
 
 
-async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObjectType:
+async def _async_handle_get_network_usage(call: ServiceCall) -> JsonObjectType:
     """Return one usage-oriented report for the requested segment."""
     entry = _get_loaded_entry(
         call.hass,
@@ -6592,7 +6592,7 @@ async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObje
         _raise_runtime_service_error(
             err,
             log_message="Failed to read network segment usage",
-            translation_key=TRANS_KEY_EXCEPTION_NETWORK_SEGMENT_USAGE_FAILED,
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_USAGE_FAILED,
         )
 
     if not network_views:
@@ -6601,7 +6601,7 @@ async def _async_handle_get_network_segment_usage(call: ServiceCall) -> JsonObje
             translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network.uuid},
         )
 
-    return _serialize_network_segment_usage(
+    return _serialize_network_usage(
         entry,
         view=network_views[0],
         network=full_network,
@@ -6869,16 +6869,16 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         False,
     ),
     (
-        SERVICE_GET_NETWORK_SEGMENT_REPORT,
-        _async_handle_get_network_segment_report,
-        GET_NETWORK_SEGMENT_REPORT_SCHEMA,
+        SERVICE_GET_NETWORK_CONFIG,
+        _async_handle_get_network_config,
+        GET_NETWORK_CONFIG_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),
     (
-        SERVICE_GET_NETWORK_SEGMENT_USAGE,
-        _async_handle_get_network_segment_usage,
-        GET_NETWORK_SEGMENT_USAGE_SCHEMA,
+        SERVICE_GET_NETWORK_USAGE,
+        _async_handle_get_network_usage,
+        GET_NETWORK_USAGE_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),
@@ -6953,30 +6953,30 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         True,
     ),
     (
-        SERVICE_GET_SPEED_TEST_RESULTS,
-        _async_handle_get_speed_test_results,
-        GET_SPEED_TEST_RESULTS_SCHEMA,
+        SERVICE_GET_SPEED_TESTS,
+        _async_handle_get_speed_tests,
+        GET_SPEED_TESTS_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),
     (
-        SERVICE_GET_INTERNET_QUALITY_REPORT,
-        _async_handle_get_internet_quality_report,
-        GET_INTERNET_QUALITY_REPORT_SCHEMA,
+        SERVICE_GET_INTERNET_QUALITY,
+        _async_handle_get_internet_quality,
+        GET_INTERNET_QUALITY_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),
     (
-        SERVICE_GET_TIME_USAGE_REPORT,
-        _async_handle_get_time_usage_report,
-        GET_TIME_USAGE_REPORT_SCHEMA,
+        SERVICE_GET_TIME_USAGE,
+        _async_handle_get_time_usage,
+        GET_TIME_USAGE_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),
     (
-        SERVICE_GET_WAN_DATA_USAGE,
-        _async_handle_get_wan_data_usage,
-        GET_WAN_DATA_USAGE_SCHEMA,
+        SERVICE_GET_WAN_USAGE,
+        _async_handle_get_wan_usage,
+        GET_WAN_USAGE_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),

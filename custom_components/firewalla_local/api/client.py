@@ -3092,7 +3092,7 @@ class FirewallaApiClient:
             hosts=hosts,
             groups=groups,
             users=users,
-            speed_test_results=self._extract_speed_test_records(data),
+            speed_tests=self._extract_speed_test_records(data),
             alarms=self._normalize_alarms(data),
             alarm_exceptions=self._normalize_alarm_exceptions(data),
             active_alarm_count=self._alarm_count(data, _RAW_ACTIVE_ALARM_COUNT_KEY),

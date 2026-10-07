@@ -282,7 +282,7 @@ of taste — it is what makes the mistakes impossible rather than merely detecta
 These rules exist because they were broken twice, in opposite directions. A service
 published a user by its affiliated tag and used the protocol vocabulary for its
 target kind, making it the only surface to disagree with the watched-user entities
-and `get_time_usage_report` about how a user is named. The correction then set the
+and `get_time_usage` about how a user is named. The correction then set the
 kind to `device` — fixing the protocol leak and introducing a lexicon violation,
 because the register boundary was not consulted. Both are recorded here so the next
 change has a rule rather than a precedent. Consistency here is a correctness
@@ -596,7 +596,7 @@ Rules:
 
 - the manager is the only integration layer above `api/` that may orchestrate create, update, delete, enable, disable, or pause operations
 - **a successful command must update in-memory runtime state**, so the next read agrees with it. This is required rather than optional: when it was optional, only the two managers whose entities needed it implemented it, and every other mutation forced a box poll to make a write visible
-- **both views of an inventory are republished together** — a manager holding a derived index beside the coordinator snapshot must rebuild the index from the same tuple it publishes, or the two disagree. A host deletion once popped the host out of the index while the snapshot still carried it, so `get_host` returned nothing while `list_hosts` still listed it
+- **both views of an inventory are republished together** — a manager holding a derived index beside the coordinator snapshot must rebuild the index from the same tuple it publishes, or the two disagree. A host deletion once popped the host out of the index while the snapshot still carried it, so `get_host` returned nothing while `get_hosts` still listed it
 - a derived count may be adjusted by the delta the operation implies rather than recomputed, because it is the box's own number and the next refresh is the authority
 - the coordinator refresh remains the later source of truth
 - optimistic state must remain in memory only

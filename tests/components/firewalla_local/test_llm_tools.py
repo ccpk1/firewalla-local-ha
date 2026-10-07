@@ -28,19 +28,19 @@ from custom_components.firewalla_local.models import (
     FirewallaRuntimeSnapshot,
 )
 
-LIST_HOSTS_TOOL = "firewalla_local__list_hosts"
-LIST_RULES_TOOL = "firewalla_local__list_rules"
+GET_HOSTS_TOOL = "firewalla_local__get_hosts"
+GET_RULES_TOOL = "firewalla_local__get_rules"
 
 # Every read tool and the response_type it reports in meta.
 _READ_TOOLS: tuple[tuple[str, str], ...] = (
     ("firewalla_local__get_system_overview", "system_overview"),
-    ("firewalla_local__list_hosts", "hosts"),
-    ("firewalla_local__list_rules", "rules"),
+    ("firewalla_local__get_hosts", "hosts"),
+    ("firewalla_local__get_rules", "rules"),
     ("firewalla_local__get_network_config", "network_config"),
     ("firewalla_local__get_network_usage", "network_usage"),
     ("firewalla_local__get_wan_usage", "wan_usage"),
     ("firewalla_local__get_wan_events", "wan_events"),
-    ("firewalla_local__get_user_usage", "user_usage"),
+    ("firewalla_local__get_time_usage", "user_usage"),
     ("firewalla_local__get_flow_report", "flow_report"),
     ("firewalla_local__get_internet_quality", "internet_quality"),
     ("firewalla_local__get_speed_tests", "speed_tests"),
@@ -152,8 +152,8 @@ async def _setup_hass(hass: HomeAssistant) -> MockConfigEntry:
 @pytest.mark.parametrize(
     ("tool_name", "response_type"),
     [
-        pytest.param(LIST_HOSTS_TOOL, "hosts", id="list_hosts"),
-        pytest.param(LIST_RULES_TOOL, "rules", id="list_rules"),
+        pytest.param(GET_HOSTS_TOOL, "hosts", id="get_hosts"),
+        pytest.param(GET_RULES_TOOL, "rules", id="get_rules"),
     ],
 )
 async def test_read_tool_returns_envelope(
@@ -175,13 +175,13 @@ async def test_read_tool_returns_envelope(
     assert isinstance(result.data["result"], dict)
 
 
-async def test_list_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
-    """list_rules surfaces the flat rule shape including the alarm reference."""
+async def test_get_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
+    """get_rules surfaces the flat rule shape including the alarm reference."""
     await _setup_hass(hass)
     api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     result = await api_instance.async_call_tool(
-        llm.ToolInput(tool_name=LIST_RULES_TOOL, tool_args={})
+        llm.ToolInput(tool_name=GET_RULES_TOOL, tool_args={})
     )
 
     rules = result.data["result"]["rules"]
@@ -197,13 +197,13 @@ async def test_list_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
     assert rule["alarm_id"] == "1728"
 
 
-async def test_list_hosts_returns_host_records(hass: HomeAssistant) -> None:
-    """list_hosts surfaces the host identity records from the host service."""
+async def test_get_hosts_returns_host_records(hass: HomeAssistant) -> None:
+    """get_hosts surfaces the host identity records from the host service."""
     await _setup_hass(hass)
     api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
 
     result = await api_instance.async_call_tool(
-        llm.ToolInput(tool_name=LIST_HOSTS_TOOL, tool_args={})
+        llm.ToolInput(tool_name=GET_HOSTS_TOOL, tool_args={})
     )
 
     hosts = result.data["result"]["hosts"]
@@ -312,7 +312,7 @@ _CONTROL_TOOLS: tuple[str, ...] = (
     "firewalla_local__set_host_notify_when_next_offline",
     "firewalla_local__wake_host",
     "firewalla_local__run_internet_speed_test",
-    "firewalla_local__set_alarm_muted",
+    "firewalla_local__mute_alarm",
     "firewalla_local__unmute_alarm",
     "firewalla_local__block_alarm_target",
     "firewalla_local__unblock_alarm_target",
@@ -373,7 +373,7 @@ async def test_control_tools_absent_in_read_only_mode(hass: HomeAssistant) -> No
     registered = {tool.name for tool in api_instance.tools}
     assert not registered.intersection(_CONTROL_TOOLS)
     assert not registered.intersection(_DESTRUCTIVE_TOOLS)
-    assert "firewalla_local__list_hosts" in registered
+    assert "firewalla_local__get_hosts" in registered
 
 
 async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> None:
@@ -384,7 +384,7 @@ async def test_control_tools_present_in_control_mode(hass: HomeAssistant) -> Non
     registered = {tool.name for tool in api_instance.tools}
     assert registered.issuperset(_CONTROL_TOOLS)
     assert not registered.intersection(_DESTRUCTIVE_TOOLS)
-    assert "firewalla_local__list_hosts" in registered
+    assert "firewalla_local__get_hosts" in registered
 
 
 async def test_destructive_tools_only_in_full_mode(hass: HomeAssistant) -> None:

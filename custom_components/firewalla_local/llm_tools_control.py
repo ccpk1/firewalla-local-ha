@@ -122,7 +122,7 @@ RUNTIME_UPDATED: Final = "updated"
 RUNTIME_PENDING: Final = "pending"
 
 _HOST_MAC_DESCRIPTION: Final = (
-    "Optional. The host's MAC address (from list_hosts). Provide this or host_name."
+    "Optional. The host's MAC address (from get_hosts). Provide this or host_name."
 )
 _HOST_NAME_DESCRIPTION: Final = (
     "Optional. The host's name. Provide this or host_mac; names must be "
@@ -247,7 +247,7 @@ class PauseRuleTool(_FirewallaControlTool):
     title = "Pause rule"
     description = (
         "Pause one firewall rule, either for a set time or until it is resumed. "
-        "Resolve `rule_id` from `list_rules`. Fully reversible: `undo` is "
+        "Resolve `rule_id` from `get_rules`. Fully reversible: `undo` is "
         "`resume_rule`, and the rule keeps its id.\n"
         "\n"
         "- **timed** — pass `duration` or `resume_at`. The box stores a resume "
@@ -263,7 +263,7 @@ class PauseRuleTool(_FirewallaControlTool):
         {
             vol.Required(
                 SERVICE_FIELD_RULE_ID,
-                description="Required. The rule id from list_rules.",
+                description="Required. The rule id from get_rules.",
             ): str,
             vol.Optional(
                 SERVICE_FIELD_DURATION,
@@ -342,14 +342,14 @@ class ResumeRuleTool(_FirewallaControlTool):
         "a rule switched off in the Firewalla app — all the same state. Resuming "
         "an already-enabled rule is a no-op.\n"
         "\n"
-        "Afterwards `list_rules` reports `is_paused: false` and `pause_until: "
+        "Afterwards `get_rules` reports `is_paused: false` and `pause_until: "
         "null`. Allow a short delay before the change takes effect on the wire."
     )
     parameters = vol.Schema(
         {
             vol.Required(
                 SERVICE_FIELD_RULE_ID,
-                description="Required. The rule id from list_rules.",
+                description="Required. The rule id from get_rules.",
             ): str,
         }
     )
@@ -602,7 +602,7 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
     title = "Set host DHCP reservation"
     description = (
         "Give a host a fixed IP address (or return it to dynamic). Pair with "
-        "list_hosts to find hosts without a reservation. Strong built-in "
+        "get_hosts to find hosts without a reservation. Strong built-in "
         "validation rejects conflicting, in-use, or out-of-range addresses. "
         "Reversible by setting mode back to 'dynamic'."
     )
@@ -1035,7 +1035,7 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
 class SetAlarmMutedTool(_FirewallaControlTool):
     """Mute or unmute an alarm silence."""
 
-    name = format_tool_name("set_alarm_muted")
+    name = format_tool_name("mute_alarm")
     title = "Set alarm muted"
     description = (
         "Create or remove a silence so matching alarms stop alerting. This does "
@@ -1152,7 +1152,7 @@ class UnmuteAlarmTool(_FirewallaControlTool):
     title = "Unmute alarm"
     description = (
         "Remove a silence so matching alarms alert again. This is the undo for "
-        "set_alarm_muted. Provide either the alarm id or the silence (exception) "
+        "mute_alarm. Provide either the alarm id or the silence (exception) "
         "id."
     )
     parameters = vol.Schema(
@@ -1206,7 +1206,7 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
         "recording the alarm id on it. Provide either `alarm_id`, or "
         "`target_type` and `target_value` (optionally with `scope_kind` / "
         "`scope_target`) to widen or narrow where the block applies. This "
-        "actually blocks traffic (unlike set_alarm_muted). Reversible with "
+        "actually blocks traffic (unlike mute_alarm). Reversible with "
         "unblock_alarm_target."
     )
     parameters = vol.Schema(
@@ -1319,7 +1319,7 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
         {
             vol.Required(
                 SERVICE_FIELD_RULE_ID,
-                description="Required. The rule id to remove (from list_rules).",
+                description="Required. The rule id to remove (from get_rules).",
             ): str,
         }
     )
@@ -1357,7 +1357,7 @@ class ArchiveAlarmTool(_FirewallaControlTool):
     title = "Archive alarm"
     description = (
         "Dismiss one alarm from the active list while keeping the record. This "
-        "does NOT stop future matching alarms (use set_alarm_muted). Note there "
+        "does NOT stop future matching alarms (use mute_alarm). Note there "
         "is no un-archive if you change your mind."
     )
     parameters = vol.Schema(
@@ -1607,13 +1607,13 @@ class DeleteRuleTool(_FirewallaControlTool):
     description = (
         "Destructive: permanently delete a firewall rule. This is irreversible. "
         "To disable a rule reversibly use pause_rule instead. Resolve rule_id "
-        "from list_rules."
+        "from get_rules."
     )
     parameters = vol.Schema(
         {
             vol.Required(
                 SERVICE_FIELD_RULE_ID,
-                description="Required. The rule id to delete (from list_rules).",
+                description="Required. The rule id to delete (from get_rules).",
             ): str,
             vol.Required(
                 SERVICE_FIELD_CONFIRM,

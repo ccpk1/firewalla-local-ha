@@ -1053,14 +1053,14 @@ only — coarse), `uuid`. The `network_kind` is derived from the category key so
 Per-network usage is surfaced via a **single logic path**: the integration
 manager fetches `item=intf` once per poll (resilient to per-network failures —
 OpenVPN returns a 500 for `item=intf`, all others work) and the entity
-`network_usage` attribute, the `get_network_segment_report` usage section, and
-the `get_network_segment_usage` service all consume the same manager views.
+`network_usage` attribute, the `get_network_config` usage section, and
+the `get_network_usage` service all consume the same manager views.
 WAN networks have **no windowed source** — a WAN's `item=intf` windows are all
 zero and the box-wide init windows are aggregate (not per-WAN) — so a WAN
 `network_usage` carries only the **`monthly`** key (current calendar month from
 `monthlyDataUsageOnWans`), never conflated with the rolling `last_30d` window.
 WAN monthly totals also remain on the System Status `current_wan_usage` /
-`get_wan_data_usage` surface.
+`get_wan_usage` surface.
 
 #### Per-host flow and block counters (`item=intf`)
 
@@ -1078,8 +1078,8 @@ per-device rather than per-network. Each host entry exposes:
 
 Normalized to `FirewallaNetworkHostTotals` and surfaced through
 `_serialize_network_host_totals` as `dns_blocked` / `ip_blocked` / `ip_denied`,
-reachable via the `get_network_segment_report` (`hosts[]`) and
-`get_network_segment_usage` services. `view.activity_hosts` carries the richer
+reachable via the `get_network_config` (`hosts[]`) and
+`get_network_usage` services. `view.activity_hosts` carries the richer
 per-host rows built from the payload's `flows` families
 (`_build_network_activity_hosts`).
 
@@ -1334,7 +1334,7 @@ which is honest for the visible rule set.
 The one place that matters: **the omission correlates with rule family.** All 184
 Device Active Protect rules (`purpose == 'dap'`) fall in the "neither" group and
 none carry a count, so for those the field is untracked rather than zero. DAP
-rules are excluded from `list_rules` by default, so a `0` is reliable within the
+rules are excluded from `get_rules` by default, so a `0` is reliable within the
 visible set but would be wrong if DAP rules were included.
 
 The block case is the useful one. A `block` rule carrying a `lastHitFlow` names
@@ -3327,9 +3327,9 @@ Result:
 
 Implementation impact:
 
-- a future network-segment report can safely expose DHCP ranges from
+- `get_network_config` can safely expose DHCP ranges from
   `networkConfig.dhcp`
-- host detail inside that report can safely expose:
+- host detail inside that payload can safely expose:
   - IP assignment mode derived from host policy allocations
   - reserved IPv4 when present
   - device-type feedback when present
@@ -4973,7 +4973,7 @@ be invented:**
 | Where | Shape | Status |
 | --- | --- | --- |
 | Rule create payload (`models.py`) | `scope: list[str]` — flat identifiers, e.g. `["0C:85:E1:B0:1D:1C"]` | **Existing** |
-| Usage history (`get_time_usage_report`) | `scope_kind` + `scope_target` — kind enum plus one value | **Existing** |
+| Usage history (`get_time_usage`) | `scope_kind` + `scope_target` — kind enum plus one value | **Existing** |
 | Alarm mute (proposed) | `scope` + `scope_value` | ❌ **Would have been a duplicate of the row above** |
 
 **The established convention is `scope_kind` + `scope_target`.** Used verbatim:

@@ -75,15 +75,15 @@ from .const import (
     SERVICE_GET_ALARMS,
     SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
-    SERVICE_GET_INTERNET_QUALITY_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_REPORT,
-    SERVICE_GET_NETWORK_SEGMENT_USAGE,
+    SERVICE_GET_INTERNET_QUALITY,
+    SERVICE_GET_NETWORK_CONFIG,
+    SERVICE_GET_NETWORK_USAGE,
     SERVICE_GET_RULES,
-    SERVICE_GET_SPEED_TEST_RESULTS,
+    SERVICE_GET_SPEED_TESTS,
     SERVICE_GET_SYSTEM_OVERVIEW,
-    SERVICE_GET_TIME_USAGE_REPORT,
-    SERVICE_GET_WAN_DATA_USAGE,
+    SERVICE_GET_TIME_USAGE,
     SERVICE_GET_WAN_EVENTS,
+    SERVICE_GET_WAN_USAGE,
     SERVICE_GET_WIRELESS_STATUS,
     SERVICE_SYNC_RUNTIME,
 )
@@ -197,7 +197,7 @@ class _FirewallaReadTool(llm.Tool):
 class ListHostsTool(_FirewallaReadTool):
     """List Firewalla hosts with identity and IP assignment."""
 
-    name = format_tool_name("list_hosts")
+    name = format_tool_name("get_hosts")
     title = "List hosts"
     description = (
         "Hosts on the network: identity, IP assignment, and connectivity.\n"
@@ -209,7 +209,7 @@ class ListHostsTool(_FirewallaReadTool):
         "`network_uuid` / `network_name` — the host's segment, stated rather than "
         "inferred from its IP. `network_uuid` also filters.\n"
         "`group_name` — the group or user this host follows; `membership_kind` "
-        "names which. Pass `group_name` to `list_rules` as `applies_to` to find "
+        "names which. Pass `group_name` to `get_rules` as `applies_to` to find "
         "the rules that govern the host.\n"
         "`membership_kind` — `group` or `user`, or null when the host's tags mix "
         "the two.\n"
@@ -299,7 +299,7 @@ class ListHostsTool(_FirewallaReadTool):
 class ListRulesTool(_FirewallaReadTool):
     """List Firewalla policy rules with their current state."""
 
-    name = format_tool_name("list_rules")
+    name = format_tool_name("get_rules")
     title = "List rules"
     description = (
         "Firewall rules with id, name, action, paused state, target, scope, and "
@@ -349,7 +349,7 @@ class ListRulesTool(_FirewallaReadTool):
                 SERVICE_FIELD_APPLIES_TO,
                 description=(
                     "Optional. Filter to rules governing one group, user or "
-                    "network name. A host's `group_name` (from list_hosts) is "
+                    "network name. A host's `group_name` (from get_hosts) is "
                     "the value to pass here to find the rules that govern that "
                     "host. Matches exactly, so filter one name at a time."
                 ),
@@ -399,7 +399,7 @@ class GetNetworkConfigTool(_FirewallaReadTool):
         "`policy` — network-level Firewalla **settings**, not rules (`adblock`, "
         "`safeSearch`, `family`, `doh`, `monitor`, `qos`). They neither create nor "
         "correspond to a rule, so a `family` setting here is unrelated to a "
-        "`family` rule purpose in `list_rules`.\n"
+        "`family` rule purpose in `get_rules`.\n"
         "\n"
         "`summary.host_count` is the network's host count from the host inventory "
         "and is the number to quote — it is the same with or without the host "
@@ -408,7 +408,7 @@ class GetNetworkConfigTool(_FirewallaReadTool):
         "\n"
         "The host list is off by default. Ask for it only when the hosts "
         "themselves are wanted — those rows carry MAC addresses, hostnames, IPs "
-        "and reservations — and use `list_hosts` for host questions. The filters "
+        "and reservations — and use `get_hosts` for host questions. The filters "
         "narrow on the box, so prefer them to pulling the inventory."
     )
     parameters = vol.Schema(
@@ -431,7 +431,7 @@ class GetNetworkConfigTool(_FirewallaReadTool):
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )
-    _service = SERVICE_GET_NETWORK_SEGMENT_REPORT
+    _service = SERVICE_GET_NETWORK_CONFIG
     _response_type = "network_config"
 
 
@@ -488,7 +488,7 @@ class GetNetworkUsageTool(_FirewallaReadTool):
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )
-    _service = SERVICE_GET_NETWORK_SEGMENT_USAGE
+    _service = SERVICE_GET_NETWORK_USAGE
     _response_type = "network_usage"
 
 
@@ -542,7 +542,7 @@ class GetWanUsageTool(_FirewallaReadTool):
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )
-    _service = SERVICE_GET_WAN_DATA_USAGE
+    _service = SERVICE_GET_WAN_USAGE
     _response_type = "wan_usage"
 
 
@@ -598,12 +598,12 @@ class GetWanEventsTool(_FirewallaReadTool):
 class GetUserUsageTool(_FirewallaReadTool):
     """Return time-based usage for one person, group, or host."""
 
-    name = format_tool_name("get_user_usage")
+    name = format_tool_name("get_time_usage")
     title = "Get user usage"
     description = (
         "How much time a person, host, or group spent online, over a begin/end "
         "range. Minutes, not bandwidth volume (`get_network_usage`). Resolve the "
-        "scope from `list_hosts` or the watched-user surfaces.\n"
+        "scope from `get_hosts` or the watched-user surfaces.\n"
         "\n"
         "Every section is returned by default; pass `sections` to keep only what "
         "the question needs."
@@ -692,7 +692,7 @@ class GetUserUsageTool(_FirewallaReadTool):
             ): vol.All(cv.ensure_list, [str]),
         }
     )
-    _service = SERVICE_GET_TIME_USAGE_REPORT
+    _service = SERVICE_GET_TIME_USAGE
     _response_type = "user_usage"
 
 
@@ -846,7 +846,7 @@ class GetInternetQualityTool(_FirewallaReadTool):
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )
-    _service = SERVICE_GET_INTERNET_QUALITY_REPORT
+    _service = SERVICE_GET_INTERNET_QUALITY
     _response_type = "internet_quality"
 
 
@@ -875,7 +875,7 @@ class GetSpeedTestsTool(_FirewallaReadTool):
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )
-    _service = SERVICE_GET_SPEED_TEST_RESULTS
+    _service = SERVICE_GET_SPEED_TESTS
     _response_type = "speed_tests"
 
 
@@ -909,8 +909,8 @@ class GetSystemOverviewTool(_FirewallaReadTool):
         "surface's vocabulary.\n"
         "\n"
         "It returns counts and identifiers only — never host or rule records. "
-        "Answer per-host questions from `list_hosts` and per-rule questions from "
-        "`list_rules`.\n"
+        "Answer per-host questions from `get_hosts` and per-rule questions from "
+        "`get_rules`.\n"
         "\n" + _COUNTS_READING
     )
     parameters = vol.Schema(
@@ -919,7 +919,7 @@ class GetSystemOverviewTool(_FirewallaReadTool):
                 SERVICE_FIELD_INCLUDE,
                 description=(
                     "Optional. Add the group and user names and ids that "
-                    "get_user_usage and the rule tools accept as selectors. Each "
+                    "get_time_usage and the rule tools accept as selectors. Each "
                     "entry carries `kind` of 'group' or 'user', so the two are "
                     "told apart by that field and never by name. "
                     "Allowed: 'identifiers'."

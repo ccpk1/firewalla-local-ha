@@ -560,7 +560,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
             mount="/home", capacity_ratio=0.62, used_bytes=None, size_bytes=None
         ),
     )
-    assert snapshot.speed_test_results[1] == FirewallaSpeedTestRecord(
+    assert snapshot.speed_tests[1] == FirewallaSpeedTestRecord(
         tested_at_timestamp=1774293094.481,
         download_mbps=507.17651748657227,
         upload_mbps=49.001976013183594,
@@ -583,7 +583,7 @@ async def test_get_runtime_snapshot_normalizes_policy_rules() -> None:
         vendor="ookla",
         wan_uuid="wan-1",
     )
-    assert snapshot.speed_test_results[0].wan_uuid == "wan-2"
+    assert snapshot.speed_tests[0].wan_uuid == "wan-2"
     assert rules[0].rule_id == "739"
     assert rules[0].enabled is False
     assert rules[0].target_name == "Kitchen speaker"
@@ -1564,7 +1564,7 @@ async def test_get_runtime_snapshot_omits_latest_speed_test_without_success() ->
     assert snapshot.appliance_runtime.memory_usage_ratio == 0.25
     assert snapshot.appliance_runtime.total_memory_mb == 1000
     assert snapshot.appliance_runtime.uptime_seconds is None
-    assert snapshot.speed_test_results == (
+    assert snapshot.speed_tests == (
         FirewallaSpeedTestRecord(
             tested_at_timestamp=1774300000,
             download_mbps=None,
