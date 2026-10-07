@@ -393,9 +393,10 @@ Reads that tell you what exists — the first step before any control action.
 ### `firewalla_local__sync_runtime`
 
 - **Answers:** "Is this data current?" / "Refresh now."
-- **When to use / not:** when the user needs current data and the last snapshot may
-  be stale. Call it, then read other tools with `refresh=false` — that is the cheap
-  pattern. Do not call it before several tools expecting several polls.
+- **When to use / not:** when the cached snapshot is stale and the answer depends
+  on what is true right now. Call it, then read the tools the question needs — a
+  read serves the snapshot by default, so one call here freshens them all. Do not
+  call it before several reads expecting several polls.
 - **Inputs:** none.
 - **Returns:** read envelope — `result` with `synced`, `synced_at` (ISO) and
   `synced_at_timestamp`.
@@ -418,7 +419,7 @@ Reads that tell you what exists — the first step before any control action.
   `get_network_usage`.
 - **Inputs:** `detail` (`summary`|`full`, default `summary`), `host_name`
   (substring), `host_mac`, `group_name`, `kind` (`mac_host`|`pseudo_host`),
-  `network_uuid`, `online` (bool), `user`, `refresh` (bool, default true).
+  `network_uuid`, `online` (bool), `user`, `refresh` (bool, default false).
 - **Narrow it — do not pull the whole inventory:** this returns every host by
   default and is the largest payload in the surface (~18k tokens live). Filters are
   applied server-side, so the model is expected to pass `host_name` (substring),
@@ -455,7 +456,7 @@ Reads that tell you what exists — the first step before any control action.
   surfaces, and the window is user-tunable when a longer tolerance suits a network
   better.
 - **Inputs:** the filters above; `detail` (`summary` default | `full`); `refresh`
-  (bool, default true — performs a live poll; set false for a fast cached read).
+  (bool, default false — reads the cached snapshot; set true to poll the box first).
 - **Returns:** read envelope — `result.hosts[]`, each with `host_id`, `mac`,
   `host_name`, `kind` (`mac_host`/`pseudo_host`), **`online`** (active now — the
   connectivity signal to answer "is it connected?"), `last_active_at` (the date of

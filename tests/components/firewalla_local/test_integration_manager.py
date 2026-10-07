@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -29,13 +30,27 @@ from custom_components.firewalla_local.models import (
 )
 
 
+class _StubCoordinator(SimpleNamespace):
+    """A coordinator stub whose update method republishes `data` like the real one.
+
+    A plain `MagicMock` here would swallow the snapshot and leave `coordinator.data`
+    at its old value, so a test asserting optimistic state would read the pre-write
+    snapshot and fail — or worse, a test asserting the *call* would pass while the
+    state it was supposed to publish went nowhere.
+    """
+
+    def async_set_updated_data(self, data: object) -> None:
+        """Replace the held snapshot, as the coordinator does."""
+        self.data = data
+
+
 def _build_manager(
     snapshot: FirewallaRuntimeSnapshot,
     *,
     unique_id: str | None = None,
 ) -> FirewallaIntegrationManager:
     """Return an integration manager with minimal coordinator state."""
-    coordinator = SimpleNamespace(data=snapshot, hass=None)
+    coordinator = _StubCoordinator(data=snapshot, hass=None)
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id=unique_id,
@@ -1604,6 +1619,154 @@ async def test_async_delete_host_forwards_to_client_and_evicts_index() -> None:
     assert response == {"deleted": "12:A9:78:EB:EA:02"}
     manager.client.async_delete_host.assert_awaited_once_with("12:A9:78:EB:EA:02")
     assert host_manager.get_host("12:A9:78:EB:EA:02") is None
+
+
+def _host_snapshot(**overrides: object) -> FirewallaRuntimeSnapshot:
+    """Return a one-host snapshot for the optimistic-update tests."""
+    host = FirewallaHostRuntime(
+        mac="12:A9:78:EB:EA:02",
+        host_name="Test Device",
+        ip_address="192.168.200.25",
+        group_name=None,
+        network_name=None,
+        connection_type=None,
+        last_active=None,
+        download_bytes=None,
+        upload_bytes=None,
+        stale=False,
+        dns_hostname="test-host",
+        dns_domain="int.example",
+        dns_fqdn="test-host.int.example",
+        host_device_type="tablet",
+        **overrides,
+    )
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+        hosts=(host,),
+    )
+
+
+def _manager_with_hosts(
+    snapshot: FirewallaRuntimeSnapshot,
+) -> tuple[FirewallaIntegrationManager, FirewallaHostManager, MagicMock]:
+    """Return a manager whose host manager has been refreshed from `snapshot`."""
+    manager = _build_manager(snapshot)
+    host_manager = FirewallaHostManager(
+        manager.coordinator, manager.entry, manager.client
+    )
+    host_manager.handle_refresh(snapshot)
+    manager.coordinator.host_manager = host_manager
+    republished = MagicMock(wraps=manager.coordinator.async_set_updated_data)
+    manager.coordinator.async_set_updated_data = republished
+    return manager, host_manager, republished
+
+
+@pytest.mark.parametrize(
+    ("method", "value", "field", "expected"),
+    [
+        pytest.param(
+            "async_set_host_name", "Renamed", "host_name", "Renamed", id="name"
+        ),
+        pytest.param(
+            "async_set_host_device_type",
+            "phone",
+            "host_device_type",
+            "phone",
+            id="device_type",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_host_mutation_updates_the_snapshot_optimistically(
+    method: str, value: str, field: str, expected: str
+) -> None:
+    """A successful host write is visible to the next read, without a poll.
+
+    `ARCHITECTURE.md` requires a successful command to update runtime state so the
+    next read agrees with it. These services did not, so the write was invisible for
+    up to the update interval and the only way to make it visible was to force a
+    poll — which is why `refresh` defaulted to true on them.
+    """
+    manager, host_manager, set_updated = _manager_with_hosts(_host_snapshot())
+    called = AsyncMock(return_value={"ok": True})
+    setattr(manager.client, method, called)
+
+    await getattr(manager, method)("12:A9:78:EB:EA:02", value)
+
+    assert called.await_count == 1
+    # the snapshot the next read uses
+    assert getattr(manager.coordinator.data.hosts[0], field) == expected
+    # and the index, rebuilt from the same tuple
+    host = host_manager.get_host("12:A9:78:EB:EA:02")
+    assert host is not None
+    assert getattr(host, field) == expected
+    assert set_updated.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_set_host_dns_hostname_updates_the_derived_fqdn_too() -> None:
+    """The FQDN is republished with the override, so the pair stays coherent.
+
+    The box derives the FQDN from the override, so updating only `dns_hostname`
+    would publish a hostname and an FQDN that never coexisted on the box.
+    """
+    manager, host_manager, _ = _manager_with_hosts(_host_snapshot())
+    manager.client.async_set_host_dns_hostname = AsyncMock(return_value={"ok": True})
+
+    await manager.async_set_host_dns_hostname("12:A9:78:EB:EA:02", "living-room")
+
+    host = host_manager.get_host("12:A9:78:EB:EA:02")
+    assert host is not None
+    assert host.dns_hostname == "living-room"
+    assert host.dns_fqdn == "living-room.int.example"
+
+
+@pytest.mark.asyncio
+async def test_delete_host_removes_it_from_both_views_at_once() -> None:
+    """Deletion leaves no host that one view can see and another cannot.
+
+    This is the defect the optimistic update fixed rather than introduced: deletion
+    popped the host out of the manager's index while `coordinator.data.hosts` still
+    carried it, so `get_host(mac)` returned nothing while `list_hosts` — which reads
+    the snapshot — still listed the deleted host. The test asserts both views
+    together, because asserting either alone is what let them disagree.
+    """
+    manager, host_manager, set_updated = _manager_with_hosts(_host_snapshot())
+    manager.client.async_delete_host = AsyncMock(return_value={"ok": True})
+
+    await manager.async_delete_host("12:A9:78:EB:EA:02")
+
+    assert host_manager.get_host("12:A9:78:EB:EA:02") is None
+    assert manager.coordinator.data.hosts == ()
+    assert set_updated.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_optimistic_host_update_ignores_an_unknown_mac() -> None:
+    """A selector that matches no host leaves the snapshot untouched.
+
+    Without this the manager would publish a rebuilt-but-identical snapshot, which
+    is a coordinator update that reports no change — noise an entity would still be
+    woken for.
+    """
+    manager, _, set_updated = _manager_with_hosts(_host_snapshot())
+
+    manager._apply_optimistic_host(
+        "AA:BB:CC:DD:EE:FF", transform=lambda host: replace(host, host_name="x")
+    )
+
+    assert manager.coordinator.data.hosts[0].host_name == "Test Device"
+    assert set_updated.call_count == 0
 
 
 @pytest.mark.asyncio

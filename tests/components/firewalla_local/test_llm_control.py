@@ -295,11 +295,17 @@ async def test_run_internet_speed_test_reports_a_network_target(
 
 
 async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
-    """pause_rule on an already-paused rule is a no-op with no service call.
+    """pause_rule on an already-paused rule reports a no-op *and still writes*.
 
     A disabled rule *is* paused -- Firewalla has one pair of states, enabled or
     disabled, and a resume boundary is what makes a pause timed rather than
     indefinite. So a disabled rule with no boundary reports `is_paused: true`.
+
+    The write happens anyway, and that is the point. The snapshot the precheck reads
+    can be a poll interval old, so skipping the write on its say-so meant a rule
+    resumed on the box in that window was reported as already-paused and left
+    running. The call is idempotent, so making it costs one request and is the only
+    way the answer is true; the precheck now shapes the report and nothing else.
     """
     with patch(
         "custom_components.firewalla_local.api.client.FirewallaApiClient."
@@ -309,7 +315,7 @@ async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
         api_instance = await _setup(hass, rule_enabled=False)
         result = await _call(api_instance, PAUSE_RULE, {SERVICE_FIELD_RULE_ID: "761"})
 
-    assert update_rule.await_count == 0
+    assert update_rule.await_count == 1
     assert result.data["status"] == "already_in_state"
     assert result.data["changed"] is False
     assert result.data["before"] == {"enabled": False, "is_paused": True}
@@ -317,7 +323,7 @@ async def test_pause_rule_reports_already_in_state(hass: HomeAssistant) -> None:
 
 
 async def test_resume_rule_reports_already_in_state(hass: HomeAssistant) -> None:
-    """resume_rule on an enabled rule is a no-op with no service call."""
+    """resume_rule on an enabled rule reports a no-op and still writes."""
     with patch(
         "custom_components.firewalla_local.api.client.FirewallaApiClient."
         "async_update_rule_control_only",
@@ -326,7 +332,7 @@ async def test_resume_rule_reports_already_in_state(hass: HomeAssistant) -> None
         api_instance = await _setup(hass)
         result = await _call(api_instance, RESUME_RULE, {SERVICE_FIELD_RULE_ID: "761"})
 
-    assert update_rule.await_count == 0
+    assert update_rule.await_count == 1
     assert result.data["status"] == "already_in_state"
 
 

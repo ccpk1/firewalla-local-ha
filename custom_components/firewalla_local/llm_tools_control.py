@@ -50,7 +50,6 @@ from .const import (
     SERVICE_FIELD_NETWORK_NAME,
     SERVICE_FIELD_NETWORK_UUID,
     SERVICE_FIELD_NEW_NAME,
-    SERVICE_FIELD_REFRESH,
     SERVICE_FIELD_RESERVED_IPV4,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
@@ -280,22 +279,31 @@ class PauseRuleTool(_FirewallaControlTool):
         args = self._args(tool_input)
         rule_id = args[SERVICE_FIELD_RULE_ID]
         target = {"kind": TARGET_KIND_RULE, "id": rule_id}
-        before: dict[str, Any] | None = None
         after = {"enabled": False, "is_paused": True}
+
+        # The precheck decides only what to *report*, never whether to write. The
+        # snapshot can be a poll interval old, so treating it as authoritative meant
+        # a rule resumed on the box in that window read as already-paused here and the
+        # write was skipped — the user asked to pause a running rule and was told
+        # nothing needed doing, on the strength of stale data. The service refreshes
+        # before it validates, so the call is what makes the answer true.
+        before: dict[str, Any] | None = None
+        already_paused = False
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
             if rule is not None:
                 before = {"enabled": rule.enabled, "is_paused": rule.is_paused}
-                if rule.is_paused:
-                    return self._result(
-                        status="already_in_state",
-                        changed=False,
-                        target=target,
-                        before=before,
-                        after=before,
-                    )
+                already_paused = rule.is_paused
 
         await self._call_service(hass, llm_context, args)
+        if already_paused:
+            return self._result(
+                status="already_in_state",
+                changed=False,
+                target=target,
+                before=before,
+                after=before,
+            )
         return self._result(
             status="applied",
             changed=True,
@@ -341,22 +349,26 @@ class ResumeRuleTool(_FirewallaControlTool):
         args = self._args(tool_input)
         rule_id = args[SERVICE_FIELD_RULE_ID]
         target = {"kind": TARGET_KIND_RULE, "id": rule_id}
-        before: dict[str, Any] | None = None
         after = {"enabled": True, "is_paused": False}
+
+        # Same reasoning as `pause_rule`: the precheck may only shape the report.
+        before: dict[str, Any] | None = None
+        already_enabled = False
         if (manager := self._rule_manager(hass)) is not None:
             rule = next((r for r in manager.get_rules() if r.rule_id == rule_id), None)
             if rule is not None:
                 before = {"enabled": rule.enabled, "is_paused": rule.is_paused}
-                if rule.enabled:
-                    return self._result(
-                        status="already_in_state",
-                        changed=False,
-                        target=target,
-                        before=before,
-                        after=before,
-                    )
+                already_enabled = rule.enabled
 
         await self._call_service(hass, llm_context, args)
+        if already_enabled:
+            return self._result(
+                status="already_in_state",
+                changed=False,
+                target=target,
+                before=before,
+                after=before,
+            )
         return self._result(
             status="applied",
             changed=True,
@@ -1518,7 +1530,6 @@ class DeleteHostTool(_FirewallaControlTool):
         data = {
             SERVICE_FIELD_HOST_MAC: host_mac,
             SERVICE_FIELD_CONFIRM: args[SERVICE_FIELD_CONFIRM],
-            SERVICE_FIELD_REFRESH: True,
         }
         result = await self._call_service(hass, llm_context, data)
         return self._result(

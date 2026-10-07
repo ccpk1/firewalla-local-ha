@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta, tzinfo
 from typing import TYPE_CHECKING, Final
@@ -338,8 +338,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
     async def async_delete_host(self, host_mac: str) -> dict[str, object]:
         """Delete one MAC-identified host from the Firewalla inventory."""
         await self.client.async_delete_host(host_mac)
-        if host_manager := getattr(self.coordinator, "host_manager", None):
-            host_manager.remove_host_from_index(host_mac)
+        self._apply_optimistic_host(host_mac, removed=True)
         return {"deleted": host_mac}
 
     async def async_set_host_policy(
@@ -348,13 +347,47 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         """Write one host-scoped policy payload to the requested host."""
         return await self.client.async_set_host_policy(host_mac, policy_value)
 
+    def apply_optimistic_host_membership(
+        self,
+        host_mac: str,
+        *,
+        group_id: str | None,
+        group_name: str | None,
+        is_user: bool,
+    ) -> None:
+        """Publish a successful membership change to the in-memory snapshot.
+
+        Membership is *not* applied inside `async_set_host_policy`, because that
+        method is the generic policy write and does not know what the payload means.
+        The caller resolved the target, so the caller states the membership.
+
+        A host holds exactly one membership and the box expresses it as a tag: the id
+        lands in `tags` and `group_name` resolves that tag through the affiliated
+        users before the tag names. The fields move together deliberately — updating
+        `group_name` without the id tuples would publish a host that reads as
+        belonging to a group it carries no id for, and `list_hosts` publishes both.
+        """
+        self._apply_optimistic_host(
+            host_mac,
+            transform=lambda host: replace(
+                host,
+                group_name=group_name,
+                group_ids=() if group_id is None else (group_id,),
+                user_ids=(group_id,) if is_user and group_id is not None else (),
+            ),
+        )
+
     async def async_set_host_name(
         self,
         host_mac: str,
         host_name: str,
     ) -> dict[str, object]:
         """Write one host-scoped custom name to the requested host."""
-        return await self.client.async_set_host_name(host_mac, host_name)
+        result = await self.client.async_set_host_name(host_mac, host_name)
+        self._apply_optimistic_host(
+            host_mac, transform=lambda host: replace(host, host_name=host_name)
+        )
+        return result
 
     async def async_set_host_dns_hostname(
         self,
@@ -362,7 +395,18 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         dns_hostname: str,
     ) -> dict[str, object]:
         """Write one host-scoped DNS hostname override to the requested host."""
-        return await self.client.async_set_host_dns_hostname(host_mac, dns_hostname)
+        result = await self.client.async_set_host_dns_hostname(host_mac, dns_hostname)
+        # The box derives the FQDN from the override, so leaving the old one beside
+        # the new hostname would publish a pair that never coexisted.
+        domain = self._host_dns_domain(host_mac)
+        fqdn = f"{dns_hostname}.{domain}" if domain else dns_hostname
+        self._apply_optimistic_host(
+            host_mac,
+            transform=lambda host: replace(
+                host, dns_hostname=dns_hostname, dns_fqdn=fqdn
+            ),
+        )
+        return result
 
     async def async_set_host_device_type(
         self,
@@ -370,7 +414,40 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         device_type: str,
     ) -> dict[str, object]:
         """Write one host device type through the feedback path."""
-        return await self.client.async_set_host_device_type(host_mac, device_type)
+        result = await self.client.async_set_host_device_type(host_mac, device_type)
+        self._apply_optimistic_host(
+            host_mac,
+            transform=lambda host: replace(host, host_device_type=device_type),
+        )
+        return result
+
+    def _apply_optimistic_host(
+        self,
+        host_mac: str,
+        *,
+        transform: Callable[[FirewallaHostRuntime], FirewallaHostRuntime] | None = None,
+        removed: bool = False,
+    ) -> None:
+        """Publish one successful host write to the host manager's snapshot.
+
+        The manager owns the inventory, so the update goes through it rather than
+        rebuilding hosts here — and it keeps the host index and the snapshot in step,
+        which a mutation applied to only one of them did not.
+        """
+        host_manager = getattr(self.coordinator, "host_manager", None)
+        if host_manager is None:
+            return
+        host_manager.apply_optimistic_host_update(
+            host_mac, transform=transform, removed=removed
+        )
+
+    def _host_dns_domain(self, host_mac: str) -> str | None:
+        """Return one host's DNS domain, for deriving its optimistic FQDN."""
+        host_manager = getattr(self.coordinator, "host_manager", None)
+        if host_manager is None:
+            return None
+        host = host_manager.get_host(host_mac)
+        return host.dns_domain if host is not None else None
 
     async def async_get_usage_history(
         self,

@@ -165,8 +165,10 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         """
         if alarm_id is not None:
             await self.client.async_archive_alarm(alarm_id)
+            self._apply_optimistic_archive(alarm_id=alarm_id)
             return
         await self.client.async_archive_all_alarms()
+        self._apply_optimistic_archive(alarm_id=None)
 
     async def async_delete_alarms(
         self, *, alarm_id: str | None, alarm_status: str | None
@@ -174,9 +176,108 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         """Permanently delete one alarm, or every alarm in the named set."""
         if alarm_id is not None:
             await self.client.async_delete_alarm(alarm_id)
+            self._apply_optimistic_delete(alarm_id=alarm_id, archived=None)
             return
-        await self.client.async_delete_all_alarms(
-            archived=alarm_status == ALARM_STATUS_ARCHIVED
+        archived = alarm_status == ALARM_STATUS_ARCHIVED
+        await self.client.async_delete_all_alarms(archived=archived)
+        self._apply_optimistic_delete(alarm_id=None, archived=archived)
+
+    def _apply_optimistic_archive(self, *, alarm_id: str | None) -> None:
+        """Move one alarm, or the active set, from active to archived locally.
+
+        The counts are the box's own and are authoritative, so this applies the
+        delta the operation implies rather than recomputing them: a bulk archive
+        moves exactly the active alarms this manager is holding. The coordinator
+        refresh remains the later source of truth, so an approximation here is
+        corrected within one poll interval — which is what the contract's
+        "refreshed state wins" reconciliation is for.
+
+        Only the active set is filtered: silently dropping an *archived* alarm from
+        this list would hide it from `get_alarm`, which reads the same tuple.
+        """
+        if alarm_id is not None:
+            if self.get_alarm(alarm_id) is None:
+                return
+            updated = tuple(
+                alarm for alarm in self._alarms if alarm.alarm_id != alarm_id
+            )
+            self._publish_optimistic_alarms(
+                alarms=updated,
+                active_count=max(0, self._active_count - 1),
+                archived_count=self._archived_count + 1,
+            )
+            return
+
+        self._publish_optimistic_alarms(
+            alarms=(),
+            active_count=0,
+            archived_count=self._archived_count + self._active_count,
+        )
+
+    def _apply_optimistic_delete(
+        self, *, alarm_id: str | None, archived: bool | None
+    ) -> None:
+        """Drop one alarm, or a whole set, from the local alarm state.
+
+        Unlike archiving, a delete can target the archived set, and `_alarms` holds
+        only active alarms — so deleting from the archived set changes the count and
+        nothing else.
+        """
+        if alarm_id is not None:
+            held = self.get_alarm(alarm_id)
+            if held is None:
+                return
+            self._publish_optimistic_alarms(
+                alarms=tuple(
+                    alarm for alarm in self._alarms if alarm.alarm_id != alarm_id
+                ),
+                active_count=max(0, self._active_count - 1),
+                archived_count=self._archived_count,
+            )
+            return
+
+        if archived:
+            self._publish_optimistic_alarms(
+                alarms=self._alarms,
+                active_count=self._active_count,
+                archived_count=0,
+            )
+            return
+
+        self._publish_optimistic_alarms(
+            alarms=(),
+            active_count=0,
+            archived_count=self._archived_count,
+        )
+
+    def _publish_optimistic_alarms(
+        self,
+        *,
+        alarms: tuple[FirewallaAlarm, ...],
+        active_count: int,
+        archived_count: int,
+    ) -> None:
+        """Publish updated alarm state to this manager and the coordinator snapshot.
+
+        Both, not one: entities read this manager, but `coordinator.data` is what a
+        later `handle_refresh` and the diagnostics snapshot read, so publishing to
+        one alone would leave two answers to the same question — the defect the host
+        inventory had.
+        """
+        self._alarms = alarms
+        self._active_count = active_count
+        self._archived_count = archived_count
+
+        snapshot = self.coordinator.data
+        if snapshot is None:
+            return
+        self.coordinator.async_set_updated_data(
+            replace(
+                snapshot,
+                alarms=alarms,
+                active_alarm_count=active_count,
+                archived_alarm_count=archived_count,
+            )
         )
 
     async def async_mute_alarm(

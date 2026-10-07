@@ -595,10 +595,16 @@ All rule mutations flow through the manager layer.
 Rules:
 
 - the manager is the only integration layer above `api/` that may orchestrate create, update, delete, enable, disable, or pause operations
-- successful commands may update in-memory runtime state optimistically for immediate UI correctness
+- **a successful command must update in-memory runtime state**, so the next read agrees with it. This is required rather than optional: when it was optional, only the two managers whose entities needed it implemented it, and every other mutation forced a box poll to make a write visible
+- **both views of an inventory are republished together** — a manager holding a derived index beside the coordinator snapshot must rebuild the index from the same tuple it publishes, or the two disagree. A host deletion once popped the host out of the index while the snapshot still carried it, so `get_host` returned nothing while `list_hosts` still listed it
+- a derived count may be adjusted by the delta the operation implies rather than recomputed, because it is the box's own number and the next refresh is the authority
 - the coordinator refresh remains the later source of truth
 - optimistic state must remain in memory only
 - if later polling disagrees with the optimistic state, the refreshed state wins and the discrepancy is treated as a runtime reconciliation concern
+
+**A pre-write read may inform the report; it may never suppress the write.** A check against current state reads the cached snapshot, which can be a poll interval old. On a stale "already in state" it would skip the write and report success while the box is in the other state — `pause_rule` did exactly that, so a rule resumed on the box in that window looked already-paused and the user was told nothing needed doing. The call happens regardless, and these operations are idempotent, so the cost is one request.
+
+**A write that cannot resolve its target re-reads before failing.** Resolution uses the snapshot, so a host that just joined or was just renamed is absent from the *view* rather than from the box. Raising `not_found` there is wrong: a miss is retried once after a refresh, costing a poll only in the case that would otherwise have failed.
 
 ## Config-entry scope contract
 

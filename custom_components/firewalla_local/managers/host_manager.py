@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from homeassistant.util import dt as dt_util
 
@@ -140,6 +141,65 @@ class FirewallaHostManager(FirewallaBaseManager):
             for host in snapshot.hosts
             if (normalized_mac := normalize_mac_address(host.mac)) is not None
         }
+
+    def apply_optimistic_host_update(
+        self,
+        mac: str,
+        *,
+        transform: Callable[[FirewallaHostRuntime], FirewallaHostRuntime] | None = None,
+        removed: bool = False,
+    ) -> None:
+        """Publish a successful host mutation to the in-memory snapshot.
+
+        `ARCHITECTURE.md` requires a successful command to update runtime state so
+        the next read agrees with it, with the coordinator refresh as the later
+        source of truth. Without this a host write was invisible until the next poll
+        — up to the update interval — which is why these services forced a poll
+        instead.
+
+        `transform` is a callable rather than a field mapping because it keeps the
+        dataclass field types checkable: `replace(host, **mapping)` erases them, and
+        the caller knows the concrete field it is setting, so it should say so.
+
+        The index and the snapshot are republished together and from the same tuple.
+        That is the fix for a real inconsistency: deletion popped the host out of
+        `_host_index` while `coordinator.data.hosts` still carried it, so
+        `get_host(mac)` returned nothing while `list_hosts` — which reads the
+        snapshot — still listed it. One inventory, two answers.
+        """
+        snapshot = self.coordinator.data
+        if snapshot is None:
+            return
+
+        normalized_mac = normalize_mac_address(mac)
+        if normalized_mac is None:
+            return
+
+        if removed:
+            updated_hosts = tuple(
+                host
+                for host in snapshot.hosts
+                if normalize_mac_address(host.mac) != normalized_mac
+            )
+        elif transform is not None:
+            updated_hosts = tuple(
+                (
+                    transform(host)
+                    if normalize_mac_address(host.mac) == normalized_mac
+                    else host
+                )
+                for host in snapshot.hosts
+            )
+        else:
+            return
+
+        if updated_hosts == snapshot.hosts:
+            return
+
+        updated_snapshot = replace(snapshot, hosts=updated_hosts)
+        # rebuilds `_host_index` from the same tuple, so the two cannot disagree
+        self.handle_refresh(updated_snapshot)
+        self.coordinator.async_set_updated_data(updated_snapshot)
 
     def remove_host_from_index(self, mac: str) -> None:
         """Drop one normalized MAC from the host index after a deletion."""

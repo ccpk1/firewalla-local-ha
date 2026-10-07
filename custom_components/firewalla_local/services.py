@@ -639,7 +639,7 @@ _HOST_TARGET_SCHEMA_FIELDS: dict[object, object] = {
     vol.Optional(SERVICE_FIELD_HOST_ID): cv.string,
     vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
     vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
-    vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+    vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
     vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
     vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
 }
@@ -653,7 +653,7 @@ DELETE_HOST_SCHEMA = vol.Schema(
             [cv.string],
         ),
         vol.Required(SERVICE_FIELD_CONFIRM): cv.boolean,
-        vol.Optional(SERVICE_FIELD_REFRESH, default=True): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -2310,6 +2310,49 @@ def _resolve_requested_host(
         )
 
     return None
+
+
+async def _async_resolve_requested_host(
+    entry: FirewallaConfigEntry,
+    *,
+    host_id: str | None,
+    host_mac: str | None,
+    host_name: str | None,
+    required: bool,
+) -> FirewallaHostRuntime | None:
+    """Resolve a host selector for a write, re-polling once when it is not found.
+
+    A write resolves its target against the cached snapshot, which can be a poll
+    interval old. A host that joined, or that was renamed so the selector no longer
+    matches, is then *missing from our view* rather than missing from the box, and
+    raising `host_not_found` is simply wrong — the caller's target exists. So a miss
+    is retried once after a refresh, which costs a poll only in the case that would
+    otherwise have failed.
+
+    Two other outcomes are deliberately not retried. An **ambiguous** name is a
+    different error and a fresher snapshot would only be more ambiguous. A missing
+    selector is a caller mistake that no poll can fix.
+    """
+    try:
+        return _resolve_requested_host(
+            entry,
+            host_id=host_id,
+            host_mac=host_mac,
+            host_name=host_name,
+            required=required,
+        )
+    except ServiceValidationError as err:
+        if err.translation_key != TRANS_KEY_EXCEPTION_HOST_NOT_FOUND:
+            raise
+
+    await _async_refresh_runtime_state(entry)
+    return _resolve_requested_host(
+        entry,
+        host_id=host_id,
+        host_mac=host_mac,
+        host_name=host_name,
+        required=required,
+    )
 
 
 def _build_raw_host_lookup(entry: FirewallaConfigEntry) -> dict[str, dict[str, object]]:
@@ -5343,7 +5386,7 @@ async def _async_handle_wake_host(call: ServiceCall) -> JsonObjectType:
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
-    host = _resolve_requested_host(
+    host = await _async_resolve_requested_host(
         entry,
         host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
         host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
@@ -5494,7 +5537,7 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
-    host = _resolve_requested_host(
+    host = await _async_resolve_requested_host(
         entry,
         host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
         host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
@@ -5552,6 +5595,17 @@ async def _async_handle_set_host_membership(call: ServiceCall) -> JsonObjectType
             translation_key=TRANS_KEY_EXCEPTION_SET_HOST_MEMBERSHIP_FAILED,
         )
 
+    # The tags write succeeded, so the host now belongs to `target` — or to nothing.
+    # Publishing it here is what makes the next read agree; without it the old
+    # membership stood until the next poll, and `host_rules.removed` below already
+    # reported rules as gone while the host still looked as though it owned them.
+    entry.runtime_data.integration_manager.apply_optimistic_host_membership(
+        host.mac,
+        group_id=None if target is None else target.group_id,
+        group_name=None if target is None else target.name,
+        is_user=target is not None and target.kind == _MEMBERSHIP_KIND_USER,
+    )
+
     return {
         "refreshed": refresh_requested,
         "target": _serialize_report_target(
@@ -5606,7 +5660,7 @@ async def _async_handle_set_host_notification(
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
-    host = _resolve_requested_host(
+    host = await _async_resolve_requested_host(
         entry,
         host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
         host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
@@ -5787,7 +5841,7 @@ async def _async_handle_host_string_mutation(
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
-    host = _resolve_requested_host(
+    host = await _async_resolve_requested_host(
         entry,
         host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
         host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
@@ -5849,7 +5903,7 @@ async def _async_handle_set_host_dhcp_reservation(
     if refresh_requested:
         await _async_refresh_runtime_state(entry)
 
-    host = _resolve_requested_host(
+    host = await _async_resolve_requested_host(
         entry,
         host_id=cast(str | None, call.data.get(SERVICE_FIELD_HOST_ID)),
         host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
