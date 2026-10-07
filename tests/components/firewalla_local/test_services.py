@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # pylint: disable=too-many-lines
+import ast
 import json
 import re
 from collections.abc import Iterator
@@ -4025,6 +4026,9 @@ _SERVICES_YAML_PATH: Final = (
     / "services.yaml"
 )
 _USER_GUIDE_PATH: Final = Path(__file__).parents[3] / "docs" / "USER_GUIDE.md"
+_SERVICES_SOURCE_PATH: Final = (
+    Path(__file__).parents[3] / "custom_components" / "firewalla_local" / "services.py"
+)
 
 
 def _parse_services_yaml() -> dict[str, Any]:
@@ -4137,6 +4141,53 @@ def test_services_yaml_is_valid_and_matches_translations() -> None:
     }
 
     assert mismatched == {}, f"services.yaml and translations disagree: {mismatched}"
+
+
+def test_every_read_service_names_its_schema_after_itself() -> None:
+    """A read service's schema constant carries the service's own name.
+
+    `get_hosts` was backed by `GET_HOST_NAME_MAPPING_SCHEMA`, a name from two
+    renames earlier, so grepping for the service found nothing and the constant
+    looked orphaned. Every other read schema already matched; this pins it.
+
+    The registration table holds *resolved* services and schemas, so the constant
+    names are read from the source rather than the runtime objects.
+    """
+    source = _SERVICES_SOURCE_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    registrations = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_SERVICE_REGISTRATIONS"
+            and isinstance(node.value, (ast.Tuple, ast.List))
+        ):
+            registrations = node.value
+            break
+    assert registrations is not None, "_SERVICE_REGISTRATIONS not found in services.py"
+
+    mismatched: list[str] = []
+    for entry in registrations.elts:
+        if not isinstance(entry, (ast.Tuple, ast.List)) or len(entry.elts) != 5:
+            continue
+        service_node, _handler, schema_node, response_node, _admin = entry.elts
+        if not isinstance(service_node, ast.Name) or not isinstance(
+            schema_node, ast.Name
+        ):
+            continue
+        if getattr(response_node, "attr", None) != "ONLY":
+            continue
+        # `SERVICE_GET_NETWORK_CONFIG` -> `GET_NETWORK_CONFIG_SCHEMA`
+        service = service_node.id.removeprefix("SERVICE_").lower()
+        if not service.startswith("get_"):
+            continue
+        expected = f"GET_{service.removeprefix('get_').upper()}_SCHEMA"
+        if schema_node.id != expected:
+            mismatched.append(f"{service}: {schema_node.id} (expected {expected})")
+
+    assert mismatched == [], f"schema constants do not name their service: {mismatched}"
 
 
 async def test_get_system_overview_reports_counts_without_identities(

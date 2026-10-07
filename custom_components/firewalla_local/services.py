@@ -553,7 +553,7 @@ DELETE_RULE_SCHEMA = vol.Schema(
     }
 )
 
-GET_HOST_NAME_MAPPING_SCHEMA = vol.Schema(
+GET_HOSTS_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_DETAIL, default=DETAIL_SUMMARY): vol.In(
             DETAIL_LEVELS
@@ -6864,7 +6864,7 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
     (
         SERVICE_GET_HOSTS,
         _async_handle_get_hosts,
-        GET_HOST_NAME_MAPPING_SCHEMA,
+        GET_HOSTS_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),
