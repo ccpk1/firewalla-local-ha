@@ -127,7 +127,8 @@ SYSTEM_MODEL: Final = (
     "host or the whole network: a membership change, pausing an SSID, muting an alarm "
     "without a narrow scope, or pausing a rule that covers a group or network. State "
     "the change and its scope and wait for agreement. Routine single-host changes can "
-    "proceed.\n"
+    "proceed where the action is reversible; anything destructive needs the approval "
+    "its own tool description requires.\n"
     "\n"
     "**Report actions precisely.** After a control call, name the target and say "
     "exactly which field moved and from what to what, using `before` and `after`. If "
@@ -192,9 +193,17 @@ DESTRUCTIVE_INJECTION: Final = (
     _ORIENTATION
     + " once before writing** — and understand that this family cannot be undone: "
     "an object created afterwards is new rather than restored, which is what "
-    "`undo: null` or a membership-only `undo` means. State plainly what is destroyed "
-    "and what survives, and prefer a reversible alternative where one exists and "
-    "serves the request."
+    "`undo: null` or a membership-only `undo` means. Prefer a reversible "
+    "alternative where one exists and serves the request.\n"
+    "\n"
+    "**A destructive call needs the user's approval for that specific action.** "
+    "Before calling one, state what you intend in full — the target, the scope, "
+    "everything it destroys, and what survives — and wait for their agreement. "
+    "Until they give it, make no call, however plainly they asked for the outcome: "
+    "the request is what you propose against, not the approval itself. Approval "
+    "covers that one action and nothing else. A later or different action needs its "
+    "own, even one that looks the same, and an earlier agreement never authorizes a "
+    "new call."
 )
 
 

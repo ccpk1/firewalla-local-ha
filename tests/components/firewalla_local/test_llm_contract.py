@@ -683,6 +683,55 @@ async def test_every_control_tool_declares_its_runtime_contract(
     )
 
 
+async def test_every_destructive_tool_requires_approval_for_that_action(
+    hass: HomeAssistant,
+) -> None:
+    """A destructive tool states the intent and waits, and for that action only.
+
+    The requirement is per action because consent does not compose. A user who agreed
+    to delete one host has agreed to that, not to the same deletion re-issued later,
+    and not to a deletion of something else — and an agent that reuses an earlier yes
+    is the failure this guards, because nothing downstream can catch it. A wrong write
+    against a live network is unrecoverable here.
+
+    It is stated in the family block rather than the system model on purpose, and the
+    second half of this test pins that split. The API prompt reaches an MCP client
+    only through MCP's `prompts` primitive, which a client must invoke explicitly, and
+    `system_model` only arrives once `get_system_overview` has been called — so a
+    client that sends `tools/list` and goes straight to a delete receives the
+    descriptions and nothing else. A consent rule that can be absent is not a
+    safeguard.
+    """
+    api_instance = await _api_instance(hass)
+    destructive = [tool for tool in api_instance.tools if tool.annotations.destructive]
+
+    # Guard against the test passing because there are no destructive tools registered
+    # in this mode.
+    assert destructive, "no destructive tools were registered, so this proves nothing"
+
+    missing: list[str] = []
+    for tool in destructive:
+        if "wait for their agreement" not in tool.description:
+            missing.append(tool.name)
+        if "that one action and nothing else" not in tool.description:
+            missing.append(f"{tool.name} (single-use scope)")
+
+    assert missing == [], (
+        "these destructive tools do not require approval for the specific action "
+        f"before they run: {missing}"
+    )
+
+    # The per-action scope must not live in the model only, because the model is the
+    # one channel a write-first client might never receive.
+    assert "that one action and nothing else" in DESTRUCTIVE_INJECTION
+    assert "that one action and nothing else" not in PROMPT
+
+    # The model must not authorize a destructive single-host change either. Its
+    # confirmation rule carves destructive actions out, because "routine single-host
+    # changes can proceed" otherwise read as covering a one-host delete.
+    assert "anything destructive needs the approval" in PROMPT
+
+
 async def test_a_tool_and_its_service_share_one_name(hass: HomeAssistant) -> None:
     """A tool and the service behind it name one operation, so they name it alike.
 
