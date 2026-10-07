@@ -233,26 +233,17 @@ class PauseRuleTool(_FirewallaControlTool):
     title = "Pause rule"
     description = (
         "Pause one firewall rule, either for a set time or until it is resumed. "
-        "Resolve rule_id from list_rules. Fully reversible: `undo` is "
-        "resume_rule.\n"
+        "Resolve `rule_id` from `list_rules`. Fully reversible: `undo` is "
+        "`resume_rule`, and the rule keeps its id.\n"
         "\n"
-        "The rule is not deleted. Firewalla disables it in place and keeps its "
-        "id, so resuming restores the same rule. Two modes:\n"
-        "- **timed** -- pass `duration` or `resume_at`. The box stores a resume "
+        "- **timed** — pass `duration` or `resume_at`. The box stores a resume "
         "boundary and brings the rule back on its own.\n"
-        "- **indefinite** -- pass neither. The rule stays off until "
-        "resume_rule.\n"
+        "- **indefinite** — pass neither. The rule stays off until `resume_rule`. "
+        "That is the same state as switching the rule off in the app.\n"
         "\n"
-        "Indefinite is the *same underlying state* as switching the rule off in "
-        "the Firewalla app: one disabled rule with no resume boundary. The two "
-        "are interchangeable and cannot be told apart afterwards. "
-        "`list_rules` reports both as `is_paused: true`; its `pause_until` is "
-        "what separates them -- a timestamp means the box will resume it, "
-        "`null` means it will not.\n"
-        "\n"
-        "A rule pause applies to every host the rule governs, so pausing a "
-        "group or user rule pauses it for all of that group's or user's hosts. "
-        "Allow a short delay before the change takes effect on the wire."
+        "A rule pause applies to every host the rule governs, so pausing a group "
+        "or user rule pauses it for all of that group's or user's hosts. Allow a "
+        "short delay before the change takes effect on the wire."
     )
     parameters = vol.Schema(
         {
@@ -322,18 +313,12 @@ class ResumeRuleTool(_FirewallaControlTool):
     title = "Resume rule"
     description = (
         "Resume one paused rule, clearing any resume boundary. This is the undo "
-        "for pause_rule, and it works for both a timed pause and an indefinite "
-        "one -- including a rule switched off in the Firewalla app, which is the "
-        "same state.\n"
+        "for `pause_rule`, and it works for a timed pause, an indefinite one, and "
+        "a rule switched off in the Firewalla app — all the same state. Resuming "
+        "an already-enabled rule is a no-op.\n"
         "\n"
-        "Firewalla re-enables the existing rule in place rather than creating a "
-        "new one, so a rule id survives a pause/resume cycle and anything "
-        "referencing it stays valid. Resuming an already-enabled rule is a "
-        "no-op.\n"
-        "\n"
-        "After resuming, `list_rules` reports `enabled: true`, `is_paused: "
-        "false` and `pause_until: null`. Allow a short delay before the change "
-        "takes effect on the wire."
+        "Afterwards `list_rules` reports `is_paused: false` and `pause_until: "
+        "null`. Allow a short delay before the change takes effect on the wire."
     )
     parameters = vol.Schema(
         {
@@ -707,11 +692,10 @@ class SetHostGroupTool(_SetHostMembershipTool):
     name = format_tool_name("set_host_group")
     title = "Set host group"
     description = (
-        "Put a host in one Firewalla group, so it follows that group's rules. "
-        "A host has exactly one membership, so this replaces any group or user "
-        "it currently belongs to, as the app does. Resolve the group from "
-        "get_system_overview (include 'identifiers') first; group and user names "
-        "are separate, and a user's name is never a valid group. "
+        "Put a host in one Firewalla group. This replaces whatever group or user "
+        "the host currently belongs to, as the app does. Resolve the group from "
+        "`get_system_overview` (`include: ['identifiers']`) first — group and user "
+        "names are separate collections, so a user's name is never a valid group. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
@@ -750,9 +734,10 @@ class ClearHostGroupTool(_SetHostMembershipTool):
     name = format_tool_name("clear_host_group")
     title = "Clear host group"
     description = (
-        "Remove a host's group or user membership so it belongs to neither and "
-        "no longer inherits that group's or user's rules. Use it to release a "
-        "host, or to undo set_host_group or set_host_user. " + _MEMBERSHIP_RULE_WARNING
+        "Remove a host's group membership. The group and its rules are untouched "
+        "and keep covering its other hosts — only this host leaves. The inverse of "
+        "`set_host_group`, and it also clears a user membership. "
+        + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
 
@@ -779,11 +764,11 @@ class SetHostUserTool(_SetHostMembershipTool):
     name = format_tool_name("set_host_user")
     title = "Set host user"
     description = (
-        "Assign a host to one Firewalla user, so it follows that user's rules. "
-        "A host has exactly one membership, so this replaces any group or user "
-        "it currently belongs to. Resolve the user from get_system_overview "
-        "(include 'identifiers') first; users and groups are separate collections "
-        "and a group's name is never a valid user. " + _MEMBERSHIP_RULE_WARNING
+        "Assign a host to one Firewalla user. This replaces whatever group or user "
+        "the host currently belongs to. Resolve the user from `get_system_overview` "
+        "(`include: ['identifiers']`) first — users and groups are separate "
+        "collections, so a group's name is never a valid user. "
+        + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
 
@@ -821,10 +806,9 @@ class ClearHostUserTool(_SetHostMembershipTool):
     name = format_tool_name("clear_host_user")
     title = "Clear host user"
     description = (
-        "Remove a host's user or group membership so it belongs to neither and "
-        "no longer inherits that user's rules. The user and their rules are left "
-        "untouched and keep covering their other hosts; only this host leaves. "
-        "Use it to release a host, or to undo set_host_user or set_host_group. "
+        "Remove a host's user membership. The user and their rules are untouched "
+        "and keep covering their other hosts — only this host leaves. The inverse "
+        "of `set_host_user`, and it also clears a group membership. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP

@@ -312,6 +312,9 @@ class ListRulesTool(_FirewallaReadTool):
         "destination, or null. The box keeps one match per rule and no history, so "
         'it cannot answer "everything this rule blocked".\n'
         "\n"
+        "`is_paused` — whether the rule is running; `pause_until` — the boundary it "
+        "comes back on its own, or null when it will not.\n"
+        "\n"
         "User-visible rules only by default. Product-owned DAP and family rules "
         "and alarm-intel auto-blocks are hidden unless `include_purpose` or "
         "`include_system_managed` asks for them. `alarm_id` finds the auto-block an "

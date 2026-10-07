@@ -68,6 +68,16 @@ SYSTEM_MODEL: Final = (
     "identifiers whose human-readable names are not available locally — never invent "
     "one.\n"
     "\n"
+    "**Reading any result.** Lists are **newest first** unless a tool says "
+    "otherwise, so the most recent record is `[0]`; no tool returns a separate "
+    '"latest". The box **clamps or ignores what it does not like without '
+    "erroring**, so where a response reports the span or window it actually served, "
+    "state that rather than the one requested. Where an id/name pair exists "
+    "(`_uuid`/`_name`, `_mac`/`_name`), the id is a deterministic match and the name "
+    "is for interactive use — provide one. Names are not unique, so a name matching "
+    "nothing, or more than one object, is refused rather than resolved "
+    "arbitrarily.\n"
+    "\n"
     "**Resolve before acting.** The write tools need exact identifiers and cannot "
     "guess them, so read them first: a rule id from `list_rules`, a host from "
     "`list_hosts`, an SSID from `get_wireless_status`. `get_system_overview` returns "
@@ -87,6 +97,15 @@ SYSTEM_MODEL: Final = (
     'host?", read its `group_name` from `list_hosts` and pass that to `list_rules` '
     "as `applies_to` — which matches exactly, and a host may list several names "
     'separated by ", ", so filter one at a time.\n'
+    "\n"
+    "**A paused rule keeps its id.** Pausing disables the rule in place rather than "
+    "deleting it, so resuming restores the same rule and anything referencing its id "
+    "stays valid. `is_paused` alone does not say whether it will come back: read "
+    "`pause_until` beside it, where a timestamp means the box resumes the rule on its "
+    "own and `null` means it stays paused until `resume_rule`. A rule paused with no "
+    "boundary and a rule switched off in the Firewalla app are the **same state** — "
+    "the box keeps only enabled/disabled plus a resume boundary — so they cannot be "
+    "told apart afterwards, and either can be resumed with `resume_rule`.\n"
     "\n"
     "**A membership change destroys the host's own rules.** `set_host_group`, "
     "`set_host_user`, `clear_host_group` and `clear_host_user` permanently remove the "
@@ -150,19 +169,12 @@ _ORIENTATION: Final = (
 )
 
 READ_INJECTION: Final = (
-    _ORIENTATION + " — once per session is enough unless a result stops making sense.\n"
+    _ORIENTATION + " — once per session is enough unless a result stops making "
+    "sense.\n"
     "\n"
-    "Read results are **newest first** unless a tool says otherwise, so the most "
-    'recent record is `[0]`; no tool returns a separate "latest". The box clamps '
-    "or ignores what it does not like **without erroring**, so where a response "
-    "reports the span or window it actually served, state that rather than the one "
-    "requested. Where an id/name pair exists (`_uuid`/`_name`, `_mac`/`_name`), the "
-    "id is a deterministic match and the name is for interactive use — provide one. "
-    "Names are not unique, so a name matching nothing or more than one object is "
-    "refused rather than resolved arbitrarily. A default result also omits optional "
-    "detail: check the tool's `detail` or `include` before concluding a field is "
-    "absent, and `truncated` / `next_cursor` / `rows_returned` before presenting a "
-    "page or a cap as the whole answer."
+    "A default result omits optional detail: check the tool's `detail` or `include` "
+    "before concluding a field is absent, and `truncated` / `next_cursor` / "
+    "`rows_returned` before presenting a page or a cap as the whole answer."
 )
 
 CONTROL_INJECTION: Final = (
