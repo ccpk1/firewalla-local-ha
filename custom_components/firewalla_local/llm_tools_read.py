@@ -988,6 +988,11 @@ class GetAlarmsTool(_FirewallaReadTool):
         "when asked. Defaults to the 10 newest; raise `limit` deliberately, since "
         "a large alarm payload is expensive context.\n"
         "\n"
+        "The default reads the cached snapshot, so an alarm you archived in this "
+        "session is already gone from the result; pass `refresh: true` to read the "
+        "box instead. Archived alarms are **only** available from the box, so "
+        "`include_archived` requires `refresh: true`.\n"
+        "\n"
         "Silence records are omitted by default, and each alarm already carries "
         "its own `exception_id`, so `include_exceptions` is only for finding a "
         "silence to remove — that list is unbounded and is the expensive part of "
@@ -1004,7 +1009,11 @@ class GetAlarmsTool(_FirewallaReadTool):
             ): vol.All(int, vol.Range(min=1, max=500)),
             vol.Optional(
                 SERVICE_FIELD_INCLUDE_ARCHIVED,
-                description="Optional. Include archived alarms. Defaults to false.",
+                description=(
+                    "Optional. Include archived alarms. Defaults to false. "
+                    "Requires `refresh: true`: the archived set is box-retained "
+                    "history the cached snapshot does not hold."
+                ),
             ): bool,
             vol.Optional(
                 SERVICE_FIELD_ALARM_TYPE,
@@ -1032,6 +1041,7 @@ class GetAlarmsTool(_FirewallaReadTool):
                     "unmute."
                 ),
             ): bool,
+            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
         }
     )
     _service = SERVICE_GET_ALARMS

@@ -8688,6 +8688,63 @@ async def test_get_alarms_is_not_admin_gated(hass: HomeAssistant) -> None:
     assert err.value.translation_key == "multiple_entries_loaded"
 
 
+async def test_get_alarms_archived_request_requires_refresh(
+    hass: HomeAssistant,
+) -> None:
+    """An archived request is refused without refresh rather than polled quietly.
+
+    The snapshot carries the active set only, so `include_archived` asks for
+    something the cache cannot answer. Fetching it anyway would poll behind a read
+    that reports itself as cached, which is exactly the inconsistency the cached
+    default removes — so the combination is refused, and the message names the fix.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+        patch.object(
+            FirewallaApiClient, "async_get_archived_alarms", new=AsyncMock()
+        ) as get_archived,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_ALARMS,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_INCLUDE_ARCHIVED: True,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert err.value.translation_key == "alarm_archived_requires_refresh"
+    assert get_archived.await_count == 0
+
+
 async def test_get_alarms_returns_normalized_data_and_report_metadata(
     hass: HomeAssistant,
 ) -> None:
@@ -8754,6 +8811,7 @@ async def test_get_alarms_returns_normalized_data_and_report_metadata(
             {
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_INCLUDE_ARCHIVED: True,
+                SERVICE_FIELD_REFRESH: True,
             },
             blocking=True,
             return_response=True,

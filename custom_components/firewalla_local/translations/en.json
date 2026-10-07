@@ -1391,6 +1391,9 @@
     "alarm_operation_failed": {
       "message": "The integration could not complete the alarm operation. Check the Firewalla connection and try again."
     },
+    "alarm_archived_requires_refresh": {
+      "message": "Archived alarms are read from the box, not the cached snapshot. Set refresh to true to include them."
+    },
     "wan_usage_failed": {
       "message": "The integration could not read WAN data usage. Check the Firewalla connection and try again."
     },
@@ -1415,7 +1418,11 @@
         },
         "include_archived": {
           "name": "Include archived",
-          "description": "Optional. Include archived alarms in the result."
+          "description": "Optional. Include archived alarms in the result. Requires refresh to be true, because the archived set is box-retained history the cached snapshot does not hold."
+        },
+        "refresh": {
+          "name": "Refresh",
+          "description": "Optional. Defaults to false, reading the cached snapshot, which reflects an archive already made in this session. Set true to poll the box; required when include_archived is true."
         },
         "alarm_type": {
           "name": "Alarm type",

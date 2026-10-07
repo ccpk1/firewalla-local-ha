@@ -2134,6 +2134,47 @@ class FirewallaApiClient:
         kind = distinct.pop() if len(distinct) == 1 else None
         return label, kind
 
+    def _resolve_host_network_fields(
+        self, interface_id: str | None, network_lookup: dict[str, str]
+    ) -> tuple[str | None, str | None]:
+        """Return one host's `(network_name, network_uuid)` from its interface.
+
+        The name is display-only and the uuid is the deterministic match, so both are
+        resolved together: they come from the same interface id and a caller that took
+        one without the other would publish a name from a different network.
+        """
+        return (
+            network_lookup.get(interface_id) if interface_id is not None else None,
+            interface_id,
+        )
+
+    def _resolve_host_flow_bytes(
+        self, flowsummary: object
+    ) -> tuple[int | None, int | None]:
+        """Return one host's `(download_bytes, upload_bytes)` from its flow summary.
+
+        A peer and an ordinary host carry the same flow-summary shape, so the same
+        extraction serves both.
+        """
+        if not isinstance(flowsummary, dict):
+            return None, None
+        return (
+            self._coerce_int(flowsummary.get("inbytes")),
+            self._coerce_int(flowsummary.get("outbytes")),
+        )
+
+    @staticmethod
+    def _sorted_raw_ids(value: object) -> tuple[str, ...]:
+        """Return the non-empty strings in one raw id list, deduplicated and sorted.
+
+        Used for the tag references on both an ordinary host and a VPN peer, which
+        hold the same kind of list and were otherwise read by two copies of this
+        expression.
+        """
+        if not isinstance(value, list):
+            return ()
+        return tuple(sorted({item for item in value if isinstance(item, str) and item}))
+
     def _resolve_host_connection_type(
         self,
         raw_host: dict[str, object],
@@ -2249,6 +2290,10 @@ class FirewallaApiClient:
                 tags=tags,
                 affiliated_users=affiliated_users,
             )
+            network_name, network_uuid = self._resolve_host_network_fields(
+                interface_id, network_lookup
+            )
+            download_bytes, upload_bytes = self._resolve_host_flow_bytes(flowsummary)
 
             normalized_peers.append(
                 FirewallaHostRuntime(
@@ -2261,36 +2306,16 @@ class FirewallaApiClient:
                     ip_address=peer_ip_address,
                     group_name=membership_name,
                     membership_kind=membership_kind,
-                    network_name=(
-                        network_lookup.get(interface_id)
-                        if interface_id is not None
-                        else None
-                    ),
-                    network_uuid=interface_id,
+                    network_name=network_name,
+                    network_uuid=network_uuid,
                     connection_type="vpn",
                     last_active=self._coerce_float(
                         raw_peer.get(_RAW_HOST_LAST_ACTIVE_TIMESTAMP_KEY)
                     ),
-                    download_bytes=(
-                        self._coerce_int(flowsummary.get("inbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
-                    upload_bytes=(
-                        self._coerce_int(flowsummary.get("outbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
+                    download_bytes=download_bytes,
+                    upload_bytes=upload_bytes,
                     stale=None,
-                    group_ids=tuple(
-                        sorted(
-                            raw_group_id
-                            for raw_group_id in raw_tags
-                            if isinstance(raw_group_id, str) and raw_group_id
-                        )
-                    )
-                    if isinstance(raw_tags, list)
-                    else (),
+                    group_ids=self._sorted_raw_ids(raw_tags),
                 )
             )
 
@@ -2340,6 +2365,10 @@ class FirewallaApiClient:
                 tags=tag_lookup,
                 affiliated_users=affiliated_user_lookup,
             )
+            network_name, network_uuid = self._resolve_host_network_fields(
+                interface_id, network_lookup
+            )
+            download_bytes, upload_bytes = self._resolve_host_flow_bytes(flowsummary)
             normalized_hosts.append(
                 FirewallaHostRuntime(
                     mac=host_mac,
@@ -2353,12 +2382,8 @@ class FirewallaApiClient:
                     dhcp_name=dhcp_name,
                     group_name=membership_name,
                     membership_kind=membership_kind,
-                    network_name=(
-                        network_lookup.get(interface_id)
-                        if interface_id is not None
-                        else None
-                    ),
-                    network_uuid=interface_id,
+                    network_name=network_name,
+                    network_uuid=network_uuid,
                     connection_type=self._resolve_host_connection_type(
                         raw_host,
                         device_tags=device_tag_lookup,
@@ -2366,37 +2391,13 @@ class FirewallaApiClient:
                     last_active=self._coerce_float(
                         raw_host.get(_RAW_HOST_LAST_ACTIVE_KEY)
                     ),
-                    download_bytes=(
-                        self._coerce_int(flowsummary.get("inbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
-                    upload_bytes=(
-                        self._coerce_int(flowsummary.get("outbytes"))
-                        if isinstance(flowsummary, dict)
-                        else None
-                    ),
+                    download_bytes=download_bytes,
+                    upload_bytes=upload_bytes,
                     stale=self._coerce_boolish(raw_host.get(_RAW_HOST_STALE_KEY)),
                     host_device_type=self._resolve_host_device_type(raw_host),
                     vpn_client=self._normalize_host_vpn_client(raw_host),
-                    group_ids=tuple(
-                        sorted(
-                            raw_group_id
-                            for raw_group_id in raw_host.get("tags", [])
-                            if isinstance(raw_group_id, str) and raw_group_id
-                        )
-                    )
-                    if isinstance(raw_host.get("tags"), list)
-                    else (),
-                    user_ids=tuple(
-                        sorted(
-                            raw_user_id
-                            for raw_user_id in raw_host.get(_RAW_USER_TAGS_KEY, [])
-                            if isinstance(raw_user_id, str) and raw_user_id
-                        )
-                    )
-                    if isinstance(raw_host.get(_RAW_USER_TAGS_KEY), list)
-                    else (),
+                    group_ids=self._sorted_raw_ids(raw_host.get("tags")),
+                    user_ids=self._sorted_raw_ids(raw_host.get(_RAW_USER_TAGS_KEY)),
                 )
             )
 

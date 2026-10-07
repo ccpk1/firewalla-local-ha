@@ -113,8 +113,44 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         include_archived: bool,
         alarm_type: str | None,
         detail: bool,
+        refresh: bool = False,
     ) -> tuple[FirewallaAlarm, ...]:
-        """Fetch and normalize active alarms, optionally archived and enriched."""
+        """Return alarms from the cached snapshot, or from the box on request.
+
+        The default reads the snapshot this manager already holds, so the call is
+        fast and — the reason it matters — agrees with a write made in the same
+        session: an archive applied optimistically is visible here immediately, where
+        a live fetch would still show the alarm until the next poll.
+
+        The snapshot carries the **active** set only, because the archived set is
+        box-retained history that never enters it. `include_archived` therefore cannot
+        be answered from the cache, and the service refuses that combination rather
+        than polling quietly behind a read that reports itself as cached.
+        """
+        alarms = (
+            await self._async_fetch_alarms(
+                limit=limit, include_archived=include_archived
+            )
+            if refresh
+            else list(self._alarms)
+        )
+
+        if alarm_type is not None:
+            matching_types = _ALARM_TYPE_GROUPS.get(alarm_type, (alarm_type,))
+            alarms = [alarm for alarm in alarms if alarm.alarm_type in matching_types]
+
+        alarms.sort(
+            key=lambda alarm: (alarm.fired_at or 0, alarm.alarm_id), reverse=True
+        )
+        alarms = alarms[:limit]
+        if detail:
+            alarms = [await self._async_enrich_alarm(alarm) for alarm in alarms]
+        return tuple(alarms)
+
+    async def _async_fetch_alarms(
+        self, *, limit: int, include_archived: bool
+    ) -> list[FirewallaAlarm]:
+        """Poll the box for the active alarms, plus the archived set when asked."""
         active_records = await self.client.async_get_alarms(limit=limit)
         alarms = [
             alarm
@@ -133,18 +169,7 @@ class FirewallaAlarmManager(FirewallaBaseManager):
                 )
                 is not None
             )
-
-        if alarm_type is not None:
-            matching_types = _ALARM_TYPE_GROUPS.get(alarm_type, (alarm_type,))
-            alarms = [alarm for alarm in alarms if alarm.alarm_type in matching_types]
-
-        alarms.sort(
-            key=lambda alarm: (alarm.fired_at or 0, alarm.alarm_id), reverse=True
-        )
-        alarms = alarms[:limit]
-        if detail:
-            alarms = [await self._async_enrich_alarm(alarm) for alarm in alarms]
-        return tuple(alarms)
+        return alarms
 
     async def _async_enrich_alarm(self, alarm: FirewallaAlarm) -> FirewallaAlarm:
         """Return an alarm copy carrying opt-in detail payload keys."""

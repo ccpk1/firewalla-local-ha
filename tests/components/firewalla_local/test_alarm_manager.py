@@ -310,6 +310,7 @@ async def test_get_alarms_filters_companion_types_before_detail() -> None:
             include_archived=True,
             alarm_type="security",
             detail=True,
+            refresh=True,
         )
 
     assert [alarm.alarm_id for alarm in alarms] == [
@@ -443,3 +444,90 @@ async def test_delete_one_alarm_that_is_not_held_leaves_state_untouched() -> Non
     assert coordinator.updates == []
     assert manager.active_count == 1
     assert manager.archived_count == 4
+
+
+async def test_get_alarms_serves_the_snapshot_by_default() -> None:
+    """The default read comes from the snapshot and does not touch the box."""
+    client = _client()
+    client.async_get_alarms = AsyncMock()
+    client.async_get_archived_alarms = AsyncMock()
+    manager, _ = _manager_with_alarms(
+        client,
+        (
+            _alarm(
+                "cached-1",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_100.0,
+                category="security",
+            ),
+        ),
+        active_count=1,
+    )
+
+    alarms = await manager.async_get_alarms(
+        limit=10, include_archived=False, alarm_type=None, detail=False
+    )
+
+    assert [alarm.alarm_id for alarm in alarms] == ["cached-1"]
+    assert client.async_get_alarms.await_count == 0
+    assert client.async_get_archived_alarms.await_count == 0
+
+
+async def test_get_alarms_shows_an_archive_made_in_the_same_session() -> None:
+    """The cached read reflects a local archive, which a box read would not.
+
+    This is the reason the default is the snapshot: the tool's own description tells
+    a model that an alarm it archived is gone from the result, and only a cached read
+    can honour that before the next poll.
+    """
+    client = _client()
+    client.async_archive_alarm = AsyncMock(return_value=None)
+    client.async_get_alarms = AsyncMock()
+    manager, _ = _manager_with_alarms(
+        client,
+        (
+            _alarm(
+                "keep",
+                alarm_type="ALARM_INTEL",
+                fired_at=1_700_000_000.0,
+                category="security",
+            ),
+            _alarm(
+                "archived",
+                alarm_type="ALARM_VIDEO",
+                fired_at=1_700_000_500.0,
+                category="av",
+            ),
+        ),
+        active_count=2,
+    )
+
+    await manager.async_archive_alarms(alarm_id="archived")
+    alarms = await manager.async_get_alarms(
+        limit=10, include_archived=False, alarm_type=None, detail=False
+    )
+
+    assert [alarm.alarm_id for alarm in alarms] == ["keep"]
+    assert client.async_get_alarms.await_count == 0
+
+
+async def test_get_alarms_refresh_polls_the_box() -> None:
+    """`refresh: true` reads the box, which is the only way to see archived alarms."""
+    client = _client()
+    client.async_get_alarms = AsyncMock(
+        return_value=({"aid": "live-1", "type": "ALARM_INTEL", "alarmTimestamp": "10"},)
+    )
+    client.async_get_archived_alarms = AsyncMock(return_value=())
+    manager, _ = _manager_with_alarms(client, (), active_count=0)
+
+    alarms = await manager.async_get_alarms(
+        limit=10,
+        include_archived=True,
+        alarm_type=None,
+        detail=False,
+        refresh=True,
+    )
+
+    assert [alarm.alarm_id for alarm in alarms] == ["live-1"]
+    assert client.async_get_alarms.await_count == 1
+    assert client.async_get_archived_alarms.await_count == 1

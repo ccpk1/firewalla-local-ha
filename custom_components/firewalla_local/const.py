@@ -728,6 +728,9 @@ TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND: Final = "alarm_not_found"
 TRANS_KEY_EXCEPTION_ALARM_SCOPE_TARGET_REQUIRED: Final = "alarm_scope_target_required"
 TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED: Final = "alarm_selector_required"
 TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED: Final = "alarm_operation_failed"
+TRANS_KEY_EXCEPTION_ALARM_ARCHIVED_REQUIRES_REFRESH: Final = (
+    "alarm_archived_requires_refresh"
+)
 TRANS_KEY_EXCEPTION_DELETE_ALARMS_CONFIRM_REQUIRED: Final = (
     "delete_alarms_confirm_required"
 )

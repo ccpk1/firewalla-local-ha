@@ -1508,6 +1508,17 @@ get_alarms:
         boolean:
       name: Fetch detail
       description: Optional. Fetch extended detail with one additional request per returned alarm.
+    refresh:
+      required: false
+      example: false
+      selector:
+        boolean:
+      name: Refresh
+      description:
+        Optional. Defaults to false, reading the cached snapshot, which
+        reflects an archive already made in this session. Set true to poll the box;
+        required when include_archived is true, since the archived set is box-retained
+        history the snapshot does not hold.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

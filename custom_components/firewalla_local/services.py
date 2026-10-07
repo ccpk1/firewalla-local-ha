@@ -160,6 +160,7 @@ from .const import (
     TARGET_KIND_HOST,
     TARGET_KIND_NETWORK,
     TARGET_KIND_USER,
+    TRANS_KEY_EXCEPTION_ALARM_ARCHIVED_REQUIRES_REFRESH,
     TRANS_KEY_EXCEPTION_ALARM_NOT_FOUND,
     TRANS_KEY_EXCEPTION_ALARM_OPERATION_FAILED,
     TRANS_KEY_EXCEPTION_ALARM_SELECTOR_REQUIRED,
@@ -483,6 +484,7 @@ GET_ALARMS_SCHEMA = vol.Schema(
             DETAIL_LEVELS
         ),
         vol.Optional(SERVICE_FIELD_INCLUDE_EXCEPTIONS, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -4753,12 +4755,26 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
     include_exceptions = cast(
         bool, call.data.get(SERVICE_FIELD_INCLUDE_EXCEPTIONS, False)
     )
+    refresh_requested = cast(bool, call.data[SERVICE_FIELD_REFRESH])
+    # The archived set is box-retained history the snapshot never holds, so this
+    # combination asks for something the cache cannot answer. Refusing says so
+    # plainly; fetching anyway would poll behind a read that reports itself as
+    # cached, which is the inconsistency this default exists to remove.
+    if include_archived and not refresh_requested:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_ALARM_ARCHIVED_REQUIRES_REFRESH,
+        )
+
+    if refresh_requested:
+        await _async_refresh_runtime_state(entry)
+
     try:
         alarms = await entry.runtime_data.alarm_manager.async_get_alarms(
             limit=limit,
             include_archived=include_archived,
             alarm_type=alarm_type,
             detail=detail,
+            refresh=refresh_requested,
         )
     except FirewallaApiError as err:
         _raise_runtime_service_error(
@@ -4779,8 +4795,19 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
         FirewallaReportProvenance(
             section="alarms",
             source="firewalla_local",
-            source_field="alarms / archivedAlarms",
-            note="The local runtime returns the newest records from its retained set.",
+            source_field=(
+                "alarms / archivedAlarms"
+                if refresh_requested
+                else "coordinator snapshot alarms"
+            ),
+            note=(
+                "Read from the box: the newest records from its retained set."
+                if refresh_requested
+                else (
+                    "Read from the cached snapshot, which holds the active set and "
+                    "reflects local changes already made in this session."
+                )
+            ),
         ),
     )
     result: JsonObjectType = {
@@ -4801,6 +4828,7 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
             "alarm_type": alarm_type,
             "detail": detail,
             "include_exceptions": include_exceptions,
+            "refresh": refresh_requested,
         },
         "metadata": _serialize_report_metadata(
             applied={
@@ -4809,6 +4837,7 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
                 "alarm_type": alarm_type,
                 "detail": detail,
                 "include_exceptions": include_exceptions,
+                "refresh": refresh_requested,
             },
             provenance=provenance,
         ),
