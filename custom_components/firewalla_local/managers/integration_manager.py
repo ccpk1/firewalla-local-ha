@@ -345,7 +345,9 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         self, host_mac: str, policy_value: dict[str, object]
     ) -> dict[str, object]:
         """Write one host-scoped policy payload to the requested host."""
-        return await self.client.async_set_host_policy(host_mac, policy_value)
+        result = await self.client.async_set_host_policy(host_mac, policy_value)
+        self._apply_optimistic_host_policy(host_mac, policy_value)
+        return result
 
     async def async_set_host_name(
         self,
@@ -410,6 +412,15 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         host_manager.apply_optimistic_host_update(
             host_mac, transform=transform, removed=removed
         )
+
+    def _apply_optimistic_host_policy(
+        self, host_mac: str, policy_value: dict[str, object]
+    ) -> None:
+        """Publish one successful host policy write to the cached raw payload."""
+        host_manager = getattr(self.coordinator, "host_manager", None)
+        if host_manager is None:
+            return
+        host_manager.apply_optimistic_host_policy(host_mac, policy_value)
 
     def _host_dns_domain(self, host_mac: str) -> str | None:
         """Return one host's DNS domain, for deriving its optimistic FQDN."""

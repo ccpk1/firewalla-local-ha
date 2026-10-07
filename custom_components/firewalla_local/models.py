@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 from enum import StrEnum
-from typing import Final, Literal, NotRequired, TypedDict
+from typing import Final, NotRequired, TypedDict
 
 from cronsim import CronSim, CronSimError
 
@@ -34,6 +34,7 @@ from .const import (
     RULE_TARGET_TYPE_IP,
     RULE_TARGET_TYPE_MAC,
     RULE_TARGET_TYPE_NETWORK,
+    MembershipKind,
 )
 from .utils.mac import normalize_mac_address
 from .utils.values import iso_instant, normalized_bool
@@ -954,6 +955,11 @@ class FirewallaHostRuntime:
     dns_fqdn: str | None = None
     dhcp_name: str | None = None
     host_device_type: str | None = None
+    # Which kind `group_name` names, using the tag collection's own vocabulary. A
+    # host carries no such discriminator in the payload — a group and a user are the
+    # same tag — so without this a reader has to resolve the label against both
+    # collections and hope it matches one.
+    membership_kind: MembershipKind | None = None
     vpn_client: FirewallaHostVpnClient | None = None
     group_ids: tuple[str, ...] = ()
     user_ids: tuple[str, ...] = ()
@@ -971,7 +977,7 @@ class FirewallaGroupRuntime:
 
     group_id: str
     name: str
-    kind: Literal["group", "user"]
+    kind: MembershipKind
     user_id: str | None = None
 
 

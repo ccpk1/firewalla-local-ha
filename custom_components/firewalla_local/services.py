@@ -47,6 +47,8 @@ from .const import (
     LLM_TOOL_MODE_SUMMARY_ONLY,
     LOGGER,
     MAX_FLOW_LOG_PAGE_SIZE,
+    MEMBERSHIP_KIND_GROUP,
+    MEMBERSHIP_KIND_USER,
     MIN_FLOW_LOG_PAGE_SIZE,
     RULE_ACTION_BLOCK,
     RULE_PURPOSE_DAP,
@@ -865,8 +867,6 @@ _USAGE_HISTORY_REQUEST_SCOPE_TAG = "tag"
 
 # The classified host-tag collection holds plain groups and user affiliations
 # together; a membership selector is scoped by this discriminator.
-_MEMBERSHIP_KIND_GROUP = "group"
-_MEMBERSHIP_KIND_USER = "user"
 
 
 def _get_loaded_entry(
@@ -2594,7 +2594,7 @@ def _resolve_membership_target(
         )
 
     is_group_target = bool(group_selectors)
-    wanted_kind = _MEMBERSHIP_KIND_GROUP if is_group_target else _MEMBERSHIP_KIND_USER
+    wanted_kind = MEMBERSHIP_KIND_GROUP if is_group_target else MEMBERSHIP_KIND_USER
     wanted_value = cast(str, group_name or group_id or user_name or user_id)
     wanted_name = group_name if is_group_target else user_name
     # The identifier means something different by kind. A group is addressed by its own
@@ -4053,7 +4053,7 @@ def _resolve_usage_history_target(
         (
             (group.group_id, (group.name,))
             for group in entry.runtime_data.integration_manager.get_groups()
-            if group.kind == _MEMBERSHIP_KIND_GROUP
+            if group.kind == MEMBERSHIP_KIND_GROUP
         ),
     )
     if (group_id := match.resolved) is None:
@@ -4156,14 +4156,14 @@ def _resolve_flow_report_target(
                 (group.name, choices.get(user_id), group.group_id),
             )
             for group in entry.runtime_data.integration_manager.get_groups()
-            if group.kind == _MEMBERSHIP_KIND_USER
+            if group.kind == MEMBERSHIP_KIND_USER
             and (user_id := group.user_id) is not None
         ]
         match = _match_scope_selection(selection, user_candidates)
         if (user_id := match.resolved) is None:
             raise _flow_report_scope_error(match, selection=selection)
         for group in entry.runtime_data.integration_manager.get_groups():
-            if group.kind == _MEMBERSHIP_KIND_USER and group.user_id == user_id:
+            if group.kind == MEMBERSHIP_KIND_USER and group.user_id == user_id:
                 return FirewallaFlowReportTarget(
                     kind=selection.kind,
                     identity_id=user_id,
@@ -4182,7 +4182,7 @@ def _resolve_flow_report_target(
         (
             (group.group_id, (group.name,))
             for group in entry.runtime_data.integration_manager.get_groups()
-            if group.kind == _MEMBERSHIP_KIND_GROUP
+            if group.kind == MEMBERSHIP_KIND_GROUP
         ),
     )
     if (group_id := match.resolved) is not None:
@@ -4533,7 +4533,7 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
     # The tag collection holds plain groups and user affiliations together. The
     # `groups` section reports only the plain groups, so its count matches what a
     # caller means by "groups"; the user population has its own section below.
-    group_entries = [group for group in groups if group.kind == _MEMBERSHIP_KIND_GROUP]
+    group_entries = [group for group in groups if group.kind == MEMBERSHIP_KIND_GROUP]
 
     groups_section: JsonObjectType = {"count": len(group_entries)}
     if include_identifiers:
@@ -4916,7 +4916,7 @@ def _resolve_scope_identity(
         users = [
             group
             for group in entry.runtime_data.integration_manager.get_groups()
-            if group.kind == _MEMBERSHIP_KIND_USER and group.user_id is not None
+            if group.kind == MEMBERSHIP_KIND_USER and group.user_id is not None
         ]
         match = _match_scope_selection(
             selection,
@@ -4942,7 +4942,7 @@ def _resolve_scope_identity(
         (
             (group.group_id, (group.name,))
             for group in entry.runtime_data.integration_manager.get_groups()
-            if group.kind == _MEMBERSHIP_KIND_GROUP
+            if group.kind == MEMBERSHIP_KIND_GROUP
         ),
     )
     if (group_id := match.resolved) is not None:
@@ -5224,6 +5224,7 @@ async def _async_handle_get_hosts(call: ServiceCall) -> JsonObjectType:
             "dns_hostname": host.dns_hostname,
             "dns_domain": host.dns_domain,
             "group_name": host.group_name,
+            "membership_kind": host.membership_kind,
             "host_device_type": host.host_device_type,
             "kind": "mac_host" if is_mac_host else "pseudo_host",
             "network_uuid": host.network_uuid or raw_network_uuid,

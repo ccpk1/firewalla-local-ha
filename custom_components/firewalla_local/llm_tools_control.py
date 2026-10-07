@@ -113,10 +113,17 @@ _NON_IDEMPOTENT_ANNOTATIONS: Final = llm.ToolAnnotations(
     open_world=True,
 )
 
+# The `runtime` field's two values. A control tool that updates the in-memory
+# snapshot reports `updated`; one that does not reports `pending`, which is the
+# honest answer for a write whose effect only the next poll will show. A tool
+# declaring nothing gets `pending`, so forgetting the declaration under-claims
+# freshness rather than asserting a read that would still serve pre-change state.
+RUNTIME_UPDATED: Final = "updated"
+RUNTIME_PENDING: Final = "pending"
+
 _HOST_MAC_DESCRIPTION: Final = (
     "Optional. The host's MAC address (from list_hosts). Provide this or host_name."
 )
-
 _HOST_NAME_DESCRIPTION: Final = (
     "Optional. The host's name. Provide this or host_mac; names must be "
 )
@@ -145,6 +152,11 @@ class _FirewallaControlTool(llm.Tool):
     # True for SupportsResponse.ONLY services (returns a payload); False for
     # SupportsResponse.NONE services (returns nothing).
     _returns_response: bool = False
+    # Whether a successful call updates the local snapshot. Every concrete tool
+    # declares this explicitly so its result says plainly whether an immediate read
+    # agrees with it -- `ARCHITECTURE.md` requires the update, so a tool that does
+    # not apply it is stating a known gap rather than relying on a default.
+    _updates_runtime: bool = False
 
     def __init__(self, *, entry_id: str) -> None:
         """Bind the tool to the config entry it was registered for."""
@@ -203,11 +215,14 @@ class _FirewallaControlTool(llm.Tool):
 
         ``before`` is the state observed before the action, when the tool read
         it. ``after`` is the state the action requested — a statement of intent,
-        not a re-read of the box.
+        not a re-read of the box. ``runtime`` says whether the local snapshot now
+        reflects the change, which is what tells the model whether its next read
+        can be trusted.
         """
         data: dict[str, Any] = {
             "status": status,
             "changed": changed,
+            "runtime": (RUNTIME_UPDATED if self._updates_runtime else RUNTIME_PENDING),
             "target": target,
             "before": before,
             "after": after,
@@ -267,6 +282,8 @@ class PauseRuleTool(_FirewallaControlTool):
         }
     )
     _service = SERVICE_PAUSE_RULE
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -338,6 +355,8 @@ class ResumeRuleTool(_FirewallaControlTool):
     )
     _service = SERVICE_RESUME_RULE
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -404,6 +423,8 @@ class SetSsidPausedTool(_FirewallaControlTool):
     )
     _service = SERVICE_SET_SSID_PAUSED
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -455,6 +476,8 @@ class SetHostNameTool(_FirewallaControlTool):
     _service = SERVICE_SET_HOST_NAME
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -502,6 +525,8 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
     _service = SERVICE_SET_HOST_DNS_HOSTNAME
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -547,6 +572,8 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
     )
     _service = SERVICE_SET_HOST_DEVICE_TYPE
     _returns_response = True
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -618,6 +645,8 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
     _service = SERVICE_SET_HOST_DHCP_RESERVATION
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -656,6 +685,8 @@ class _SetHostMembershipTool(_FirewallaControlTool):
     # Overrides the family block: this one cannot be undone.
     _injection: str = DESTRUCTIVE_INJECTION
     _returns_response = True
+
+    _updates_runtime = False
 
     @override
     async def async_call(
@@ -849,6 +880,8 @@ class _SetHostNotifyTool(_FirewallaControlTool):
 
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -933,6 +966,8 @@ class WakeHostTool(_FirewallaControlTool):
     _service = SERVICE_WAKE_HOST
     _returns_response = True
 
+    _updates_runtime = False
+
     @override
     async def async_call(
         self,
@@ -973,6 +1008,8 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
     annotations = _NON_IDEMPOTENT_ANNOTATIONS
     _service = SERVICE_RUN_INTERNET_SPEED_TEST
     _returns_response = True
+
+    _updates_runtime = False
 
     @override
     async def async_call(
@@ -1076,6 +1113,8 @@ class SetAlarmMutedTool(_FirewallaControlTool):
     )
     _service = SERVICE_MUTE_ALARM
 
+    _updates_runtime = False
+
     @override
     async def async_call(
         self,
@@ -1132,6 +1171,8 @@ class UnmuteAlarmTool(_FirewallaControlTool):
         }
     )
     _service = SERVICE_UNMUTE_ALARM
+
+    _updates_runtime = False
 
     @override
     async def async_call(
@@ -1232,6 +1273,8 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
     _service = SERVICE_CREATE_RULE
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -1283,6 +1326,8 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
     _service = SERVICE_DELETE_RULE
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -1325,6 +1370,8 @@ class ArchiveAlarmTool(_FirewallaControlTool):
     )
     _service = SERVICE_ARCHIVE_ALARMS
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -1361,6 +1408,8 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
     # Overrides the family block: this one cannot be undone.
     _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_ARCHIVE_ALARMS
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1412,6 +1461,8 @@ class DeleteAlarmTool(_FirewallaControlTool):
     # Overrides the family block: this one cannot be undone.
     _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_ALARMS
+
+    _updates_runtime = True
 
     @override
     async def async_call(
@@ -1467,6 +1518,8 @@ class DeleteAlarmsTool(_FirewallaControlTool):
     _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_ALARMS
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -1519,6 +1572,8 @@ class DeleteHostTool(_FirewallaControlTool):
     _service = SERVICE_DELETE_HOST
     _returns_response = True
 
+    _updates_runtime = True
+
     @override
     async def async_call(
         self,
@@ -1570,6 +1625,8 @@ class DeleteRuleTool(_FirewallaControlTool):
     # Overrides the family block: this one cannot be undone.
     _injection: str = DESTRUCTIVE_INJECTION
     _service = SERVICE_DELETE_RULE
+
+    _updates_runtime = True
 
     @override
     async def async_call(

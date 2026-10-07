@@ -4636,6 +4636,7 @@ async def test_get_hosts_defaults_to_summary_detail(
                 "dns_hostname": "plex-server",
                 "dns_domain": "int.ccpk.us",
                 "group_name": "Media Devices",
+                "membership_kind": None,
                 "host_device_type": "tablet",
                 "kind": "mac_host",
                 "network_uuid": "5799d896-5e0f-40a5-a776-38a5d7746204",
@@ -4656,6 +4657,7 @@ async def test_get_hosts_defaults_to_summary_detail(
                 "dns_hostname": None,
                 "dns_domain": "int.ccpk.us",
                 "group_name": None,
+                "membership_kind": None,
                 "host_device_type": None,
                 "kind": "pseudo_host",
                 "network_uuid": None,
@@ -5467,6 +5469,95 @@ async def test_set_host_dhcp_reservation_resolves_names_for_dynamic_mode(
         "network_uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
         "reserved_ipv4": None,
     }
+
+
+async def test_set_host_dhcp_reservation_updates_the_local_snapshot(
+    hass: HomeAssistant,
+) -> None:
+    """A reservation write is visible to the next read, without a poll.
+
+    A host's IP assignment is resolved from the cached raw init payload rather than
+    the normalized snapshot, so the optimistic update has to land there. Without it
+    a read taken straight after the write still reported the previous reservation,
+    and the model would present pre-change state as current — which is exactly what
+    the result's `runtime: updated` claims is not the case.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    runtime_payload = _network_segment_report_runtime_payload()
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=runtime_payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_wake_host_snapshot(),
+        ),
+        # Patched at the client, not the manager, so the manager's optimistic update
+        # actually runs.
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_set_host_policy",
+            new=AsyncMock(return_value={"ok": True}),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        before = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOSTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+        assert before is not None
+        assert before["hosts"][0]["ip_assignment_mode"] == "static"
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_HOST_DHCP_RESERVATION,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_MODE: "dynamic",
+                SERVICE_FIELD_HOST_MAC: "00:aa:bb:cc:dd:26",
+                SERVICE_FIELD_NETWORK_UUID: "5799d896-5e0f-40a5-a776-38a5d7746204",
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+        after = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_HOSTS,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_REFRESH: False,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert after is not None
+    assert after["hosts"][0]["ip_assignment_mode"] == "dynamic"
+    assert after["hosts"][0]["reserved_ipv4"] is None
 
 
 async def test_set_host_dhcp_reservation_requires_ipv4_for_static_mode(

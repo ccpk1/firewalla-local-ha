@@ -22,6 +22,7 @@ from ..const import (
     LOGGER,
     MAX_FLOW_LOG_PAGE_SIZE,
     MIN_FLOW_LOG_PAGE_SIZE,
+    MembershipKind,
 )
 from ..const import (
     TAG_REF_PREFIX_DEVICE as _RAW_TAG_PREFIX_DEVICE,
@@ -2092,31 +2093,46 @@ class FirewallaApiClient:
 
         return self._normalized_optional_string(raw_detect.get(_RAW_HOST_TYPE_KEY))
 
-    def _resolve_host_group_name(
+    def _resolve_host_membership(
         self,
         raw_host: dict[str, object],
         *,
         tags: dict[str, str],
         affiliated_users: dict[str, tuple[str, ...]],
-    ) -> str | None:
-        """Resolve one readable group label from host tag references."""
+    ) -> tuple[str | None, MembershipKind | None]:
+        """Resolve a host's membership label and which kind it names.
+
+        A group and a user assignment are the same protocol object — a host tag — so
+        the label alone cannot say which. This resolver already knows, because it looks
+        the tag up in `affiliated_users` before `tags`; that branch is the kind.
+        """
         raw_tags = raw_host.get("tags")
         if not isinstance(raw_tags, list):
-            return None
+            return None, None
 
-        resolved_tags: list[str] = []
+        label_names: list[str] = []
+        kinds: list[MembershipKind] = []
         for raw_tag_id in raw_tags:
             if not isinstance(raw_tag_id, str) or not raw_tag_id:
                 continue
             if user_names := affiliated_users.get(raw_tag_id):
-                resolved_tags.append(", ".join(user_names))
+                label_names.append(", ".join(user_names))
+                kinds.append("user")
                 continue
             if tag_name := tags.get(raw_tag_id):
-                resolved_tags.append(tag_name)
+                label_names.append(tag_name)
+                kinds.append("group")
 
-        if not resolved_tags:
-            return None
-        return ", ".join(dict.fromkeys(resolved_tags))
+        if not label_names:
+            return None, None
+
+        label = ", ".join(dict.fromkeys(label_names))
+        # A host holds exactly one membership, so a single kind is the normal case. A
+        # mixed pair is not expected, and reporting no kind is honest where picking one
+        # would assert which of two labels the kind belongs to.
+        distinct = set(kinds)
+        kind = distinct.pop() if len(distinct) == 1 else None
+        return label, kind
 
     def _resolve_host_connection_type(
         self,
@@ -2228,6 +2244,11 @@ class FirewallaApiClient:
             )
             interface_id = self._normalized_optional_string(raw_peer.get(_RAW_INTF_KEY))
             flowsummary = raw_peer.get(_RAW_HOST_FLOWSUMMARY_KEY)
+            membership_name, membership_kind = self._resolve_host_membership(
+                {"tags": raw_tags} if isinstance(raw_tags, list) else {},
+                tags=tags,
+                affiliated_users=affiliated_users,
+            )
 
             normalized_peers.append(
                 FirewallaHostRuntime(
@@ -2238,11 +2259,8 @@ class FirewallaApiClient:
                         or f"{mac_prefix}:{peer_uid}"
                     ),
                     ip_address=peer_ip_address,
-                    group_name=self._resolve_host_group_name(
-                        {"tags": raw_tags} if isinstance(raw_tags, list) else {},
-                        tags=tags,
-                        affiliated_users=affiliated_users,
-                    ),
+                    group_name=membership_name,
+                    membership_kind=membership_kind,
                     network_name=(
                         network_lookup.get(interface_id)
                         if interface_id is not None
@@ -2317,6 +2335,11 @@ class FirewallaApiClient:
                 ),
             )
             flowsummary = raw_host.get(_RAW_HOST_FLOWSUMMARY_KEY)
+            membership_name, membership_kind = self._resolve_host_membership(
+                raw_host,
+                tags=tag_lookup,
+                affiliated_users=affiliated_user_lookup,
+            )
             normalized_hosts.append(
                 FirewallaHostRuntime(
                     mac=host_mac,
@@ -2328,11 +2351,8 @@ class FirewallaApiClient:
                     dns_domain=dns_domain,
                     dns_fqdn=dns_fqdn,
                     dhcp_name=dhcp_name,
-                    group_name=self._resolve_host_group_name(
-                        raw_host,
-                        tags=tag_lookup,
-                        affiliated_users=affiliated_user_lookup,
-                    ),
+                    group_name=membership_name,
+                    membership_kind=membership_kind,
                     network_name=(
                         network_lookup.get(interface_id)
                         if interface_id is not None

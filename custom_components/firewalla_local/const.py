@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Final
+from typing import Final, Literal, get_args
 
 DOMAIN: Final = "firewalla_local"
 LOGGER: Final = logging.getLogger(__name__)
@@ -465,6 +465,11 @@ PLATFORM_BUTTON: Final = "button"
 PLATFORM_DEVICE_TRACKER: Final = "device_tracker"
 PLATFORM_SENSOR: Final = "sensor"
 PLATFORM_SWITCH: Final = "switch"
+# A group and a user assignment are the same Firewalla protocol object (a host tag),
+# so every surface that reports membership discriminates it with these two values.
+MembershipKind = Literal["group", "user"]
+MEMBERSHIP_KIND_GROUP: Final = get_args(MembershipKind)[0]
+MEMBERSHIP_KIND_USER: Final = get_args(MembershipKind)[1]
 RULE_ACTION_ALLOW: Final = "allow"
 ATTR_ALARM_ACTIVE_COUNT: Final = "active_count"
 ATTR_ALARM_ARCHIVED_COUNT: Final = "archived_count"

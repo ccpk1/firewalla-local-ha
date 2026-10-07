@@ -259,6 +259,7 @@ async def test_pause_rule_applies_and_reports_undo(hass: HomeAssistant) -> None:
     assert result.error is False
     assert result.data["status"] == "applied"
     assert result.data["changed"] is True
+    assert result.data["runtime"] == "updated"
     assert result.data["target"] == {"kind": "rule", "id": "761"}
     assert result.data["before"] == {"enabled": True, "is_paused": False}
     assert result.data["after"] == {"enabled": False, "is_paused": True}
@@ -466,6 +467,9 @@ async def test_set_alarm_muted_calls_alarm_manager(hass: HomeAssistant) -> None:
         )
 
     assert mute.await_count == 1
+    # The silence is box-side state the snapshot does not carry, so the result says
+    # so rather than implying the next read agrees.
+    assert result.data["runtime"] == "pending"
     assert 'unmute_alarm(alarm_id="1728")' in result.data["undo"]
 
 

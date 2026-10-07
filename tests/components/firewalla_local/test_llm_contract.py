@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from importlib import import_module
 from pathlib import Path
 from typing import Final
 from unittest.mock import AsyncMock, patch
@@ -76,6 +77,32 @@ _PASSTHROUGH_PAYLOAD_KEYS: Final = frozenset(
 # Backticked values a description quotes as literal data rather than naming a field.
 _PROSE_IDENTIFIERS: Final = frozenset(
     {"null", "true", "false", "applied", "already_in_state", "failed"}
+)
+
+# The control tools whose manager applies the write to the in-memory snapshot, so
+# their result reports `runtime: updated`. Everything else reports `pending`, either
+# because it deliberately does not update local state or because it has none to
+# update. Pinned here so a change to a tool's optimism is a deliberate edit.
+_EXPECTED_UPDATED_TOOLS: Final = frozenset(
+    {
+        "PauseRuleTool",
+        "ResumeRuleTool",
+        "SetSsidPausedTool",
+        "SetHostNameTool",
+        "SetHostDnsHostnameTool",
+        "SetHostDeviceTypeTool",
+        "SetHostDhcpReservationTool",
+        "SetHostNotifyWhenNextOnlineTool",
+        "SetHostNotifyWhenNextOfflineTool",
+        "BlockAlarmTargetTool",
+        "UnblockAlarmTargetTool",
+        "ArchiveAlarmTool",
+        "ArchiveAllAlarmsTool",
+        "DeleteAlarmTool",
+        "DeleteAlarmsTool",
+        "DeleteHostTool",
+        "DeleteRuleTool",
+    }
 )
 
 # Constants whose *value* names something a client sends or reads: an argument, an
@@ -569,6 +596,68 @@ async def test_family_injections_say_what_the_model_cannot_get_elsewhere(
     assert len(CONTROL_INJECTION) < len(READ_INJECTION), (
         "the control block is longer than the read block, which suggests a rule "
         "crept in that the system model already states"
+    )
+
+
+async def test_every_control_tool_declares_its_runtime_contract(
+    hass: HomeAssistant,
+) -> None:
+    """Each control result states whether the next read agrees with it.
+
+    `ARCHITECTURE.md` requires a successful command to update in-memory runtime
+    state. Some tools do not, deliberately: a membership change is not applied
+    locally, muting an alarm changes nothing the snapshot carries, and neither a
+    wake nor a speed test has state to reflect. So the contract is not "always
+    true" — it is "always *stated*", and the result answers it in `runtime`.
+
+    The declaration is checked per tool rather than against the base-class default,
+    because that default is `pending`: a tool that forgets to declare under-claims
+    freshness, which is recoverable, while a wrong `updated` would have a model
+    present pre-change state as current. A family base may declare it for its
+    members, but `_FirewallaControlTool` may not — that *is* the default.
+
+    The expected split is pinned both ways, so flipping a tool's optimism means
+    changing this list too, and cannot happen by accident.
+    """
+    control_module = import_module(
+        "custom_components.firewalla_local.llm_tools_control"
+    )
+    control_base = control_module._FirewallaControlTool
+    tool_classes = (
+        *control_module._CONTROL_TOOL_CLASSES,
+        *control_module._DESTRUCTIVE_TOOL_CLASSES,
+    )
+
+    undeclared: list[str] = []
+    reporting_updated: set[str] = set()
+    for tool_class in tool_classes:
+        declares = [
+            base
+            for base in tool_class.__mro__
+            if "_updates_runtime" in base.__dict__ and base is not control_base
+        ]
+        if not declares:
+            undeclared.append(tool_class.__name__)
+            continue
+        if tool_class._updates_runtime:
+            reporting_updated.add(tool_class.__name__)
+
+    assert undeclared == [], (
+        "these control tools inherit the default instead of stating whether the "
+        f"local snapshot reflects the write: {undeclared}"
+    )
+    assert reporting_updated == _EXPECTED_UPDATED_TOOLS, (
+        "the set of tools reporting `runtime: updated` changed; either the "
+        "optimistic update was removed, or the declaration is wrong"
+    )
+
+    # And the field has to reach the model, because no tool description explains
+    # the envelope: `status`, `undo` and `warnings` are enumerated in the system
+    # model, so `runtime` belongs there with them and not in a family block.
+    assert "`runtime`" in PROMPT
+    assert "`runtime`" not in CONTROL_INJECTION, (
+        "the envelope is documented in the system model; one field of it in the "
+        "control block would make control the only family carrying envelope text"
     )
 
 

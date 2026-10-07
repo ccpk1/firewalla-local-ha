@@ -201,6 +201,52 @@ class FirewallaHostManager(FirewallaBaseManager):
         self.handle_refresh(updated_snapshot)
         self.coordinator.async_set_updated_data(updated_snapshot)
 
+    def apply_optimistic_host_policy(
+        self, mac: str, policy_value: dict[str, object]
+    ) -> None:
+        """Apply a successful host policy write to the cached raw host payload.
+
+        A host's IP assignment and notification settings are not in the normalized
+        snapshot. Every surface that publishes them — `list_hosts` and the network
+        config host rows — resolves them from `coordinator.last_init_payload`, so the
+        update has to land there for the next read to agree with the write instead of
+        serving pre-change values until the next poll.
+
+        The update is shallow because the payload is: the IP-allocation builder
+        publishes the complete allocation map rather than one network's entry, so a
+        nested value carries its whole subtree and no stale leaf can survive it.
+
+        The payload is replaced wholesale on every refresh, so this only has to hold
+        until the next poll — the same guarantee the snapshot update carries.
+        """
+        normalized_mac = normalize_mac_address(mac)
+        if normalized_mac is None:
+            return
+
+        payload = self.coordinator.last_init_payload
+        if payload is None:
+            return
+
+        raw_hosts = payload.get("hosts")
+        if not isinstance(raw_hosts, list):
+            return
+
+        for raw_host in raw_hosts:
+            if not isinstance(raw_host, dict):
+                continue
+            raw_mac = raw_host.get("mac")
+            if not isinstance(raw_mac, str):
+                continue
+            if normalize_mac_address(raw_mac) != normalized_mac:
+                continue
+
+            raw_policy = raw_host.get("policy")
+            if not isinstance(raw_policy, dict):
+                raw_policy = {}
+                raw_host["policy"] = raw_policy
+            raw_policy.update(policy_value)
+            return
+
     def remove_host_from_index(self, mac: str) -> None:
         """Drop one normalized MAC from the host index after a deletion."""
         if normalized_mac := normalize_mac_address(mac):
