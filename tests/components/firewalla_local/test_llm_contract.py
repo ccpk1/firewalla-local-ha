@@ -722,6 +722,48 @@ async def test_membership_change_warns_that_it_deletes_host_rules(
     assert "membership change" in confirm_paragraph
 
 
+async def test_the_user_filter_description_matches_what_the_filters_do(
+    hass: HomeAssistant,
+) -> None:
+    """The two membership filters are described as they behave, not as they read.
+
+    `group_name` matches the host's membership *label*, and for a host assigned to a
+    user that label is the **user's name** — the box stores a group and a user as the
+    same tag and resolves the label through the affiliated user first. Measured on
+    the dev box: 32 of 218 hosts carry a user's name in `group_name`, and no name
+    appears in both collections.
+
+    The descriptions used to claim the opposite — "a user's name does not match here",
+    "a user's name is never a valid group" — which was wrong in the one place a model
+    would act on it. A model told a user's name cannot match would have chosen the
+    wrong filter for "which hosts belong to KADENS_PHONE", or concluded the user had
+    no hosts.
+
+    The `user` filter is the exact one for that question, because it resolves the
+    affiliated tag rather than matching a label, so the descriptions must point at it
+    rather than deny the overlap exists.
+    """
+    api_instance = await _api_instance(hass)
+    tools = {tool.name: tool for tool in api_instance.tools}
+
+    hosts = tools["firewalla_local__list_hosts"]
+    # The description lives on the marker, not on the schema value.
+    group_param = next(
+        marker for marker in hosts.parameters.schema if marker.schema == "group_name"
+    )
+    user_param = next(
+        marker for marker in hosts.parameters.schema if marker.schema == "user"
+    )
+
+    # Neither may deny that a user's name appears in a host's membership label.
+    assert "does not match" not in group_param.description
+    assert "never a valid" not in group_param.description
+    # The group filter states it takes either kind's name.
+    assert "user's name" in group_param.description
+    # The user filter says how it differs — exact by tag, not by label.
+    assert "affiliated tag" in user_param.description
+
+
 async def test_host_group_to_rules_chain_is_stated(hass: HomeAssistant) -> None:
     """A host's group_name is named as the input to list_rules' applies_to.
 

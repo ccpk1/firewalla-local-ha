@@ -254,9 +254,11 @@ class ListHostsTool(_FirewallaReadTool):
             vol.Optional(
                 SERVICE_FIELD_GROUP_NAME,
                 description=(
-                    "Optional. Exact group name to filter by. Groups and users "
-                    "are separate collections, so a user's name does not match "
-                    "here even when a host is assigned to that user."
+                    "Optional. Exact match on the host's membership label, which is "
+                    "the group's name **or the user's name** — the box stores both "
+                    "as a tag and resolves the label through the affiliated user "
+                    "first, so a host assigned to a user carries that user's name "
+                    "here. Filtering one name at a time works for either kind."
                 ),
             ): str,
             vol.Optional(
@@ -278,8 +280,10 @@ class ListHostsTool(_FirewallaReadTool):
                 SERVICE_FIELD_USER,
                 description=(
                     "Optional. Filter to the hosts assigned to one user, by user "
-                    "id or user name. Users are distinct from groups, so a user "
-                    "name does not match the `group_name` filter."
+                    "id or user name. Use this when the question is about a person: "
+                    "it resolves the user's affiliated tag and matches that, which "
+                    "is exact, where `group_name` would take the user's name as a "
+                    "label."
                 ),
             ): str,
             vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,

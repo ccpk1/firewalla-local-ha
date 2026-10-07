@@ -706,8 +706,9 @@ class SetHostGroupTool(_SetHostMembershipTool):
     description = (
         "Put a host in one Firewalla group. This replaces whatever group or user "
         "the host currently belongs to, as the app does. Resolve the group from "
-        "`get_system_overview` (`include: ['identifiers']`) first — group and user "
-        "names are separate collections, so a user's name is never a valid group. "
+        "`get_system_overview` (`include: ['identifiers']`) first — groups and users "
+        "are separate collections there and a user name is not a group there, even "
+        "though a host's `group_name` reads the user's name once assigned. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
@@ -779,7 +780,8 @@ class SetHostUserTool(_SetHostMembershipTool):
         "Assign a host to one Firewalla user. This replaces whatever group or user "
         "the host currently belongs to. Resolve the user from `get_system_overview` "
         "(`include: ['identifiers']`) first — users and groups are separate "
-        "collections, so a group's name is never a valid user. "
+        "collections there and a group name is not a user there, even though a "
+        "host's `group_name` reads the user's name once assigned. "
         + _MEMBERSHIP_RULE_WARNING
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
