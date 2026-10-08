@@ -43,8 +43,7 @@ Everything implemented is complete, guarded and documented. What is left is to p
 branch and cut the release.
 
 The migration tables for the breaking renames now live in
-`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md`, which is the working source for the
-GitHub release body. They were moved out of `docs/USER_GUIDE.md`, because they describe
-one upgrade step rather than how the integration works. Confirm each item still matches
-the code before publishing.
+`plans/in-process/RELEASE_NOTES_2.5.0.md`, which is the GitHub release body for 2.5.0.
+They were moved out of `docs/USER_GUIDE.md`, because they describe one upgrade step rather
+than how the integration works. Confirm each item still matches the code before publishing.
 

@@ -39,7 +39,7 @@ Checklist:
 
 - [ ] `.github/workflows/lint-validation.yaml` still reflects the repository-standard Python validation commands.
 - [ ] `.github/workflows/validate.yaml` still runs HACS validation and hassfest, and both pass on the release commit.
-- [ ] The HACS workflow still ignores `brands` intentionally, because Home Assistant 2026.3 no longer accepts custom integration branding, while this repository still keeps the brand assets staged correctly for repository and HACS guidance.
+- [ ] The HACS workflow passes **every** check, with no `ignore` key. Brand assets live in `custom_components/firewalla_local/brand/`, which is what satisfies the brands check: the `custom_integrations` folder in `home-assistant/brands` is closed to new entries, and local brand images have been the supported replacement since Home Assistant 2026.3.
 
 ## 4) Documentation and public surfaces
 
@@ -48,8 +48,8 @@ Checklist:
 - [ ] `CONTRIBUTING.md`, `SUPPORT.md`, and `SECURITY.md` still reflect the real repository process.
 - [ ] Any user-visible change has a short release summary prepared for the GitHub release body.
 - [ ] **Any breaking change is called out in the release body**, naming the old and new
-      value so an upgrading user can find it. `plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` is the source;
-      the release body summarises it.
+      value so an upgrading user can find it. `plans/in-process/RELEASE_NOTES_2.5.0.md` is the
+      source, and is itself the release body.
 
 ### Known breaking change pending release
 
@@ -58,7 +58,8 @@ Renamed the entity attribute keys, service-response keys and labels from `device
 surface. Firewalla's own payloads say `device` (`deviceIP`, `devicePort`, `deviceTags`)
 but that word is not echoed, because in Home Assistant a *device* is a device-registry
 entry. `device_tracker` is unaffected — it is a Home Assistant platform. Full
-old-to-new table in `plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` §2.
+old-to-new tables are in the *Breaking changes* section of
+`plans/in-process/RELEASE_NOTES_2.5.0.md`.
 
 | What | Detail |
 | --- | --- |
@@ -72,8 +73,8 @@ old-to-new table in `plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` §2.
 Every published moment now names what it is an instant of, and appears twice: a date
 (`<name>_at`) and epoch seconds (`<name>_at_timestamp`). Derived windowed values such as
 `online` are published alongside the reference instant and window they were measured in,
-so they can be checked from the payload. Full old-to-new table in
-`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` §2.
+so they can be checked from the payload. Full old-to-new tables are in the *Breaking
+changes* section of `plans/in-process/RELEASE_NOTES_2.5.0.md`.
 
 | What | Detail |
 | --- | --- |
@@ -83,15 +84,15 @@ so they can be checked from the payload. Full old-to-new table in
 | Migration | Rename and pair only; no value, type or availability changed except the three epoch-to-date corrections above, each of which keeps its number under the new `_timestamp` twin |
 
 **No shim, alias or deprecation period accompanies this break.** An alias would leave two
-names for one value, which is the defect this change removes. The tables in
-`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md` §2 are the migration, and a reviewer
-should not ask for a compatibility layer.
+names for one value, which is the defect this change removes. The tables in the *Breaking
+changes* section of `plans/in-process/RELEASE_NOTES_2.5.0.md` are the migration, and a
+reviewer should not ask for a compatibility layer.
 
 ## 5) HACS and Home Assistant posture
 
 - [ ] The repository still contains only one integration under `custom_components/`.
 - [ ] The integration package still includes the files HACS expects.
-- [ ] The repository still passes HACS structure expectations apart from the intentional `brands` bypass.
+- [ ] The repository still passes every HACS structure expectation, including the brands check, with no checks ignored.
 - [ ] The release posture remains compatible with the Home Assistant versions advertised in `hacs.json`.
 
 ## 6) Runtime smoke
@@ -130,7 +131,9 @@ Known long-term defers, so they are not mistaken for release blockers:
 - broader rule-family expansion remains deferred until the protocol contract is proven.
 - broader DHCP admin surfaces remain deferred pending protocol evidence.
 - advanced release automation remains deferred beyond the current hybrid workflow.
-- custom-integration branding acceptance remains deferred because the HACS workflow intentionally bypasses the obsolete `brands` check.
+- a stable release still needs to be cut for 2.5.0: `2.5.0-beta.2` is published as a
+  prerelease, and HACS serves the latest **non**-prerelease to default users, so the store
+  still offers 2.1.0.
 
 ## 10) Release exit criteria
 
