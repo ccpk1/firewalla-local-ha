@@ -19,7 +19,7 @@ This guide is organized around the main jobs you can do with the integration:
 **Upgrading from an earlier version?** The attribute, key, and service renames are
 breaking changes, and they live in the release notes for the version that introduced
 them rather than here. See
-[`plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md`](../plans/in-process/RELEASE_NOTES_2.5.0_DRAFT.md)
+[`plans/in-process/RELEASE_NOTES_2.5.0.md`](../plans/in-process/RELEASE_NOTES_2.5.0.md)
 until 2.5.0 ships, then the GitHub release for 2.5.0.
 
 ## Key vocabulary
