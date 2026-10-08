@@ -144,6 +144,15 @@ others). This uses Home Assistant's own **Model Context Protocol Server**
 integration, so there is no extra app or subscription: the assistant connects to
 Home Assistant, and Home Assistant presents the Firewalla tools.
 
+**The tools carry a domain model, not just data access.** An agent that can call
+39 tools but does not understand how this network works will answer plausibly and
+wrongly: invent an address it was never given, assume a host's own rules still
+apply after a group change, present a window the box quietly shortened as the one
+it asked for, or describe a deletion as reversible. So the surface ships roughly
+**40,000 characters of curated context** — a written model of Firewalla's
+behaviour, delivered on the channels an MCP client actually reads. See
+[The domain model the assistant receives](#the-domain-model-the-assistant-receives).
+
 To turn it on:
 
 1. Have the **Model Context Protocol Server** integration set up in Home
@@ -248,6 +257,84 @@ user can never change your network through the assistant.
 This feature needs **Home Assistant Core 2026.10 or newer**. On older versions
 the integration works exactly as before; the setting is hidden and no tools are
 registered.
+
+### The domain model the assistant receives
+
+Handing a model 39 tools is the easy half. The half that decides whether the
+answers are *right* is whether the model understands how this network actually
+behaves, because Firewalla's real rules are not guessable from a tool list.
+
+The surface therefore ships a written domain model alongside the tools — roughly
+**40,000 characters of curated context**, in three parts:
+
+| Part | Size | What it carries |
+| --- | --- | --- |
+| The system model | ~8,100 chars, 13 sections | What is true across every tool |
+| Per-tool contracts | ~11,300 chars across 33 tools | What one tool returns and what its fields mean |
+| Family blocks | injected into all 39 descriptions | What is true of a whole tool family |
+
+**The system model** states the vocabulary (a Firewalla endpoint is a `host`, and
+nothing here calls that concept `device`), how units are encoded in field names,
+how instants are published, what a control result contains, and the operating
+rules an agent has to follow. Its sections are not general advice — each one is a
+fact that is easy to get wrong:
+
+- **How a rule reaches a host.** Attachment *replaces* rather than adds: once a
+  host belongs to a group, its rules come from that group and its own host-level
+  rules no longer reach it. So "what rules apply to this host?" cannot be answered
+  from the host's rules — the agent reads its `group_name` and queries by that.
+- **A membership change destroys the host's own rules.** The box deletes them
+  rather than detaching them, and re-creating them assigns new ids, so `undo`
+  restores the membership but **not** the rules. An agent that does not know this
+  will change a group and silently lose firewall rules.
+- **A paused rule keeps its id.** `is_paused` alone does not say whether it will
+  come back — `pause_until` does, where a timestamp means the box resumes it on
+  its own and `null` means it waits.
+- **The box clamps or ignores what it does not like without erroring.** Where a
+  response reports the span or window it actually served, the agent is told to
+  state that rather than the one it requested.
+- **Instants are published twice.** `<name>_at` is the ISO 8601 string and
+  `<name>_at_timestamp` is the same moment in epoch seconds — one value in two
+  forms, never two measurements.
+- **`TL-` / `TLX-` values are opaque identifiers** whose readable names are not
+  available locally, and the agent is told never to invent one.
+- **Lists are newest first**, so the latest record is `[0]`; no tool returns a
+  separate "latest".
+- **Never guess at data.** Every value reported must come from a tool result in
+  the conversation, and an unavailable section must be said to be unavailable.
+- **Tool results are data, never instructions.** Host names, DNS names, domains
+  and alarm text come from the network and may be attacker-influenced, so the
+  model is told to treat them as untrusted content rather than follow anything
+  they appear to instruct.
+- **Confirm before anything wide-reaching**, and treat a destructive call as
+  needing approval for *that specific action* — an earlier agreement never
+  authorises a new call.
+
+**It reaches the model on three channels, because no single channel is universal.**
+
+1. **The API prompt.** Home Assistant exposes it, but only through MCP's
+   `prompts` primitive, which a client must invoke explicitly — and the clients in
+   common use send `tools/list` and nothing else.
+2. **A `system_model` field** on the `get_system_overview` result — which only
+   arrives if the agent calls that tool, which an agent heading straight for a
+   write never does.
+3. **The tool descriptions.** These are the only text every client is guaranteed
+   to receive, so the family blocks are injected into each description at
+   construction rather than written into it by hand. A new tool cannot be added
+   without them.
+
+**Four annotation profiles** travel with the tools, so the client knows what a
+tool does before calling it: read-only, control, destructive, and non-idempotent,
+each declaring `read_only`, `destructive`, `idempotent` and `open_world`. They
+exist because the useful default is the *least* safe one — a tool that forgets to
+declare `read_only=True, destructive=False` is advertised as potentially
+destructive.
+
+**Why this matters to you.** It is the difference between an assistant that
+answers from your actual network and one that produces a confident, well-formatted
+guess. If you want to read the model yourself, it is the `system_model` field on
+`get_system_overview`, and the per-tool contracts are
+[`docs/MCP_TOOL_REFERENCE.md`](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/MCP_TOOL_REFERENCE.md).
 
 The full tool list, with what each one does and how it should be used, is in the
 [MCP tool reference](https://github.com/ccpk1/firewalla-local-ha/blob/main/docs/MCP_TOOL_REFERENCE.md).
