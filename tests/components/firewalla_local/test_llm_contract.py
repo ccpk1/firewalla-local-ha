@@ -380,8 +380,8 @@ async def test_every_tool_parameters_expose_a_field_mapping(
     A conversation provider renders a tool from ``tool.parameters.schema``, and
     the Google Generative AI agent does it on every turn. Only a schema object
     has that attribute, so adding a cross-field rule by wrapping the schema in
-    ``vol.All`` fails that agent with a 500 before the model is called -- for
-    every conversation, not for the one tool. Compose such a rule inside the
+    ``probatio.All`` fails that agent with a 500 before the model is called --
+    for every conversation, not for the one tool. Compose such a rule inside the
     schema instead. The mapping is also what the action tool iterates, so
     ``Schema(Schema(...))``, whose ``.schema`` is another schema rather than the
     field dict, is the other way to look right and still break the provider.

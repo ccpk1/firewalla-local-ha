@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Final, cast, override
 
-import voluptuous as vol
+import probatio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
@@ -231,9 +231,9 @@ class ListHostsTool(_FirewallaReadTool):
         "`ip_assignment_mode` and `reserved_ipv4`; `full` returns the whole record. "
         "The filters narrow on the box, so prefer them to pulling the inventory."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_DETAIL,
                 default=DETAIL_SUMMARY,
                 description=(
@@ -242,19 +242,19 @@ class ListHostsTool(_FirewallaReadTool):
                     "(its useful parts are flattened to `ip_assignment_mode` "
                     "and `reserved_ipv4`). Use 'full' for the complete record."
                 ),
-            ): vol.In(DETAIL_LEVELS),
-            vol.Optional(
+            ): probatio.In(DETAIL_LEVELS),
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME,
                 description=(
                     "Optional. Substring match on the host name. Use it to find "
                     "a single host rather than listing them all."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC,
                 description="Optional. Exact host MAC address.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_NAME,
                 description=(
                     "Optional. Exact match on the host's membership label, which is "
@@ -264,22 +264,22 @@ class ListHostsTool(_FirewallaReadTool):
                     "here. Filtering one name at a time works for either kind."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_KIND,
                 description=(
                     "Optional. 'mac_host' for a normal host, 'pseudo_host' to "
                     "return only VPN peers."
                 ),
-            ): vol.In(("mac_host", "pseudo_host")),
-            vol.Optional(
+            ): probatio.In(("mac_host", "pseudo_host")),
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_UUID,
                 description="Optional. Filter to one network by its uuid.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ONLINE,
                 description="Optional. Filter to hosts currently online or offline.",
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER,
                 description=(
                     "Optional. Filter to the hosts assigned to one user, by user "
@@ -289,7 +289,9 @@ class ListHostsTool(_FirewallaReadTool):
                     "label."
                 ),
             ): str,
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_HOSTS
@@ -328,24 +330,24 @@ class ListRulesTool(_FirewallaReadTool):
         "alarm created — that is the rule `unblock_alarm_target` needs, and it "
         "requires `include_system_managed: true`."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ENABLED,
                 description="Optional. Filter by enabled state.",
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ACTION,
                 description="Optional. Filter by action.",
-            ): vol.In(("block", "allow", "qos", "disturb")),
-            vol.Optional(
+            ): probatio.In(("block", "allow", "qos", "disturb")),
+            probatio.Optional(
                 SERVICE_FIELD_TARGET_TYPE,
                 description=(
                     "Optional. Filter by target type, e.g. 'category', 'mac', "
                     "'ip', 'dns', 'network'."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_APPLIES_TO,
                 description=(
                     "Optional. Filter to rules governing one group, user or "
@@ -354,7 +356,7 @@ class ListRulesTool(_FirewallaReadTool):
                     "host. Matches exactly, so filter one name at a time."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ALARM_ID,
                 description=(
                     "Optional. Filter to the rule an alarm created, by alarm "
@@ -364,17 +366,17 @@ class ListRulesTool(_FirewallaReadTool):
                     "hidden by default."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE_PURPOSE,
                 description=(
                     "Optional. Include product-owned rules that are hidden by "
                     "default. Allowed: 'dap' (Device Active Protect), 'family'."
                 ),
-            ): vol.All(
+            ): probatio.All(
                 cv.ensure_list,
-                [vol.In(("dap", "family"))],
+                [probatio.In(("dap", "family"))],
             ),
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE_SYSTEM_MANAGED,
                 description=(
                     "Optional. Include rules owned by a Firewalla subsystem, "
@@ -411,15 +413,15 @@ class GetNetworkConfigTool(_FirewallaReadTool):
         "and reservations — and use `get_hosts` for host questions. The filters "
         "narrow on the box, so prefer them to pulling the inventory."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_UUID, description=_NETWORK_UUID_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_NAME, description=_NETWORK_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
                     "Optional. Add the network's host list with "
@@ -427,8 +429,10 @@ class GetNetworkConfigTool(_FirewallaReadTool):
                     "hostnames, IPs, and reservations, so ask for them only "
                     "when the hosts themselves are wanted."
                 ),
-            ): vol.All(cv.ensure_list, [vol.In(("hosts",))]),
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            ): probatio.All(cv.ensure_list, [probatio.In(("hosts",))]),
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_NETWORK_CONFIG
@@ -446,15 +450,15 @@ class GetNetworkUsageTool(_FirewallaReadTool):
         "not a whole-box total. Windowed WAN usage is not available; `get_wan_usage` "
         "has WAN totals."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_UUID, description=_NETWORK_UUID_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_NAME, description=_NETWORK_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WINDOW,
                 default=DEFAULT_NETWORK_USAGE_WINDOW,
                 description=(
@@ -463,7 +467,7 @@ class GetNetworkUsageTool(_FirewallaReadTool):
                     "'last_60_minutes', 'last_24_hours', 'last_30_days', "
                     "'last_12_months'."
                 ),
-            ): vol.In(
+            ): probatio.In(
                 (
                     "last_60_minutes",
                     "last_24_hours",
@@ -471,21 +475,23 @@ class GetNetworkUsageTool(_FirewallaReadTool):
                     "last_12_months",
                 )
             ),
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_TOP_N,
                 description=(
                     "Optional. Limit how many top host/app/category ranking "
                     "rows are returned. Defaults to 5."
                 ),
             ): int,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
                     "Optional. Add raw metric sample sections for the selected "
                     "window. Allowed: 'series'."
                 ),
-            ): vol.All(cv.ensure_list, [vol.In(("series",))]),
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            ): probatio.All(cv.ensure_list, [probatio.In(("series",))]),
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_NETWORK_USAGE
@@ -504,42 +510,44 @@ class GetWanUsageTool(_FirewallaReadTool):
         "means; add `history` only when a trend is wanted, since it is roughly 12x "
         "the size."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_UUID, description=_WAN_UUID_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_NAME, description=_WAN_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
                     "Optional. Add history and/or subperiod breakdown sections. "
                     "Allowed: 'history', 'subperiods'."
                 ),
-            ): vol.All(cv.ensure_list, [vol.In(("history", "subperiods"))]),
-            vol.Optional(
+            ): probatio.All(cv.ensure_list, [probatio.In(("history", "subperiods"))]),
+            probatio.Optional(
                 SERVICE_FIELD_CURRENT_PERIODS,
                 description=(
                     "Optional. Current-period totals to include. Allowed: "
                     "'month', 'week', 'day'."
                 ),
-            ): vol.All(cv.ensure_list, [vol.In(("month", "week", "day"))]),
-            vol.Optional(
+            ): probatio.All(cv.ensure_list, [probatio.In(("month", "week", "day"))]),
+            probatio.Optional(
                 SERVICE_FIELD_HISTORY_PERIOD,
                 description=(
                     "Optional. Period granularity for history. Allowed: 'month', "
                     "'week', 'day'."
                 ),
-            ): vol.In(("month", "week", "day")),
-            vol.Optional(
+            ): probatio.In(("month", "week", "day")),
+            probatio.Optional(
                 SERVICE_FIELD_HISTORY_COUNT,
                 description=(
                     "Optional. Number of history periods to return. Defaults to 0."
                 ),
-            ): vol.All(int, vol.Range(min=0, max=366)),
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            ): probatio.All(int, probatio.Range(min=0, max=366)),
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_WAN_USAGE
@@ -558,30 +566,30 @@ class GetWanEventsTool(_FirewallaReadTool):
         "they are not connectivity events. `get_wan_usage` is volume over time; "
         "`get_internet_quality` is latency and packet loss."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_UUID, description=_WAN_UUID_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_NAME, description=_WAN_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_LIMIT,
                 description="Optional. Maximum events to return. Defaults to 100.",
             ): int,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_OFFSET,
                 description="Optional. Skip this many events. Defaults to 0.",
             ): int,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WINDOW_DAYS,
                 description=(
                     "Optional. How many days back to look. Defaults to 7; use 0 "
                     "for no time bound."
                 ),
             ): int,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE_DNS,
                 description=(
                     "Optional. Defaults to false. Include the box's internal "
@@ -608,88 +616,88 @@ class GetUserUsageTool(_FirewallaReadTool):
         "Every section is returned by default; pass `sections` to keep only what "
         "the question needs."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC,
                 description=(
                     "Optional. Select a host by MAC. Provide exactly one of the "
                     "scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME,
                 description=(
                     "Optional. Select a host by name. Provide exactly one of the "
                     "scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_ID,
                 description=(
                     "Optional. Select a group by id. Provide exactly one of the "
                     "scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_NAME,
                 description=(
                     "Optional. Select a group by name. Provide exactly one of the "
                     "scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_ID,
                 description=(
                     "Optional. Select a user by id. Provide exactly one of the "
                     "scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_NAME,
                 description=(
                     "Optional. Select a user by name. Provide exactly one of the "
                     "scope selectors."
                 ),
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_USAGE_HISTORY_BEGIN,
                 description="Required. Local start date-time of the range.",
             ): cv.datetime,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_USAGE_HISTORY_END,
                 description="Required. Local end date-time of the range.",
             ): cv.datetime,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_USAGE_HISTORY_GRANULARITY,
                 description="Required. Bucket size for the report.",
-            ): vol.In(("day", "hour")),
-            vol.Optional(
+            ): probatio.In(("day", "hour")),
+            probatio.Optional(
                 SERVICE_FIELD_SECTIONS,
                 description=(
                     "Optional. Sections to include. Allowed: 'internet', "
                     "'app_totals', 'apps', 'categories'."
                 ),
-            ): vol.All(
+            ): probatio.All(
                 cv.ensure_list,
-                [vol.In(("internet", "app_totals", "apps", "categories"))],
+                [probatio.In(("internet", "app_totals", "apps", "categories"))],
             ),
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description="Optional. Add raw intervals. Allowed: 'intervals'.",
-            ): vol.All(cv.ensure_list, [vol.In(("intervals",))]),
-            vol.Optional(
+            ): probatio.All(cv.ensure_list, [probatio.In(("intervals",))]),
+            probatio.Optional(
                 SERVICE_FIELD_DETAIL,
                 default=DETAIL_FULL,
                 description=(
                     "Optional. 'full' (default) is the normal report depth; "
                     "'summary' returns the smallest default section set."
                 ),
-            ): vol.In(DETAIL_LEVELS),
-            vol.Optional(
+            ): probatio.In(DETAIL_LEVELS),
+            probatio.Optional(
                 SERVICE_FIELD_USAGE_HISTORY_APP_IDS,
                 description="Optional. Limit app usage to these app ids.",
-            ): vol.All(cv.ensure_list, [str]),
+            ): probatio.All(cv.ensure_list, [str]),
         }
     )
     _service = SERVICE_GET_TIME_USAGE
@@ -723,58 +731,58 @@ class GetFlowReportTool(_FirewallaReadTool):
         "destination, or a record. A host scope always names its own host "
         "regardless."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC,
                 description=(
                     "Optional. Scope the report to a host by MAC. Provide exactly "
                     "one of the scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME,
                 description=(
                     "Optional. Scope the report to a host by name. Provide exactly "
                     "one of the scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_ID,
                 description=(
                     "Optional. Scope the report to a group by id. Provide exactly "
                     "one of the scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_NAME,
                 description=(
                     "Optional. Scope the report to a group by name. Provide "
                     "exactly one of the scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_ID,
                 description=(
                     "Optional. Scope the report to a user by id. Provide exactly "
                     "one of the scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_NAME,
                 description=(
                     "Optional. Scope the report to a user by name. Provide "
                     "exactly one of the scope selectors."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WINDOW_HOURS,
                 description=(
                     "Optional. Defaults to 24, which is what the box serves. The "
                     "response reports the span it actually covered."
                 ),
-            ): vol.All(vol.Coerce(int), vol.Range(min=1)),
-            vol.Optional(
+            ): probatio.All(probatio.Coerce(int), probatio.Range(min=1)),
+            probatio.Optional(
                 SERVICE_FIELD_DETAIL,
                 default=DETAIL_SUMMARY,
                 description=(
@@ -782,8 +790,8 @@ class GetFlowReportTool(_FirewallaReadTool):
                     "'full' adds the individual flow records, which carry the "
                     "blocking rule — use it to diagnose why traffic was stopped."
                 ),
-            ): vol.In(DETAIL_LEVELS),
-            vol.Optional(
+            ): probatio.In(DETAIL_LEVELS),
+            probatio.Optional(
                 SERVICE_FIELD_RECORD_COUNT,
                 default=DEFAULT_FLOW_REPORT_RECORD_COUNT,
                 description=(
@@ -792,11 +800,11 @@ class GetFlowReportTool(_FirewallaReadTool):
                     "ask for a small page first and only widen if the answer is "
                     "not there."
                 ),
-            ): vol.All(
-                vol.Coerce(int),
-                vol.Range(min=MIN_FLOW_LOG_PAGE_SIZE, max=MAX_FLOW_LOG_PAGE_SIZE),
+            ): probatio.All(
+                probatio.Coerce(int),
+                probatio.Range(min=MIN_FLOW_LOG_PAGE_SIZE, max=MAX_FLOW_LOG_PAGE_SIZE),
             ),
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_REFRESH,
                 default=False,
                 description=(
@@ -805,15 +813,15 @@ class GetFlowReportTool(_FirewallaReadTool):
                     "is what resolves host, rule and tag names. Defaults to false."
                 ),
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
                     "Optional. Add per-host detail, which is absent by default. "
                     "Allowed: 'host_detail'."
                 ),
-            ): vol.All(
+            ): probatio.All(
                 cv.ensure_list,
-                [vol.In((FLOW_REPORT_INCLUDE_HOST_DETAIL,))],
+                [probatio.In((FLOW_REPORT_INCLUDE_HOST_DETAIL,))],
             ),
         }
     )
@@ -831,19 +839,21 @@ class GetInternetQualityTool(_FirewallaReadTool):
         "samples for one WAN. For a point-in-time throughput test use "
         "`run_internet_speed_test`; for past results use `get_speed_tests`."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_UUID, description=_WAN_UUID_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_NAME, description=_WAN_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_LIMIT,
                 description="Optional. Maximum samples to return. Defaults to 1.",
             ): int,
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_INTERNET_QUALITY
@@ -860,19 +870,21 @@ class GetSpeedTestsTool(_FirewallaReadTool):
         "latency, and packet loss. To run a new test use "
         "`run_internet_speed_test`."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_UUID, description=_WAN_UUID_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_NAME, description=_WAN_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_LIMIT,
                 description="Optional. Maximum results to return. Defaults to 1.",
             ): int,
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_SPEED_TESTS
@@ -892,7 +904,7 @@ class SyncRuntimeTool(_FirewallaReadTool):
         "coalesced, so calling it before several reads costs one box poll rather "
         "than one per read."
     )
-    parameters = vol.Schema({})
+    parameters = probatio.Schema({})
     _service = SERVICE_SYNC_RUNTIME
     _response_type = "runtime_sync"
 
@@ -913,9 +925,9 @@ class GetSystemOverviewTool(_FirewallaReadTool):
         "`get_rules`.\n"
         "\n" + _COUNTS_READING
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE,
                 description=(
                     "Optional. Add the group and user names and ids that "
@@ -924,7 +936,7 @@ class GetSystemOverviewTool(_FirewallaReadTool):
                     "told apart by that field and never by name. "
                     "Allowed: 'identifiers'."
                 ),
-            ): vol.All(cv.ensure_list, [vol.In(("identifiers",))]),
+            ): probatio.All(cv.ensure_list, [probatio.In(("identifiers",))]),
         }
     )
     _service = SERVICE_GET_SYSTEM_OVERVIEW
@@ -951,7 +963,7 @@ class GetSystemOverviewSummaryTool(GetSystemOverviewTool):
         "the user must raise Firewalla's AI access level in the integration "
         "options."
     )
-    parameters = vol.Schema({})
+    parameters = probatio.Schema({})
 
 
 class GetWirelessStatusTool(_FirewallaReadTool):
@@ -969,9 +981,11 @@ class GetWirelessStatusTool(_FirewallaReadTool):
         "that rather than a failed read. `get_system_overview` reports whether "
         "the box has access points at all."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_WIRELESS_STATUS
@@ -998,16 +1012,16 @@ class GetAlarmsTool(_FirewallaReadTool):
         "silence to remove — that list is unbounded and is the expensive part of "
         "this response. The box keeps roughly 30 days and takes no time filter."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_LIMIT,
                 description=(
                     "Optional. Maximum alarms to return, newest first. Defaults "
                     "to 10; maximum 500."
                 ),
-            ): vol.All(int, vol.Range(min=1, max=500)),
-            vol.Optional(
+            ): probatio.All(int, probatio.Range(min=1, max=500)),
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE_ARCHIVED,
                 description=(
                     "Optional. Include archived alarms. Defaults to false. "
@@ -1015,7 +1029,7 @@ class GetAlarmsTool(_FirewallaReadTool):
                     "history the cached snapshot does not hold."
                 ),
             ): bool,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ALARM_TYPE,
                 description=(
                     "Optional. Filter by alarm type. A raw `ALARM_*` value "
@@ -1024,15 +1038,15 @@ class GetAlarmsTool(_FirewallaReadTool):
                     "the `alarm_type` field on the returned records."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_DETAIL,
                 default=DETAIL_SUMMARY,
                 description=(
                     "Optional. 'full' fetches extended detail with one extra "
                     "request per returned alarm. Defaults to 'summary'."
                 ),
-            ): vol.In(DETAIL_LEVELS),
-            vol.Optional(
+            ): probatio.In(DETAIL_LEVELS),
+            probatio.Optional(
                 SERVICE_FIELD_INCLUDE_EXCEPTIONS,
                 description=(
                     "Optional. Add the full silence-exception table, which is "
@@ -1041,7 +1055,9 @@ class GetAlarmsTool(_FirewallaReadTool):
                     "unmute."
                 ),
             ): bool,
-            vol.Optional(SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION): bool,
+            probatio.Optional(
+                SERVICE_FIELD_REFRESH, description=_REFRESH_DESCRIPTION
+            ): bool,
         }
     )
     _service = SERVICE_GET_ALARMS
