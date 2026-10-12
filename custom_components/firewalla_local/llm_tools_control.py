@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Final, cast, override
 
-import voluptuous as vol
+import probatio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
@@ -259,20 +259,20 @@ class PauseRuleTool(_FirewallaControlTool):
         "or user rule pauses it for all of that group's or user's hosts. Allow a "
         "short delay before the change takes effect on the wire."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_RULE_ID,
                 description="Required. The rule id from get_rules.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_DURATION,
                 description=(
                     "Optional. How long to pause, e.g. '30m', '4h', '2d 4h'. "
                     "Provide this, resume_at, or neither (pauses until resumed)."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_RULE_RESUME_AT,
                 description=(
                     "Optional. Local date-time when the rule should resume. "
@@ -345,9 +345,9 @@ class ResumeRuleTool(_FirewallaControlTool):
         "Afterwards `get_rules` reports `is_paused: false` and `pause_until: "
         "null`. Allow a short delay before the change takes effect on the wire."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_RULE_ID,
                 description="Required. The rule id from get_rules.",
             ): str,
@@ -409,13 +409,13 @@ class SetSsidPausedTool(_FirewallaControlTool):
         "including the client or Home Assistant host making the request. Resolve "
         "ssid_profile_id from get_wireless_status. Fully reversible."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_SSID_PROFILE_ID,
                 description=("Required. The SSID profile id from get_wireless_status."),
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_ENABLED,
                 description="Required. True to pause the SSID, false to resume it.",
             ): bool,
@@ -459,15 +459,15 @@ class SetHostNameTool(_FirewallaControlTool):
         "Rename a host. Cosmetic and fully reversible. For a DNS name use "
         "set_host_dns_hostname instead."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_NEW_NAME,
                 description="Required. The new display name for the host.",
             ): str,
@@ -508,15 +508,15 @@ class SetHostDnsHostnameTool(_FirewallaControlTool):
         "resolution for that host if set incorrectly. Reversible. Not the display "
         "name (use set_host_name)."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_DNS_HOSTNAME,
                 description="Required. The DNS hostname to assign.",
             ): str,
@@ -556,15 +556,15 @@ class SetHostDeviceTypeTool(_FirewallaControlTool):
         "Classify a host (desktop, phone, tablet, tv, …) so reports and "
         "summaries make sense. Cosmetic and reversible."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_HOST_DEVICE_TYPE,
                 description="Required. The host device type to assign.",
             ): str,
@@ -606,34 +606,34 @@ class SetHostDhcpReservationTool(_FirewallaControlTool):
         "validation rejects conflicting, in-use, or out-of-range addresses. "
         "Reversible by setting mode back to 'dynamic'."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_MODE,
                 description=(
                     "Required. 'static' to reserve an address, 'dynamic' to release it."
                 ),
-            ): vol.In(("static", "dynamic")),
-            vol.Optional(
+            ): probatio.In(("static", "dynamic")),
+            probatio.Optional(
                 SERVICE_FIELD_RESERVED_IPV4,
                 description=(
                     "Optional. The IPv4 address to reserve (required for 'static')."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_UUID,
                 description=(
                     "Optional. The network to reserve in, when the address alone "
                     "is ambiguous across networks."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_NAME,
                 description=(
                     "Optional. The network to reserve in, by name, when the "
@@ -747,22 +747,22 @@ class SetHostGroupTool(_SetHostMembershipTool):
     def _undo(self) -> str | None:
         return format_tool_name("clear_host_group")
 
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_NAME,
                 description=(
                     "Optional. The group's name. Provide this or group_id. Use "
                     "group_id when two groups share a name."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_ID,
                 description=(
                     "Optional. The group's Firewalla id. Provide this or group_name."
@@ -785,15 +785,15 @@ class ClearHostGroupTool(_SetHostMembershipTool):
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
 
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_CLEAR,
                 description="Optional. Always true for this tool.",
                 default=True,
@@ -820,22 +820,22 @@ class SetHostUserTool(_SetHostMembershipTool):
     def _undo(self) -> str | None:
         return format_tool_name("clear_host_user")
 
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_NAME,
                 description=(
                     "Optional. The user's name. Provide this or user_id. Use "
                     "user_id when two users share a name."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_ID,
                 description=(
                     "Optional. The user's Firewalla id. Provide this or user_name."
@@ -858,15 +858,15 @@ class ClearHostUserTool(_SetHostMembershipTool):
     )
     _service = SERVICE_SET_HOST_MEMBERSHIP
 
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_CLEAR,
                 description="Optional. Always true for this tool.",
                 default=True,
@@ -901,15 +901,15 @@ class _SetHostNotifyTool(_FirewallaControlTool):
             result=result,
         )
 
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_ENABLED,
                 description=(
                     "Required. True to enable the notification, false to disable it."
@@ -952,12 +952,12 @@ class WakeHostTool(_FirewallaControlTool):
         "Send a Wake-on-LAN packet to wake a host. Sends one packet and makes "
         "no persistent change; not idempotent, since each call sends a packet."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC, description=_HOST_MAC_DESCRIPTION
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME, description=_HOST_NAME_DESCRIPTION
             ): str,
         }
@@ -993,13 +993,13 @@ class RunInternetSpeedTestTool(_FirewallaControlTool):
         "time; for recent results prefer get_speed_tests. Not idempotent — each "
         "call runs a new test."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_UUID,
                 description="Optional. A WAN UUID. Omit to use the only WAN.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_WAN_NAME,
                 description="Optional. A WAN display name. Omit to use the only WAN.",
             ): str,
@@ -1043,20 +1043,20 @@ class SetAlarmMutedTool(_FirewallaControlTool):
         "(use archive_alarm). Scope is required: an 'all' scope silences the "
         "target for every host. Reversible."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ALARM_ID,
                 description=(
                     "Optional. The alarm to derive the silence target from (from "
                     "get_alarms)."
                 ),
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_ALARM_TARGET_TYPE,
                 description="Required. What to silence.",
-            ): vol.In(ALARM_TARGET_TYPES),
-            vol.Optional(
+            ): probatio.In(ALARM_TARGET_TYPES),
+            probatio.Optional(
                 SERVICE_FIELD_ALARM_TARGET_VALUE,
                 description=(
                     "Optional. What the type refers to: the alarm type to "
@@ -1065,39 +1065,39 @@ class SetAlarmMutedTool(_FirewallaControlTool):
                     "'ip'. Required unless alarm_id supplies it."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC,
                 description="Optional. Scope by host MAC.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME,
                 description="Optional. Scope by host name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_ID,
                 description="Optional. Scope by group id.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_NAME,
                 description="Optional. Scope by group name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_ID,
                 description="Optional. Scope by user id.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_NAME,
                 description="Optional. Scope by user name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_UUID,
                 description="Optional. Scope by network UUID.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_NAME,
                 description="Optional. Scope by network name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ALL_HOSTS,
                 default=False,
                 description=(
@@ -1105,10 +1105,10 @@ class SetAlarmMutedTool(_FirewallaControlTool):
                     "stated, because an empty scope means every host on the wire."
                 ),
             ): bool,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_DURATION,
                 description="Required. How long the silence lasts.",
-            ): vol.In(("1h", "today", "always")),
+            ): probatio.In(("1h", "today", "always")),
         }
     )
     _service = SERVICE_MUTE_ALARM
@@ -1155,13 +1155,13 @@ class UnmuteAlarmTool(_FirewallaControlTool):
         "mute_alarm. Provide either the alarm id or the silence (exception) "
         "id."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ALARM_ID,
                 description="Optional. The alarm whose silence to remove.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_EXCEPTION_ID,
                 description=(
                     "Optional. The silence id to remove directly. From "
@@ -1209,58 +1209,58 @@ class BlockAlarmTargetTool(_FirewallaControlTool):
         "actually blocks traffic (unlike mute_alarm). Reversible with "
         "unblock_alarm_target."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ALARM_ID,
                 description=(
                     "Optional. Derive the blocked target and host scope from "
                     "this alarm. Provide this or target_type and target_value."
                 ),
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_TARGET_TYPE,
                 description=(
                     "Optional. Required with target_value when alarm_id is omitted."
                 ),
-            ): vol.In(("dns", "ip", "mac")),
-            vol.Optional(
+            ): probatio.In(("dns", "ip", "mac")),
+            probatio.Optional(
                 SERVICE_FIELD_TARGET_VALUE,
                 description="Optional. The domain, IP, or MAC to block.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_MAC,
                 description="Optional. Scope by host MAC.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_HOST_NAME,
                 description="Optional. Scope by host name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_ID,
                 description="Optional. Scope by group id.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_GROUP_NAME,
                 description="Optional. Scope by group name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_ID,
                 description="Optional. Scope by user id.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_USER_NAME,
                 description="Optional. Scope by user name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_UUID,
                 description="Optional. Scope by network UUID.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_NETWORK_NAME,
                 description="Optional. Scope by network name.",
             ): str,
-            vol.Optional(
+            probatio.Optional(
                 SERVICE_FIELD_ALL_HOSTS,
                 default=False,
                 description=(
@@ -1315,9 +1315,9 @@ class UnblockAlarmTargetTool(_FirewallaControlTool):
         "Remove a firewall block created for an alarm by deleting its rule. This "
         "is the undo for block_alarm_target and removes only that rule."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_RULE_ID,
                 description="Required. The rule id to remove (from get_rules).",
             ): str,
@@ -1360,9 +1360,9 @@ class ArchiveAlarmTool(_FirewallaControlTool):
         "does NOT stop future matching alarms (use mute_alarm). Note there "
         "is no un-archive if you change your mind."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_ALARM_ID,
                 description="Required. The alarm id to archive (from get_alarms).",
             ): str,
@@ -1403,7 +1403,7 @@ class ArchiveAllAlarmsTool(_FirewallaControlTool):
         "are kept but move to the archive, and there is no un-archive. Prefer "
         "archive_alarm for a single alarm."
     )
-    parameters = vol.Schema({})
+    parameters = probatio.Schema({})
     annotations = _DESTRUCTIVE_ANNOTATIONS
     # Overrides the family block: this one cannot be undone.
     _injection: str = DESTRUCTIVE_INJECTION
@@ -1445,13 +1445,13 @@ class DeleteAlarmTool(_FirewallaControlTool):
         "irreversible. To dismiss without destroying the record use "
         "archive_alarm."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_ALARM_ID,
                 description="Required. The alarm id to delete (from get_alarms).",
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_CONFIRM,
                 description="Required. Set true to confirm the irreversible delete.",
             ): bool,
@@ -1499,15 +1499,15 @@ class DeleteAlarmsTool(_FirewallaControlTool):
         "alarms destroys alarms that are not archived; deleting all archived "
         "alarms destroys the retained history."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_ALARM_STATUS,
                 description=(
                     "Required. Which set to delete permanently: 'active' or 'archived'."
                 ),
-            ): vol.In((ALARM_STATUS_ACTIVE, ALARM_STATUS_ARCHIVED)),
-            vol.Required(
+            ): probatio.In((ALARM_STATUS_ACTIVE, ALARM_STATUS_ARCHIVED)),
+            probatio.Required(
                 SERVICE_FIELD_CONFIRM,
                 description="Required. Set true to confirm the bulk delete.",
             ): bool,
@@ -1554,13 +1554,13 @@ class DeleteHostTool(_FirewallaControlTool):
         "is irreversible. It removes the host's identity, reservations, and "
         "history; the host reappears as a new host if it rejoins the network."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_HOST_MAC,
                 description="Required. The MAC address of the host to delete.",
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_CONFIRM,
                 description="Required. Set true to confirm the irreversible delete.",
             ): bool,
@@ -1609,13 +1609,13 @@ class DeleteRuleTool(_FirewallaControlTool):
         "To disable a rule reversibly use pause_rule instead. Resolve rule_id "
         "from get_rules."
     )
-    parameters = vol.Schema(
+    parameters = probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_RULE_ID,
                 description="Required. The rule id to delete (from get_rules).",
             ): str,
-            vol.Required(
+            probatio.Required(
                 SERVICE_FIELD_CONFIRM,
                 description="Required. Set true to confirm the irreversible delete.",
             ): bool,
