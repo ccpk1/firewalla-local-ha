@@ -372,6 +372,32 @@ async def test_every_parameter_has_a_description(hass: HomeAssistant) -> None:
             assert marker.description, f"{tool.name} field {marker} lacks a description"
 
 
+async def test_every_tool_parameters_expose_a_field_mapping(
+    hass: HomeAssistant,
+) -> None:
+    """Every tool's parameters must be a schema carrying its field mapping.
+
+    A conversation provider renders a tool from ``tool.parameters.schema``, and
+    the Google Generative AI agent does it on every turn. Only a schema object
+    has that attribute, so adding a cross-field rule by wrapping the schema in
+    ``vol.All`` fails that agent with a 500 before the model is called -- for
+    every conversation, not for the one tool. Compose such a rule inside the
+    schema instead. The mapping is also what the action tool iterates, so
+    ``Schema(Schema(...))``, whose ``.schema`` is another schema rather than the
+    field dict, is the other way to look right and still break the provider.
+    """
+    api_instance = await _api_instance(hass)
+
+    assert api_instance.tools, "expected at least one registered tool"
+    for tool in api_instance.tools:
+        fields = getattr(tool.parameters, "schema", None)
+        assert isinstance(fields, dict), (
+            f"{tool.name}: parameters.schema is {type(fields).__name__}, not the "
+            f"field mapping a conversation provider reads, because "
+            f"{type(tool.parameters).__name__} is not a schema"
+        )
+
+
 async def test_destructive_annotation_matches_the_documented_set(
     hass: HomeAssistant,
 ) -> None:

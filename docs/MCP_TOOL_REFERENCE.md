@@ -289,6 +289,19 @@ Inputs are **flat** (nested objects are awkward for the LLM). Every parameter ca
 a `description`. Enums are described by meaning, and where a value is discoverable,
 the description says how (e.g. "`rule_id` comes from `get_rules`").
 
+**`parameters` is a schema, never a validator.** Declare it as `vol.Schema({...})`.
+A conversation provider renders a tool from `parameters.schema` — the field
+mapping — and the Google Generative AI agent reads it on every turn. Only a schema
+object has that attribute, so adding a cross-field rule by wrapping the schema in
+`vol.All(...)` produces a validator without it: that agent fails with a 500 before
+the model is called, for every conversation rather than for the one tool. Compose
+such a rule inside the schema instead. (Home Assistant aliases `voluptuous` to
+probatio, so `vol.All` and `probatio.All` are the same class — the report that
+prompted this rule was written in probatio's names.) The same mapping is what the
+action tool iterates, so `vol.Schema(vol.Schema({...}))`, whose `.schema` is another
+schema rather than the field dict, breaks it the same way. Both are pinned by
+`test_every_tool_parameters_expose_a_field_mapping`.
+
 **One API per Firewalla box — tools are pre-bound to their box.** Each config entry
 registers its own LLM API, so a tool already knows which box it acts on: the entry
 id is injected into the backing service call, not passed by the model. There is
