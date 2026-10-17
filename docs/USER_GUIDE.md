@@ -366,6 +366,7 @@ Services added after 1.0.0:
 - `firewalla_local.set_host_membership`
 - `firewalla_local.get_speed_tests`
 - `firewalla_local.get_internet_quality`
+- `firewalla_local.get_live_throughput`
 - `firewalla_local.get_time_usage`
 - `firewalla_local.get_wan_usage`
 - `firewalla_local.get_wan_events`
@@ -1083,6 +1084,25 @@ internet-quality samples (ping latency and packet loss) for one or all WANs.
 - each sample includes `sampled_at`, `ping_target`, `ping_latency_ms`,
   `ping_latency_max_ms`, `ping_latency_median_ms`, `ping_latency_min_ms`,
   `ping_packet_loss_percent`, `wan_uuid`, and `wan_name`
+
+#### Get live throughput
+
+Use `firewalla_local.get_live_throughput` to answer *"which device is using the
+bandwidth right now?"*. It reads the box's live view (the same data the Firewalla
+app's live throughput screen shows) at the moment you call it.
+
+- rates are **bytes per second**, averaged over 2 seconds by the box
+- `hosts` are busiest first; each has `download_bytes_per_second` and
+  `upload_bytes_per_second`, its `host_name`, `host_ip`, and network
+- `interfaces` carry each interface's own `rx`/`tx` counters: on a WAN `rx` is
+  the download, on a LAN it is what the LAN sent toward the box
+- use `network_uuid` or `network_name` to limit the answer to one network, and
+  `top_n` (default 10) for the number of hosts
+- nothing is polled: each call reads the box once. The box starts its sampler
+  on the first call and stops it about 30 seconds after the last, so a call
+  after a quiet spell can take about 3 seconds; if the sampler still had no
+  reading, the answer says `warming_up` and carries a warning instead of
+  reporting the zeros as an idle network
 
 #### Get time usage report
 

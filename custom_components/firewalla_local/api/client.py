@@ -314,6 +314,10 @@ _RAW_MONTHLY_WAN_USAGE_KEY: Final = "monthlyDataUsageOnWans"
 _RAW_LAST12_WAN_USAGE_KEY: Final = "last12monthlyDataUsageOnWans"
 
 _RAW_INTERNET_QUALITY_ITEM_KEY: Final = "networkMonitorData"
+# The Firewalla app's live view. The box starts `iftop` per monitored interface on
+# the first request for a stream id and stops it about 30 s after the last one.
+_LIVE_STATS_ITEM: Final = "liveStats"
+_LIVE_STATS_SCOPE_SYSTEM: Final = "system"
 _RAW_INTERNET_QUALITY_METRIC_PREFIX: Final = "metric:monitor:raw:ping:"
 _RAW_INTERNET_QUALITY_STAT_KEY: Final = "stat"
 _RAW_INTERNET_QUALITY_LOSS_KEY: Final = "lossrate"
@@ -1267,6 +1271,34 @@ class FirewallaApiClient:
             raise FirewallaProtocolError(
                 "Firewalla local runtime payload did not include a "
                 "networkMonitorData object"
+            )
+
+        return data_payload
+
+    async def async_get_live_throughput_payload(
+        self, *, stream_id: str
+    ) -> dict[str, object]:
+        """Fetch live per-interface and per-device throughput from the local runtime.
+
+        Rates are bytes per second (`iftop` with `use-bytes`, 2 s average). The
+        first request for a ``stream_id`` answers zeros while `iftop` starts.
+        """
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _LIVE_STATS_ITEM,
+                _COMMAND_VALUE_KEY: {
+                    "type": _LIVE_STATS_SCOPE_SYSTEM,
+                    "target": DEFAULT_INIT_TARGET,
+                    "queries": {"throughput": {"devices": True}},
+                    "streaming": {"id": stream_id},
+                },
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                "Firewalla local runtime payload did not include a liveStats object"
             )
 
         return data_payload

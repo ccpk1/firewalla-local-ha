@@ -1249,6 +1249,48 @@ class FirewallaFlowWindow:
 
 
 @dataclass(slots=True, frozen=True)
+class FirewallaLiveInterfaceThroughput:
+    """Live rates for one interface, in bytes per second, as the box names them.
+
+    ``rx``/``tx`` are the box interface's own counters: on a WAN ``rx`` is the
+    download, but on a LAN it is what the LAN *sent* toward the box.
+    """
+
+    interface_name: str
+    network_uuid: str | None
+    rx_bytes_per_second: float
+    tx_bytes_per_second: float
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaLiveHostThroughput:
+    """Live rates for one host on one network, in bytes per second.
+
+    ``host_id`` is a MAC address, or ``wg_peer:<public key>`` for a WireGuard
+    peer. The box's per-host ``rx`` is the host's download.
+    """
+
+    host_id: str
+    network_uuid: str
+    download_bytes_per_second: float
+    upload_bytes_per_second: float
+
+
+@dataclass(slots=True, frozen=True)
+class FirewallaLiveThroughput:
+    """One live throughput sample from the box.
+
+    ``warming_up`` means every rate was zero and no host was listed: the box's
+    sampler had only just started, so the zeros are not a measurement.
+    """
+
+    sampled_at_timestamp: int
+    warming_up: bool
+    interfaces: tuple[FirewallaLiveInterfaceThroughput, ...] = ()
+    devices: tuple[FirewallaLiveHostThroughput, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
 class FirewallaFlowRollup:
     """One windowed flow rollup, with the window it really covered.
 

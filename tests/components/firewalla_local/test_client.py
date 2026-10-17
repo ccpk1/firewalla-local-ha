@@ -2618,6 +2618,43 @@ async def test_get_internet_quality_payload_sends_get_request() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_get_live_throughput_payload_sends_live_stats_request() -> None:
+    """Test liveStats pulls ask for system-wide throughput with host rates."""
+    async with ClientSession() as session:
+        client = FirewallaApiClient(
+            session=session,
+            host="192.168.200.1",
+            gid="gid-123",
+            eid="eid-123",
+            aid="aid-123",
+            symmetric_key=TEST_SYMMETRIC_KEY,
+            device_name="Home Assistant",
+        )
+
+        with patch.object(
+            client,
+            "_async_send_local_message_data",
+            AsyncMock(return_value={"throughput": []}),
+        ) as mock_send:
+            payload = await client.async_get_live_throughput_payload(stream_id="s-1")
+
+    assert payload == {"throughput": []}
+    assert mock_send.await_args.kwargs == {
+        "message_type": "get",
+        "data": {
+            "item": "liveStats",
+            "value": {
+                "type": "system",
+                "target": "0.0.0.0",
+                "queries": {"throughput": {"devices": True}},
+                "streaming": {"id": "s-1"},
+            },
+        },
+        "target": "0.0.0.0",
+    }
+
+
 def test_extract_internet_quality_samples_parses_buckets() -> None:
     """Test extraction parses the metric key and stat buckets."""
     client = FirewallaApiClient(

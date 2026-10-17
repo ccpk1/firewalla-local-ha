@@ -16,6 +16,7 @@ surface.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -33,6 +34,9 @@ from ..models import (
     FirewallaFlowReportView,
     FirewallaFlowRollup,
     FirewallaFlowWindow,
+    FirewallaLiveHostThroughput,
+    FirewallaLiveInterfaceThroughput,
+    FirewallaLiveThroughput,
     format_policy_rule_name,
 )
 from ..utils.flow_report import build_record_view, summarise_rollup
@@ -47,6 +51,15 @@ _RAW_FLOW_FAMILIES_KEY: Final = "flows"
 _RAW_FLOW_HOSTS_KEY: Final = "hosts"
 _RAW_FLOW_BEGIN_KEY: Final = "begin"
 _RAW_FLOW_END_KEY: Final = "end"
+
+# One stream id for the whole integration, so repeated calls reuse the box's running
+# `iftop` sampler instead of starting another set.
+_LIVE_STREAM_ID: Final = "home-assistant-firewalla-local"
+# The sampler averages over 2 s; a cold start answered zeros at once and real rates
+# 3 s later on a Gold, so one retry after this pause turns a cold call into a reading.
+_LIVE_WARMUP_SECONDS: Final = 3.0
+_RAW_LIVE_THROUGHPUT_KEY: Final = "throughput"
+_RAW_LIVE_DEVICES_KEY: Final = "devices"
 
 # `hourblock` must be at least 2 or the box answers with an empty response and no
 # error. It has no other observable effect, so one value is used throughout.
@@ -96,6 +109,31 @@ class FirewallaFlowManager(FirewallaBaseManager):
             families=families,
             hosts=_normalise_flow_hosts(payload.get(_RAW_FLOW_HOSTS_KEY)),
         )
+
+    async def async_get_live_throughput(self) -> FirewallaLiveThroughput | None:
+        """Return one live throughput sample, or ``None`` when it could not be read.
+
+        A cold sampler answers all zeros, so that answer is retried once after a
+        short pause. If it is still all zeros the sample says ``warming_up`` rather
+        than presenting the zeros as an idle network.
+        """
+        try:
+            sample = _normalise_live_throughput(
+                await self.client.async_get_live_throughput_payload(
+                    stream_id=_LIVE_STREAM_ID
+                )
+            )
+            if sample.warming_up:
+                await asyncio.sleep(_LIVE_WARMUP_SECONDS)
+                sample = _normalise_live_throughput(
+                    await self.client.async_get_live_throughput_payload(
+                        stream_id=_LIVE_STREAM_ID
+                    )
+                )
+        except FirewallaProtocolError as err:
+            _LOGGER.debug("Live throughput unavailable: %s", err)
+            return None
+        return sample
 
     async def async_get_flow_log(
         self,
@@ -480,4 +518,70 @@ def _build_served_window(
         requested_hours=requested_hours,
         begin_timestamp=min(begins) if begins else None,
         end_timestamp=max(ends) if ends else None,
+    )
+
+
+def _rate(value: object) -> float:
+    """Return one rate as a float, treating a missing or malformed value as zero."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 0.0
+    return float(value)
+
+
+def _normalise_live_throughput(
+    payload: Mapping[str, object],
+) -> FirewallaLiveThroughput:
+    """Normalise one ``liveStats`` answer into interface and device rates."""
+    interfaces: list[FirewallaLiveInterfaceThroughput] = []
+    devices: list[FirewallaLiveHostThroughput] = []
+    raw_rows = payload.get(_RAW_LIVE_THROUGHPUT_KEY)
+    for row in raw_rows if isinstance(raw_rows, list) else ():
+        if not isinstance(row, Mapping) or not isinstance(row.get("name"), str):
+            continue
+        target = row.get("target")
+        network_uuid = target if isinstance(target, str) else None
+        interfaces.append(
+            FirewallaLiveInterfaceThroughput(
+                interface_name=row["name"],
+                network_uuid=network_uuid,
+                rx_bytes_per_second=_rate(row.get("rx")),
+                tx_bytes_per_second=_rate(row.get("tx")),
+            )
+        )
+        raw_devices = row.get(_RAW_LIVE_DEVICES_KEY)
+        if network_uuid is None or not isinstance(raw_devices, Mapping):
+            continue
+        for device_id, rates in raw_devices.items():
+            if not isinstance(device_id, str) or not isinstance(rates, Mapping):
+                continue
+            devices.append(
+                FirewallaLiveHostThroughput(
+                    host_id=device_id,
+                    network_uuid=network_uuid,
+                    download_bytes_per_second=_rate(rates.get("rx")),
+                    upload_bytes_per_second=_rate(rates.get("tx")),
+                )
+            )
+
+    # No interfaces at all is no data, not a cold sampler.
+    warming_up = (
+        bool(interfaces)
+        and not devices
+        and all(
+            interface.rx_bytes_per_second == 0 and interface.tx_bytes_per_second == 0
+            for interface in interfaces
+        )
+    )
+    return FirewallaLiveThroughput(
+        sampled_at_timestamp=int(time.time()),
+        warming_up=warming_up,
+        interfaces=tuple(interfaces),
+        devices=tuple(
+            sorted(
+                devices,
+                key=lambda device: (
+                    -(device.download_bytes_per_second + device.upload_bytes_per_second)
+                ),
+            )
+        ),
     )

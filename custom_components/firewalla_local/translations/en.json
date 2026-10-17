@@ -1994,6 +1994,32 @@
         }
       }
     },
+    "get_live_throughput": {
+      "name": "Get live throughput",
+      "description": "Return live per-device and per-interface throughput in bytes per second, read from the box now (the app's live view).",
+      "fields": {
+        "network_uuid": {
+          "name": "Network UUID (Optional)",
+          "description": "Limit the answer to one network by UUID."
+        },
+        "network_name": {
+          "name": "Network name (Optional)",
+          "description": "Limit the answer to one network by display name."
+        },
+        "top_n": {
+          "name": "Device limit",
+          "description": "Optional. Defaults to 10. The number of busiest devices to return."
+        },
+        "config_entry_id": {
+          "name": "Config entry ID (Optional)",
+          "description": "Use this if you have more than one Firewalla setup. It targets one specific setup."
+        },
+        "config_entry_name": {
+          "name": "Config entry name (Optional)",
+          "description": "Use this if you have more than one Firewalla setup and they each have unique names. If names repeat, use Config Entry ID."
+        }
+      }
+    },
     "wake_host": {
       "name": "Wake host",
       "description": "Send a Wake-on-LAN command to one Firewalla host.",
