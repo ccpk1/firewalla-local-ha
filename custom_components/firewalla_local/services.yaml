@@ -1086,6 +1086,17 @@ get_live_throughput:
           mode: box
       name: Device limit
       description: Optional. Defaults to 10. The number of busiest devices to return.
+    sample_seconds:
+      required: false
+      example: 10
+      selector:
+        number:
+          min: 2
+          max: 30
+          unit_of_measurement: s
+          mode: box
+      name: Sample window
+      description: Optional. Defaults to 10. Seconds to average over. The box reports 2-second rates and streaming arrives in bursts, so a longer window shows a player's real rate; the call takes about this long.
     config_entry_id:
       required: false
       example: "0123456789abcdef"

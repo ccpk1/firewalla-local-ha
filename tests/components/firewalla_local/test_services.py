@@ -98,6 +98,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
+    SERVICE_FIELD_SAMPLE_SECONDS,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
@@ -2438,6 +2439,10 @@ async def test_get_live_throughput_service_names_hosts_and_filters(
         patch(
             "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
             new=AsyncMock(return_value=payload),
+        ) as mock_read,
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            new=AsyncMock(),
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -2450,6 +2455,7 @@ async def test_get_live_throughput_service_names_hosts_and_filters(
                 SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
                 SERVICE_FIELD_NETWORK_UUID: _CORE_UUID,
                 SERVICE_FIELD_TOP_N: 2,
+                SERVICE_FIELD_SAMPLE_SECONDS: 6,
             },
             blocking=True,
             return_response=True,
@@ -2478,7 +2484,10 @@ async def test_get_live_throughput_service_names_hosts_and_filters(
         "bond0.10"
     ]
     assert response["metadata"]["warnings"] == []
-    assert response["metadata"]["applied"] == {"top_n": 2}
+    assert response["metadata"]["applied"] == {"top_n": 2, "sample_seconds": 6}
+    # Six seconds is three back-to-back 2 s readings.
+    assert (response["sample_seconds"], response["sample_count"]) == (6, 3)
+    assert mock_read.await_count == 3
 
 
 async def test_get_live_throughput_service_reports_unavailable_and_cold(

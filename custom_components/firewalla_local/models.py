@@ -1282,10 +1282,16 @@ class FirewallaLiveThroughput:
 
     ``warming_up`` means every rate was zero and no host was listed: the box's
     sampler had only just started, so the zeros are not a measurement.
+
+    Rates are averaged over ``sample_count`` back-to-back readings spanning about
+    ``sample_seconds``. One 2 s reading misses bursty traffic: a streaming player
+    fetches a few seconds of video at a time and is idle in between.
     """
 
     sampled_at_timestamp: int
     warming_up: bool
+    sample_seconds: int = 0
+    sample_count: int = 1
     interfaces: tuple[FirewallaLiveInterfaceThroughput, ...] = ()
     devices: tuple[FirewallaLiveHostThroughput, ...] = ()
 

@@ -109,6 +109,7 @@ from .const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
+    SERVICE_FIELD_SAMPLE_SECONDS,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
@@ -769,6 +770,9 @@ GET_LIVE_THROUGHPUT_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_TOP_N, default=10): cv.positive_int,
+        vol.Optional(SERVICE_FIELD_SAMPLE_SECONDS, default=10): vol.All(
+            vol.Coerce(int), vol.Range(min=2, max=30)
+        ),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -6146,12 +6150,16 @@ async def _async_handle_get_live_throughput(call: ServiceCall) -> JsonObjectType
         network_name=call.data.get(SERVICE_FIELD_NETWORK_NAME),
     )
     top_n = cast(int, call.data[SERVICE_FIELD_TOP_N])
-    sample = await entry.runtime_data.flow_manager.async_get_live_throughput()
+    sample_seconds = cast(int, call.data[SERVICE_FIELD_SAMPLE_SECONDS])
+    sample = await entry.runtime_data.flow_manager.async_get_live_throughput(
+        sample_seconds=sample_seconds
+    )
     return _serialize_live_throughput(
         entry,
         sample,
         network=network,
         top_n=top_n,
+        sample_seconds=sample_seconds,
     )
 
 
@@ -6161,6 +6169,7 @@ def _serialize_live_throughput(
     *,
     network: FirewallaNetworkSegment | None,
     top_n: int,
+    sample_seconds: int,
 ) -> JsonObjectType:
     """Serialize one live sample, naming devices and networks from the snapshot."""
     network_names = {
@@ -6229,11 +6238,15 @@ def _serialize_live_throughput(
         "sampled_at": iso_instant(sampled_at),
         "sampled_at_timestamp": sampled_at,
         "warming_up": sample.warming_up if sample is not None else None,
+        # The window the rates were really averaged over; a warming-up answer is
+        # one reading.
+        "sample_seconds": sample.sample_seconds if sample is not None else None,
+        "sample_count": sample.sample_count if sample is not None else None,
         "interfaces": {"count": len(interfaces), "items": interfaces},
         # Busiest first: download plus upload.
         "hosts": {"count": len(devices), "items": devices},
         "metadata": _serialize_report_metadata(
-            applied={"top_n": top_n},
+            applied={"top_n": top_n, "sample_seconds": sample_seconds},
             warnings=tuple(warnings),
             unavailable_sections=tuple(unavailable_sections),
             provenance=(
@@ -6242,8 +6255,9 @@ def _serialize_live_throughput(
                     source="direct",
                     source_field="liveStats.throughput",
                     note=(
-                        "Bytes per second, averaged over 2 s by the box's iftop "
-                        "sampler; download is the host's receive rate"
+                        "Bytes per second, averaged over back-to-back 2 s iftop "
+                        "readings across sample_seconds; download is the host's "
+                        "receive rate"
                     ),
                 ),
             ),

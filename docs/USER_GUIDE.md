@@ -1091,7 +1091,12 @@ Use `firewalla_local.get_live_throughput` to answer *"which device is using the
 bandwidth right now?"*. It reads the box's live view (the same data the Firewalla
 app's live throughput screen shows) at the moment you call it.
 
-- rates are **bytes per second**, averaged over 2 seconds by the box
+- rates are **bytes per second**, averaged over `sample_seconds` (default 10,
+  2 to 30). The box itself reports 2-second rates, and streaming arrives in
+  bursts (a player can pull 30 Mbps for 2 seconds, then nothing for 8), so the
+  service takes readings 2 seconds apart across the window and averages them.
+  The call takes about `sample_seconds` to answer; `sample_count` says how many
+  readings were averaged
 - `hosts` are busiest first; each has `download_bytes_per_second` and
   `upload_bytes_per_second`, its `host_name`, `host_ip`, and network
 - `interfaces` carry each interface's own `rx`/`tx` counters: on a WAN `rx` is

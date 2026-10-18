@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import time
+from collections import defaultdict
 from collections.abc import Mapping
 from typing import Final
 
@@ -58,6 +59,9 @@ _LIVE_STREAM_ID: Final = "home-assistant-firewalla-local"
 # The sampler averages over 2 s; a cold start answered zeros at once and real rates
 # 3 s later on a Gold, so one retry after this pause turns a cold call into a reading.
 _LIVE_WARMUP_SECONDS: Final = 3.0
+# The box reports each rate as a 2 s average, so readings 2 s apart cover a window
+# without gaps.
+_LIVE_READING_SECONDS: Final = 2
 _RAW_LIVE_THROUGHPUT_KEY: Final = "throughput"
 _RAW_LIVE_DEVICES_KEY: Final = "devices"
 
@@ -110,30 +114,44 @@ class FirewallaFlowManager(FirewallaBaseManager):
             hosts=_normalise_flow_hosts(payload.get(_RAW_FLOW_HOSTS_KEY)),
         )
 
-    async def async_get_live_throughput(self) -> FirewallaLiveThroughput | None:
-        """Return one live throughput sample, or ``None`` when it could not be read.
+    async def async_get_live_throughput(
+        self, *, sample_seconds: int
+    ) -> FirewallaLiveThroughput | None:
+        """Return live rates averaged over ``sample_seconds``, or ``None``.
 
-        A cold sampler answers all zeros, so that answer is retried once after a
-        short pause. If it is still all zeros the sample says ``warming_up`` rather
-        than presenting the zeros as an idle network.
+        The box reports a 2 s average, and streaming traffic arrives in bursts
+        (measured: 25-38 Mbps for 2-4 s every 10 s from a player averaging about
+        6 Mbps), so a single reading usually lands in a gap. Readings are taken
+        back to back across the window and averaged per host.
+
+        A cold sampler answers all zeros, so that first answer is retried once
+        after a short pause and not counted. If it is still all zeros the result
+        says ``warming_up`` rather than presenting the zeros as an idle network.
         """
         try:
-            sample = _normalise_live_throughput(
-                await self.client.async_get_live_throughput_payload(
-                    stream_id=_LIVE_STREAM_ID
-                )
-            )
-            if sample.warming_up:
+            reading = await self._async_read_live_throughput()
+            if reading.warming_up:
                 await asyncio.sleep(_LIVE_WARMUP_SECONDS)
-                sample = _normalise_live_throughput(
-                    await self.client.async_get_live_throughput_payload(
-                        stream_id=_LIVE_STREAM_ID
-                    )
-                )
+                reading = await self._async_read_live_throughput()
+                if reading.warming_up:
+                    return reading
+            readings = [reading]
+            wanted = max(1, round(sample_seconds / _LIVE_READING_SECONDS))
+            while len(readings) < wanted:
+                await asyncio.sleep(_LIVE_READING_SECONDS)
+                readings.append(await self._async_read_live_throughput())
         except FirewallaProtocolError as err:
             _LOGGER.debug("Live throughput unavailable: %s", err)
             return None
-        return sample
+        return _average_live_readings(readings, sample_seconds=sample_seconds)
+
+    async def _async_read_live_throughput(self) -> FirewallaLiveThroughput:
+        """Take one 2 s reading from the box."""
+        return _normalise_live_throughput(
+            await self.client.async_get_live_throughput_payload(
+                stream_id=_LIVE_STREAM_ID
+            )
+        )
 
     async def async_get_flow_log(
         self,
@@ -581,6 +599,65 @@ def _normalise_live_throughput(
                 devices,
                 key=lambda device: (
                     -(device.download_bytes_per_second + device.upload_bytes_per_second)
+                ),
+            )
+        ),
+    )
+
+
+def _average_live_readings(
+    readings: list[FirewallaLiveThroughput], *, sample_seconds: int
+) -> FirewallaLiveThroughput:
+    """Average back-to-back readings per host and per interface.
+
+    The box leaves an idle host out of a reading rather than listing it at zero,
+    so a host's average divides by every reading, not only the ones it was in.
+    Otherwise a player seen in one burst out of five would read five times its
+    real rate.
+    """
+    count = len(readings)
+    host_totals: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0, 0.0])
+    interface_totals: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    interface_networks: dict[str, str | None] = {}
+    for reading in readings:
+        for host in reading.devices:
+            totals = host_totals[(host.host_id, host.network_uuid)]
+            totals[0] += host.download_bytes_per_second
+            totals[1] += host.upload_bytes_per_second
+        for interface in reading.interfaces:
+            totals = interface_totals[interface.interface_name]
+            totals[0] += interface.rx_bytes_per_second
+            totals[1] += interface.tx_bytes_per_second
+            interface_networks[interface.interface_name] = interface.network_uuid
+
+    hosts = [
+        FirewallaLiveHostThroughput(
+            host_id=host_id,
+            network_uuid=network_uuid,
+            download_bytes_per_second=down / count,
+            upload_bytes_per_second=up / count,
+        )
+        for (host_id, network_uuid), (down, up) in host_totals.items()
+    ]
+    return FirewallaLiveThroughput(
+        sampled_at_timestamp=readings[-1].sampled_at_timestamp,
+        warming_up=False,
+        sample_seconds=sample_seconds,
+        sample_count=count,
+        interfaces=tuple(
+            FirewallaLiveInterfaceThroughput(
+                interface_name=name,
+                network_uuid=interface_networks[name],
+                rx_bytes_per_second=rx / count,
+                tx_bytes_per_second=tx / count,
+            )
+            for name, (rx, tx) in interface_totals.items()
+        ),
+        devices=tuple(
+            sorted(
+                hosts,
+                key=lambda host: (
+                    -(host.download_bytes_per_second + host.upload_bytes_per_second)
                 ),
             )
         ),
