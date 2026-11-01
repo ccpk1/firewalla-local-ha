@@ -102,7 +102,7 @@ def decode_sse(blob: bytes, key: str) -> list[tuple[str, dict[str, object] | Non
         try:
             plaintext = crypto.aes256_cbc_decrypt_from_base64(payload_b64, key)
             parsed = json.loads(plaintext)
-        except ValueError, json.JSONDecodeError:
+        except (ValueError, json.JSONDecodeError):
             parsed = None
         if isinstance(parsed, dict):
             decoded = parsed
@@ -114,7 +114,7 @@ def decode_sse(blob: bytes, key: str) -> list[tuple[str, dict[str, object] | Non
                 try:
                     inflated = zlib.decompress(base64.b64decode(inner))
                     unpacked = json.loads(inflated)
-                except ValueError, zlib.error:
+                except (ValueError, zlib.error):
                     unpacked = None
                 if isinstance(unpacked, dict):
                     decoded = unpacked

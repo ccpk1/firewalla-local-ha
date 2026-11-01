@@ -30,6 +30,7 @@ from .const import (
     TRANS_KEY_PURPOSE_DEVICE_TRACKER_PRESENCE,
 )
 from .coordinator import FirewallaConfigEntry, FirewallaDataUpdateCoordinator
+from .helpers.device_registry import async_get_entry_device
 from .managers import FirewallaHostManager
 from .models import FirewallaHostRuntime
 from .utils.values import iso_instant
@@ -102,7 +103,8 @@ class FirewallaDeviceTracker(
 
     def find_device_entry(self) -> dr.DeviceEntry | None:
         """Return the tracked-client device entry for this tracker."""
-        return dr.async_get(self.hass).async_get_device_by_identifier(
+        return async_get_entry_device(
+            dr.async_get(self.hass),
             self._entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
                 self._mac
             ),

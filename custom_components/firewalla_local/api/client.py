@@ -2995,7 +2995,7 @@ class FirewallaApiClient:
             raw_expiry = raw_exception.get("expireTs")
             try:
                 expires_at = int(raw_expiry) if raw_expiry is not None else None
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 expires_at = None
             exceptions.append(
                 FirewallaAlarmException(
@@ -3039,7 +3039,7 @@ class FirewallaApiClient:
                 if isinstance(raw_timestamp, (float, int, str))
                 else None
             )
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             fired_at = None
         return FirewallaAlarm(
             alarm_id=alarm_id,

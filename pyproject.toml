@@ -7,7 +7,9 @@ name = "ha-firewalla-local"
 version = "2.5.1"
 description = "Local-first Home Assistant custom integration for Firewalla"
 readme = "README.md"
-requires-python = ">=3.14"
+# Home Assistant 2025.10 (the declared floor in hacs.json) runs on Python 3.13, so
+# the shipped code must stay importable there. CI tests on 3.14.
+requires-python = ">=3.13"
 dependencies = []
 
 [project.optional-dependencies]
@@ -41,7 +43,10 @@ filterwarnings = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py314"
+# The lowest Python the supported Home Assistant floor runs on. Kept below the
+# 3.14 that CI uses on purpose: with a py314 target the formatter rewrites
+# `except A, B:` (PEP 758) into a form Python 3.13 cannot parse.
+target-version = "py313"
 exclude = [
     ".tmp",
     ".captures",
@@ -58,7 +63,7 @@ select = ["ASYNC", "B", "C4", "E", "F", "I", "RUF", "SIM", "UP"]
 "custom_components/firewalla_local/device_tracker.py" = ["I001"]
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.13"
 strict = true
 warn_unused_ignores = true
 show_error_codes = true
