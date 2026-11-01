@@ -269,15 +269,16 @@ envelope of encipher messages (the `ts` value from the `rkey` JSON).
 
 The APK method `n73.m15464y()` implements this priority:
 
-```java
-public String m15464y() {
-    String m15454C = m15454C();  // try rkey.key first
-    if (m15454C.length() == 0) {
-        m15454C = m15456E();     // fall back to symmetricKeys[0].key
-    }
-    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
-}
-```
+1. It asks the `rkey` path for a key. That path caches its result, parses the
+   parsed-`rkey` JSON, reads its `key` field, and RSA-decrypts it. A missing
+   parsed `rkey` yields an empty string rather than an error.
+2. If that returns empty, it asks the direct-key path. That path also caches,
+   reads the first `symmetricKeys` entry's `key` field, and RSA-decrypts it. An
+   empty `symmetricKeys` array yields an empty string.
+3. Whichever it got, it is truncated to its first 32 characters and returned.
+
+The truncation is what makes the two paths interchangeable: both yield AES-256
+key material, and 32 characters is exactly one 256-bit key.
 
 The `xname` field in the group JSON is AES-encrypted box metadata (box name,
 model), not an encrypted key. It is decrypted using the same intermediate key.
@@ -332,15 +333,11 @@ sources depending on what the cloud returns during provisioning:
 
 The APK's `n73.m15464y()` method implements this priority:
 
-```java
-public String m15464y() {
-    String m15454C = m15454C();  // try rkey.key first
-    if (m15454C.length() == 0) {
-        m15454C = m15456E();     // fall back to symmetricKeys[0].key
-    }
-    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
-}
-```
+1. Try the `rkey` path; it caches its answer, and returns an empty string when
+   there is no parsed `rkey`.
+2. If that was empty, fall back to the direct-key path, which also caches and
+   returns an empty string when `symmetricKeys` is empty.
+3. Truncate to 32 characters and return.
 
 The `rkey` field is a JSON string from `symmetricKeys[0].rkey`. The app
 parses it into box metadata (`n73.y0`) via `ue3.m18976a()` → `m15455D()`:
@@ -5621,26 +5618,17 @@ handles most ProGuard / R8 obfuscation.
 
 ### Confirmed outer payload format (Android app v1.69.1)
 
-From `y2.java` case 2 and `wx3.java`:
+From `y2.java` case 2 and `wx3.java`, the outer HTTP payload is built like this:
 
-```java
-// wx3.c() builds:
-JSONObject outer = new JSONObject();
-outer.put("timestamp", System.currentTimeMillis() / 1000);
-outer.put("message", encrypted_payload);
+1. `wx3.c()` creates an object and puts two keys into it: `timestamp`, as whole
+   seconds, and `message`, as the encrypted payload.
+2. If the parsed box metadata carries a `ts` value, it is added as `rkeyts` when
+   it is greater than zero. When it is absent or zero, nothing is added at this
+   stage.
+3. The caller in `y2.java` then puts `mtype: "msg"` into the same object, and
+   adds `rkeyts: 1` as a fallback when the box had no `ts`.
 
-// If the box metadata (n73.y0) has a "ts" value, send it as rkeyts:
-long optLong = jSONObject2 != null ? jSONObject2.optLong("ts") : 0L;
-if (optLong > 0) {
-    outer.put("rkeyts", optLong);
-}
-
-// y2.java caller then adds:
-c.put("mtype", "msg");       // mtype added to outer by the message sender
-c.put("rkeyts", 1);          // fallback: rkeyts=1 when box has no ts
-```
-
-The APK source confirms the app sends both `timestamp` and `mtype"msg"` in
+The APK confirms the app sends both `timestamp` and `mtype` in
 the outer envelope, plus `rkeyts` when available. **However, captured phone
 traffic does not show `mtype` in the outer envelope** — neither the working
 Gold capture nor the Gold Plus capture. The box accepts messages both with
@@ -5766,14 +5754,11 @@ recently. The Firewalla app surfaces this as the "Show past devices" toggle
 
 ### Inner encrypted envelope format (for reference)
 
-From `wx3.d()`:
-
-```java
-String inner = "{\"message\":{\"mtype\":\"msg\",\"type\":\"jsondata\",\"msg\":\"\",\"from\":\"Android\""
-    + ",\"obj\":" + serialized_obj
-    + ",\"appInfo\":" + app_info_json
-    + ",\"compressMode\":1}, \"mtype\":\"msg\"}";
-```
+From `wx3.d()`, the inner structure is a JSON object with a single `message` key,
+whose value is the command itself: `mtype` of `msg`, `type` of `jsondata`, an
+empty `msg` string, `from` set to `Android`, the serialized `obj`, the `appInfo`
+object, and `compressMode` set to `1`. The same `mtype: "msg"` also appears at
+that inner level, which is why reading the two layers apart matters.
 
 This produces a nested JSON that gets encrypted and placed in the outer
 `"message"` field. The integration uses the equivalent structure directly
@@ -5908,15 +5893,10 @@ cloud MSP subscription data structure that includes:
 - `channel` — software update channel
 - `version` — MSP data version
 
-The `xz2.java` init parser reads this at line ~3235:
-
-```java
-JSONObject optJSONObject16 = jSONObject2.optJSONObject("mspData");
-if (optJSONObject16 != null) {
-    JSONArray optJSONArray = optJSONObject16.optJSONArray("targetlists");
-    // each element parsed into a08 (TargetListItem)
-}
-```
+The init parser reads it by taking `mspData` from the top-level object, and then
+the `targetlists` array from that block. Each element of the array is parsed into
+the app's target-list item model. When `mspData` is absent, no target lists are
+read, which is why a box without an MSP subscription answers an empty list.
 
 #### Target list ID prefixes
 
