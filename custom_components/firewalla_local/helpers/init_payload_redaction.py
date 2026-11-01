@@ -167,6 +167,15 @@ def _redact_scalar(value: Any) -> Any:
     return redacted
 
 
+def redact_scalar(value: Any) -> Any:
+    """Redact sensitive value patterns from one scalar.
+
+    Public so the normalized-snapshot redaction can reuse the same patterns
+    instead of keeping a second, drifting copy.
+    """
+    return _redact_scalar(value)
+
+
 def _redact_host(host: Mapping[str, Any]) -> dict[str, Any]:
     """Redact one host record."""
     return {

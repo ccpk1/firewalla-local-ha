@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 from homeassistant.core import HomeAssistant
 
@@ -25,8 +26,12 @@ from custom_components.firewalla_local.diagnostics import (
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
+    FirewallaGroupRuntime,
+    FirewallaHostRuntime,
     FirewallaPolicyRule,
     FirewallaRuntimeSnapshot,
+    FirewallaSpeedTestRecord,
+    FirewallaUserRuntime,
 )
 
 
@@ -165,3 +170,155 @@ async def test_get_config_entry_diagnostics_handles_missing_snapshot(
     assert diagnostics["entry_options"] == {}
     assert diagnostics["runtime_snapshot"] is None
     assert diagnostics["runtime_init_payload"] is None
+
+
+# Every value below is something a user must not publish by pasting a report.
+_SENSITIVE_VALUES = (
+    "Kaden Phone",
+    "KADEN",
+    "kid.example.com",
+    "kaden-phone",
+    "kaden.example.com",
+    "AA:BB:CC:DD:EE:FF",
+    "192.168.200.25",
+    "serial-abc123",
+    "abc.ddns.net",
+    "203.0.113.7",
+    "Example ISP",
+    "speed.example.net",
+    "vimeo.com",
+)
+
+
+def _sensitive_snapshot() -> FirewallaRuntimeSnapshot:
+    """Return a snapshot carrying every identifying field the model exposes."""
+    return FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Home",
+            device_name="Living Room Gold",
+            model="gold",
+            serial_number="serial-abc123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(
+            ddns="abc.ddns.net",
+            timezone_name="America/New_York",
+            public_ip="203.0.113.7",
+            public_ips={"wan": "203.0.113.7"},
+        ),
+        policy_rules=(
+            FirewallaPolicyRule(
+                rule_id="744",
+                action="block",
+                target="vimeo.com",
+                target_type="dns",
+                direction="bidirection",
+                enabled=True,
+                purpose=None,
+                scope=("AA:BB:CC:DD:EE:FF",),
+                tag_refs=("tag:17",),
+                target_name="Vimeo",
+                raw_update_payload={"target": "vimeo.com"},
+            ),
+        ),
+        exception_rule_count=1,
+        hosts=(
+            FirewallaHostRuntime(
+                mac="AA:BB:CC:DD:EE:FF",
+                host_name="Kaden Phone",
+                ip_address="192.168.200.25",
+                group_name="KADEN",
+                network_name="VLAN10 CORE",
+                connection_type="phone",
+                last_active=1774285600.0,
+                download_bytes=1,
+                upload_bytes=2,
+                stale=False,
+                dns_hostname="kaden-phone",
+                dns_fqdn="kaden.example.com",
+                dhcp_name="kid.example.com",
+            ),
+        ),
+        groups=(
+            FirewallaGroupRuntime(
+                group_id="17",
+                name="KADEN",
+                kind=cast(Any, "group"),
+            ),
+        ),
+        users=(
+            FirewallaUserRuntime(
+                user_id="u-1",
+                name="Kaden",
+                affiliated_group_id="17",
+                affiliated_group_name="KADEN",
+                total_minutes_today=60,
+                unique_minutes_today=30,
+            ),
+        ),
+        speed_tests=(
+            FirewallaSpeedTestRecord(
+                tested_at_timestamp=1774285600.0,
+                download_mbps=900.0,
+                upload_mbps=800.0,
+                latency_ms=5.0,
+                jitter_ms=1.0,
+                packet_loss_percent=0.0,
+                download_megabytes=100.0,
+                upload_megabytes=50.0,
+                isp="Example ISP",
+                public_ip="203.0.113.7",
+                server_country="US",
+                server_host="speed.example.net",
+                server_id="srv-1",
+                server_location="New York",
+                server_sponsor="Example Sponsor",
+                manual=False,
+                success=True,
+                vendor="ookla",
+            ),
+        ),
+    )
+
+
+async def test_get_config_entry_diagnostics_leaks_no_identifying_value(
+    hass: HomeAssistant,
+) -> None:
+    """Test no personal value survives anywhere in the diagnostics payload.
+
+    Diagnostics get pasted into public issues, so this asserts over the whole
+    serialized payload rather than field by field: a new model field that carries
+    a name or an address fails here instead of in an issue thread.
+    """
+    entry = cast(
+        FirewallaConfigEntry,
+        SimpleNamespace(
+            domain=DOMAIN,
+            title="Firewalla",
+            data={CONF_LICENSE: "license-123"},
+            options={},
+            runtime_data=SimpleNamespace(
+                coordinator=SimpleNamespace(
+                    data=_sensitive_snapshot(),
+                    last_init_payload={"hosts": []},
+                )
+            ),
+        ),
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    serialized = json.dumps(diagnostics, default=str)
+
+    leaked = [value for value in _SENSITIVE_VALUES if value in serialized]
+    assert leaked == [], f"identifying values published in diagnostics: {leaked}"
+
+    # The payload is redacted, not gutted: the counts and the box's own object
+    # ids are what make a report diagnosable.
+    snapshot = cast(dict[str, Any], diagnostics["runtime_snapshot"])
+    assert snapshot["exception_rule_count"] == 1
+    assert snapshot["policy_rules"][0]["rule_id"] == "744"
+    assert snapshot["appliance_runtime"]["timezone_name"] == "America/New_York"
+    assert snapshot["hosts"][0]["last_active"] == 1774285600.0
+    assert snapshot["speed_tests"][0]["download_mbps"] == 900.0
+    assert snapshot["users"][0]["total_minutes_today"] == 60

@@ -4803,7 +4803,7 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
         )
 
     manager = entry.runtime_data.alarm_manager
-    _, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    _, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     exceptions_by_alarm = {
         exception.alarm_id: exception.exception_id
         for exception in manager.exceptions
@@ -6282,24 +6282,23 @@ def _serialize_live_throughput(
     }
 
 
-def _resolve_report_time_zone(
+async def _async_resolve_report_time_zone(
     hass: HomeAssistant,
     entry: FirewallaConfigEntry,
 ) -> tuple[tzinfo, str]:
-    """Return the effective timezone used for report shaping and display."""
-    snapshot = entry.runtime_data.coordinator.data
-    if (
-        snapshot is not None
-        and snapshot.appliance_runtime.timezone_name is not None
-        and (
-            firewalla_time_zone := dt_util.get_time_zone(
-                snapshot.appliance_runtime.timezone_name
-            )
-        )
-    ):
-        return firewalla_time_zone, snapshot.appliance_runtime.timezone_name
+    """Return the effective timezone used for report shaping and display.
 
-    time_zone = dt_util.get_time_zone(hass.config.time_zone) or UTC
+    The zone the box reports is not the one Home Assistant already loaded, so
+    building it reads tzdata from disk. That has to happen off the event loop,
+    which is why this and its callers are async.
+    """
+    snapshot = entry.runtime_data.coordinator.data
+    if snapshot is not None and snapshot.appliance_runtime.timezone_name is not None:
+        time_zone_name = snapshot.appliance_runtime.timezone_name
+        if firewalla_time_zone := await dt_util.async_get_time_zone(time_zone_name):
+            return firewalla_time_zone, time_zone_name
+
+    time_zone = await dt_util.async_get_time_zone(hass.config.time_zone) or UTC
     return time_zone, getattr(time_zone, "key", None) or hass.config.time_zone
 
 
@@ -6315,7 +6314,7 @@ async def _async_handle_get_time_usage(call: ServiceCall) -> JsonObjectType:
     end_input = cast(datetime, call.data[SERVICE_FIELD_USAGE_HISTORY_END])
     begin_utc = dt_util.as_utc(begin_input)
     end_utc = dt_util.as_utc(end_input)
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     if end_utc <= begin_utc:
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_END_BEFORE_BEGIN,
@@ -6531,7 +6530,7 @@ async def _async_handle_get_wan_usage(call: ServiceCall) -> JsonObjectType:
         warnings,
         unavailable_sections,
     ) = _resolve_wan_usage_inputs(call)
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     integration_manager = entry.runtime_data.integration_manager
     manager_detail = (
         "daily" if ("subperiods" in applied_include or detail == "full") else "summary"
@@ -6652,7 +6651,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
 
     detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
     include_records = detail == DETAIL_FULL
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
 
     try:
         view = await entry.runtime_data.flow_manager.async_get_report(
@@ -6769,7 +6768,7 @@ async def _async_handle_get_network_usage(call: ServiceCall) -> JsonObjectType:
         call.data.get(SERVICE_FIELD_INCLUDE),
         allowed=("series",),
     )
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     full_network = _require_full_network(entry, network)
 
     try:
@@ -6821,7 +6820,7 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
     )
     limit = cast(int, call.data[SERVICE_FIELD_LIMIT])
     offset = cast(int, call.data[SERVICE_FIELD_OFFSET])
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
 
     try:
         events = await entry.runtime_data.integration_manager.async_get_wan_events(
