@@ -1060,7 +1060,7 @@ get_internet_quality:
 
 get_live_throughput:
   name: Get live throughput
-  description: Return live per-device and per-interface throughput in bytes per second, read from the box now (the app's live view). A rate, not a total; for data volume over a window use get_network_usage.
+  description: Return live per-host and per-interface throughput in bytes per second, read from the box now (the app's live view). A rate, not a total; for data volume over a window use get_network_usage.
   fields:
     network_uuid:
       required: false
@@ -1084,8 +1084,8 @@ get_live_throughput:
           min: 1
           max: 500
           mode: box
-      name: Device limit
-      description: Optional. Defaults to 10. The number of busiest devices to return.
+      name: Host limit
+      description: Optional. Defaults to 10. The number of busiest hosts to return.
     sample_seconds:
       required: false
       example: 10

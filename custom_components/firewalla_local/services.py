@@ -771,7 +771,9 @@ GET_LIVE_THROUGHPUT_SCHEMA = vol.Schema(
     {
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
-        vol.Optional(SERVICE_FIELD_TOP_N, default=10): cv.positive_int,
+        vol.Optional(SERVICE_FIELD_TOP_N, default=10): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=500)
+        ),
         vol.Optional(SERVICE_FIELD_SAMPLE_SECONDS, default=10): vol.All(
             vol.Coerce(int),
             vol.Range(min=LIVE_SAMPLE_SECONDS_MIN, max=LIVE_SAMPLE_SECONDS_MAX),
@@ -6141,7 +6143,7 @@ async def _async_handle_get_internet_quality(
 
 
 async def _async_handle_get_live_throughput(call: ServiceCall) -> JsonObjectType:
-    """Return live per-device and per-interface throughput, read now from the box."""
+    """Return live per-host and per-interface throughput, read now from the box."""
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),

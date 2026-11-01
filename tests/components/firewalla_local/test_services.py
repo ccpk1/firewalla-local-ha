@@ -2441,7 +2441,7 @@ async def test_get_live_throughput_service_names_hosts_and_filters(
             new=AsyncMock(return_value=payload),
         ) as mock_read,
         patch(
-            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
             new=AsyncMock(),
         ),
     ):
@@ -2511,7 +2511,7 @@ async def test_get_live_throughput_service_reports_unavailable_and_cold(
             new=AsyncMock(side_effect=(FirewallaProtocolError("bad"), cold, cold)),
         ),
         patch(
-            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
             new=AsyncMock(),
         ),
     ):
@@ -2576,7 +2576,7 @@ async def test_get_live_throughput_service_rounds_an_odd_window_up(
             new=AsyncMock(return_value=payload),
         ) as mock_read,
         patch(
-            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
             new=AsyncMock(),
         ),
     ):

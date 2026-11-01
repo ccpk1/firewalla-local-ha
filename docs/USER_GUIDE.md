@@ -1101,8 +1101,7 @@ app's live throughput screen shows) at the moment you call it.
   request as `sample_seconds_requested`, and `sample_count` says how many
   readings were averaged
 - `hosts` are busiest first; each has `download_bytes_per_second` and
-  `upload_bytes_per_second`, its `host_name`, `host_ip`, and network
-- `interfaces` carry each interface's own `rx`/`tx` counters: on a WAN `rx` is
+  `upload_bytes_per_second`, its `host_name`, `host_ip`, and network- `interfaces` carry each interface's own `rx`/`tx` counters: on a WAN `rx` is
   the download, on a LAN it is what the LAN sent toward the box
 - use `network_uuid` or `network_name` to limit the answer to one network, and
   `top_n` (default 10) for the number of hosts

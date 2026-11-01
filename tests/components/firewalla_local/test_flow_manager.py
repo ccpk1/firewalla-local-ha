@@ -559,7 +559,7 @@ async def test_live_throughput_retries_once_when_the_sampler_is_cold() -> None:
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ) as mock_sleep:
         sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
@@ -586,7 +586,7 @@ async def test_live_throughput_still_cold_says_warming_up() -> None:
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ):
         sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
@@ -610,7 +610,7 @@ async def test_live_throughput_rounds_an_odd_window_up_never_down() -> None:
     client.async_get_live_throughput_payload = AsyncMock(return_value=_live_payload())
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ):
         sample = await _manager(client).async_get_live_throughput(sample_seconds=5)
@@ -677,7 +677,7 @@ async def test_live_throughput_averages_a_bursty_player_to_its_real_rate() -> No
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ) as mock_sleep:
         sample = await _manager(client).async_get_live_throughput(sample_seconds=10)
@@ -703,7 +703,7 @@ async def test_live_throughput_cold_reading_is_not_counted_in_the_window() -> No
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ):
         sample = await _manager(client).async_get_live_throughput(sample_seconds=4)

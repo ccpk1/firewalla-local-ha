@@ -67,6 +67,11 @@ _LIVE_WARMUP_SECONDS: Final = 3.0
 _RAW_LIVE_THROUGHPUT_KEY: Final = "throughput"
 _RAW_LIVE_DEVICES_KEY: Final = "devices"
 
+# Bound at import so the wait can be stubbed by patching this attribute. Patching
+# `asyncio.sleep` through the module patches the real one process-wide, which a
+# live-throughput test would then impose on every other coroutine in the run.
+_live_sleep = asyncio.sleep
+
 # `hourblock` must be at least 2 or the box answers with an empty response and no
 # error. It has no other observable effect, so one value is used throughout.
 _FLOW_HOURBLOCK: Final = 24
@@ -138,7 +143,7 @@ class FirewallaFlowManager(FirewallaBaseManager):
         try:
             reading = await self._async_read_live_throughput()
             if reading.warming_up:
-                await asyncio.sleep(_LIVE_WARMUP_SECONDS)
+                await _live_sleep(_LIVE_WARMUP_SECONDS)
                 reading = await self._async_read_live_throughput()
                 if reading.warming_up:
                     # Still starting: report the window that was served rather
@@ -147,7 +152,7 @@ class FirewallaFlowManager(FirewallaBaseManager):
             readings = [reading]
             wanted = max(1, served_seconds // LIVE_SAMPLE_READING_SECONDS)
             while len(readings) < wanted:
-                await asyncio.sleep(LIVE_SAMPLE_READING_SECONDS)
+                await _live_sleep(LIVE_SAMPLE_READING_SECONDS)
                 readings.append(await self._async_read_live_throughput())
         except FirewallaProtocolError as err:
             _LOGGER.debug("Live throughput unavailable: %s", err)
