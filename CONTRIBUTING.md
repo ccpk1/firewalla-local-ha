@@ -12,11 +12,28 @@ Thanks for contributing to Firewalla Local.
 
 ## Local validation requirements
 
+The test suite runs against the Home Assistant release pinned by
+`pytest-homeassistant-custom-component`, so it needs an isolated environment. Do
+not run it with whatever `python` happens to be on your paths: a Home Assistant
+core development checkout fails at plugin load, because core imports `httpx2`
+and refuses to start once `httpx` has been imported, and the test plugin imports
+`httpx` first.
+
+Create the environment once, at the repository root:
+
+```bash
+uv venv .venv --python 3.14
+uv pip install --python .venv/bin/python -e ".[dev]"
+```
+
 Run these before opening a PR:
 
 - `bash ./utils/quick_lint.sh --fix`
-- `python -m mypy custom_components/firewalla_local`
-- `python -m pytest tests/ -v`
+- `.venv/bin/python -m mypy custom_components/firewalla_local`
+- `.venv/bin/python -m pytest tests/ -v`
+
+The VS Code tasks (`Pytest`, `Ruff`, `MyPy`) already use `.venv/bin/python`, and
+`Setup test venv` rebuilds the environment.
 
 If your change only affects a narrow area, you may run a targeted test suite, but include rationale in your PR.
 

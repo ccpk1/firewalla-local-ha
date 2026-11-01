@@ -1,0 +1,18 @@
+{
+  // Folder scope overrides the workspace-level `python.defaultInterpreterPath`,
+  // which points at core's dev venv for the `core` folder.
+  //
+  // Tests here must run against the Home Assistant release that
+  // pytest-homeassistant-custom-component pins (HA 2026.10.x today), not core
+  // dev. Core dev imports `httpx2` and refuses to start once `httpx` has been
+  // imported, and the test plugin imports `respx` (and therefore `httpx`) before
+  // it imports `homeassistant`, so the suite aborts at plugin load.
+  //
+  // `.venv` is gitignored. Create it with the "Setup test venv" task, or:
+  //   uv venv .venv --python 3.14 && uv pip install --python .venv/bin/python -e ".[dev]"
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.cwd": "${workspaceFolder}",
+  "python.testing.pytestArgs": ["tests"]
+}
