@@ -19,6 +19,10 @@ Counts, identifiers of the box's own objects (``rule_id``, ``alarm_id``) and
 network UUIDs are kept on purpose: they are what makes a report diagnosable, and
 they name nothing on their own. Treat the result as reduced sensitivity rather
 than as a guarantee -- the payload shape is not a published contract.
+
+Raw protocol records are the one exception to "redact, do not drop": they are
+omitted, because they duplicate the normalized fields beside them and are large.
+See ``_OMITTED_RECORD_KEYS``.
 """
 
 from __future__ import annotations
@@ -26,12 +30,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Final
 
-from .init_payload_redaction import (
-    redact_runtime_init_payload,
-    redact_scalar,
-)
+from .init_payload_redaction import redact_scalar
 
 _REDACTED: Final = "**REDACTED**"
+_OMITTED: Final = "**OMITTED**"
 
 # Keys that name a person, a device, or an address wherever they appear.
 _IDENTIFYING_KEYS: Final = frozenset(
@@ -87,9 +89,16 @@ _IDENTIFIER_LIST_KEYS: Final = frozenset(
     }
 )
 
-# Raw protocol records keep their original key spelling, so they go through the
-# init-payload walker, which knows `p.device.mac` and its neighbours.
-_RAW_RECORD_KEYS: Final = frozenset(
+# Raw protocol records are omitted rather than redacted. They duplicate the
+# normalized fields beside them -- a 193-rule capture carried 57.7 KB of rule
+# records whose `action`, `target`, `type`, `scope` and counters are all already
+# published in normalized form -- so publishing them adds noise to a report
+# without adding an answer. They were added to investigate fields the model does
+# not surface yet, which is a local task, not a public-issue one.
+#
+# The marker keeps the fact that they existed, because a reader triaging a report
+# needs to know something was withheld rather than absent.
+_OMITTED_RECORD_KEYS: Final = frozenset(
     {
         "raw_payload",
         "raw_update_payload",
@@ -97,52 +106,27 @@ _RAW_RECORD_KEYS: Final = frozenset(
 )
 
 
-def _redact_value(key: str, value: Any, *, in_raw_record: bool = False) -> Any:
+def _redact_value(key: str, value: Any) -> Any:
     """Redact one key/value pair, recursing into containers."""
     key_lower = key.lower()
 
-    if not in_raw_record and key_lower in _RAW_RECORD_KEYS:
+    if key_lower in _OMITTED_RECORD_KEYS:
         if isinstance(value, Mapping):
-            return _redact_raw_record(value)
-        return value
+            return f"{_OMITTED} ({len(value)} raw protocol keys)"
+        return _OMITTED
 
     if isinstance(value, Mapping):
-        return {
-            nested_key: _redact_value(nested_key, nested_value, in_raw_record=True)
-            if in_raw_record
-            else _redact_value(nested_key, nested_value)
-            for nested_key, nested_value in value.items()
-        }
+        return redact_runtime_snapshot(value)
 
     if isinstance(value, list | tuple):
         if key_lower in _IDENTIFIER_LIST_KEYS:
             return [_REDACTED for _ in value]
-        return [
-            _redact_value(key, item, in_raw_record=True)
-            if in_raw_record
-            else _redact_value(key, item)
-            for item in value
-        ]
+        return [_redact_value(key, item) for item in value]
 
     if key_lower in _IDENTIFYING_KEYS or key_lower in _IDENTIFIER_LIST_KEYS:
         return _REDACTED if value is not None else value
 
     return redact_scalar(value)
-
-
-def _redact_raw_record(record: Mapping[str, Any]) -> dict[str, Any]:
-    """Redact one raw protocol record for inclusion in diagnostics.
-
-    Two passes, because the two name the same things differently: the init-payload
-    walker knows the wire spellings (``p.device.mac``, ``p.dest.domain``) and the
-    snapshot pass knows the normalized ones (``target``, ``host_name``). A rule's
-    blocked domain arrived in ``raw_update_payload`` under the wire spelling and
-    survived the first pass alone.
-    """
-    return {
-        key: _redact_value(key, value, in_raw_record=True)
-        for key, value in redact_runtime_init_payload(dict(record)).items()
-    }
 
 
 def redact_runtime_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:

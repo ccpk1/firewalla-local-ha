@@ -219,7 +219,11 @@ def _sensitive_snapshot() -> FirewallaRuntimeSnapshot:
                 scope=("AA:BB:CC:DD:EE:FF",),
                 tag_refs=("tag:17",),
                 target_name="Vimeo",
-                raw_update_payload={"target": "vimeo.com"},
+                raw_update_payload={
+                    "target": "vimeo.com",
+                    "p.device.mac": "AA:BB:CC:DD:EE:FF",
+                    "disturbLevel": 2,
+                },
             ),
         ),
         exception_rule_count=1,
@@ -322,3 +326,10 @@ async def test_get_config_entry_diagnostics_leaks_no_identifying_value(
     assert snapshot["hosts"][0]["last_active"] == 1774285600.0
     assert snapshot["speed_tests"][0]["download_mbps"] == 900.0
     assert snapshot["users"][0]["total_minutes_today"] == 60
+
+    # Raw protocol records are omitted rather than redacted: they duplicate the
+    # normalized fields beside them and are large. The marker keeps the fact that
+    # something was withheld, so a reader is not misled into thinking it is empty.
+    assert snapshot["policy_rules"][0]["raw_update_payload"] == (
+        "**OMITTED** (3 raw protocol keys)"
+    )

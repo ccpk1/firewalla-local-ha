@@ -57,9 +57,15 @@ DDNS name, and the public IP and ISP of the last speed tests. Diagnostics get
 pasted into public issues.
 
 The snapshot is now redacted by shape rather than removed, because the counts and
-the box's own object ids are what make a report diagnosable. A test asserts over
-the whole serialized payload, so a field added later that carries a name or an
-address fails there instead of in an issue thread.
+the box's own object ids are what make a report diagnosable. Raw protocol records
+are the exception: they are omitted, not redacted. They duplicate the normalized
+fields beside them — a 193-rule capture carried 57.7 KB of rule records whose
+action, target, type, scope and counters were all already published in normalized
+form — so publishing them added noise without adding an answer. The report says
+where one was withheld, so a reader is not misled into thinking it was empty.
+
+A test asserts over the whole serialized payload, so a field added later that
+carries a name or an address fails there instead of in an issue thread.
 
 ## Home Assistant 2025.10
 
