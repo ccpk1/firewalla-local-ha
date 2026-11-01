@@ -27,6 +27,8 @@ from .const import (
     DETAIL_SUMMARY,
     DOMAIN,
     FLOW_REPORT_INCLUDE_HOST_DETAIL,
+    LIVE_SAMPLE_SECONDS_MAX,
+    LIVE_SAMPLE_SECONDS_MIN,
     MAX_FLOW_LOG_PAGE_SIZE,
     MIN_FLOW_LOG_PAGE_SIZE,
     SERVICE_FIELD_ACTION,
@@ -57,6 +59,7 @@ from .const import (
     SERVICE_FIELD_ONLINE,
     SERVICE_FIELD_RECORD_COUNT,
     SERVICE_FIELD_REFRESH,
+    SERVICE_FIELD_SAMPLE_SECONDS,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_TARGET_TYPE,
     SERVICE_FIELD_TOP_N,
@@ -76,6 +79,7 @@ from .const import (
     SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY,
+    SERVICE_GET_LIVE_THROUGHPUT,
     SERVICE_GET_NETWORK_CONFIG,
     SERVICE_GET_NETWORK_USAGE,
     SERVICE_GET_RULES,
@@ -125,6 +129,25 @@ _WAN_UUID_DESCRIPTION: Final = (
 _WAN_NAME_DESCRIPTION: Final = (
     "Optional. A Firewalla WAN display name. Omit to use the only WAN when "
     "there is one."
+)
+
+# The live sampler is synchronous: the call blocks for the whole window. Read
+# tools must not stall a conversation turn, so the default is short, but not so
+# short that bursty traffic is missed.
+_LIVE_SAMPLE_DESCRIPTION: Final = (
+    "Optional. Seconds to average the rates over — defaults to 6, and the call "
+    "takes about that long to answer because the box is read repeatedly across "
+    "the window. Any value from 2 to 30 is accepted, rounded up to the next "
+    "even second because the box averages one reading every 2 seconds; the "
+    "answer reports the window it served as `sample_seconds` and the request as "
+    "`sample_seconds_requested`.\n"
+    "\n"
+    "A short window is noisy: a stream sends its next few seconds of video in "
+    "a burst and is then idle, so a busy device can read as idle or at a "
+    "fraction of its real rate. Use the default for a quick look and raise it "
+    "to 10-30 when the answer has to be trusted, or when a device is expected "
+    "to transfer briefly and rarely. Never raise it without telling the user "
+    "the call will take that many seconds."
 )
 
 # Both overview tools publish these counts, so the reading rule is stated once and
@@ -445,10 +468,15 @@ class GetNetworkUsageTool(_FirewallaReadTool):
     name = format_tool_name("get_network_usage")
     title = "Get network usage"
     description = (
-        "What is using the most bandwidth on one network — top talkers, apps, and "
-        "categories over a window. A network must be selected: this is per segment, "
-        "not a whole-box total. Windowed WAN usage is not available; `get_wan_usage` "
-        "has WAN totals."
+        "What used the most data on one network — top talkers, apps, and "
+        "categories over a window, as totals in bytes. A network must be "
+        "selected: this is per segment, not a whole-box total. Windowed WAN "
+        "usage is not available; `get_wan_usage` has WAN totals.\n"
+        "\n"
+        "These are totals, not rates, and the smallest window is the last 60 "
+        'minutes, so this cannot answer "what is using the bandwidth right '
+        'now" — that is `get_live_throughput`, which reports bytes per second '
+        "and reads the box at the moment it is called."
     )
     parameters = probatio.Schema(
         {
@@ -891,9 +919,59 @@ class GetSpeedTestsTool(_FirewallaReadTool):
     _response_type = "speed_tests"
 
 
-class SyncRuntimeTool(_FirewallaReadTool):
-    """Poll the Firewalla box now and report the resulting snapshot time."""
+class GetLiveThroughputTool(_FirewallaReadTool):
+    """Return live per-host bandwidth, read from the box now."""
 
+    name = format_tool_name("get_live_throughput")
+    title = "Get live throughput"
+    description = (
+        "Which device is using the bandwidth right now — live per-host download "
+        "and upload rates, busiest first, plus each interface's own counters. "
+        "Every other usage tool reports totals over a window; this is the only "
+        'one that answers "now", from the same data as the Firewalla app live '
+        "view.\n"
+        "\n"
+        "Rates are bytes per second, so a 10 Mbps stream reads about 1250000. "
+        "For volume over time use `get_network_usage`; for latency use "
+        "`get_internet_quality`.\n"
+        "\n"
+        "The lookup is not cached: each call reads the box and takes about "
+        "`sample_seconds` to answer. If the box's sampler had only just been "
+        "started, the answer says `warming_up` with a warning rather than "
+        "reporting zeros as an idle network — call again instead of concluding "
+        "nothing is using the connection."
+    )
+    parameters = probatio.Schema(
+        {
+            probatio.Optional(
+                SERVICE_FIELD_NETWORK_UUID, description=_NETWORK_UUID_DESCRIPTION
+            ): str,
+            probatio.Optional(
+                SERVICE_FIELD_NETWORK_NAME, description=_NETWORK_NAME_DESCRIPTION
+            ): str,
+            probatio.Optional(
+                SERVICE_FIELD_TOP_N,
+                description=(
+                    "Optional. How many of the busiest hosts to return. Defaults to 10."
+                ),
+            ): probatio.All(int, probatio.Range(min=1, max=500)),
+            probatio.Optional(
+                SERVICE_FIELD_SAMPLE_SECONDS,
+                default=6,
+                description=_LIVE_SAMPLE_DESCRIPTION,
+            ): probatio.All(
+                int,
+                probatio.Range(
+                    min=LIVE_SAMPLE_SECONDS_MIN, max=LIVE_SAMPLE_SECONDS_MAX
+                ),
+            ),
+        }
+    )
+    _service = SERVICE_GET_LIVE_THROUGHPUT
+    _response_type = "live_throughput"
+
+
+class SyncRuntimeTool(_FirewallaReadTool):
     name = format_tool_name("sync_runtime")
     title = "Sync runtime"
     description = (
@@ -1076,6 +1154,7 @@ _READ_TOOL_CLASSES: Final = (
     GetFlowReportTool,
     GetInternetQualityTool,
     GetSpeedTestsTool,
+    GetLiveThroughputTool,
     GetWirelessStatusTool,
     GetAlarmsTool,
     SyncRuntimeTool,

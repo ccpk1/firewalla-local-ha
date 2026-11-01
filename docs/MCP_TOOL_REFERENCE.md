@@ -337,6 +337,7 @@ to one host.
 | Usage & health | `get_time_usage` | read | read+ |
 | Usage & health | `get_flow_report` | read | read+ |
 | Usage & health | `get_internet_quality` | read | read+ |
+| Usage & health | `get_live_throughput` | read | read+ |
 | Usage & health | `get_speed_tests` | read | read+ |
 | Usage & health | `get_wireless_status` | read | read+ |
 | Usage & health | `run_internet_speed_test` | control | control+ |
@@ -721,6 +722,37 @@ Reads that explain what the network is doing and how it is performing.
   measurement use `run_internet_speed_test`; for past results use `get_speed_tests`.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
   raise for a short history of samples); `refresh`.
+- **Availability:** read, default-on.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+
+### `firewalla_local__get_live_throughput`
+
+- **Answers:** "Which device is using the bandwidth right now?" / "What is my
+  current download?"
+- **When to use / not:** live per-host rates. Every other usage tool reports
+  totals over a window, so this is the only one that answers *now*. For volume
+  over time use `get_network_usage`; for latency use `get_internet_quality`.
+- **Inputs:** `network_uuid`/`network_name` (optional — limits the answer to one
+  network); `top_n` (default 10, the busiest hosts); `sample_seconds` (**default
+  **6**, any value 2–30, rounded **up** to the next even second).
+- **Sampling:** the call blocks for about `sample_seconds`, because the box is
+  read repeatedly across the window and averaged. One reading is a 2 s average,
+  so an odd request is served at the next even second and never at a shorter
+  one; the answer says which it served (`sample_seconds`) and what was asked
+  (`sample_seconds_requested`), with a `live_throughput_window_rounded` warning
+  when they differ. 6 s is the default so a conversation turn does not stall; it
+  is not a lot of coverage, and a stream that bursts can read as idle at that
+  length. Raise it to 10–30 when the answer must be trusted, and never raise it
+  without saying the call will take that long.
+- **Returns:** read envelope — `result.hosts.items[]` busiest first, each with
+  `host_id`, `host_name`, `host_ip`, `download_bytes_per_second`,
+  `upload_bytes_per_second`, and its network; `result.interfaces.items[]` with each
+  interface's own `rx`/`tx`; plus `sampled_at`, `sample_seconds`, `sample_count`,
+  and `metadata`. Rates are **bytes per second**.
+- **Cold sampler:** a first call starts the box's sampler and can answer all
+  zeros. That is reported as `warming_up: true` with a `live_throughput_warming_up`
+  warning, never as an idle network — call again rather than concluding nothing is
+  using the connection.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 

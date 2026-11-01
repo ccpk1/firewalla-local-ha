@@ -41,6 +41,8 @@ from .const import (
     FLOW_REPORT_INCLUDE_HOST_DETAIL,
     HIDDEN_RULE_PURPOSES,
     HOST_DEVICE_TYPE_OPTIONS,
+    LIVE_SAMPLE_SECONDS_MAX,
+    LIVE_SAMPLE_SECONDS_MIN,
     LLM_TOOL_MODE_OFF,
     LLM_TOOL_MODE_READ_AND_CONTROL,
     LLM_TOOL_MODE_READ_ONLY,
@@ -771,7 +773,8 @@ GET_LIVE_THROUGHPUT_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_TOP_N, default=10): cv.positive_int,
         vol.Optional(SERVICE_FIELD_SAMPLE_SECONDS, default=10): vol.All(
-            vol.Coerce(int), vol.Range(min=2, max=30)
+            vol.Coerce(int),
+            vol.Range(min=LIVE_SAMPLE_SECONDS_MIN, max=LIVE_SAMPLE_SECONDS_MAX),
         ),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
@@ -6202,6 +6205,18 @@ def _serialize_live_throughput(
                     ),
                 )
             )
+        if sample.sample_seconds != sample_seconds:
+            warnings.append(
+                FirewallaReportWarning(
+                    code="live_throughput_window_rounded",
+                    message=(
+                        f"Asked for {sample_seconds} seconds, served "
+                        f"{sample.sample_seconds}: the box averages one reading "
+                        "every 2 seconds, so a window is a whole number of "
+                        "readings and is rounded up rather than down."
+                    ),
+                )
+            )
         for interface in sample.interfaces:
             if network is not None and interface.network_uuid != network.uuid:
                 continue
@@ -6238,9 +6253,11 @@ def _serialize_live_throughput(
         "sampled_at": iso_instant(sampled_at),
         "sampled_at_timestamp": sampled_at,
         "warming_up": sample.warming_up if sample is not None else None,
-        # The window the rates were really averaged over; a warming-up answer is
-        # one reading.
+        # The window the rates were really averaged over, and the request it was
+        # served at. They differ when an odd request was rounded up; a warming-up
+        # answer is one reading at the served window.
         "sample_seconds": sample.sample_seconds if sample is not None else None,
+        "sample_seconds_requested": sample_seconds,
         "sample_count": sample.sample_count if sample is not None else None,
         "interfaces": {"count": len(interfaces), "items": interfaces},
         # Busiest first: download plus upload.
@@ -6256,8 +6273,8 @@ def _serialize_live_throughput(
                     source_field="liveStats.throughput",
                     note=(
                         "Bytes per second, averaged over back-to-back 2 s iftop "
-                        "readings across sample_seconds; download is the host's "
-                        "receive rate"
+                        "readings across the served window; download is the "
+                        "host's receive rate"
                     ),
                 ),
             ),

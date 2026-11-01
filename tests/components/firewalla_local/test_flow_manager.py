@@ -594,6 +594,31 @@ async def test_live_throughput_still_cold_says_warming_up() -> None:
     assert sample is not None
     assert sample.warming_up
     assert sample.devices == ()
+    # The window is what was asked for, not the normaliser's 0.
+    assert sample.sample_seconds == 2
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_rounds_an_odd_window_up_never_down() -> None:
+    """An odd window is served at the next even second, never a shorter one.
+
+    `round(5 / 2)` is 2 in Python, so the old code took two readings and covered
+    4 s while reporting 5. Rounding up means a caller always gets at least the
+    averaging it asked for.
+    """
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(return_value=_live_payload())
+
+    with patch(
+        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        new=AsyncMock(),
+    ):
+        sample = await _manager(client).async_get_live_throughput(sample_seconds=5)
+
+    assert sample is not None
+    assert sample.sample_seconds == 6
+    assert sample.sample_count == 3
+    assert sample.sample_count * 2 >= 5
 
 
 @pytest.mark.asyncio

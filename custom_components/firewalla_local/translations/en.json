@@ -1898,7 +1898,7 @@
     },
     "get_network_usage": {
       "name": "Get network segment usage",
-      "description": "Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API.",
+      "description": "Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API. Totals in bytes over a window of at least 60 minutes; for the current per-host rate use get_live_throughput.",
       "fields": {
         "network_uuid": {
           "name": "Network UUID (Optional)",
@@ -1996,7 +1996,7 @@
     },
     "get_live_throughput": {
       "name": "Get live throughput",
-      "description": "Return live per-device and per-interface throughput in bytes per second, read from the box now (the app's live view).",
+      "description": "Return live per-device and per-interface throughput in bytes per second, read from the box now (the app's live view). A rate, not a total; for data volume over a window use get_network_usage.",
       "fields": {
         "network_uuid": {
           "name": "Network UUID (Optional)",
@@ -2012,7 +2012,7 @@
         },
         "sample_seconds": {
           "name": "Sample window",
-          "description": "Optional. Defaults to 10. Seconds to average over. The box reports 2-second rates and streaming arrives in bursts, so a longer window shows a player's real rate; the call takes about this long."
+          "description": "Optional. Defaults to 10. Seconds to average over. Any value from 2 to 30 is accepted and rounded up to the next even second, because the box averages one reading every 2 seconds; the response reports the window it served and the request that was rounded. Streaming arrives in bursts, so a longer window shows a player's real rate; the call takes about this long."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

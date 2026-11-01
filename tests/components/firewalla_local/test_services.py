@@ -2545,6 +2545,78 @@ async def test_get_live_throughput_service_reports_unavailable_and_cold(
     ]
 
 
+async def test_get_live_throughput_service_rounds_an_odd_window_up(
+    hass: HomeAssistant,
+) -> None:
+    """Test an odd sample window is served at the next even second, and says so."""
+    entry = _live_entry(hass)
+    payload = {
+        "throughput": [
+            {
+                "name": "bond0",
+                "target": _CORE_UUID,
+                "rx": 1000,
+                "tx": 1000,
+                "devices": {"0C:85:E1:B0:1D:1C": {"rx": 717824, "tx": 806}},
+            }
+        ]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+            new=AsyncMock(return_value=payload),
+        ) as mock_read,
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        async def call(sample_seconds: int) -> dict[str, Any]:
+            response = await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_LIVE_THROUGHPUT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_SAMPLE_SECONDS: sample_seconds,
+                },
+                blocking=True,
+                return_response=True,
+            )
+            assert response is not None
+            return cast(dict[str, Any], response)
+
+        odd = await call(5)
+        odd_reads = mock_read.await_count
+        even = await call(6)
+
+    # Five seconds is served at six: three 2 s readings, never two.
+    assert odd["sample_seconds_requested"] == 5
+    assert odd["sample_seconds"] == 6
+    assert odd["sample_count"] == 3
+    assert odd_reads == 3
+    assert [w["code"] for w in odd["metadata"]["warnings"]] == [
+        "live_throughput_window_rounded"
+    ]
+    assert odd["metadata"]["applied"]["sample_seconds"] == 5
+
+    # An already-even window is served unchanged, with no warning.
+    assert even["sample_seconds_requested"] == 6
+    assert even["sample_seconds"] == 6
+    assert even["metadata"]["warnings"] == []
+
+
 async def test_get_internet_quality_service_returns_latest_sample(
     hass: HomeAssistant,
 ) -> None:

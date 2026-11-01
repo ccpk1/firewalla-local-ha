@@ -22,13 +22,16 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Final
 
 from ..api.exceptions import FirewallaProtocolError
 from ..const import (
     DEFAULT_FLOW_REPORT_WINDOW_HOURS,
     FLOW_LOG_PAGE_DEADLINE_SECONDS,
+    LIVE_SAMPLE_READING_SECONDS,
     MAX_FLOW_LOG_PAGE_SIZE,
+    served_live_sample_seconds,
 )
 from ..models import (
     FirewallaFlowRecordSet,
@@ -56,12 +59,11 @@ _RAW_FLOW_END_KEY: Final = "end"
 # One stream id for the whole integration, so repeated calls reuse the box's running
 # `iftop` sampler instead of starting another set.
 _LIVE_STREAM_ID: Final = "home-assistant-firewalla-local"
-# The sampler averages over 2 s; a cold start answered zeros at once and real rates
-# 3 s later on a Gold, so one retry after this pause turns a cold call into a reading.
+# The sampler averages over 2 s, so readings 2 s apart cover a window without
+# gaps. A cold start answered zeros at once and real rates 3 s later on a Gold, so
+# one retry after this pause turns a cold call into a reading.
 _LIVE_WARMUP_SECONDS: Final = 3.0
-# The box reports each rate as a 2 s average, so readings 2 s apart cover a window
-# without gaps.
-_LIVE_READING_SECONDS: Final = 2
+
 _RAW_LIVE_THROUGHPUT_KEY: Final = "throughput"
 _RAW_LIVE_DEVICES_KEY: Final = "devices"
 
@@ -124,26 +126,33 @@ class FirewallaFlowManager(FirewallaBaseManager):
         6 Mbps), so a single reading usually lands in a gap. Readings are taken
         back to back across the window and averaged per host.
 
+        ``sample_seconds`` is a request, not a promise: one reading is a 2 s
+        average, so an odd window is served at the next even second and the
+        result reports that window rather than the request.
+
         A cold sampler answers all zeros, so that first answer is retried once
         after a short pause and not counted. If it is still all zeros the result
         says ``warming_up`` rather than presenting the zeros as an idle network.
         """
+        served_seconds = served_live_sample_seconds(sample_seconds)
         try:
             reading = await self._async_read_live_throughput()
             if reading.warming_up:
                 await asyncio.sleep(_LIVE_WARMUP_SECONDS)
                 reading = await self._async_read_live_throughput()
                 if reading.warming_up:
-                    return reading
+                    # Still starting: report the window that was served rather
+                    # than the normaliser's 0, which would look like no window.
+                    return replace(reading, sample_seconds=served_seconds)
             readings = [reading]
-            wanted = max(1, round(sample_seconds / _LIVE_READING_SECONDS))
+            wanted = max(1, served_seconds // LIVE_SAMPLE_READING_SECONDS)
             while len(readings) < wanted:
-                await asyncio.sleep(_LIVE_READING_SECONDS)
+                await asyncio.sleep(LIVE_SAMPLE_READING_SECONDS)
                 readings.append(await self._async_read_live_throughput())
         except FirewallaProtocolError as err:
             _LOGGER.debug("Live throughput unavailable: %s", err)
             return None
-        return _average_live_readings(readings, sample_seconds=sample_seconds)
+        return _average_live_readings(readings, sample_seconds=served_seconds)
 
     async def _async_read_live_throughput(self) -> FirewallaLiveThroughput:
         """Take one 2 s reading from the box."""

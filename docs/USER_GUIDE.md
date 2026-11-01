@@ -1092,10 +1092,13 @@ bandwidth right now?"*. It reads the box's live view (the same data the Firewall
 app's live throughput screen shows) at the moment you call it.
 
 - rates are **bytes per second**, averaged over `sample_seconds` (default 10,
-  2 to 30). The box itself reports 2-second rates, and streaming arrives in
-  bursts (a player can pull 30 Mbps for 2 seconds, then nothing for 8), so the
-  service takes readings 2 seconds apart across the window and averages them.
-  The call takes about `sample_seconds` to answer; `sample_count` says how many
+  any value 2 to 30). The box itself reports 2-second rates, and streaming
+  arrives in bursts (a player can pull 30 Mbps for 2 seconds, then nothing for
+  8), so the service reads the box repeatedly across the window and averages the
+  readings. One reading is a 2-second average, so an odd window is rounded **up**
+  to the next even second — never down, so you never get less averaging than you
+  asked for. The response reports the window it served as `sample_seconds`, the
+  request as `sample_seconds_requested`, and `sample_count` says how many
   readings were averaged
 - `hosts` are busiest first; each has `download_bytes_per_second` and
   `upload_bytes_per_second`, its `host_name`, `host_ip`, and network
@@ -1103,11 +1106,13 @@ app's live throughput screen shows) at the moment you call it.
   the download, on a LAN it is what the LAN sent toward the box
 - use `network_uuid` or `network_name` to limit the answer to one network, and
   `top_n` (default 10) for the number of hosts
-- nothing is polled: each call reads the box once. The box starts its sampler
-  on the first call and stops it about 30 seconds after the last, so a call
-  after a quiet spell can take about 3 seconds; if the sampler still had no
-  reading, the answer says `warming_up` and carries a warning instead of
-  reporting the zeros as an idle network
+- nothing is polled between calls: each call reads the box a number of times
+  across the window rather than once, because a single 2-second reading usually
+  lands in a gap between bursts. The box starts its sampler on the first call
+  and stops it about 30 seconds after the last, so a call after a quiet spell can
+  take about 3 seconds longer; if the sampler still had no reading, the answer
+  says `warming_up` and carries a warning instead of reporting the zeros as an
+  idle network
 
 #### Get time usage report
 

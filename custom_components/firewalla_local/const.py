@@ -339,6 +339,41 @@ MIN_FLOW_LOG_PAGE_SIZE: Final = 50
 # field: a caller able to raise it without limit would defeat its purpose.
 FLOW_LOG_PAGE_DEADLINE_SECONDS: Final = 30
 
+# The box averages each live-throughput reading over 2 seconds, so the rates are
+# only meaningful in whole readings and the achievable windows are even seconds.
+# An odd request is served at the next even second rather than rejected: rejecting
+# is a worse answer than serving the nearest window it can honour, as long as the
+# response says which window that was. It rounds up and never down, because a
+# caller asking for 5 seconds must not receive 4 -- `round(5 / 2)` is 2 in Python,
+# which is the bug this replaced.
+LIVE_SAMPLE_READING_SECONDS: Final = 2
+LIVE_SAMPLE_SECONDS_MIN: Final = 2
+LIVE_SAMPLE_SECONDS_MAX: Final = 30
+# Every window a request can be served at, in order. Shared so the service schema,
+# the tool schema and the documentation cannot disagree about the range.
+LIVE_SAMPLE_SECONDS_CHOICES: Final = tuple(
+    range(
+        LIVE_SAMPLE_SECONDS_MIN,
+        LIVE_SAMPLE_SECONDS_MAX + 1,
+        LIVE_SAMPLE_READING_SECONDS,
+    )
+)
+
+
+def served_live_sample_seconds(requested: int) -> int:
+    """Return the even sample window a request is served at.
+
+    Rounded up so the answer always covers at least what was asked for, then
+    clamped to the range the service admits. The result is what the response
+    reports as ``sample_seconds``; the request is echoed beside it.
+    """
+    readings = -(-requested // LIVE_SAMPLE_READING_SECONDS)
+    return min(
+        max(readings * LIVE_SAMPLE_READING_SECONDS, LIVE_SAMPLE_SECONDS_MIN),
+        LIVE_SAMPLE_SECONDS_MAX,
+    )
+
+
 # Which unit a rollup family's `count` is in. The box overloads the field and
 # documents doing so: "number of TCP connections or UDP sessions for flow, or
 # block count for blocked flow". Measured, the byte families run 49,148+ against
