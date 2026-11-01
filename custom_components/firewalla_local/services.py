@@ -109,6 +109,7 @@ from .const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
+    SERVICE_FIELD_SAMPLE_SECONDS,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
@@ -130,6 +131,7 @@ from .const import (
     SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY,
+    SERVICE_GET_LIVE_THROUGHPUT,
     SERVICE_GET_NETWORK_CONFIG,
     SERVICE_GET_NETWORK_USAGE,
     SERVICE_GET_RULES,
@@ -274,6 +276,7 @@ from .models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaInternetQualitySample,
+    FirewallaLiveThroughput,
     FirewallaLocalPeer,
     FirewallaNetwork,
     FirewallaNetworkDhcpConfig,
@@ -757,6 +760,19 @@ GET_INTERNET_QUALITY_SCHEMA = vol.Schema(
         vol.Optional(SERVICE_FIELD_WAN_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_LIMIT, default=1): cv.positive_int,
         vol.Optional(SERVICE_FIELD_REFRESH, default=False): cv.boolean,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+GET_LIVE_THROUGHPUT_SCHEMA = vol.Schema(
+    {
+        vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
+        vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
+        vol.Optional(SERVICE_FIELD_TOP_N, default=10): cv.positive_int,
+        vol.Optional(SERVICE_FIELD_SAMPLE_SECONDS, default=10): vol.All(
+            vol.Coerce(int), vol.Range(min=2, max=30)
+        ),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
     }
@@ -6121,6 +6137,134 @@ async def _async_handle_get_internet_quality(
     }
 
 
+async def _async_handle_get_live_throughput(call: ServiceCall) -> JsonObjectType:
+    """Return live per-device and per-interface throughput, read now from the box."""
+    entry = _get_loaded_entry(
+        call.hass,
+        entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
+        entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
+    )
+    network = _resolve_requested_network(
+        entry,
+        network_uuid=call.data.get(SERVICE_FIELD_NETWORK_UUID),
+        network_name=call.data.get(SERVICE_FIELD_NETWORK_NAME),
+    )
+    top_n = cast(int, call.data[SERVICE_FIELD_TOP_N])
+    sample_seconds = cast(int, call.data[SERVICE_FIELD_SAMPLE_SECONDS])
+    sample = await entry.runtime_data.flow_manager.async_get_live_throughput(
+        sample_seconds=sample_seconds
+    )
+    return _serialize_live_throughput(
+        entry,
+        sample,
+        network=network,
+        top_n=top_n,
+        sample_seconds=sample_seconds,
+    )
+
+
+def _serialize_live_throughput(
+    entry: FirewallaConfigEntry,
+    sample: FirewallaLiveThroughput | None,
+    *,
+    network: FirewallaNetworkSegment | None,
+    top_n: int,
+    sample_seconds: int,
+) -> JsonObjectType:
+    """Serialize one live sample, naming devices and networks from the snapshot."""
+    network_names = {
+        candidate.uuid: candidate.name
+        for candidate in entry.runtime_data.integration_manager.get_networks()
+    }
+    snapshot = entry.runtime_data.coordinator.data
+    hosts = {host.mac.upper(): host for host in snapshot.hosts} if snapshot else {}
+    warnings: list[FirewallaReportWarning] = []
+    unavailable_sections: list[str] = []
+    interfaces: list[JsonValueType] = []
+    devices: list[JsonValueType] = []
+
+    if sample is None:
+        unavailable_sections.extend(("interfaces", "hosts"))
+        warnings.append(
+            FirewallaReportWarning(
+                code="live_throughput_unavailable",
+                message="The box did not return live throughput.",
+            )
+        )
+    else:
+        if sample.warming_up:
+            warnings.append(
+                FirewallaReportWarning(
+                    code="live_throughput_warming_up",
+                    message=(
+                        "The box's live sampler was still starting, so every rate "
+                        "read zero. Call again in a few seconds."
+                    ),
+                )
+            )
+        for interface in sample.interfaces:
+            if network is not None and interface.network_uuid != network.uuid:
+                continue
+            interfaces.append(
+                {
+                    "interface_name": interface.interface_name,
+                    "network_uuid": interface.network_uuid,
+                    "network_name": network_names.get(interface.network_uuid or ""),
+                    "rx_bytes_per_second": interface.rx_bytes_per_second,
+                    "tx_bytes_per_second": interface.tx_bytes_per_second,
+                }
+            )
+        for device in sample.devices:
+            if network is not None and device.network_uuid != network.uuid:
+                continue
+            if len(devices) >= top_n:
+                break
+            host = hosts.get(device.host_id.upper())
+            devices.append(
+                {
+                    "host_id": device.host_id,
+                    "host_name": host.host_name if host is not None else None,
+                    "host_ip": host.ip_address if host is not None else None,
+                    "network_uuid": device.network_uuid,
+                    "network_name": network_names.get(device.network_uuid),
+                    "download_bytes_per_second": device.download_bytes_per_second,
+                    "upload_bytes_per_second": device.upload_bytes_per_second,
+                }
+            )
+
+    sampled_at = sample.sampled_at_timestamp if sample is not None else None
+    return {
+        "network": _serialize_network_segment(network) if network else None,
+        "sampled_at": iso_instant(sampled_at),
+        "sampled_at_timestamp": sampled_at,
+        "warming_up": sample.warming_up if sample is not None else None,
+        # The window the rates were really averaged over; a warming-up answer is
+        # one reading.
+        "sample_seconds": sample.sample_seconds if sample is not None else None,
+        "sample_count": sample.sample_count if sample is not None else None,
+        "interfaces": {"count": len(interfaces), "items": interfaces},
+        # Busiest first: download plus upload.
+        "hosts": {"count": len(devices), "items": devices},
+        "metadata": _serialize_report_metadata(
+            applied={"top_n": top_n, "sample_seconds": sample_seconds},
+            warnings=tuple(warnings),
+            unavailable_sections=tuple(unavailable_sections),
+            provenance=(
+                FirewallaReportProvenance(
+                    section="hosts",
+                    source="direct",
+                    source_field="liveStats.throughput",
+                    note=(
+                        "Bytes per second, averaged over back-to-back 2 s iftop "
+                        "readings across sample_seconds; download is the host's "
+                        "receive rate"
+                    ),
+                ),
+            ),
+        ),
+    }
+
+
 def _resolve_report_time_zone(
     hass: HomeAssistant,
     entry: FirewallaConfigEntry,
@@ -6992,6 +7136,13 @@ _SERVICE_REGISTRATIONS: tuple[FirewallaServiceRegistration, ...] = (
         SERVICE_GET_INTERNET_QUALITY,
         _async_handle_get_internet_quality,
         GET_INTERNET_QUALITY_SCHEMA,
+        SupportsResponse.ONLY,
+        False,
+    ),
+    (
+        SERVICE_GET_LIVE_THROUGHPUT,
+        _async_handle_get_live_throughput,
+        GET_LIVE_THROUGHPUT_SCHEMA,
         SupportsResponse.ONLY,
         False,
     ),

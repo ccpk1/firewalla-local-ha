@@ -98,6 +98,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_FIELD_RULE_DURATION,
     SERVICE_FIELD_RULE_ID,
     SERVICE_FIELD_RULE_RESUME_AT,
+    SERVICE_FIELD_SAMPLE_SECONDS,
     SERVICE_FIELD_SECTIONS,
     SERVICE_FIELD_SSID_PROFILE_ID,
     SERVICE_FIELD_TARGET_TYPE,
@@ -118,6 +119,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_GET_FLOW_REPORT,
     SERVICE_GET_HOSTS,
     SERVICE_GET_INTERNET_QUALITY,
+    SERVICE_GET_LIVE_THROUGHPUT,
     SERVICE_GET_NETWORK_CONFIG,
     SERVICE_GET_NETWORK_USAGE,
     SERVICE_GET_RULES,
@@ -2371,6 +2373,176 @@ async def test_get_speed_tests_service_filters_one_wan_without_refresh(
     assert response["wan"] == {"uuid": "wan-2", "name": "WAN-TWO"}
     assert response["count"] == 1
     assert response["results"][0]["wan_uuid"] == "wan-2"
+
+
+_CORE_UUID = "5799d896-5e0f-40a5-a776-38a5d7746204"
+_PRIMARY_UUID = "d7e5a5c4-0b28-4010-b3c6-dad1a868693f"
+
+
+def _live_entry(hass: HomeAssistant) -> MockConfigEntry:
+    """Add the standard test entry for the live-throughput service tests."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_get_live_throughput_service_names_hosts_and_filters(
+    hass: HomeAssistant,
+) -> None:
+    """Test live rates come back named, busiest first, and limited to one network."""
+    entry = _live_entry(hass)
+    payload = {
+        "throughput": [
+            {"name": "eth0", "target": "wan-uuid", "rx": 3501746, "tx": 35462},
+            {
+                "name": "bond0.10",
+                "target": _CORE_UUID,
+                "rx": 900000,
+                "tx": 20000,
+                "devices": {
+                    "00:aa:bb:cc:dd:26": {"rx": 1200, "tx": 300},
+                    "0C:85:E1:B0:1D:1C": {"rx": 717824, "tx": 806},
+                    "AA:AA:AA:AA:AA:AA": {"rx": 10, "tx": 0},
+                },
+            },
+            {
+                "name": "br0",
+                "target": _PRIMARY_UUID,
+                "rx": 5,
+                "tx": 5,
+                "devices": {"BB:BB:BB:BB:BB:BB": {"rx": 999999, "tx": 0}},
+            },
+        ]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+            new=AsyncMock(return_value=payload),
+        ) as mock_read,
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_LIVE_THROUGHPUT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: _CORE_UUID,
+                SERVICE_FIELD_TOP_N: 2,
+                SERVICE_FIELD_SAMPLE_SECONDS: 6,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["network"] == {"uuid": _CORE_UUID, "name": "VLAN10 CORE"}
+    assert response["warming_up"] is False
+    assert isinstance(response["sampled_at_timestamp"], int)
+    assert response["sampled_at"] is not None
+    # Only the requested network, busiest first, cut at top_n.
+    hosts = response["hosts"]["items"]
+    assert [host["host_name"] for host in hosts] == ["Office Phone", "Plex Server"]
+    assert hosts[0] == {
+        "host_id": "0C:85:E1:B0:1D:1C",
+        "host_name": "Office Phone",
+        "host_ip": hosts[0]["host_ip"],
+        "network_uuid": _CORE_UUID,
+        "network_name": "VLAN10 CORE",
+        "download_bytes_per_second": 717824.0,
+        "upload_bytes_per_second": 806.0,
+    }
+    # A lower-case MAC from the box still finds its host.
+    assert hosts[1]["host_id"] == "00:aa:bb:cc:dd:26"
+    assert [i["interface_name"] for i in response["interfaces"]["items"]] == [
+        "bond0.10"
+    ]
+    assert response["metadata"]["warnings"] == []
+    assert response["metadata"]["applied"] == {"top_n": 2, "sample_seconds": 6}
+    # Six seconds is three back-to-back 2 s readings.
+    assert (response["sample_seconds"], response["sample_count"]) == (6, 3)
+    assert mock_read.await_count == 3
+
+
+async def test_get_live_throughput_service_reports_unavailable_and_cold(
+    hass: HomeAssistant,
+) -> None:
+    """Test a failed read and a cold sampler each carry a warning, never bare zeros."""
+    entry = _live_entry(hass)
+    cold = {"throughput": [{"name": "eth0", "target": "wan-uuid", "rx": 0, "tx": 0}]}
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+            new=AsyncMock(side_effect=(FirewallaProtocolError("bad"), cold, cold)),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        async def call() -> dict[str, Any]:
+            response = await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_LIVE_THROUGHPUT,
+                {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+                blocking=True,
+                return_response=True,
+            )
+            assert response is not None
+            return cast(dict[str, Any], response)
+
+        unavailable = await call()
+        cold_response = await call()
+
+    assert unavailable["hosts"]["count"] == 0
+    assert unavailable["warming_up"] is None
+    assert unavailable["metadata"]["unavailable_sections"] == ["interfaces", "hosts"]
+    assert [w["code"] for w in unavailable["metadata"]["warnings"]] == [
+        "live_throughput_unavailable"
+    ]
+
+    assert cold_response["warming_up"] is True
+    assert [w["code"] for w in cold_response["metadata"]["warnings"]] == [
+        "live_throughput_warming_up"
+    ]
 
 
 async def test_get_internet_quality_service_returns_latest_sample(

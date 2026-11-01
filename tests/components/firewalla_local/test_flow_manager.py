@@ -9,7 +9,7 @@ float.
 from __future__ import annotations
 
 from typing import cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from aiohttp import ClientSession
@@ -483,3 +483,208 @@ def test_the_record_set_keeps_rows_returned_apart_from_rows_available() -> None:
     assert record_set.rows_returned == 1
     assert record_set.rows_available == 9001
     assert record_set.truncated is True
+
+
+# Shaped like a Gold's answer: the WAN without hosts, a LAN with two, a WireGuard
+# peer keyed by its public key, and a host that only sent.
+_LAN_UUID = "dcd0be73-8707-4bd3-af3d-42899f338b9d"
+
+
+def _live_payload(*, warm: bool = True) -> dict[str, object]:
+    """Build a liveStats answer; ``warm=False`` is the cold sampler's all-zero one."""
+    if not warm:
+        return {
+            "throughput": [
+                {"name": "eth0", "target": "wan-uuid", "rx": 0, "tx": 0},
+                {"name": "bond0", "target": _LAN_UUID, "rx": 0, "tx": 0, "devices": {}},
+            ]
+        }
+    return {
+        "throughput": [
+            {"name": "eth0", "target": "wan-uuid", "rx": 3501746, "tx": 35462},
+            {
+                "name": "bond0",
+                "target": _LAN_UUID,
+                "rx": 4031145.5,
+                "tx": 7445103,
+                "devices": {
+                    "9C:6B:00:19:89:43": {"tx": 19251.2, "rx": 2099.2},
+                    "C4:F7:C1:40:9F:0B": {"tx": 806, "rx": 717824},
+                    "48:A6:B8:10:32:70": {"tx": 379},
+                },
+            },
+            {
+                "name": "wg0",
+                "target": "wg-uuid",
+                "rx": 728,
+                "tx": 336,
+                "devices": {"wg_peer:abc=": {"tx": 0, "rx": 38}},
+            },
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_lists_hosts_busiest_first() -> None:
+    """Test hosts are normalised, rx is the download, and the busiest leads."""
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(return_value=_live_payload())
+
+    sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
+
+    assert sample is not None
+    assert not sample.warming_up
+    assert [host.host_id for host in sample.devices] == [
+        "C4:F7:C1:40:9F:0B",
+        "9C:6B:00:19:89:43",
+        "48:A6:B8:10:32:70",
+        "wg_peer:abc=",
+    ]
+    streaming = sample.devices[0]
+    assert streaming.network_uuid == _LAN_UUID
+    assert streaming.download_bytes_per_second == 717824
+    assert streaming.upload_bytes_per_second == 806
+    # A missing direction reads zero rather than dropping the host.
+    assert sample.devices[2].download_bytes_per_second == 0
+    assert [i.interface_name for i in sample.interfaces] == ["eth0", "bond0", "wg0"]
+    assert sample.interfaces[0].rx_bytes_per_second == 3501746
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_retries_once_when_the_sampler_is_cold() -> None:
+    """Test a cold all-zero answer is retried once after a pause, not reported."""
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(
+        side_effect=(_live_payload(warm=False), _live_payload())
+    )
+
+    with patch(
+        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        new=AsyncMock(),
+    ) as mock_sleep:
+        sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
+
+    assert sample is not None
+    assert not sample.warming_up
+    assert len(sample.devices) == 4
+    assert client.async_get_live_throughput_payload.await_count == 2
+    mock_sleep.assert_awaited_once()
+    # Both calls share one stream id, so the box reuses its running sampler.
+    stream_ids = {
+        call.kwargs["stream_id"]
+        for call in client.async_get_live_throughput_payload.await_args_list
+    }
+    assert len(stream_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_still_cold_says_warming_up() -> None:
+    """Test zeros after the retry are flagged, never presented as an idle network."""
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(
+        return_value=_live_payload(warm=False)
+    )
+
+    with patch(
+        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        new=AsyncMock(),
+    ):
+        sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
+
+    assert sample is not None
+    assert sample.warming_up
+    assert sample.devices == ()
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_with_no_interfaces_is_not_warming_up() -> None:
+    """Test an answer with no interfaces is empty data, not a cold sampler."""
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(return_value={})
+
+    sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
+
+    assert sample is not None
+    assert not sample.warming_up
+    assert sample.interfaces == ()
+    client.async_get_live_throughput_payload.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_protocol_error_is_unavailable() -> None:
+    """Test a malformed answer yields None; a connection failure still raises."""
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(
+        side_effect=FirewallaProtocolError("bad shape")
+    )
+    assert await _manager(client).async_get_live_throughput(sample_seconds=2) is None
+
+    client.async_get_live_throughput_payload = AsyncMock(
+        side_effect=FirewallaConnectionError("down")
+    )
+    with pytest.raises(FirewallaConnectionError):
+        await _manager(client).async_get_live_throughput(sample_seconds=2)
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_averages_a_bursty_player_to_its_real_rate() -> None:
+    """Test a player seen in one 2 s burst out of five averages to a fifth of it.
+
+    Measured on a Gold: an Apple TV pulled 25-38 Mbps for 2-4 s every 10 s while
+    averaging about 6 Mbps. The box leaves an idle host out of a reading, so the
+    average must divide by every reading, not only the ones the host was in.
+    """
+    burst = 3_750_000  # 30 Mbps in bytes per second
+    lan = {"name": "bond0", "target": _LAN_UUID, "rx": 0, "tx": 0}
+    with_burst = {
+        "throughput": [
+            {**lan, "devices": {"C4:F7:C1:40:9F:0B": {"rx": burst, "tx": 500}}}
+        ]
+    }
+    quiet = {
+        "throughput": [
+            {**lan, "devices": {"9C:6B:00:19:89:43": {"rx": 1000, "tx": 1000}}}
+        ]
+    }
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(
+        side_effect=(quiet, with_burst, quiet, quiet, quiet)
+    )
+
+    with patch(
+        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        new=AsyncMock(),
+    ) as mock_sleep:
+        sample = await _manager(client).async_get_live_throughput(sample_seconds=10)
+
+    assert sample is not None
+    assert (sample.sample_seconds, sample.sample_count) == (10, 5)
+    assert client.async_get_live_throughput_payload.await_count == 5
+    assert mock_sleep.await_count == 4
+    player = sample.devices[0]
+    assert player.host_id == "C4:F7:C1:40:9F:0B"
+    assert player.download_bytes_per_second == burst / 5
+    assert player.upload_bytes_per_second == 100
+    # A host in four readings of five averages over all five too.
+    assert sample.devices[1].download_bytes_per_second == 800
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_cold_reading_is_not_counted_in_the_window() -> None:
+    """Test the warm-up zeros are retried and left out of the average."""
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(
+        side_effect=(_live_payload(warm=False), _live_payload(), _live_payload())
+    )
+
+    with patch(
+        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        new=AsyncMock(),
+    ):
+        sample = await _manager(client).async_get_live_throughput(sample_seconds=4)
+
+    assert sample is not None
+    assert sample.sample_count == 2
+    assert client.async_get_live_throughput_payload.await_count == 3
+    # Two identical warm readings average to the same rate: the cold zeros are out.
+    assert sample.devices[0].download_bytes_per_second == 717824
