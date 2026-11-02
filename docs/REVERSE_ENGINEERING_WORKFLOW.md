@@ -5463,6 +5463,226 @@ payload from 57,762 bytes of mostly-DNS noise to a handful of real events.
 `/tmp/wanprobe_*.json`; comparison `.tmp/quality_events.json` (the ping alert
 feed, captured 2026-09-10).
 
+### Finding 44: `liveStats` has two scopes, three direction conventions, and the app only ever charts WAN
+
+**Scenario:**
+
+- `get_live_throughput` shipped in 2.5.2 reading the box's `liveStats` at system
+  scope. The owner ran it and the interface totals did not reconcile with the host
+  rows, and the app's own live view showed something different again ("WAN
+  throughput", two cells, upload/download/total only).
+- Probed on a Gold-class box (10 interfaces: `eth0`/`eth1` WAN, `bond0` trunk,
+  five `bond0.*` VLANs, `awg0`/`wg0`) with 62 hosts.
+
+**Result: all of it is explainable, and none of it is a box fault.**
+
+#### 1. There are two request scopes, not one
+
+System scope (what the integration sends):
+
+```json
+{"type": "system", "target": "0.0.0.0",
+ "queries": {"throughput": {"devices": true}},
+ "streaming": {"id": "<stream id>"}}
+```
+
+returns `throughput[]` of interface rows, each optionally carrying a `devices`
+map of `{MAC: {rx, tx}}`.
+
+Host scope (undocumented, but it is what the app's device-detail chart uses):
+
+```json
+{"type": "host", "target": "<MAC>",
+ "queries": {"throughput": {"devices": true}},
+ "streaming": {"id": "<stream id>"}}
+```
+
+returns exactly one row: `{"throughput": [{"target": "<MAC>", "rx": …, "tx": …}]}`.
+A host scope is a single round trip with no averaging window, and an idle host
+answers zeros rather than being omitted — so it is strictly better than sampling
+system scope to answer a per-host question.
+
+Scope validation is strict and returns HTTP-level code 500 for: a missing `type`,
+a `type` other than `system`/`host`, `type: "host"` with a MAC the box does not
+know, and **any request missing the `streaming` key**. Treat 500 as "bad request
+shape", not "box broken".
+
+#### 2. The two scopes have exactly swapped `rx`/`tx`
+
+Same host, same moment, three consecutive rounds:
+
+| round | host | system `devices` map | host scope |
+| --- | --- | --- | --- |
+| 1 | `74:D5:E8:95:FC:34` | rx 4445962.24 / tx 19251.2 | rx 19251.2 / tx 4445962.24 |
+| 2 | `0C:85:E1:EB:6A:AF` | rx 1331691.52 / tx 17612.8 | rx 17612.8 / tx 1331691.52 |
+| 3 | `0C:85:E1:EB:6A:AF` | rx 163840 / tx 2529.28 | rx 2529.28 / tx 163840 |
+
+- **System `devices` map is host-centric:** `rx` is the host's download.
+- **Host scope is box-centric:** `tx` is the host's download.
+
+Three of those hosts were on a LAN VLAN (`bond0.60`), so this holds for LAN hosts,
+not only WAN.
+
+#### 3. Interface direction flips with `network_kind`
+
+An interface's own counters are named from the box's point of view, so "rx" means
+opposite things at each edge:
+
+| interface | kind | host download is | host upload is |
+| --- | --- | --- | --- |
+| `eth0`, `eth1` | `wan` | `rx` | `tx` |
+| `bond0.*`, `bond0` | `lan` | `tx` | `rx` |
+
+The WAN side is independently confirmed twice. Numerically, `eth0` rx (1232 kB/s)
+tracked the sum of host downloads (1074 kB/s) warm-only, while `bond0.10` tx
+(1159 kB/s) tracked the sum of those same hosts' downloads (1030 kB/s). And the
+app's own extraction code is explicit:
+
+```
+x85.m20195h(): cg8Var = new cg8(Math.abs(row.optLong("tx")), Math.abs(row.optLong("rx")));
+cg8.toString(): "UploadDownload(upload=<a>, download=<b>)"
+```
+
+so `rx` → download and `tx` → upload, in the row the app matched. The app only
+ever matches WAN interfaces (§4), so **the LAN mapping above is inferred from
+counter semantics, not confirmed by app code** — the empirical check was
+inconclusive because of §6.
+
+#### 4. The app charts WAN only, and only three numbers
+
+`x85.m20201r()` builds the dashboard chart's target list:
+
+```
+FWNetworkConfig.sortedWanInterfaces(...)   // one cell per WAN
+  fallback: a single hard-coded eth0 cell
+```
+
+Its title string is `live_stats_wan_title`. Each cell renders exactly
+`@string/download`, `@string/upload`, `@string/total` (layout
+`view_live_stats_single_chart.xml`), where `total` is computed client-side by
+summing the other two. **No LAN VLAN, no `bond0` trunk, and no `eth1` unless it is
+a configured WAN is ever charted.** Per-device live throughput is a separate
+screen: `LiveStatsSingleView` inside `DeviceDetailDialog`,
+`SwitchDeviceDetailDialog` and `SwitchPortDetailDialog`.
+
+So the integration publishes an interface dump the app deliberately never shows.
+That is the root of "the summary disagrees with the rows": there is no summary to
+agree with.
+
+#### 5. The trunk and its VLANs both appear
+
+`bond0` (kind `lan`) aggregates its VLANs. Measured: `bond0` rx 179579 / tx
+976324 against sum-of-VLANs 474900 / 1585600 in another sample, and consistently
+within ~5% in both directions. Any caller totalling the `throughput` array counts
+the same bytes twice — 2.11× in one measurement.
+
+`bond0`'s own `devices` map is also nearly empty (3 entries vs 22 on `bond0.60`),
+so the busiest-looking row carries the least detail.
+
+#### 6. Host rows never partition interface totals
+
+Warm readings only, with cold readings excluded so this is not a sampling
+artefact, per-VLAN `interface tx / sum(host download)`:
+
+| interface | ratio |
+| --- | --- |
+| `bond0.70` | 85.5× |
+| `bond0.60` | 9.22× |
+| `bond0.20` | 1.76× |
+| `bond0.90` | 1.65× |
+| `bond0.10` | 1.13× |
+
+The box lists some idle hosts at zero, omits others, and at times a single host
+exceeds its interface counter. Per-host attribution is a hint, not an
+accounting. A service must not imply the two can be reconciled.
+
+#### 7. A cold sampler returns traffic with an empty device map
+
+After the box idles its `iftop` sampler out (~70 s), the **first** reading
+returns nonzero interface counters and **zero** host rows:
+
+```
+idle 70 s, then five readings 2 s apart
+  reading 1: busy_ifaces=8  hosts=0    <-- empty, silently counted
+  reading 2: busy_ifaces=8  hosts=13
+  reading 3: busy_ifaces=8  hosts=28
+  reading 4: busy_ifaces=8  hosts=35
+  reading 5: busy_ifaces=8  hosts=40
+```
+
+Later readings are also smaller than the last, so the ramp is gradual rather than
+a single bad sample. Two consequences for any averaging: an empty reading must
+not enter the divisor, and "every interface rate is zero" is the wrong warm-up
+test — this reading had 435 kB/s of traffic on it.
+
+#### 8. WAN scope is a client-side filter, not a protocol scope
+
+Worth stating plainly, because it is easy to get backwards: **the app never asks
+the box for "WAN throughput".** It sends one system-scope request and filters the
+resulting `throughput` array itself.
+
+`x85.m20201r()` builds a target list from `FWNetworkConfig.sortedWanInterfaces()`
+— that is box *configuration*, read from the init payload, not from `liveStats`.
+`x85.m20195h()` then walks the system response's `throughput` rows and keeps those
+whose `name` (`FWNetwork.META_KEY_NAME`) or `target` matches an entry in that list.
+Everything else in the array is discarded client-side.
+
+Two consequences:
+
+- The box already returns `eth0` and `eth1` with `network_kind: wan` in the same
+  response the integration fetches today. Nothing is missing and nothing extra
+  needs requesting.
+- Our selector refusing WAN is **our** restriction, not the box's.
+  `get_available_networks()` filters to `LAN` and `VLAN`, so a WAN UUID is rejected
+  with `network_not_found` even though the row is sitting in the payload we already
+  have. That is a design choice in the service layer, and it should be judged as
+  one.
+
+The same is true of the aggregate: the app's "total" is `download + upload`
+computed client-side. The box never publishes a total, and never publishes a
+network-level sum of hosts. Any "network total" we expose is our arithmetic, and
+should be labelled as such.
+
+#### 9. Assumptions this leaves open
+
+Recorded so they are not mistaken for verified behaviour:
+
+- **Same-VLAN traffic may be invisible.** If two hosts on the same segment talk
+to each other, the box may never see it, because the traffic is switched rather
+than routed. Nothing in the probes settles this. It matters for anyone reading a
+network total as "this segment's traffic": a 2 MB/s host-to-host transfer on the
+same VLAN would either appear in the VLAN row or not appear at all.
+- **The LAN direction mapping is inferred, not confirmed by app code.** `eth0`
+(rx → download) is confirmed twice: numerically against summed host downloads,
+and by `x85.m20195h()`'s `cg8(upload=tx, download=rx)` construction. The LAN rows
+are only ever matched by that same app path, which never selects them, so
+`bond0.*` is inferred from counter semantics — the trunk aggregates the VLANs, and
+a trunk's counters face the box, which makes `tx` the toward-hosts direction.
+- **Per-host attribution is a hint, not accounting.** §6's ratios run from 1.13×
+to 85×, so no host sum can be reconciled with any interface counter, and none
+should be presented as if it could.
+
+**Design consequence.** Model the two questions the app models, and stop
+publishing the raw dump as if it were one answer:
+
+- a WAN **selection** over the response we already fetch, returning
+download/upload/total per WAN, since that is what the app shows and what
+"internet throughput" means. No new request is involved: `eth0`/`eth1` are
+already in the payload with `network_kind: wan`, and only our selector refuses
+them
+- a per-host scope backed by `type: "host"`, which is one round trip and exact
+- direction-correct field names (`download_bytes_per_second` /
+`upload_bytes_per_second`), because `rx`/`tx` are unreadable without knowing
+both the row's kind and which of the two scopes produced it
+- drop or mark the `bond0` trunk whenever its VLANs are present
+- a warm-up test based on "no device rows on any busy interface", not on all
+zeros
+- totals labelled as our arithmetic, since the box publishes none
+
+**Artifacts:** live session 2026-11-02 against the owner's box; probes in
+`/tmp/probe_host*.py`, `/tmp/dir_test.py`, `/tmp/recheck_warm.py`,
+`/tmp/lan_dir.py`.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
