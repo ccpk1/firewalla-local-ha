@@ -22,8 +22,8 @@ Contributed by [@ferritercb](https://github.com/ferritercb), whose
 
 Every other usage report answers over a window: `get_network_usage` returns byte
 totals for at least the last 60 minutes, `get_wan_usage` returns daily totals.
-None of them can answer "which device is using the bandwidth right now", because
-the box keeps no per-host rate history to look back at.
+None of them can answer "what is using the bandwidth right now", because the box
+keeps no per-host rate history to look back at.
 
 `get_live_throughput` reads the box's own live sampler — the data behind the
 Firewalla app's live view — and averages repeated readings across a short window.
@@ -32,7 +32,36 @@ sends its next few seconds of video in a burst and is then idle, so a single
 reading lands in a gap often enough to matter. Measured on a streaming 1080p
 Apple TV, one reading came back zero three times in five.
 
-Sampling has two consequences worth knowing:
+### Three scopes, because they are three questions
+
+- **one device** — `host_mac` or `host_name`. That device alone, from the box's
+  own single-host query: one request, no waiting for a window, and an idle device
+  answering zero rather than being left out. This is the only scope that measures
+  a device, including traffic it exchanged with another device on its own segment
+- **one network** — `network_uuid` or `network_name`, which accepts a WAN. A WAN
+  is how to ask what the internet link is doing, and it is what the app's own
+  dashboard chart shows: one cell per WAN, with download, upload and total
+- **everything** — neither. Every device on every network, busiest first
+
+The response says which it used in `scope`. Host and network selectors are
+mutually exclusive.
+
+### Reading the numbers
+
+- **Device and network figures are not comparable, and neither is a slice of the
+  other.** Network rows are interface counters; device rows are the box's
+  best-effort attribution. Measured on one network they differed by 1.1× to 85×,
+  and adding them together counts the same traffic twice. If an aggregate
+  interface (a `bond0` trunk above its VLANs) is present, a warning names it.
+- **A network figure is routed traffic only.** Two devices on the same segment
+  talk through the switch, never through the box, so that traffic appears in the
+  devices' own figures and not in the segment's.
+- **Direction is resolved for you.** Rows carry `download_bytes_per_second`,
+  `upload_bytes_per_second` and `total_bytes_per_second` rather than the box's
+  raw `rx`/`tx`, which mean opposite things at each edge: on a WAN `rx` is the
+  download, on a LAN it is what the LAN sent toward the box.
+
+### Sampling
 
 - **A short window is noisy.** Two readings miss a busy stream about a third of
   the time. The assistant tool defaults to 6 seconds, and every window up to 30
@@ -42,10 +71,14 @@ Sampling has two consequences worth knowing:
   never down — a 5-second request is served 6 seconds of coverage, and the
   response says so with `sample_seconds` (served), `sample_seconds_requested`
   (the request) and a `live_throughput_window_rounded` warning.
+- **A call after a quiet spell no longer halves the answer.** The box stops its
+  sampler when idle, and the first reading back carries real interface traffic
+  with no device attached to it yet. That used to be averaged in, scaling every
+  device down; it is now retried and never counted, and the answer says
+  `warming_up` if the sampler still had nothing to attribute.
 
-A first call in a quiet spell starts the box's sampler and can answer all zeros.
-That is reported as `warming_up` with a warning rather than as an idle network:
-call again instead of concluding nothing is using the connection.
+`hosts.available` reports how many devices there were, beside `hosts.count` for
+how many were returned.
 
 ## Diagnostics
 
