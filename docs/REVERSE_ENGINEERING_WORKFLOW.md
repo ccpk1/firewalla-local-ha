@@ -5643,24 +5643,35 @@ computed client-side. The box never publishes a total, and never publishes a
 network-level sum of hosts. Any "network total" we expose is our arithmetic, and
 should be labelled as such.
 
-#### 9. Assumptions this leaves open
+#### 9. Same-VLAN traffic is never visible, and network totals are routed only
 
-Recorded so they are not mistaken for verified behaviour:
+Host-to-host traffic on one segment is switched, not routed, so it never crosses
+the box's interface counters. This is not a gap in the capture or a firmware
+quirk; it is how a bridge works. Two consequences:
 
-- **Same-VLAN traffic may be invisible.** If two hosts on the same segment talk
-to each other, the box may never see it, because the traffic is switched rather
-than routed. Nothing in the probes settles this. It matters for anyone reading a
-network total as "this segment's traffic": a 2 MB/s host-to-host transfer on the
-same VLAN would either appear in the VLAN row or not appear at all.
-- **The LAN direction mapping is inferred, not confirmed by app code.** `eth0`
-(rx → download) is confirmed twice: numerically against summed host downloads,
-and by `x85.m20195h()`'s `cg8(upload=tx, download=rx)` construction. The LAN rows
-are only ever matched by that same app path, which never selects them, so
-`bond0.*` is inferred from counter semantics — the trunk aggregates the VLANs, and
-a trunk's counters face the box, which makes `tx` the toward-hosts direction.
-- **Per-host attribution is a hint, not accounting.** §6's ratios run from 1.13×
-to 85×, so no host sum can be reconciled with any interface counter, and none
-should be presented as if it could.
+- A **network total is routed traffic only.** Two hosts on the same VLAN
+  exchanging 2 MB/s contribute nothing to that VLAN's counters. Do not describe a
+  segment total as "all traffic on this network": say routed traffic.
+- A **host row can exceed its segment's counters** without anything being wrong.
+  A host that receives 2 MB/s from a same-VLAN peer shows that receive in its own
+  `devices` entry while the VLAN row does not move. This is a third reason, on top
+  of §6, that host rows and interface rows cannot be reconciled.
+
+So a host's own live figure is complete (the box taps the host, not the router),
+while a segment or WAN figure counts only what crossed that interface. For "how
+fast is this device going", the host figure is the only correct one.
+
+#### 10. What remains inferred rather than confirmed
+
+- **The LAN direction mapping.** `eth0` (rx → download) is confirmed twice:
+  numerically against summed host downloads, and by `x85.m20195h()`'s
+  `cg8(upload=tx, download=rx)` construction. The LAN rows are only ever matched by
+  that same app path, which never selects them, so `bond0.*` is inferred from
+  counter semantics — the trunk aggregates the VLANs, and a trunk's counters face
+  the box, which makes `tx` the toward-hosts direction.
+- **Per-host attribution.** §6's ratios run from 1.13× to 85×, so no host sum can
+  be reconciled with any interface counter, and none should be presented as if it
+  could.
 
 **Design consequence.** Model the two questions the app models, and stop
 publishing the raw dump as if it were one answer:
