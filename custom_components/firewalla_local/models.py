@@ -1250,16 +1250,24 @@ class FirewallaFlowWindow:
 
 @dataclass(slots=True, frozen=True)
 class FirewallaLiveInterfaceThroughput:
-    """Live rates for one interface, in bytes per second, as the box names them.
+    """Live rates for one interface, in bytes per second, as the box counts them.
 
-    ``rx``/``tx`` are the box interface's own counters: on a WAN ``rx`` is the
-    download, but on a LAN it is what the LAN *sent* toward the box.
+    ``rx``/``tx`` are the box interface's own counters, so they mean opposite
+    things at each edge: on a WAN ``rx`` is the download, while on a LAN it is
+    what the LAN *sent* toward the box, making ``tx`` the download. ``network_kind``
+    is what tells the two apart, and a row that reaches a caller always states the
+    direction as ``download``/``upload`` instead of leaking these two names.
+
+    Raw counters are kept here rather than pre-converted because the conversion
+    needs the kind, and the kind is resolved from the network model rather than
+    from this payload.
     """
 
     interface_name: str
     network_uuid: str | None
     rx_bytes_per_second: float
     tx_bytes_per_second: float
+    network_kind: FirewallaNetworkKind | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -1280,12 +1288,20 @@ class FirewallaLiveHostThroughput:
 class FirewallaLiveThroughput:
     """One live throughput sample from the box.
 
-    ``warming_up`` means every rate was zero and no host was listed: the box's
-    sampler had only just started, so the zeros are not a measurement.
+    ``warming_up`` means the box's sampler had only just started: at least one
+    interface carried traffic while no host was listed at all, so the interface
+    rates are real but there is no per-host attribution yet.
 
     Rates are averaged over ``sample_count`` back-to-back readings spanning about
     ``sample_seconds``. One 2 s reading misses bursty traffic: a streaming player
-    fetches a few seconds of video at a time and is idle in between.
+    fetches a few seconds of video at a time and is idle in between. Readings that
+    listed no host are excluded from that average, because an idle host is left out
+    of a reading rather than listed at zero, and counting an empty reading would
+    scale every host down.
+
+    ``host_scope`` records whether the sample came from the single-host query, in
+    which case ``devices`` holds the one requested host and ``interfaces`` is
+    empty.
     """
 
     sampled_at_timestamp: int
@@ -1294,6 +1310,7 @@ class FirewallaLiveThroughput:
     sample_count: int = 1
     interfaces: tuple[FirewallaLiveInterfaceThroughput, ...] = ()
     devices: tuple[FirewallaLiveHostThroughput, ...] = ()
+    host_scope: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

@@ -1087,9 +1087,22 @@ internet-quality samples (ping latency and packet loss) for one or all WANs.
 
 #### Get live throughput
 
-Use `firewalla_local.get_live_throughput` to answer *"which device is using the
-bandwidth right now?"*. It reads the box's live view (the same data the Firewalla
-app's live throughput screen shows) at the moment you call it.
+Use `firewalla_local.get_live_throughput` to answer *"what is using the bandwidth
+right now?"*. It reads the box's live sampler at the moment you call it. Three
+selectors decide which question it answers, and the response reports it as
+`scope`:
+
+- **one host** — `host_mac` or `host_name`. That device alone, using the box's own
+  single-host query: one request, no waiting for a window, and an idle device
+  answers zero instead of being left out. This is the only scope that measures
+  *that device*, including traffic it exchanged with another device on its own
+  segment
+- **one network** — `network_uuid` or `network_name`, which accepts a WAN as well
+  as a LAN or VLAN. A WAN is how to ask what the internet link is doing, and is
+  what the Firewalla app's dashboard chart shows
+- **everything** — neither. Every host on every network, busiest first
+
+The three cannot be combined: naming a host and a network together is an error.
 
 - rates are **bytes per second**, averaged over `sample_seconds` (default 10,
   any value 2 to 30). The box itself reports 2-second rates, and streaming
@@ -1100,18 +1113,30 @@ app's live throughput screen shows) at the moment you call it.
   asked for. The response reports the window it served as `sample_seconds`, the
   request as `sample_seconds_requested`, and `sample_count` says how many
   readings were averaged
-- `hosts` are busiest first; each has `download_bytes_per_second` and
-  `upload_bytes_per_second`, its `host_name`, `host_ip`, and network- `interfaces` carry each interface's own `rx`/`tx` counters: on a WAN `rx` is
-  the download, on a LAN it is what the LAN sent toward the box
-- use `network_uuid` or `network_name` to limit the answer to one network, and
-  `top_n` (default 10) for the number of hosts
+- `hosts` are busiest first; each has `download_bytes_per_second`,
+  `upload_bytes_per_second` and `total_bytes_per_second`, plus `host_name`,
+  `host_ip` and its network. `hosts.count` is how many were returned and
+  `hosts.available` is how many there were, so a truncated answer says so
+- `interfaces` carry `download_bytes_per_second`, `upload_bytes_per_second` and
+  `total_bytes_per_second` already resolved by direction, plus `network_kind`.
+  The box's own counters are not published, because `rx` and `tx` mean opposite
+  things on each edge: on a WAN `rx` is the download, on a LAN it is what the LAN
+  sent toward the box
+- **a network's figures are its interface counters, and a host's are not**
+  comparable to them. The box attributes traffic to hosts on a best-effort basis,
+  so a network row and the sum of its host rows will not agree, and adding them
+  together counts the same traffic twice. If an aggregate interface (such as a
+  `bond0` trunk above its VLANs) is present, a warning names it
+- **a network total is routed traffic only.** Traffic between two devices on the
+  same segment is switched and never crosses a box interface, so it does not
+  appear in a network's figures — only in those devices' own figures
 - nothing is polled between calls: each call reads the box a number of times
   across the window rather than once, because a single 2-second reading usually
   lands in a gap between bursts. The box starts its sampler on the first call
   and stops it about 30 seconds after the last, so a call after a quiet spell can
-  take about 3 seconds longer; if the sampler still had no reading, the answer
-  says `warming_up` and carries a warning instead of reporting the zeros as an
-  idle network
+  take about 3 seconds longer; if the sampler started but had not attributed
+  traffic to any host yet, the answer says `warming_up` and carries a warning
+  rather than presenting an empty host list as an idle network
 
 #### Get time usage report
 

@@ -491,12 +491,22 @@ _LAN_UUID = "dcd0be73-8707-4bd3-af3d-42899f338b9d"
 
 
 def _live_payload(*, warm: bool = True) -> dict[str, object]:
-    """Build a liveStats answer; ``warm=False`` is the cold sampler's all-zero one."""
+    """Build a liveStats answer.
+
+    ``warm=False`` is the cold sampler as the box actually answers: real interface
+    traffic with no host attributed to it yet.
+    """
     if not warm:
         return {
             "throughput": [
-                {"name": "eth0", "target": "wan-uuid", "rx": 0, "tx": 0},
-                {"name": "bond0", "target": _LAN_UUID, "rx": 0, "tx": 0, "devices": {}},
+                {"name": "eth0", "target": "wan-uuid", "rx": 435805.5, "tx": 56516.5},
+                {
+                    "name": "bond0",
+                    "target": _LAN_UUID,
+                    "rx": 5127.5,
+                    "tx": 1327.5,
+                    "devices": {},
+                },
             ]
         }
     return {

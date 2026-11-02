@@ -920,29 +920,51 @@ class GetSpeedTestsTool(_FirewallaReadTool):
 
 
 class GetLiveThroughputTool(_FirewallaReadTool):
-    """Return live per-host bandwidth, read from the box now."""
+    """Return live bandwidth, read from the box now."""
 
     name = format_tool_name("get_live_throughput")
     title = "Get live throughput"
     description = (
-        "Which device is using the bandwidth right now — live per-host download "
-        "and upload rates, busiest first, plus each interface's own counters. "
-        "Every other usage tool reports totals over a window; this is the only "
-        'one that answers "now", from the same data as the Firewalla app live '
-        "view.\n"
+        "How fast is traffic moving right now — live download and upload rates in "
+        "bytes per second. Every other usage tool reports totals over a window; "
+        'this is the only one that answers "now".\n'
         "\n"
-        "Rates are bytes per second, so a 10 Mbps stream reads about 1250000. "
-        "For volume over time use `get_network_usage`; for latency use "
-        "`get_internet_quality`.\n"
+        "Three scopes, and the answer says which one it used:\n"
+        "- name one host (`host_mac` or `host_name`) for that device alone. This "
+        'is the right scope for "how fast is my TV going", and it is exact: '
+        "one query, no waiting for a window.\n"
+        "- name one network (`network_uuid` or `network_name`) for that segment's "
+        "interfaces plus its hosts. A WAN works here too, which is what answers "
+        '"what is my internet doing".\n'
+        "- name neither for every host on every network, busiest first.\n"
         "\n"
-        "The lookup is not cached: each call reads the box and takes about "
-        "`sample_seconds` to answer. If the box's sampler had only just been "
-        "started, the answer says `warming_up` with a warning rather than "
-        "reporting zeros as an idle network — call again instead of concluding "
-        "nothing is using the connection."
+        "Reading the numbers: `download_bytes_per_second` and "
+        "`upload_bytes_per_second` are already direction-correct everywhere, so "
+        "never infer direction from raw counters. A network's figures are its "
+        "interface counters and count only traffic that crossed the box, so "
+        "same-segment traffic between two hosts is not in them; a host's figures "
+        "are complete. Do not add a network's interface rows to its host rows — "
+        "they measure different things and will not reconcile.\n"
+        "\n"
+        "`hosts.available` is how many hosts there were; `hosts.count` is how many "
+        "were returned."
     )
     parameters = probatio.Schema(
         {
+            probatio.Optional(
+                SERVICE_FIELD_HOST_MAC,
+                description=(
+                    "Optional. Select one host by MAC, from `get_hosts`. Cannot be "
+                    "combined with a network selector."
+                ),
+            ): str,
+            probatio.Optional(
+                SERVICE_FIELD_HOST_NAME,
+                description=(
+                    "Optional. Select one host by name, from `get_hosts`. Cannot "
+                    "be combined with a network selector."
+                ),
+            ): str,
             probatio.Optional(
                 SERVICE_FIELD_NETWORK_UUID, description=_NETWORK_UUID_DESCRIPTION
             ): str,

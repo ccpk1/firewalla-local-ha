@@ -1996,15 +1996,23 @@
     },
     "get_live_throughput": {
       "name": "Get live throughput",
-      "description": "Return live per-host and per-interface throughput in bytes per second, read from the box now (the app's live view). A rate, not a total; for data volume over a window use get_network_usage.",
+      "description": "Return live throughput in bytes per second, read from the box now. One host, one network, or every host, depending on the selectors given. A rate, not a total; for data volume over a window use get_network_usage. Network figures are that interface's counters and exclude same-segment traffic between hosts; host figures are complete.",
       "fields": {
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Report this one host. Cannot be combined with a network selector. Uses the box's single-host query, so the call does not wait for an averaging window."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Report this one host, by the name get_hosts reports. Cannot be combined with a network selector."
+        },
         "network_uuid": {
           "name": "Network UUID (Optional)",
-          "description": "Limit the answer to one network by UUID."
+          "description": "Limit the answer to one network by UUID. A WAN is accepted here, which is how to ask what the internet link is doing."
         },
         "network_name": {
           "name": "Network name (Optional)",
-          "description": "Limit the answer to one network by display name."
+          "description": "Limit the answer to one network by display name. A WAN is accepted here."
         },
         "top_n": {
           "name": "Host limit",

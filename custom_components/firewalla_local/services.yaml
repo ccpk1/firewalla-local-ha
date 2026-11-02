@@ -1060,22 +1060,36 @@ get_internet_quality:
 
 get_live_throughput:
   name: Get live throughput
-  description: Return live per-host and per-interface throughput in bytes per second, read from the box now (the app's live view). A rate, not a total; for data volume over a window use get_network_usage.
+  description: Return live throughput in bytes per second, read from the box now. One host, one network, or every host, depending on the selectors given. A rate, not a total; for data volume over a window use get_network_usage. Network figures are that interface's counters and exclude same-segment traffic between hosts; host figures are complete.
   fields:
+    host_mac:
+      required: false
+      example: "AA:BB:CC:DD:EE:FF"
+      selector:
+        text:
+      name: Host MAC
+      description: Optional. Report this one host. Cannot be combined with a network selector. Uses the box's single-host query, so the call does not wait for an averaging window.
+    host_name:
+      required: false
+      example: "Kaden Phone"
+      selector:
+        text:
+      name: Host name
+      description: Optional. Report this one host, by the name get_hosts reports. Cannot be combined with a network selector.
     network_uuid:
       required: false
       example: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
       selector:
         text:
       name: Network UUID
-      description: Optional. Limit the answer to one network by UUID.
+      description: Optional. Limit the answer to one network by UUID. A WAN is accepted here, which is how to ask what the internet link is doing.
     network_name:
       required: false
       example: "LAN 1"
       selector:
         text:
       name: Network name
-      description: Optional. Limit the answer to one network by display name.
+      description: Optional. Limit the answer to one network by display name. A WAN is accepted here.
     top_n:
       required: false
       example: 10
