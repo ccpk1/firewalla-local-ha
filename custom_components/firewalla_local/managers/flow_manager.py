@@ -637,7 +637,6 @@ def _normalise_live_throughput(
             sampled_at_timestamp=int(time.time()),
             warming_up=False,
             devices=tuple(devices),
-            host_scope=host_scope,
         )
 
     raw_rows = payload.get(_RAW_LIVE_THROUGHPUT_KEY)
@@ -757,7 +756,6 @@ def _average_live_readings(
         )
 
     count = len(warm)
-    scoped = warm[0].host_scope
     host_totals: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0, 0.0])
     interface_totals: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
     interface_networks: dict[str, str | None] = {}
@@ -806,5 +804,4 @@ def _average_live_readings(
                 ),
             )
         ),
-        host_scope=scoped,
     )

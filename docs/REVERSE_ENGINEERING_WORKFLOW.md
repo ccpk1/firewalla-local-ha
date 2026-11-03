@@ -5672,6 +5672,13 @@ fast is this device going", the host figure is the only correct one.
 - **Per-host attribution.** §6's ratios run from 1.13× to 85×, so no host sum can
   be reconciled with any interface counter, and none should be presented as if it
   could.
+- **The VPN direction mapping is assumed from the LAN one.** `wg0` and `awg0`
+  reported zero in every probe, so no reading was ever taken on an active tunnel.
+  They are grouped with the LAN kinds because a tunnel's counters face the same
+  way a bridge's do — toward the peers it carries — but that is reasoning, not
+  measurement. A tunnel that turns out to be counter-oriented like a WAN would
+  report download and upload swapped, so check one against a known transfer before
+  relying on VPN rows.
 
 **Design consequence.** Model the two questions the app models, and stop
 publishing the raw dump as if it were one answer:

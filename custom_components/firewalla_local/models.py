@@ -1298,10 +1298,6 @@ class FirewallaLiveThroughput:
     listed no host are excluded from that average, because an idle host is left out
     of a reading rather than listed at zero, and counting an empty reading would
     scale every host down.
-
-    ``host_scope`` records whether the sample came from the single-host query, in
-    which case ``devices`` holds the one requested host and ``interfaces`` is
-    empty.
     """
 
     sampled_at_timestamp: int
@@ -1310,7 +1306,6 @@ class FirewallaLiveThroughput:
     sample_count: int = 1
     interfaces: tuple[FirewallaLiveInterfaceThroughput, ...] = ()
     devices: tuple[FirewallaLiveHostThroughput, ...] = ()
-    host_scope: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
