@@ -10,13 +10,18 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.firewalla_local.const import (
     CONF_AID,
+    CONF_DEVICE_TRACKER_AWAY_WINDOW,
+    CONF_DEVICE_TRACKERS,
     CONF_EID,
     CONF_GID,
     CONF_HOST,
     CONF_LICENSE,
+    CONF_LLM_TOOL_MODE,
     CONF_SELECTED_RULE_IDS,
     CONF_SELECTED_RULE_TEMPLATES,
     CONF_SYMMETRIC_KEY,
+    CONF_WATCHED_DEVICES,
+    CONF_WATCHED_USERS,
     DOMAIN,
 )
 from custom_components.firewalla_local.coordinator import FirewallaConfigEntry
@@ -144,6 +149,50 @@ async def test_get_config_entry_diagnostics_redacts_entry_data(
         "networkProfiles": {"net-1": {"name": "Universe", "intf": "eth0"}},
         "hosts": [],
     }
+
+
+async def test_get_config_entry_diagnostics_redacts_selected_hosts(
+    hass: HomeAssistant,
+) -> None:
+    """Test the option lists that name devices and people are redacted.
+
+    The options are not credentials, but `device_trackers`, `watched_devices` and
+    `watched_users` are lists of MAC addresses and user ids — the household's
+    devices and people by another name. The non-identifying options are kept, so a
+    report still shows how it was configured.
+    """
+    entry = cast(
+        FirewallaConfigEntry,
+        SimpleNamespace(
+            domain=DOMAIN,
+            title="Firewalla",
+            data={CONF_LICENSE: "license-123"},
+            options={
+                CONF_DEVICE_TRACKERS: ["AA:BB:CC:DD:EE:FF"],
+                CONF_WATCHED_DEVICES: ["Kaden Phone"],
+                CONF_WATCHED_USERS: ["u-1"],
+                CONF_DEVICE_TRACKER_AWAY_WINDOW: 15,
+                CONF_LLM_TOOL_MODE: "off",
+            },
+            runtime_data=SimpleNamespace(
+                coordinator=SimpleNamespace(data=None, last_init_payload=None)
+            ),
+        ),
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    options = cast(dict[str, Any], diagnostics["entry_options"])
+
+    assert options[CONF_DEVICE_TRACKERS] == "**REDACTED**"
+    assert options[CONF_WATCHED_DEVICES] == "**REDACTED**"
+    assert options[CONF_WATCHED_USERS] == "**REDACTED**"
+    # Configuration that names nothing is still readable.
+    assert options[CONF_DEVICE_TRACKER_AWAY_WINDOW] == 15
+    assert options[CONF_LLM_TOOL_MODE] == "off"
+
+    serialized = json.dumps(diagnostics, default=str)
+    assert "AA:BB:CC:DD:EE:FF" not in serialized
+    assert "Kaden Phone" not in serialized
 
 
 async def test_get_config_entry_diagnostics_handles_missing_snapshot(
