@@ -11,9 +11,9 @@ the HACS submission. Upgrading needs no config entry change and no repairing.
   answer.
 - **Diagnostics are redacted by shape**, so a report can be pasted into a public
   issue without publishing the household's names, devices or addresses.
-- **Home Assistant 2025.10 is now genuinely supported.** The declared floor was
-  eight releases short of what the code needed.
-- **Reports no longer resolve a time zone on the event loop.**
+- **Home Assistant 2025.10 is genuinely supported.** The declared floor now matches
+  the releases the code works on.
+- **Reports resolve the time zone off the event loop.**
 
 Contributed by [@ferritercb](https://github.com/ferritercb), whose
 `get_live_throughput` service and protocol work this release builds on.
@@ -71,11 +71,11 @@ mutually exclusive.
   never down — a 5-second request is served 6 seconds of coverage, and the
   response says so with `sample_seconds` (served), `sample_seconds_requested`
   (the request) and a `live_throughput_window_rounded` warning.
-- **A call after a quiet spell no longer halves the answer.** The box stops its
-  sampler when idle, and the first reading back carries real interface traffic
-  with no device attached to it yet. That used to be averaged in, scaling every
-  device down; it is now retried and never counted, and the answer says
-  `warming_up` if the sampler still had nothing to attribute.
+- **A call after a quiet spell is not scaled down.** The box stops its sampler
+  when idle, and the first reading back carries real interface traffic with no
+  device attached to it yet. That reading is retried and never averaged, so every
+  device keeps its real rate, and the answer says `warming_up` if the sampler
+  still has nothing to attribute.
 
 `hosts.available` reports how many devices there were, beside `hosts.count` for
 how many were returned.
