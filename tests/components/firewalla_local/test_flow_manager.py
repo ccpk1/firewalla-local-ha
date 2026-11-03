@@ -491,12 +491,22 @@ _LAN_UUID = "dcd0be73-8707-4bd3-af3d-42899f338b9d"
 
 
 def _live_payload(*, warm: bool = True) -> dict[str, object]:
-    """Build a liveStats answer; ``warm=False`` is the cold sampler's all-zero one."""
+    """Build a liveStats answer.
+
+    ``warm=False`` is the cold sampler as the box actually answers: real interface
+    traffic with no host attributed to it yet.
+    """
     if not warm:
         return {
             "throughput": [
-                {"name": "eth0", "target": "wan-uuid", "rx": 0, "tx": 0},
-                {"name": "bond0", "target": _LAN_UUID, "rx": 0, "tx": 0, "devices": {}},
+                {"name": "eth0", "target": "wan-uuid", "rx": 435805.5, "tx": 56516.5},
+                {
+                    "name": "bond0",
+                    "target": _LAN_UUID,
+                    "rx": 5127.5,
+                    "tx": 1327.5,
+                    "devices": {},
+                },
             ]
         }
     return {
@@ -559,7 +569,7 @@ async def test_live_throughput_retries_once_when_the_sampler_is_cold() -> None:
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ) as mock_sleep:
         sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
@@ -586,7 +596,7 @@ async def test_live_throughput_still_cold_says_warming_up() -> None:
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ):
         sample = await _manager(client).async_get_live_throughput(sample_seconds=2)
@@ -594,6 +604,31 @@ async def test_live_throughput_still_cold_says_warming_up() -> None:
     assert sample is not None
     assert sample.warming_up
     assert sample.devices == ()
+    # The window is what was asked for, not the normaliser's 0.
+    assert sample.sample_seconds == 2
+
+
+@pytest.mark.asyncio
+async def test_live_throughput_rounds_an_odd_window_up_never_down() -> None:
+    """An odd window is served at the next even second, never a shorter one.
+
+    `round(5 / 2)` is 2 in Python, so the old code took two readings and covered
+    4 s while reporting 5. Rounding up means a caller always gets at least the
+    averaging it asked for.
+    """
+    client = _client()
+    client.async_get_live_throughput_payload = AsyncMock(return_value=_live_payload())
+
+    with patch(
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
+        new=AsyncMock(),
+    ):
+        sample = await _manager(client).async_get_live_throughput(sample_seconds=5)
+
+    assert sample is not None
+    assert sample.sample_seconds == 6
+    assert sample.sample_count == 3
+    assert sample.sample_count * 2 >= 5
 
 
 @pytest.mark.asyncio
@@ -652,7 +687,7 @@ async def test_live_throughput_averages_a_bursty_player_to_its_real_rate() -> No
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ) as mock_sleep:
         sample = await _manager(client).async_get_live_throughput(sample_seconds=10)
@@ -678,7 +713,7 @@ async def test_live_throughput_cold_reading_is_not_counted_in_the_window() -> No
     )
 
     with patch(
-        "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+        "custom_components.firewalla_local.managers.flow_manager._live_sleep",
         new=AsyncMock(),
     ):
         sample = await _manager(client).async_get_live_throughput(sample_seconds=4)

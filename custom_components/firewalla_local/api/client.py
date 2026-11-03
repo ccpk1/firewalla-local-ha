@@ -318,6 +318,10 @@ _RAW_INTERNET_QUALITY_ITEM_KEY: Final = "networkMonitorData"
 # the first request for a stream id and stops it about 30 s after the last one.
 _LIVE_STATS_ITEM: Final = "liveStats"
 _LIVE_STATS_SCOPE_SYSTEM: Final = "system"
+# The box also accepts a single-host scope, keyed by MAC. It answers one row
+# (`{target, rx, tx}`) with no interface counters, which is the query the app's
+# device-detail chart uses.
+_LIVE_STATS_SCOPE_HOST: Final = "host"
 _RAW_INTERNET_QUALITY_METRIC_PREFIX: Final = "metric:monitor:raw:ping:"
 _RAW_INTERNET_QUALITY_STAT_KEY: Final = "stat"
 _RAW_INTERNET_QUALITY_LOSS_KEY: Final = "lossrate"
@@ -1299,6 +1303,39 @@ class FirewallaApiClient:
         if not isinstance(data_payload, dict):
             raise FirewallaProtocolError(
                 "Firewalla local runtime payload did not include a liveStats object"
+            )
+
+        return data_payload
+
+    async def async_get_host_live_throughput_payload(
+        self, *, mac: str, stream_id: str
+    ) -> dict[str, object]:
+        """Fetch one host's live throughput from the local runtime.
+
+        The answer is a single ``throughput`` row keyed by ``mac``, with no
+        interface counters. Its counters are box-centric, the opposite of the
+        system answer's per-host map, so the caller must not compare the two.
+
+        The box rejects a MAC it does not know with an error code rather than an
+        empty row, so callers resolve the host from the snapshot first.
+        """
+        data_payload = await self._async_send_local_message_data(
+            message_type=_GET_MESSAGE_TYPE,
+            data={
+                _COMMAND_ITEM_KEY: _LIVE_STATS_ITEM,
+                _COMMAND_VALUE_KEY: {
+                    "type": _LIVE_STATS_SCOPE_HOST,
+                    "target": mac,
+                    "queries": {"throughput": {"devices": True}},
+                    "streaming": {"id": stream_id},
+                },
+            },
+            target=DEFAULT_INIT_TARGET,
+        )
+        if not isinstance(data_payload, dict):
+            raise FirewallaProtocolError(
+                "Firewalla local runtime host payload did not include a liveStats "
+                "object"
             )
 
         return data_payload
@@ -2995,7 +3032,7 @@ class FirewallaApiClient:
             raw_expiry = raw_exception.get("expireTs")
             try:
                 expires_at = int(raw_expiry) if raw_expiry is not None else None
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 expires_at = None
             exceptions.append(
                 FirewallaAlarmException(
@@ -3039,7 +3076,7 @@ class FirewallaApiClient:
                 if isinstance(raw_timestamp, (float, int, str))
                 else None
             )
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             fired_at = None
         return FirewallaAlarm(
             alarm_id=alarm_id,

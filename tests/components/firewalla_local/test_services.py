@@ -2377,6 +2377,7 @@ async def test_get_speed_tests_service_filters_one_wan_without_refresh(
 
 _CORE_UUID = "5799d896-5e0f-40a5-a776-38a5d7746204"
 _PRIMARY_UUID = "d7e5a5c4-0b28-4010-b3c6-dad1a868693f"
+_WAN_UUID = "0f3d5b21-6c8a-4d0e-9b7f-2a1c4e6d8b30"
 
 
 def _live_entry(hass: HomeAssistant) -> MockConfigEntry:
@@ -2441,7 +2442,7 @@ async def test_get_live_throughput_service_names_hosts_and_filters(
             new=AsyncMock(return_value=payload),
         ) as mock_read,
         patch(
-            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
             new=AsyncMock(),
         ),
     ):
@@ -2462,7 +2463,11 @@ async def test_get_live_throughput_service_names_hosts_and_filters(
         )
 
     assert response is not None
-    assert response["network"] == {"uuid": _CORE_UUID, "name": "VLAN10 CORE"}
+    assert response["network"] == {
+        "uuid": _CORE_UUID,
+        "name": "VLAN10 CORE",
+        "kind": "lan",
+    }
     assert response["warming_up"] is False
     assert isinstance(response["sampled_at_timestamp"], int)
     assert response["sampled_at"] is not None
@@ -2477,12 +2482,24 @@ async def test_get_live_throughput_service_names_hosts_and_filters(
         "network_name": "VLAN10 CORE",
         "download_bytes_per_second": 717824.0,
         "upload_bytes_per_second": 806.0,
+        "total_bytes_per_second": 718630.0,
     }
     # A lower-case MAC from the box still finds its host.
     assert hosts[1]["host_id"] == "00:aa:bb:cc:dd:26"
     assert [i["interface_name"] for i in response["interfaces"]["items"]] == [
         "bond0.10"
     ]
+    # A LAN interface's `tx` is the download, so the row is re-pointed at the
+    # direction rather than repeating the box's counters.
+    lan_interface = response["interfaces"]["items"][0]
+    assert lan_interface["network_kind"] == "lan"
+    assert lan_interface["download_bytes_per_second"] == 20000.0
+    assert lan_interface["upload_bytes_per_second"] == 900000.0
+    assert lan_interface["total_bytes_per_second"] == 920000.0
+    assert response["scope"] == "network"
+    assert response["hosts"]["count"] == 2
+    # Three hosts were listed on the network; top_n returned two of them.
+    assert response["hosts"]["available"] == 3
     assert response["metadata"]["warnings"] == []
     assert response["metadata"]["applied"] == {"top_n": 2, "sample_seconds": 6}
     # Six seconds is three back-to-back 2 s readings.
@@ -2495,7 +2512,13 @@ async def test_get_live_throughput_service_reports_unavailable_and_cold(
 ) -> None:
     """Test a failed read and a cold sampler each carry a warning, never bare zeros."""
     entry = _live_entry(hass)
-    cold = {"throughput": [{"name": "eth0", "target": "wan-uuid", "rx": 0, "tx": 0}]}
+    # The box's cold sampler answers with real interface traffic and no host
+    # attribution yet, which is the case that used to be reported as idle.
+    cold = {
+        "throughput": [
+            {"name": "eth0", "target": "wan-uuid", "rx": 435805.5, "tx": 56516.5}
+        ]
+    }
 
     with (
         patch(
@@ -2511,7 +2534,7 @@ async def test_get_live_throughput_service_reports_unavailable_and_cold(
             new=AsyncMock(side_effect=(FirewallaProtocolError("bad"), cold, cold)),
         ),
         patch(
-            "custom_components.firewalla_local.managers.flow_manager.asyncio.sleep",
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
             new=AsyncMock(),
         ),
     ):
@@ -2541,8 +2564,326 @@ async def test_get_live_throughput_service_reports_unavailable_and_cold(
 
     assert cold_response["warming_up"] is True
     assert [w["code"] for w in cold_response["metadata"]["warnings"]] == [
-        "live_throughput_warming_up"
+        "live_throughput_warming_up",
+        "live_throughput_direction_unknown",
     ]
+
+
+async def test_get_live_throughput_service_rounds_an_odd_window_up(
+    hass: HomeAssistant,
+) -> None:
+    """Test an odd sample window is served at the next even second, and says so."""
+    entry = _live_entry(hass)
+    payload = {
+        "throughput": [
+            {
+                "name": "bond0",
+                "target": _CORE_UUID,
+                "rx": 1000,
+                "tx": 1000,
+                "devices": {"0C:85:E1:B0:1D:1C": {"rx": 717824, "tx": 806}},
+            }
+        ]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+            new=AsyncMock(return_value=payload),
+        ) as mock_read,
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        async def call(sample_seconds: int) -> dict[str, Any]:
+            response = await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_LIVE_THROUGHPUT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_SAMPLE_SECONDS: sample_seconds,
+                },
+                blocking=True,
+                return_response=True,
+            )
+            assert response is not None
+            return cast(dict[str, Any], response)
+
+        odd = await call(5)
+        odd_reads = mock_read.await_count
+        even = await call(6)
+
+    # Five seconds is served at six: three 2 s readings, never two.
+    assert odd["sample_seconds_requested"] == 5
+    assert odd["sample_seconds"] == 6
+    assert odd["sample_count"] == 3
+    assert odd_reads == 3
+    assert [w["code"] for w in odd["metadata"]["warnings"]] == [
+        "live_throughput_window_rounded"
+    ]
+    assert odd["metadata"]["applied"]["sample_seconds"] == 5
+
+    # An already-even window is served unchanged, with no warning.
+    assert even["sample_seconds_requested"] == 6
+    assert even["sample_seconds"] == 6
+    assert even["metadata"]["warnings"] == []
+
+
+async def test_get_live_throughput_service_reports_one_host_from_the_host_query(
+    hass: HomeAssistant,
+) -> None:
+    """Test a host selector uses the box's single-host query and returns it alone.
+
+    The system answer carries interface counters and a partial per-host map; asking
+    about one host neither needs nor benefits from them, and including them invites
+    a comparison that cannot reconcile.
+    """
+    entry = _live_entry(hass)
+    # Box-centric: `tx` is what the host downloaded.
+    host_payload = {
+        "throughput": [{"target": "0C:85:E1:B0:1D:1C", "tx": 4445962.24, "rx": 19251.2}]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_host_live_throughput_payload",
+            new=AsyncMock(return_value=host_payload),
+        ) as mock_host_read,
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+        ) as mock_system_read,
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_LIVE_THROUGHPUT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_HOST_NAME: "Office Phone",
+                SERVICE_FIELD_SAMPLE_SECONDS: 4,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["scope"] == "host"
+    assert response["host"] == {
+        "host_id": "0C:85:E1:B0:1D:1C",
+        "host_name": "Office Phone",
+        "host_ip": "192.168.10.44",
+    }
+    # Host-scoped answers carry no interface rows at all.
+    assert response["interfaces"] == {"count": 0, "items": []}
+    assert response["hosts"]["count"] == 1
+    host_row = response["hosts"]["items"][0]
+    assert host_row["host_id"] == "0C:85:E1:B0:1D:1C"
+    # The host query is box-centric, so `tx` becomes the download.
+    assert host_row["download_bytes_per_second"] == 4445962.24
+    assert host_row["upload_bytes_per_second"] == 19251.2
+    assert host_row["total_bytes_per_second"] == 4465213.44
+    # Two 2 s readings for a 4 s window, and never the system query.
+    assert mock_host_read.await_count == 2
+    mock_system_read.assert_not_called()
+
+
+async def test_get_live_throughput_service_rejects_host_and_network_together(
+    hass: HomeAssistant,
+) -> None:
+    """Test a request naming both a host and a network is refused."""
+    entry = _live_entry(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_GET_LIVE_THROUGHPUT,
+                {
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                    SERVICE_FIELD_HOST_MAC: "0C:85:E1:B0:1D:1C",
+                    SERVICE_FIELD_NETWORK_UUID: _CORE_UUID,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+
+async def test_get_live_throughput_service_accepts_a_wan_scope(
+    hass: HomeAssistant,
+) -> None:
+    """Test a WAN can be selected, and its direction is read as rx = download.
+
+    The box returns WAN interfaces in the same answer as the LAN ones, and the app's
+    own dashboard chart is exactly this: one cell per WAN. Refusing a WAN here was a
+    restriction in this module, not in the protocol.
+    """
+    entry = _live_entry(hass)
+    runtime_payload = _runtime_payload()
+    # A `phy` interface category is a WAN only when the box marks it as such, and
+    # the shared fixture has LANs only.
+    runtime_payload["networkProfiles"][_WAN_UUID] = {
+        "intf": "eth0",
+        "name": "WAN",
+    }
+    runtime_payload["networkConfig"]["interface"]["phy"] = {
+        "eth0": {"meta": {"name": "WAN", "uuid": _WAN_UUID, "type": "wan"}}
+    }
+    payload = {
+        "throughput": [
+            {"name": "eth0", "target": _WAN_UUID, "rx": 547041, "tx": 131403},
+            {
+                "name": "bond0.10",
+                "target": _CORE_UUID,
+                "rx": 900000,
+                "tx": 20000,
+                "devices": {"0C:85:E1:B0:1D:1C": {"rx": 717824, "tx": 806}},
+            },
+        ]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=runtime_payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_LIVE_THROUGHPUT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_NETWORK_UUID: _WAN_UUID,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    assert response["scope"] == "network"
+    assert response["network"]["kind"] == "wan"
+    interfaces = response["interfaces"]["items"]
+    assert [row["interface_name"] for row in interfaces] == ["eth0"]
+    # On a WAN `rx` is the download, the opposite of a LAN row.
+    assert interfaces[0]["download_bytes_per_second"] == 547041.0
+    assert interfaces[0]["upload_bytes_per_second"] == 131403.0
+    assert interfaces[0]["total_bytes_per_second"] == 678444.0
+    # No host was listed on the WAN, so none is returned.
+    assert response["hosts"]["count"] == 0
+
+
+async def test_get_live_throughput_service_flags_an_aggregate_interface(
+    hass: HomeAssistant,
+) -> None:
+    """Test a trunk published beside its own VLANs is named, so a sum is not naive.
+
+    The box returns `bond0` and each `bond0.*` in the same answer, so adding every
+    row counts the same traffic twice. Nothing in the payload says one contains the
+    other, so the response has to.
+    """
+    entry = _live_entry(hass)
+    payload = {
+        "throughput": [
+            {"name": "bond0", "target": _PRIMARY_UUID, "rx": 179579, "tx": 976324},
+            {"name": "bond0.10", "target": _CORE_UUID, "rx": 49853, "tx": 465909},
+        ]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_LIVE_THROUGHPUT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_SAMPLE_SECONDS: 2,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    codes = [w["code"] for w in response["metadata"]["warnings"]]
+    assert "live_throughput_aggregate_interface" in codes
+    warning = next(
+        w
+        for w in response["metadata"]["warnings"]
+        if w["code"] == "live_throughput_aggregate_interface"
+    )
+    # It names the trunk, not the VLANs it contains.
+    assert "bond0" in warning["message"]
+    assert "bond0.10" not in warning["message"]
 
 
 async def test_get_internet_quality_service_returns_latest_sample(

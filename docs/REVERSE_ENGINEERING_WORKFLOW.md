@@ -269,15 +269,16 @@ envelope of encipher messages (the `ts` value from the `rkey` JSON).
 
 The APK method `n73.m15464y()` implements this priority:
 
-```java
-public String m15464y() {
-    String m15454C = m15454C();  // try rkey.key first
-    if (m15454C.length() == 0) {
-        m15454C = m15456E();     // fall back to symmetricKeys[0].key
-    }
-    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
-}
-```
+1. It asks the `rkey` path for a key. That path caches its result, parses the
+   parsed-`rkey` JSON, reads its `key` field, and RSA-decrypts it. A missing
+   parsed `rkey` yields an empty string rather than an error.
+2. If that returns empty, it asks the direct-key path. That path also caches,
+   reads the first `symmetricKeys` entry's `key` field, and RSA-decrypts it. An
+   empty `symmetricKeys` array yields an empty string.
+3. Whichever it got, it is truncated to its first 32 characters and returned.
+
+The truncation is what makes the two paths interchangeable: both yield AES-256
+key material, and 32 characters is exactly one 256-bit key.
 
 The `xname` field in the group JSON is AES-encrypted box metadata (box name,
 model), not an encrypted key. It is decrypted using the same intermediate key.
@@ -332,15 +333,11 @@ sources depending on what the cloud returns during provisioning:
 
 The APK's `n73.m15464y()` method implements this priority:
 
-```java
-public String m15464y() {
-    String m15454C = m15454C();  // try rkey.key first
-    if (m15454C.length() == 0) {
-        m15454C = m15456E();     // fall back to symmetricKeys[0].key
-    }
-    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
-}
-```
+1. Try the `rkey` path; it caches its answer, and returns an empty string when
+   there is no parsed `rkey`.
+2. If that was empty, fall back to the direct-key path, which also caches and
+   returns an empty string when `symmetricKeys` is empty.
+3. Truncate to 32 characters and return.
 
 The `rkey` field is a JSON string from `symmetricKeys[0].rkey`. The app
 parses it into box metadata (`n73.y0`) via `ue3.m18976a()` → `m15455D()`:
@@ -5466,6 +5463,244 @@ payload from 57,762 bytes of mostly-DNS noise to a handful of real events.
 `/tmp/wanprobe_*.json`; comparison `.tmp/quality_events.json` (the ping alert
 feed, captured 2026-09-10).
 
+### Finding 44: `liveStats` has two scopes, three direction conventions, and the app only ever charts WAN
+
+**Scenario:**
+
+- `get_live_throughput` shipped in 2.5.2 reading the box's `liveStats` at system
+  scope. The owner ran it and the interface totals did not reconcile with the host
+  rows, and the app's own live view showed something different again ("WAN
+  throughput", two cells, upload/download/total only).
+- Probed on a Gold-class box (10 interfaces: `eth0`/`eth1` WAN, `bond0` trunk,
+  five `bond0.*` VLANs, `awg0`/`wg0`) with 62 hosts.
+
+**Result: all of it is explainable, and none of it is a box fault.**
+
+#### 1. There are two request scopes, not one
+
+System scope (what the integration sends):
+
+```json
+{"type": "system", "target": "0.0.0.0",
+ "queries": {"throughput": {"devices": true}},
+ "streaming": {"id": "<stream id>"}}
+```
+
+returns `throughput[]` of interface rows, each optionally carrying a `devices`
+map of `{MAC: {rx, tx}}`.
+
+Host scope (undocumented, but it is what the app's device-detail chart uses):
+
+```json
+{"type": "host", "target": "<MAC>",
+ "queries": {"throughput": {"devices": true}},
+ "streaming": {"id": "<stream id>"}}
+```
+
+returns exactly one row: `{"throughput": [{"target": "<MAC>", "rx": …, "tx": …}]}`.
+A host scope is a single round trip with no averaging window, and an idle host
+answers zeros rather than being omitted — so it is strictly better than sampling
+system scope to answer a per-host question.
+
+Scope validation is strict and returns HTTP-level code 500 for: a missing `type`,
+a `type` other than `system`/`host`, `type: "host"` with a MAC the box does not
+know, and **any request missing the `streaming` key**. Treat 500 as "bad request
+shape", not "box broken".
+
+#### 2. The two scopes have exactly swapped `rx`/`tx`
+
+Same host, same moment, three consecutive rounds:
+
+| round | host | system `devices` map | host scope |
+| --- | --- | --- | --- |
+| 1 | `74:D5:E8:95:FC:34` | rx 4445962.24 / tx 19251.2 | rx 19251.2 / tx 4445962.24 |
+| 2 | `0C:85:E1:EB:6A:AF` | rx 1331691.52 / tx 17612.8 | rx 17612.8 / tx 1331691.52 |
+| 3 | `0C:85:E1:EB:6A:AF` | rx 163840 / tx 2529.28 | rx 2529.28 / tx 163840 |
+
+- **System `devices` map is host-centric:** `rx` is the host's download.
+- **Host scope is box-centric:** `tx` is the host's download.
+
+Three of those hosts were on a LAN VLAN (`bond0.60`), so this holds for LAN hosts,
+not only WAN.
+
+#### 3. Interface direction flips with `network_kind`
+
+An interface's own counters are named from the box's point of view, so "rx" means
+opposite things at each edge:
+
+| interface | kind | host download is | host upload is |
+| --- | --- | --- | --- |
+| `eth0`, `eth1` | `wan` | `rx` | `tx` |
+| `bond0.*`, `bond0` | `lan` | `tx` | `rx` |
+
+The WAN side is independently confirmed twice. Numerically, `eth0` rx (1232 kB/s)
+tracked the sum of host downloads (1074 kB/s) warm-only, while `bond0.10` tx
+(1159 kB/s) tracked the sum of those same hosts' downloads (1030 kB/s). And the
+app's own extraction code is explicit:
+
+```
+x85.m20195h(): cg8Var = new cg8(Math.abs(row.optLong("tx")), Math.abs(row.optLong("rx")));
+cg8.toString(): "UploadDownload(upload=<a>, download=<b>)"
+```
+
+so `rx` → download and `tx` → upload, in the row the app matched. The app only
+ever matches WAN interfaces (§4), so **the LAN mapping above is inferred from
+counter semantics, not confirmed by app code** — the empirical check was
+inconclusive because of §6.
+
+#### 4. The app charts WAN only, and only three numbers
+
+`x85.m20201r()` builds the dashboard chart's target list:
+
+```
+FWNetworkConfig.sortedWanInterfaces(...)   // one cell per WAN
+  fallback: a single hard-coded eth0 cell
+```
+
+Its title string is `live_stats_wan_title`. Each cell renders exactly
+`@string/download`, `@string/upload`, `@string/total` (layout
+`view_live_stats_single_chart.xml`), where `total` is computed client-side by
+summing the other two. **No LAN VLAN, no `bond0` trunk, and no `eth1` unless it is
+a configured WAN is ever charted.** Per-device live throughput is a separate
+screen: `LiveStatsSingleView` inside `DeviceDetailDialog`,
+`SwitchDeviceDetailDialog` and `SwitchPortDetailDialog`.
+
+So the integration publishes an interface dump the app deliberately never shows.
+That is the root of "the summary disagrees with the rows": there is no summary to
+agree with.
+
+#### 5. The trunk and its VLANs both appear
+
+`bond0` (kind `lan`) aggregates its VLANs. Measured: `bond0` rx 179579 / tx
+976324 against sum-of-VLANs 474900 / 1585600 in another sample, and consistently
+within ~5% in both directions. Any caller totalling the `throughput` array counts
+the same bytes twice — 2.11× in one measurement.
+
+`bond0`'s own `devices` map is also nearly empty (3 entries vs 22 on `bond0.60`),
+so the busiest-looking row carries the least detail.
+
+#### 6. Host rows never partition interface totals
+
+Warm readings only, with cold readings excluded so this is not a sampling
+artefact, per-VLAN `interface tx / sum(host download)`:
+
+| interface | ratio |
+| --- | --- |
+| `bond0.70` | 85.5× |
+| `bond0.60` | 9.22× |
+| `bond0.20` | 1.76× |
+| `bond0.90` | 1.65× |
+| `bond0.10` | 1.13× |
+
+The box lists some idle hosts at zero, omits others, and at times a single host
+exceeds its interface counter. Per-host attribution is a hint, not an
+accounting. A service must not imply the two can be reconciled.
+
+#### 7. A cold sampler returns traffic with an empty device map
+
+After the box idles its `iftop` sampler out (~70 s), the **first** reading
+returns nonzero interface counters and **zero** host rows:
+
+```
+idle 70 s, then five readings 2 s apart
+  reading 1: busy_ifaces=8  hosts=0    <-- empty, silently counted
+  reading 2: busy_ifaces=8  hosts=13
+  reading 3: busy_ifaces=8  hosts=28
+  reading 4: busy_ifaces=8  hosts=35
+  reading 5: busy_ifaces=8  hosts=40
+```
+
+Later readings are also smaller than the last, so the ramp is gradual rather than
+a single bad sample. Two consequences for any averaging: an empty reading must
+not enter the divisor, and "every interface rate is zero" is the wrong warm-up
+test — this reading had 435 kB/s of traffic on it.
+
+#### 8. WAN scope is a client-side filter, not a protocol scope
+
+Worth stating plainly, because it is easy to get backwards: **the app never asks
+the box for "WAN throughput".** It sends one system-scope request and filters the
+resulting `throughput` array itself.
+
+`x85.m20201r()` builds a target list from `FWNetworkConfig.sortedWanInterfaces()`
+— that is box *configuration*, read from the init payload, not from `liveStats`.
+`x85.m20195h()` then walks the system response's `throughput` rows and keeps those
+whose `name` (`FWNetwork.META_KEY_NAME`) or `target` matches an entry in that list.
+Everything else in the array is discarded client-side.
+
+Two consequences:
+
+- The box already returns `eth0` and `eth1` with `network_kind: wan` in the same
+  response the integration fetches today. Nothing is missing and nothing extra
+  needs requesting.
+- Our selector refusing WAN is **our** restriction, not the box's.
+  `get_available_networks()` filters to `LAN` and `VLAN`, so a WAN UUID is rejected
+  with `network_not_found` even though the row is sitting in the payload we already
+  have. That is a design choice in the service layer, and it should be judged as
+  one.
+
+The same is true of the aggregate: the app's "total" is `download + upload`
+computed client-side. The box never publishes a total, and never publishes a
+network-level sum of hosts. Any "network total" we expose is our arithmetic, and
+should be labelled as such.
+
+#### 9. Same-VLAN traffic is never visible, and network totals are routed only
+
+Host-to-host traffic on one segment is switched, not routed, so it never crosses
+the box's interface counters. This is not a gap in the capture or a firmware
+quirk; it is how a bridge works. Two consequences:
+
+- A **network total is routed traffic only.** Two hosts on the same VLAN
+  exchanging 2 MB/s contribute nothing to that VLAN's counters. Do not describe a
+  segment total as "all traffic on this network": say routed traffic.
+- A **host row can exceed its segment's counters** without anything being wrong.
+  A host that receives 2 MB/s from a same-VLAN peer shows that receive in its own
+  `devices` entry while the VLAN row does not move. This is a third reason, on top
+  of §6, that host rows and interface rows cannot be reconciled.
+
+So a host's own live figure is complete (the box taps the host, not the router),
+while a segment or WAN figure counts only what crossed that interface. For "how
+fast is this device going", the host figure is the only correct one.
+
+#### 10. What remains inferred rather than confirmed
+
+- **The LAN direction mapping.** `eth0` (rx → download) is confirmed twice:
+  numerically against summed host downloads, and by `x85.m20195h()`'s
+  `cg8(upload=tx, download=rx)` construction. The LAN rows are only ever matched by
+  that same app path, which never selects them, so `bond0.*` is inferred from
+  counter semantics — the trunk aggregates the VLANs, and a trunk's counters face
+  the box, which makes `tx` the toward-hosts direction.
+- **Per-host attribution.** §6's ratios run from 1.13× to 85×, so no host sum can
+  be reconciled with any interface counter, and none should be presented as if it
+  could.
+- **The VPN direction mapping is assumed from the LAN one.** `wg0` and `awg0`
+  reported zero in every probe, so no reading was ever taken on an active tunnel.
+  They are grouped with the LAN kinds because a tunnel's counters face the same
+  way a bridge's do — toward the peers it carries — but that is reasoning, not
+  measurement. A tunnel that turns out to be counter-oriented like a WAN would
+  report download and upload swapped, so check one against a known transfer before
+  relying on VPN rows.
+
+**Design consequence.** Model the two questions the app models, and stop
+publishing the raw dump as if it were one answer:
+
+- a WAN **selection** over the response we already fetch, returning
+download/upload/total per WAN, since that is what the app shows and what
+"internet throughput" means. No new request is involved: `eth0`/`eth1` are
+already in the payload with `network_kind: wan`, and only our selector refuses
+them
+- a per-host scope backed by `type: "host"`, which is one round trip and exact
+- direction-correct field names (`download_bytes_per_second` /
+`upload_bytes_per_second`), because `rx`/`tx` are unreadable without knowing
+both the row's kind and which of the two scopes produced it
+- drop or mark the `bond0` trunk whenever its VLANs are present
+- a warm-up test based on "no device rows on any busy interface", not on all
+zeros
+- totals labelled as our arithmetic, since the box publishes none
+
+**Artifacts:** live session 2026-11-02 against the owner's box; probes in
+`/tmp/probe_host*.py`, `/tmp/dir_test.py`, `/tmp/recheck_warm.py`,
+`/tmp/lan_dir.py`.
+
 ## Capture workflow note
 
 Later in reverse engineering, repeated zero-byte pcap files were traced to two
@@ -5621,26 +5856,17 @@ handles most ProGuard / R8 obfuscation.
 
 ### Confirmed outer payload format (Android app v1.69.1)
 
-From `y2.java` case 2 and `wx3.java`:
+From `y2.java` case 2 and `wx3.java`, the outer HTTP payload is built like this:
 
-```java
-// wx3.c() builds:
-JSONObject outer = new JSONObject();
-outer.put("timestamp", System.currentTimeMillis() / 1000);
-outer.put("message", encrypted_payload);
+1. `wx3.c()` creates an object and puts two keys into it: `timestamp`, as whole
+   seconds, and `message`, as the encrypted payload.
+2. If the parsed box metadata carries a `ts` value, it is added as `rkeyts` when
+   it is greater than zero. When it is absent or zero, nothing is added at this
+   stage.
+3. The caller in `y2.java` then puts `mtype: "msg"` into the same object, and
+   adds `rkeyts: 1` as a fallback when the box had no `ts`.
 
-// If the box metadata (n73.y0) has a "ts" value, send it as rkeyts:
-long optLong = jSONObject2 != null ? jSONObject2.optLong("ts") : 0L;
-if (optLong > 0) {
-    outer.put("rkeyts", optLong);
-}
-
-// y2.java caller then adds:
-c.put("mtype", "msg");       // mtype added to outer by the message sender
-c.put("rkeyts", 1);          // fallback: rkeyts=1 when box has no ts
-```
-
-The APK source confirms the app sends both `timestamp` and `mtype"msg"` in
+The APK confirms the app sends both `timestamp` and `mtype` in
 the outer envelope, plus `rkeyts` when available. **However, captured phone
 traffic does not show `mtype` in the outer envelope** — neither the working
 Gold capture nor the Gold Plus capture. The box accepts messages both with
@@ -5766,14 +5992,11 @@ recently. The Firewalla app surfaces this as the "Show past devices" toggle
 
 ### Inner encrypted envelope format (for reference)
 
-From `wx3.d()`:
-
-```java
-String inner = "{\"message\":{\"mtype\":\"msg\",\"type\":\"jsondata\",\"msg\":\"\",\"from\":\"Android\""
-    + ",\"obj\":" + serialized_obj
-    + ",\"appInfo\":" + app_info_json
-    + ",\"compressMode\":1}, \"mtype\":\"msg\"}";
-```
+From `wx3.d()`, the inner structure is a JSON object with a single `message` key,
+whose value is the command itself: `mtype` of `msg`, `type` of `jsondata`, an
+empty `msg` string, `from` set to `Android`, the serialized `obj`, the `appInfo`
+object, and `compressMode` set to `1`. The same `mtype: "msg"` also appears at
+that inner level, which is why reading the two layers apart matters.
 
 This produces a nested JSON that gets encrypted and placed in the outer
 `"message"` field. The integration uses the equivalent structure directly
@@ -5908,15 +6131,10 @@ cloud MSP subscription data structure that includes:
 - `channel` — software update channel
 - `version` — MSP data version
 
-The `xz2.java` init parser reads this at line ~3235:
-
-```java
-JSONObject optJSONObject16 = jSONObject2.optJSONObject("mspData");
-if (optJSONObject16 != null) {
-    JSONArray optJSONArray = optJSONObject16.optJSONArray("targetlists");
-    // each element parsed into a08 (TargetListItem)
-}
-```
+The init parser reads it by taking `mspData` from the top-level object, and then
+the `targetlists` array from that block. Each element of the array is parsed into
+the app's target-list item model. When `mspData` is absent, no target lists are
+read, which is why a box without an MSP subscription answers an empty list.
 
 #### Target list ID prefixes
 

@@ -316,7 +316,7 @@ class FirewallaAlarmManager(FirewallaBaseManager):
         duration: str,
     ) -> None:
         """Create a scoped silence using verified local mute payload shapes."""
-        expiry = self._get_expiry_timestamp(duration)
+        expiry = await self._async_get_expiry_timestamp(duration)
         alarm = await self._async_find_alarm(alarm_id) if alarm_id is not None else None
         if alarm_id is not None and alarm is None:
             raise ValueError("Alarm was not found in the active or archived set")
@@ -435,12 +435,17 @@ class FirewallaAlarmManager(FirewallaBaseManager):
             return {"p.tag.ids": [scope_target or ""]}
         return {"p.intf.id": scope_target or ""}
 
-    def _get_expiry_timestamp(self, duration: str) -> int | None:
+    async def _async_get_expiry_timestamp(self, duration: str) -> int | None:
         """Return the verified local-runtime expiry timestamp for one duration."""
         if duration == "always":
             return None
         if duration == "today":
-            time_zone = dt_util.get_time_zone(self.client.timezone_name or "UTC") or UTC
+            # The box's zone is not the one Home Assistant loaded, so resolving it
+            # reads tzdata -- off the loop, like the report helpers.
+            time_zone = (
+                await dt_util.async_get_time_zone(self.client.timezone_name or "UTC")
+                or UTC
+            )
             now = dt_util.now(time_zone)
             return int(
                 (now + timedelta(days=1))

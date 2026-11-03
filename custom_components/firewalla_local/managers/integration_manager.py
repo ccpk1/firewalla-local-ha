@@ -28,6 +28,7 @@ from ..const import (
     PLATFORM_SENSOR,
     PLATFORM_SWITCH,
 )
+from ..helpers.device_registry import via_device_kwargs
 from ..models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
@@ -2480,7 +2481,9 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 model=_TRACKED_CLIENT_DEVICE_MODEL,
                 name=device_name,
                 serial_number=dr.format_mac(mac),
-                via_device_id=router_device.id,
+                **via_device_kwargs(
+                    router_device.id, self.build_primary_device_identifier()
+                ),
             )
 
             if device.name_by_user is None and device.name != device_name:
@@ -2551,7 +2554,9 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
                 model=ap.model or "fwap",
                 name=device_name,
                 serial_number=dr.format_mac(ap.asset_id),
-                via_device_id=router_device.id,
+                **via_device_kwargs(
+                    router_device.id, self.build_primary_device_identifier()
+                ),
             )
 
             if device.name_by_user is None and device.name != device_name:

@@ -218,24 +218,11 @@ next steps.
 
 ## 5. `rkeyts` origin
 
-The `rkeyts` value in the outer envelope comes from the APK source:
-
-```java
-// wx3.java - c() method
-JSONObject jSONObject2 = n73Var.y0;
-long optLong = jSONObject2 != null ? jSONObject2.optLong("ts") : 0L;
-if (optLong > 0) {
-    jSONObject.put("rkeyts", optLong);
-}
-
-// y2.java - case 2 (local message send)
-JSONObject c = wx3Var.c(n73Var);
-c.put("mtype", "msg");
-JSONObject jSONObject = n73Var.y0;
-if ((jSONObject != null ? jSONObject.optLong("ts") : 0L) == 0) {
-    c.put("rkeyts", 1);
-}
-```
+The `rkeyts` value in the outer envelope comes from the APK in two stages. The
+envelope builder (`wx3.c()`) reads the parsed box metadata's `ts` value and adds
+it as `rkeyts` only when it is greater than zero. The local-send path (`y2.java`,
+case 2) then adds `mtype: "msg"` to the same payload, and adds `rkeyts: 1` as a
+fallback when the box had no `ts` at all.
 
 The `rkeyts` is a box-level timestamp from `n73.y0.ts`. If the box has no `ts`,
 the app sends `rkeyts: 1`. This is a sync/replay-prevention mechanism, not
@@ -246,21 +233,15 @@ and its absence in the Gold-working capture is a box firmware difference.
 
 ## 6. `mtype` in outer envelope — origin
 
-The `mtype` commit was based on analysis of the APK `wx3.d()` method:
+The `mtype` commit was based on analysis of the APK's inner-message builder,
+`wx3.d()`, which appends `,"compressMode":1}, "mtype":"msg"}` to the string it is
+assembling. That trailing fragment also closes the `message` object, so the
+`mtype` it carries reads as part of the *inner* structure, not the outer one.
 
-```java
-// wx3.d() — builds the inner encrypted message string
-sb.append(",\"compressMode\":1}, \"mtype\":\"msg\"}");
-```
-
-This string was interpreted as the outer envelope format, but it is actually
-the **inner** message structure. The outer `mtype` is added by `y2.java`:
-
-```java
-// y2.java — case 2, after calling wx3.c()
-JSONObject c = wx3Var.c(n73Var);   // builds {timestamp, message}
-c.put("mtype", "msg");              // adds mtype to outer
-```
+This string was originally interpreted as the outer envelope format, but it is
+actually the **inner** message structure. The outer `mtype` is added separately by
+the message sender in `y2.java`, case 2, which builds `{timestamp, message}` and
+then adds `mtype: "msg"` to that object.
 
 The APK confirms the phone app sends `mtype` in the outer envelope. However,
 **neither captured phone trace shows it.** Possible explanations:
@@ -304,26 +285,17 @@ issue.
 ### Cloud login response parsing (`z73.m21307g`)
 
 The cloud login response contains a `groups` array. Each group is parsed into
-an `n73` object via `n73.m15460I()`:
+an `n73` object via `n73.m15460I()`, which:
 
-```java
-// n73.m15460I() — parses group JSON from cloud
-this.f22533K = jSONObject.getString("info");      // AES-encrypted box metadata
-this.f22534X = jSONObject.getString("xname");     // AES-encrypted box name
+- reads `info` and `xname`, both AES-encrypted box metadata — `info` decrypts to
+  the model description and `xname` to the box's display name
+- reads `symmetricKeys` as an array and parses every element into a `ue3`, keeping
+  the cloud's order
+- decrypts `info` with the first 32 characters of the direct key to recover the
+  model
 
-// Parse symmetricKeys array
-JSONArray jSONArray = jSONObject.getJSONArray("symmetricKeys");
-for (int i = 0; i < length; i++) {
-    ue3 ue3Var = new ue3();
-    ue3Var.m18976a(jSONArray.getJSONObject(i));
-    arrayList.add(ue3Var);
-}
-
-// Decrypt box info to get model
-JSONObject jSONObject2 = new JSONObject(
-    s97.m18101c(this.f22533K, m15456E().substring(0, 32))
-);
-```
+Decrypting `info` with the direct key matters: reading the model does not depend
+on the `rkey` path having succeeded.
 
 ### `ue3` — symmetric key entry
 
@@ -334,15 +306,10 @@ Each `symmetricKeys` array entry has:
 
 ### `m15455D()` — parse `rkey` into box metadata
 
-```java
-public JSONObject m15455D() {
-    ue3 ue3Var = (ue3) arrayList.get(0);
-    if (ue3Var.f33133b.length() != 0) {  // rkey is non-empty
-        return new JSONObject(ue3Var.f33133b);  // parse rkey as JSON → n73.y0
-    }
-    return null;
-}
-```
+It takes the first key entry and returns `null` when that entry's `rkey` string is
+empty. Otherwise it parses the string as JSON and exposes the result as the parsed
+box metadata (`n73.y0`). Nothing is decrypted at this stage — the RSA operations
+happen when a key is actually requested.
 
 The `rkey` field is a JSON string containing at minimum:
 ```json
@@ -354,48 +321,25 @@ is what appears as `rkeyts` in the outer envelope.
 
 ### `m15454C()` — get the rotation key
 
-```java
-public String m15454C() {
-    if (this.f22531I0.length() > 0) return this.f22531I0;  // cached
-    JSONObject jSONObject = this.f22542y0;  // n73.y0 = parsed rkey JSON
-    if (jSONObject == null) return Strings.EMPTY;
-    String optString = jSONObject.optString("key");  // rkey.key
-    return s97.m18106q(optString, s97.f29914K);  // RSA-decrypt
-}
-```
+It caches its result, returns an empty string when there is no parsed `rkey`, and
+otherwise reads that object's `key` field and RSA-decrypts it. An entry that
+parses but has no `key` therefore yields an empty string rather than raising.
 
-This RSA-decrypts the `key` field from the `rkey` JSON. The result is the
-**rotation key** — a different symmetric key than `symmetricKeys[0].key`.
+The result is the **rotation key** — a different symmetric key than
+`symmetricKeys[0].key`.
 
 ### `m15456E()` — get the fallback symmetric key
 
-```java
-public String m15456E() {
-    if (this.f22530H0.length() > 0) return this.f22530H0;  // cached
-    ArrayList arrayList = this.f22541x0;  // symmetricKeys array
-    if (arrayList.isEmpty()) return Strings.EMPTY;
-    String m18106q = s97.m18106q(
-        ((ue3) arrayList.get(0)).f33132a,  // symmetricKeys[0].key
-        s97.f29914K                         // RSA private key
-    );
-    this.f22530H0 = m18106q;
-    return m18106q;
-}
-```
-
-This RSA-decrypts `symmetricKeys[0].key` — the fallback key.
+It caches as well, and returns an empty string when `symmetricKeys` is empty.
+Otherwise it reads the first entry's `key` field and RSA-decrypts it with the same
+bundled private key.
 
 ### `m15464y()` — the actual key used for local Encipher encryption
 
-```java
-public String m15464y() {
-    String m15454C = m15454C();  // try rkey.key first
-    if (m15454C.length() == 0) {
-        m15454C = m15456E();     // fall back to symmetricKeys[0].key
-    }
-    return m15454C.length() > 32 ? m15454C.substring(0, 32) : m15454C;
-}
-```
+It tries the rotation key path first, falls back to the direct key when that came
+back empty, and truncates the result to 32 characters. Both paths return
+RSA-decrypted key material, so the truncation is what makes them interchangeable:
+32 characters is one AES-256 key.
 
 **This is the method called by `wx3.c()` to get the encryption key.**
 It tries the rotation key (`rkey.key`) first, and only falls back to

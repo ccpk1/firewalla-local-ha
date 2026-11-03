@@ -76,6 +76,9 @@ from custom_components.firewalla_local.const import (
     DOMAIN,
     TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY,
 )
+from custom_components.firewalla_local.helpers.device_registry import (
+    async_get_entry_device,
+)
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
@@ -1379,11 +1382,11 @@ async def test_ap_status_binary_sensor_exposes_state_and_attributes(
     assert state.attributes[ATTR_AP_DISABLE_ACL] is False
     assert state.attributes[ATTR_AP_CLIENT_COUNT] == 2
 
-    ap_device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, "license-123_ap_20:6d:31:71:1d:d0"), entry.entry_id
+    ap_device = async_get_entry_device(
+        dr.async_get(hass), (DOMAIN, "license-123_ap_20:6d:31:71:1d:d0"), entry.entry_id
     )
-    router_device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, "license-123"), entry.entry_id
+    router_device = async_get_entry_device(
+        dr.async_get(hass), (DOMAIN, "license-123"), entry.entry_id
     )
     assert ap_device is not None
     assert router_device is not None

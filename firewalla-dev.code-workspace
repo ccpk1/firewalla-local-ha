@@ -9,6 +9,11 @@
     },
   ],
   "settings": {
+    // Workspace scope covers BOTH folders, so this value is what the `core`
+    // folder needs: core installed editable from /workspaces/core (2026.11 dev).
+    // The firewalla folder overrides it in `.vscode/settings.json`, because its
+    // tests must run against the Home Assistant release that
+    // pytest-homeassistant-custom-component pins, not core dev. See that file.
     "python.defaultInterpreterPath": "/home/vscode/.local/ha-venv/bin/python",
     // Analyse only files that are actually open. Without this, Pylance walks the
     // whole workspace folder, and the `core` folder alone holds ~23k Python
@@ -69,6 +74,7 @@
       "**/.ruff_cache/**": true,
       "**/__pycache__/**": true,
       "**/node_modules/**": true,
+      "**/.venv/**": true,
       "**/site-packages/**": true,
       "${workspaceFolder:core}/**": true,
     },
@@ -91,9 +97,16 @@
       "**/.mypy_cache": true,
       "**/.pytest_cache": true,
       "**/.ruff_cache": true,
-      "**/.tmp": true,
+      // `.tmp` stays visible on purpose: it holds working notes, release drafts
+      // and PR bodies that are meant to be read. Only the decompiled-APK trees
+      // are excluded — three jadx outputs holding ~41,400 .java files between
+      // them, which make the Explorer crawl and are never opened by hand.
+      // `git check-ignore` still reports `.tmp/` ignored, so visibility here
+      // never risks committing it.
+      "**/.tmp/Firewalla_*": true,
       "**/.artifacts": true,
       "**/.captures": true,
+      "**/.venv": true,
       "**/site-packages": true,
       "/home/vscode/.local/ha-venv": true,
     },
@@ -122,20 +135,52 @@
           "runOn": "folderOpen",
         },
       },
+      // The three validation tasks must NOT rely on `python` from PATH. In this
+      // dev container that is /home/vscode/.local/ha-venv, which has core dev
+      // (2026.11) installed editable; running the test suite there aborts while
+      // loading pytest-homeassistant-custom-component, which imports httpx
+      // before Home Assistant can alias it to httpx2. `.venv` is the isolated
+      // environment CI builds with `pip install -e ".[dev]"`.
+      {
+        "label": "Setup test venv",
+        "detail": "Create .venv with the HA release the test plugin pins",
+        "type": "shell",
+        "command": "uv venv .venv --python 3.14 && uv pip install --python .venv/bin/python -e '.[dev]'",
+        "options": {
+          "cwd": "${workspaceFolder:firewalla-local-ha}",
+        },
+        "problemMatcher": [],
+      },
       {
         "label": "Ruff",
         "type": "shell",
-        "command": "python -m ruff check .",
+        "command": "${workspaceFolder:firewalla-local-ha}/.venv/bin/python",
+        "args": ["-m", "ruff", "check", "."],
+        "options": {
+          "cwd": "${workspaceFolder:firewalla-local-ha}",
+        },
       },
       {
         "label": "MyPy",
         "type": "shell",
-        "command": "python -m mypy custom_components/firewalla_local",
+        "command": "${workspaceFolder:firewalla-local-ha}/.venv/bin/python",
+        "args": ["-m", "mypy", "custom_components/firewalla_local"],
+        "options": {
+          "cwd": "${workspaceFolder:firewalla-local-ha}",
+        },
       },
       {
         "label": "Pytest",
         "type": "shell",
-        "command": "python -m pytest tests/ -v",
+        "command": "${workspaceFolder:firewalla-local-ha}/.venv/bin/python",
+        "args": ["-m", "pytest", "tests/", "-v"],
+        "options": {
+          "cwd": "${workspaceFolder:firewalla-local-ha}",
+        },
+        "group": {
+          "kind": "test",
+          "isDefault": true,
+        },
       },
     ],
   },

@@ -33,6 +33,9 @@ from custom_components.firewalla_local.const import (
     DOMAIN,
     TRANS_KEY_PURPOSE_DEVICE_TRACKER_PRESENCE,
 )
+from custom_components.firewalla_local.helpers.device_registry import (
+    async_get_entry_device,
+)
 from custom_components.firewalla_local.models import (
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
@@ -58,7 +61,8 @@ def _tracked_client_device(
     hass: HomeAssistant, entry, mac: str
 ) -> dr.DeviceEntry | None:
     """Return the tracked-client device for one selected MAC."""
-    return dr.async_get(hass).async_get_device_by_identifier(
+    return async_get_entry_device(
+        dr.async_get(hass),
         entry.runtime_data.integration_manager.build_tracked_client_device_identifier(
             mac
         ),
@@ -178,8 +182,8 @@ async def test_device_tracker_exposes_state_and_attributes(
     )
     tracker_entry = _device_tracker_registry_entry(hass, entry.entry_id)
     client_device = _tracked_client_device(hass, entry, "AA:BB:CC:DD:EE:FF")
-    router_device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, "license-123"), entry.entry_id
+    router_device = async_get_entry_device(
+        dr.async_get(hass), (DOMAIN, "license-123"), entry.entry_id
     )
 
     assert client_device is not None
@@ -188,7 +192,9 @@ async def test_device_tracker_exposes_state_and_attributes(
     assert client_device.name == "Kaden Phone"
     assert client_device.via_device_id == router_device.id
     assert tracker_state.name is not None
-    assert tracker_state.name == "Kaden Phone Presence"
+    # Assert the entity's own name: newer Core composes the device name into the
+    # state name and 2025.10 does not, so the composed value is not portable.
+    assert tracker_entry.original_name == "Presence"
     assert tracker_entry.entity_id == "device_tracker.presence"
     assert tracker_state.state == STATE_HOME
     assert (
@@ -321,11 +327,12 @@ async def test_device_tracker_is_unavailable_when_host_missing(
         hass, "_AA:BB:CC:DD:EE:FF_device_tracker"
     )
     client_device = _tracked_client_device(hass, entry, "AA:BB:CC:DD:EE:FF")
+    tracker_entry = _device_tracker_registry_entry(hass, entry.entry_id)
 
     assert client_device is not None
     assert client_device.name == "Client aa:bb:cc:dd:ee:ff"
     assert tracker_state.name is not None
-    assert tracker_state.name == "Client aa:bb:cc:dd:ee:ff Presence"
+    assert tracker_entry.original_name == "Presence"
     assert tracker_state.state == STATE_UNAVAILABLE
 
 
@@ -478,7 +485,7 @@ async def test_device_tracker_device_name_follows_host_rename(
         initial_state = hass.states.get(tracker_entry.entity_id)
         assert initial_state is not None
         assert initial_state.name is not None
-        assert initial_state.name == "Kaden Phone Presence"
+        assert tracker_entry.original_name == "Presence"
         assert client_device is not None
         assert client_device.name == "Kaden Phone"
 
@@ -491,7 +498,7 @@ async def test_device_tracker_device_name_follows_host_rename(
     assert renamed_state.name is not None
     # The device name follows Firewalla (source of record), but the entity
     # name and ID stay stable until the user manually regenerates them.
-    assert renamed_state.name == "Kaden Phone Presence"
+    assert tracker_entry.original_name == "Presence"
     assert renamed_device is not None
     assert renamed_device.name == "Kaden Pixel"
 
@@ -576,11 +583,11 @@ async def test_device_tracker_unique_ids_are_entry_scoped(
     second_client_device = _tracked_client_device(
         hass, second_entry, "AA:BB:CC:DD:EE:FF"
     )
-    first_router_device = device_registry.async_get_device_by_identifier(
-        (DOMAIN, "license-123"), first_entry.entry_id
+    first_router_device = async_get_entry_device(
+        device_registry, (DOMAIN, "license-123"), first_entry.entry_id
     )
-    second_router_device = device_registry.async_get_device_by_identifier(
-        (DOMAIN, "license-456"), second_entry.entry_id
+    second_router_device = async_get_entry_device(
+        device_registry, (DOMAIN, "license-456"), second_entry.entry_id
     )
 
     assert len(tracker_entries) == 2

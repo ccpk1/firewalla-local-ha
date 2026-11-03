@@ -15,3 +15,8 @@ etp.public.pem
 
 # Generated support exports
 utils/exports/*.txt
+
+# Coverage output
+.coverage
+.coverage.*
+htmlcov/

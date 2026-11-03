@@ -33,3 +33,31 @@ jobs:
 
       - name: Run pytest
         run: python -m pytest tests/ -v
+
+  # `hacs.json` declares Home Assistant 2025.10 as the floor, and that release
+  # runs on Python 3.13. Pin the test harness to the release that targeted it so
+  # the claim is enforced instead of assumed: the tool surface is skipped there,
+  # everything else must pass.
+  floor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install the test harness pinned to Home Assistant 2025.10
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pytest-homeassistant-custom-component==0.13.285" \
+            "hassil==3.12.1" "gazetteer-matcher==1.1.0" "pycares==4.9.0" \
+            "pytest>=8.3.5" "pytest-asyncio>=0.26.0"
+          python -c "import importlib.metadata as m; print('Home Assistant', m.version('homeassistant'))"
+
+      - name: Run pytest against the declared floor
+        run: python -m pytest tests/ -v

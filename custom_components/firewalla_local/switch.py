@@ -147,7 +147,9 @@ class FirewallaRuleSwitch(FirewallaEntity, SwitchEntity):
         """Return stable attributes that describe the selected rule template."""
         matching_rules = self._matching_rules
         matched_rule = self._matched_rule
-        time_zone = dt_util.get_time_zone(self.coordinator.hass.config.time_zone)
+        # The default zone is the configured one, already resolved and cached at
+        # startup, so a state-attribute read cannot touch tzdata on the loop.
+        time_zone = dt_util.get_default_time_zone()
         notes = [rule.notes for rule in matching_rules if isinstance(rule.notes, str)]
         schedule_next_start = (
             matched_rule.schedule_next_start(time_zone=time_zone)

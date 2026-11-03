@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import probatio
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import Context, HomeAssistant
@@ -29,6 +30,7 @@ from custom_components.firewalla_local.models import (
 )
 
 GET_HOSTS_TOOL = "firewalla_local__get_hosts"
+GET_LIVE_THROUGHPUT_TOOL = "firewalla_local__get_live_throughput"
 GET_RULES_TOOL = "firewalla_local__get_rules"
 
 # Every read tool and the response_type it reports in meta.
@@ -43,6 +45,7 @@ _READ_TOOLS: tuple[tuple[str, str], ...] = (
     ("firewalla_local__get_time_usage", "user_usage"),
     ("firewalla_local__get_flow_report", "flow_report"),
     ("firewalla_local__get_internet_quality", "internet_quality"),
+    ("firewalla_local__get_live_throughput", "live_throughput"),
     ("firewalla_local__get_speed_tests", "speed_tests"),
     ("firewalla_local__get_wireless_status", "wireless_status"),
     ("firewalla_local__get_alarms", "alarms"),
@@ -195,6 +198,35 @@ async def test_get_rules_returns_flat_rule_shape(hass: HomeAssistant) -> None:
     assert rule["target_type"] == "dns"
     assert rule["scope"] == ["0C:85:E1:B0:1D:1C"]
     assert rule["alarm_id"] == "1728"
+
+
+async def test_live_throughput_tool_defaults_to_six_seconds(
+    hass: HomeAssistant,
+) -> None:
+    """The live tool samples 6 s by default and admits any value in range.
+
+    The service default is 10 s, but a read tool blocks the conversation turn, so
+    the tool asks for less unless the caller explicitly wants more. Odd values are
+    accepted rather than rejected: the service rounds them up to the next even
+    second, which is friendlier than refusing the call.
+    """
+    await _setup_hass(hass)
+    api_instance = await llm.async_get_api(hass, _api_id(hass), _llm_context())
+    tool = next(
+        candidate
+        for candidate in api_instance.tools
+        if candidate.name == GET_LIVE_THROUGHPUT_TOOL
+    )
+
+    assert tool.parameters({})["sample_seconds"] == 6
+    assert tool.parameters({"sample_seconds": 2})["sample_seconds"] == 2
+    assert tool.parameters({"sample_seconds": 5})["sample_seconds"] == 5
+    assert tool.parameters({"sample_seconds": 30})["sample_seconds"] == 30
+
+    with pytest.raises(probatio.Invalid):
+        tool.parameters({"sample_seconds": 1})
+    with pytest.raises(probatio.Invalid):
+        tool.parameters({"sample_seconds": 31})
 
 
 async def test_get_hosts_returns_host_records(hass: HomeAssistant) -> None:

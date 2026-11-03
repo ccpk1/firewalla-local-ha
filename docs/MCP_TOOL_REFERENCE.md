@@ -337,6 +337,7 @@ to one host.
 | Usage & health | `get_time_usage` | read | read+ |
 | Usage & health | `get_flow_report` | read | read+ |
 | Usage & health | `get_internet_quality` | read | read+ |
+| Usage & health | `get_live_throughput` | read | read+ |
 | Usage & health | `get_speed_tests` | read | read+ |
 | Usage & health | `get_wireless_status` | read | read+ |
 | Usage & health | `run_internet_speed_test` | control | control+ |
@@ -721,6 +722,66 @@ Reads that explain what the network is doing and how it is performing.
   measurement use `run_internet_speed_test`; for past results use `get_speed_tests`.
 - **Inputs:** `wan_uuid`/`wan_name` (optional — for multi-WAN); `limit` (default 1 —
   raise for a short history of samples); `refresh`.
+- **Availability:** read, default-on.
+- **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
+
+### `firewalla_local__get_live_throughput`
+
+- **Answers:** "Which device is using the bandwidth right now?" / "How fast is my
+  internet right now?" / "How fast is this one device going?"
+- **When to use / not:** live rates. Every other usage tool reports totals over a
+  window, so this is the only one that answers *now*. For volume over time use
+  `get_network_usage`; for latency use `get_internet_quality`.
+- **Three scopes**, and `result.scope` says which was used:
+
+  | selectors | scope | answers |
+  | --- | --- | --- |
+  | `host_mac` or `host_name` | `host` | that device alone |
+  | `network_uuid` or `network_name` | `network` | that segment's interfaces and its hosts |
+  | neither | `network` (all) | every host on every network, busiest first |
+
+  Host and network selectors are mutually exclusive. A WAN is a valid network
+  selector — that is how "what is my internet doing" is asked, and it is what the
+  app's own dashboard chart shows.
+- **Host scope is exact, and cheap.** It uses the box's single-host query: one
+  request per reading, no interface counters, and an idle device answers zeros
+  rather than being omitted. It also avoids every reconciliation trap below, so
+  prefer it whenever the question names a device.
+- **Inputs:** `host_mac`/`host_name` (one device, from `get_hosts`); or
+  `network_uuid`/`network_name` (one network, WAN included); `top_n` (default 10,
+  the busiest hosts); `sample_seconds` (**default **6**, any value 2–30, rounded
+  **up** to the next even second).
+- **Sampling:** the call blocks for about `sample_seconds`, because the box is
+  read repeatedly across the window and averaged. One reading is a 2 s average,
+  so an odd request is served at the next even second and never at a shorter
+  one; the answer says which it served (`sample_seconds`) and what was asked
+  (`sample_seconds_requested`), with a `live_throughput_window_rounded` warning
+  when they differ. 6 s is the default so a conversation turn does not stall; it
+  is not a lot of coverage, and a stream that bursts can read as idle at that
+  length. Raise it to 10–30 when the answer must be trusted, and never raise it
+  without saying the call will take that long.
+- **Returns:** read envelope — `result.hosts.items[]` busiest first, each with
+  `host_id`, `host_name`, `host_ip`, `download_bytes_per_second`,
+  `upload_bytes_per_second`, `total_bytes_per_second`, and its network;
+  `result.interfaces.items[]` with `download_bytes_per_second`,
+  `upload_bytes_per_second`, `total_bytes_per_second` and `network_kind`; plus
+  `scope`, `host`, `network`, `sampled_at`, `sample_seconds`, `sample_count`, and
+  `metadata`. Rates are **bytes per second**. `hosts.count` is returned,
+  `hosts.available` is how many there were.
+- **Never add or compare the two collections.** Network rows are interface
+  counters; host rows are the box's best-effort attribution. Measured on one box
+  they differ by 1.1× to 85× per segment. Adding them double-counts, and an
+  aggregate interface (a `bond0` trunk above its VLANs) is named by a
+  `live_throughput_aggregate_interface` warning because it contains the rows
+  beside it.
+- **A network figure is routed traffic only.** Same-segment traffic is switched,
+  so it appears in the devices' own figures and never in the segment's.
+- **Cold sampler:** a first call starts the box's sampler, which answers real
+  interface traffic with no host attributed to it yet. That is reported as
+  `warming_up: true` with a `live_throughput_warming_up` warning, never as an
+  idle network — call again rather than concluding nothing is using the
+  connection. Empty readings are excluded from the average, so a cold call is not
+  diluted either.
 - **Availability:** read, default-on.
 - **Annotations:** `read_only=true, destructive=false, idempotent=true, open_world=true`.
 

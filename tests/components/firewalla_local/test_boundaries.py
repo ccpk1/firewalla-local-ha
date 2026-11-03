@@ -85,3 +85,35 @@ def test_platforms_do_not_call_protocol_mutations_directly() -> None:
         or "async_delete_rule(" in path.read_text()
     ]
     assert offenders == []
+
+
+def _sync_time_zone_calls(path: Path) -> list[str]:
+    """Return the synchronous `get_time_zone` calls in one file.
+
+    Matched on the attribute access rather than on text, so a call inside a
+    comment or a docstring does not count, and `get_default_time_zone` -- a cached
+    lookup -- is not mistaken for the blocking one.
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+    return [
+        f"{path.name}:{node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get_time_zone"
+    ]
+
+
+def test_no_sync_time_zone_lookup_outside_the_executor() -> None:
+    """Test tzdata is never read from the event loop.
+
+    `dt_util.get_time_zone` reads tzdata from disk the first time a zone is
+    resolved, and the zone a Firewalla box reports is not the one Home Assistant
+    loaded at startup, so it is always a first resolution. Use
+    `async_get_time_zone`, or `get_default_time_zone` for the already-cached
+    configured zone.
+    """
+    offenders = [
+        call for path in _python_files() for call in _sync_time_zone_calls(path)
+    ]
+    assert offenders == []

@@ -398,7 +398,7 @@ async def _provision_symmetric_key(
                                 symmetric_key = _rsa_decrypt_base64(
                                     rkey_cipher, private_pem
                                 )
-                        except ValueError, TypeError, json.JSONDecodeError:
+                        except (ValueError, TypeError, json.JSONDecodeError):
                             print("  rkey parsing failed; using direct key")
                     print(
                         f"  Derived symmetric key: "
@@ -484,7 +484,7 @@ async def _provision_symmetric_key(
                                     symmetric_key = _rsa_decrypt_base64(
                                         rkey_cipher, private_pem
                                     )
-                            except ValueError, TypeError, json.JSONDecodeError:
+                            except (ValueError, TypeError, json.JSONDecodeError):
                                 print("  rkey parsing failed; using direct key")
                         print(
                             f"  Derived symmetric key: "

@@ -1898,7 +1898,7 @@
     },
     "get_network_usage": {
       "name": "Get network segment usage",
-      "description": "Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API.",
+      "description": "Return one window-selected usage-oriented network segment report in the shared report envelope from the Firewalla local API. Totals in bytes over a window of at least 60 minutes; for the current per-host rate use get_live_throughput.",
       "fields": {
         "network_uuid": {
           "name": "Network UUID (Optional)",
@@ -1996,23 +1996,31 @@
     },
     "get_live_throughput": {
       "name": "Get live throughput",
-      "description": "Return live per-device and per-interface throughput in bytes per second, read from the box now (the app's live view).",
+      "description": "Return live throughput in bytes per second, read from the box now. One host, one network, or every host, depending on the selectors given. A rate, not a total; for data volume over a window use get_network_usage. Network figures are that interface's counters and exclude same-segment traffic between hosts; host figures are complete.",
       "fields": {
+        "host_mac": {
+          "name": "Host MAC (Optional)",
+          "description": "Report this one host. Cannot be combined with a network selector. Uses the box's single-host query, so the call does not wait for an averaging window."
+        },
+        "host_name": {
+          "name": "Host name (Optional)",
+          "description": "Report this one host, by the name get_hosts reports. Cannot be combined with a network selector."
+        },
         "network_uuid": {
           "name": "Network UUID (Optional)",
-          "description": "Limit the answer to one network by UUID."
+          "description": "Limit the answer to one network by UUID. A WAN is accepted here, which is how to ask what the internet link is doing."
         },
         "network_name": {
           "name": "Network name (Optional)",
-          "description": "Limit the answer to one network by display name."
+          "description": "Limit the answer to one network by display name. A WAN is accepted here."
         },
         "top_n": {
-          "name": "Device limit",
-          "description": "Optional. Defaults to 10. The number of busiest devices to return."
+          "name": "Host limit",
+          "description": "Optional. Defaults to 10. The number of busiest hosts to return."
         },
         "sample_seconds": {
           "name": "Sample window",
-          "description": "Optional. Defaults to 10. Seconds to average over. The box reports 2-second rates and streaming arrives in bursts, so a longer window shows a player's real rate; the call takes about this long."
+          "description": "Optional. Defaults to 10. Seconds to average over. Any value from 2 to 30 is accepted and rounded up to the next even second, because the box averages one reading every 2 seconds; the response reports the window it served and the request that was rounded. Streaming arrives in bursts, so a longer window shows a player's real rate; the call takes about this long."
         },
         "config_entry_id": {
           "name": "Config entry ID (Optional)",

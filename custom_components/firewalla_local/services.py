@@ -41,6 +41,8 @@ from .const import (
     FLOW_REPORT_INCLUDE_HOST_DETAIL,
     HIDDEN_RULE_PURPOSES,
     HOST_DEVICE_TYPE_OPTIONS,
+    LIVE_SAMPLE_SECONDS_MAX,
+    LIVE_SAMPLE_SECONDS_MIN,
     LLM_TOOL_MODE_OFF,
     LLM_TOOL_MODE_READ_AND_CONTROL,
     LLM_TOOL_MODE_READ_ONLY,
@@ -276,6 +278,7 @@ from .models import (
     FirewallaGroupRuntime,
     FirewallaHostRuntime,
     FirewallaInternetQualitySample,
+    FirewallaLiveInterfaceThroughput,
     FirewallaLiveThroughput,
     FirewallaLocalPeer,
     FirewallaNetwork,
@@ -767,14 +770,32 @@ GET_INTERNET_QUALITY_SCHEMA = vol.Schema(
 
 GET_LIVE_THROUGHPUT_SCHEMA = vol.Schema(
     {
+        # MAC and name only: a read needs no host id, and for a MAC-backed host the
+        # id *is* the MAC, so accepting all three would add a redundant selector.
+        vol.Optional(SERVICE_FIELD_HOST_MAC): cv.string,
+        vol.Optional(SERVICE_FIELD_HOST_NAME): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_UUID): cv.string,
         vol.Optional(SERVICE_FIELD_NETWORK_NAME): cv.string,
-        vol.Optional(SERVICE_FIELD_TOP_N, default=10): cv.positive_int,
+        vol.Optional(SERVICE_FIELD_TOP_N, default=10): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=500)
+        ),
         vol.Optional(SERVICE_FIELD_SAMPLE_SECONDS, default=10): vol.All(
-            vol.Coerce(int), vol.Range(min=2, max=30)
+            vol.Coerce(int),
+            vol.Range(min=LIVE_SAMPLE_SECONDS_MIN, max=LIVE_SAMPLE_SECONDS_MAX),
         ),
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(SERVICE_FIELD_CONFIG_ENTRY_NAME): cv.string,
+    }
+)
+
+# Kinds whose interface counters face the hosts rather than the internet, so
+# `tx` is the download. A WAN is the other way round; see
+# `_live_interface_directions`.
+_LIVE_HOST_FACING_NETWORK_KINDS: Final = frozenset(
+    {
+        FirewallaNetworkKind.LAN,
+        FirewallaNetworkKind.VLAN,
+        FirewallaNetworkKind.VPN,
     }
 )
 
@@ -4800,7 +4821,7 @@ async def _async_handle_get_alarms(call: ServiceCall) -> JsonObjectType:
         )
 
     manager = entry.runtime_data.alarm_manager
-    _, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    _, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     exceptions_by_alarm = {
         exception.alarm_id: exception.exception_id
         for exception in manager.exceptions
@@ -6138,50 +6159,144 @@ async def _async_handle_get_internet_quality(
 
 
 async def _async_handle_get_live_throughput(call: ServiceCall) -> JsonObjectType:
-    """Return live per-device and per-interface throughput, read now from the box."""
+    """Return live throughput, read from the box now.
+
+    Three scopes, because they answer three different questions and mixing them is
+    what made the first version unreadable: one host, one network, or every host
+    on every network.
+    """
     entry = _get_loaded_entry(
         call.hass,
         entry_id=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_ID),
         entry_name=call.data.get(SERVICE_FIELD_CONFIG_ENTRY_NAME),
     )
-    network = _resolve_requested_network(
-        entry,
-        network_uuid=call.data.get(SERVICE_FIELD_NETWORK_UUID),
-        network_name=call.data.get(SERVICE_FIELD_NETWORK_NAME),
-    )
     top_n = cast(int, call.data[SERVICE_FIELD_TOP_N])
     sample_seconds = cast(int, call.data[SERVICE_FIELD_SAMPLE_SECONDS])
+    host = _resolve_requested_host(
+        entry,
+        host_id=None,
+        host_mac=cast(str | None, call.data.get(SERVICE_FIELD_HOST_MAC)),
+        host_name=cast(str | None, call.data.get(SERVICE_FIELD_HOST_NAME)),
+        required=False,
+    )
+    if host is not None:
+        _reject_live_scope_conflict(call)
+        sample = await entry.runtime_data.flow_manager.async_get_host_live_throughput(
+            mac=host.mac, sample_seconds=sample_seconds
+        )
+        return _serialize_live_throughput(
+            entry,
+            sample,
+            host=host,
+            network=None,
+            top_n=top_n,
+            sample_seconds=sample_seconds,
+        )
+
+    network = _resolve_live_network(
+        entry,
+        network_uuid=cast(str | None, call.data.get(SERVICE_FIELD_NETWORK_UUID)),
+        network_name=cast(str | None, call.data.get(SERVICE_FIELD_NETWORK_NAME)),
+    )
     sample = await entry.runtime_data.flow_manager.async_get_live_throughput(
-        sample_seconds=sample_seconds
+        sample_seconds=sample_seconds,
+        network_kinds={
+            candidate.uuid: candidate.kind
+            for candidate in entry.runtime_data.integration_manager.get_networks()
+        },
     )
     return _serialize_live_throughput(
         entry,
         sample,
+        host=None,
         network=network,
         top_n=top_n,
         sample_seconds=sample_seconds,
     )
 
 
+def _reject_live_scope_conflict(call: ServiceCall) -> None:
+    """Reject a request that selects a host and a network at once."""
+    if call.data.get(SERVICE_FIELD_NETWORK_UUID) or call.data.get(
+        SERVICE_FIELD_NETWORK_NAME
+    ):
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_SELECTOR_CONFLICT,
+        )
+
+
+def _resolve_live_network(
+    entry: FirewallaConfigEntry,
+    *,
+    network_uuid: str | None,
+    network_name: str | None,
+) -> FirewallaNetwork | None:
+    """Resolve the live report's optional network selector against every network.
+
+    This resolves against all networks rather than the segments other services
+    accept, because a WAN is a legitimate answer to "what is my internet doing
+    right now". The box returns WAN interfaces in the same answer as the LAN ones;
+    excluding them was a restriction in this module, not in the protocol.
+    """
+    if not network_uuid and not network_name:
+        return None
+
+    networks = entry.runtime_data.integration_manager.get_networks()
+    if network_uuid:
+        for candidate in networks:
+            if candidate.uuid == network_uuid:
+                return candidate
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
+            translation_placeholders={TRANS_PLACEHOLDER_NETWORK_UUID: network_uuid},
+        )
+
+    assert network_name is not None
+    matching = [
+        candidate
+        for candidate in networks
+        if candidate.name.casefold() == network_name.casefold()
+    ]
+    if not matching:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_NOT_FOUND,
+            translation_placeholders={TRANS_PLACEHOLDER_NETWORK_NAME: network_name},
+        )
+    if len(matching) > 1:
+        raise _service_validation_error(
+            translation_key=TRANS_KEY_EXCEPTION_NETWORK_NAME_AMBIGUOUS,
+            translation_placeholders={TRANS_PLACEHOLDER_NETWORK_NAME: network_name},
+        )
+    return matching[0]
+
+
 def _serialize_live_throughput(
     entry: FirewallaConfigEntry,
     sample: FirewallaLiveThroughput | None,
     *,
-    network: FirewallaNetworkSegment | None,
+    host: FirewallaHostRuntime | None,
+    network: FirewallaNetwork | None,
     top_n: int,
     sample_seconds: int,
 ) -> JsonObjectType:
-    """Serialize one live sample, naming devices and networks from the snapshot."""
+    """Serialize one live sample, naming hosts and networks from the snapshot.
+
+    Interface counters are published as ``download``/``upload`` rather than the
+    box's own ``rx``/``tx``, because those two names mean opposite things at each
+    edge: on a WAN ``rx`` is the download, on a LAN it is what the LAN sent toward
+    the box. A caller should never have to know that.
+    """
     network_names = {
         candidate.uuid: candidate.name
         for candidate in entry.runtime_data.integration_manager.get_networks()
     }
     snapshot = entry.runtime_data.coordinator.data
-    hosts = {host.mac.upper(): host for host in snapshot.hosts} if snapshot else {}
+    hosts = {candidate.mac.upper(): candidate for candidate in snapshot.hosts}
     warnings: list[FirewallaReportWarning] = []
     unavailable_sections: list[str] = []
     interfaces: list[JsonValueType] = []
     devices: list[JsonValueType] = []
+    matched = 0
 
     if sample is None:
         unavailable_sections.extend(("interfaces", "hosts"))
@@ -6197,54 +6312,107 @@ def _serialize_live_throughput(
                 FirewallaReportWarning(
                     code="live_throughput_warming_up",
                     message=(
-                        "The box's live sampler was still starting, so every rate "
-                        "read zero. Call again in a few seconds."
+                        "The box's live sampler was still starting: its interfaces "
+                        "carried traffic but it had not attributed any of it to a "
+                        "host yet. Call again in a few seconds."
                     ),
                 )
             )
+        if sample.sample_seconds != sample_seconds:
+            warnings.append(
+                FirewallaReportWarning(
+                    code="live_throughput_window_rounded",
+                    message=(
+                        f"Asked for {sample_seconds} seconds, served "
+                        f"{sample.sample_seconds}: the box averages one reading "
+                        "every 2 seconds, so a window is a whole number of "
+                        "readings and is rounded up rather than down."
+                    ),
+                )
+            )
+        warnings.extend(_live_interface_warnings(sample.interfaces))
         for interface in sample.interfaces:
             if network is not None and interface.network_uuid != network.uuid:
                 continue
-            interfaces.append(
-                {
-                    "interface_name": interface.interface_name,
-                    "network_uuid": interface.network_uuid,
-                    "network_name": network_names.get(interface.network_uuid or ""),
-                    "rx_bytes_per_second": interface.rx_bytes_per_second,
-                    "tx_bytes_per_second": interface.tx_bytes_per_second,
-                }
+            interfaces.append(_serialize_live_interface(interface, network_names))
+        # Only the rows that survived the network filter are described, so a
+        # warning cannot complain about an interface the answer omits.
+        warnings = [
+            warning
+            for warning in warnings
+            if warning.code != "live_throughput_direction_unknown"
+        ]
+        warnings.extend(
+            _live_interface_warnings(
+                tuple(
+                    interface
+                    for interface in sample.interfaces
+                    if network is None or interface.network_uuid == network.uuid
+                )
             )
+        )
+
         for device in sample.devices:
             if network is not None and device.network_uuid != network.uuid:
                 continue
+            matched += 1
             if len(devices) >= top_n:
-                break
-            host = hosts.get(device.host_id.upper())
+                continue
+            host_row = hosts.get(device.host_id.upper())
             devices.append(
                 {
                     "host_id": device.host_id,
-                    "host_name": host.host_name if host is not None else None,
-                    "host_ip": host.ip_address if host is not None else None,
-                    "network_uuid": device.network_uuid,
+                    "host_name": host_row.host_name if host_row is not None else None,
+                    "host_ip": host_row.ip_address if host_row is not None else None,
+                    "network_uuid": device.network_uuid or None,
                     "network_name": network_names.get(device.network_uuid),
                     "download_bytes_per_second": device.download_bytes_per_second,
                     "upload_bytes_per_second": device.upload_bytes_per_second,
+                    "total_bytes_per_second": (
+                        device.download_bytes_per_second
+                        + device.upload_bytes_per_second
+                    ),
                 }
             )
 
     sampled_at = sample.sampled_at_timestamp if sample is not None else None
     return {
-        "network": _serialize_network_segment(network) if network else None,
+        "scope": _live_scope(host),
+        "host": (
+            {
+                "host_id": host.mac,
+                "host_name": host.host_name,
+                "host_ip": host.ip_address,
+            }
+            if host is not None
+            else None
+        ),
+        "network": (
+            {
+                "uuid": network.uuid,
+                "name": network.name,
+                "kind": network.kind,
+            }
+            if network is not None
+            else None
+        ),
         "sampled_at": iso_instant(sampled_at),
         "sampled_at_timestamp": sampled_at,
         "warming_up": sample.warming_up if sample is not None else None,
-        # The window the rates were really averaged over; a warming-up answer is
-        # one reading.
+        # The window the rates were really averaged over, and the request it was
+        # served at. They differ when an odd request was rounded up.
         "sample_seconds": sample.sample_seconds if sample is not None else None,
+        "sample_seconds_requested": sample_seconds,
         "sample_count": sample.sample_count if sample is not None else None,
         "interfaces": {"count": len(interfaces), "items": interfaces},
-        # Busiest first: download plus upload.
-        "hosts": {"count": len(devices), "items": devices},
+        # Busiest first, ranked by download plus upload. `count` is what was
+        # returned; `available` is what there was to return, so a truncated answer
+        # says so instead of looking complete.
+        "hosts": {
+            "count": len(devices),
+            "available": matched,
+            "items": devices,
+        },
         "metadata": _serialize_report_metadata(
             applied={"top_n": top_n, "sample_seconds": sample_seconds},
             warnings=tuple(warnings),
@@ -6256,8 +6424,10 @@ def _serialize_live_throughput(
                     source_field="liveStats.throughput",
                     note=(
                         "Bytes per second, averaged over back-to-back 2 s iftop "
-                        "readings across sample_seconds; download is the host's "
-                        "receive rate"
+                        "readings across the served window. A host's figures come "
+                        "from the box's per-host attribution and include traffic "
+                        "that never crosses a box interface (same-segment, "
+                        "switched), so they are not a slice of any interface total."
                     ),
                 ),
             ),
@@ -6265,24 +6435,115 @@ def _serialize_live_throughput(
     }
 
 
-def _resolve_report_time_zone(
+def _live_scope(host: FirewallaHostRuntime | None) -> str:
+    """Return which of the three questions this answer addressed.
+
+    Read from the request rather than the sample, so a failed host read still
+    reports the scope that was asked for.
+    """
+    return "host" if host is not None else "network"
+
+
+def _serialize_live_interface(
+    interface: FirewallaLiveInterfaceThroughput,
+    network_names: Mapping[str, str],
+) -> JsonObjectType:
+    """Serialize one interface row with its counters named by direction."""
+    download, upload = _live_interface_directions(interface)
+    return {
+        "interface_name": interface.interface_name,
+        "network_uuid": interface.network_uuid,
+        "network_name": network_names.get(interface.network_uuid or ""),
+        "network_kind": interface.network_kind,
+        "download_bytes_per_second": download,
+        "upload_bytes_per_second": upload,
+        "total_bytes_per_second": (
+            None if download is None or upload is None else download + upload
+        ),
+    }
+
+
+def _live_interface_directions(
+    interface: FirewallaLiveInterfaceThroughput,
+) -> tuple[float | None, float | None]:
+    """Return ``(download, upload)`` for one interface, or ``(None, None)``.
+
+    An interface's own counters face the box, so the two edges disagree: a WAN's
+    ``rx`` is the download, while a LAN's ``tx`` is. Direction is therefore only
+    reported for a row whose kind is known, rather than guessing and presenting the
+    guess as fact.
+    """
+    if interface.network_kind is FirewallaNetworkKind.WAN:
+        return interface.rx_bytes_per_second, interface.tx_bytes_per_second
+    if interface.network_kind in _LIVE_HOST_FACING_NETWORK_KINDS:
+        return interface.tx_bytes_per_second, interface.rx_bytes_per_second
+    return None, None
+
+
+def _live_interface_warnings(
+    interfaces: Sequence[FirewallaLiveInterfaceThroughput],
+) -> list[FirewallaReportWarning]:
+    """Return warnings about rows a caller could otherwise misread.
+
+    Two shapes are worth flagging rather than silently publishing: an aggregate
+    interface alongside the interfaces it contains, which double-counts if summed,
+    and an interface whose kind is unknown, whose direction therefore cannot be
+    stated.
+    """
+    warnings: list[FirewallaReportWarning] = []
+    names = {interface.interface_name for interface in interfaces}
+    aggregates = sorted(
+        interface.interface_name
+        for interface in interfaces
+        if any(name.startswith(f"{interface.interface_name}.") for name in names)
+    )
+    if aggregates:
+        warnings.append(
+            FirewallaReportWarning(
+                code="live_throughput_aggregate_interface",
+                message=(
+                    f"{', '.join(aggregates)} aggregate other interfaces in this "
+                    "answer, so summing every row counts that traffic twice."
+                ),
+            )
+        )
+    unknown = sorted(
+        interface.interface_name
+        for interface in interfaces
+        if interface.network_kind is None
+    )
+    if unknown:
+        named = ", ".join(unknown)
+        warnings.append(
+            FirewallaReportWarning(
+                code="live_throughput_direction_unknown",
+                message=(
+                    f"{named} {'is' if len(unknown) == 1 else 'are'} not in the "
+                    "network inventory, so download and upload are unknown for "
+                    f"{'it' if len(unknown) == 1 else 'them'} rather than guessed."
+                ),
+            )
+        )
+    return warnings
+
+
+async def _async_resolve_report_time_zone(
     hass: HomeAssistant,
     entry: FirewallaConfigEntry,
 ) -> tuple[tzinfo, str]:
-    """Return the effective timezone used for report shaping and display."""
-    snapshot = entry.runtime_data.coordinator.data
-    if (
-        snapshot is not None
-        and snapshot.appliance_runtime.timezone_name is not None
-        and (
-            firewalla_time_zone := dt_util.get_time_zone(
-                snapshot.appliance_runtime.timezone_name
-            )
-        )
-    ):
-        return firewalla_time_zone, snapshot.appliance_runtime.timezone_name
+    """Return the effective timezone used for report shaping and display.
 
-    time_zone = dt_util.get_time_zone(hass.config.time_zone) or UTC
+    The zone the box reports is not the one Home Assistant already loaded, so
+    building it reads tzdata from disk. That has to happen off the event loop,
+    which is why this and its callers are async.
+    """
+    snapshot = entry.runtime_data.coordinator.data
+    if snapshot is not None and snapshot.appliance_runtime.timezone_name is not None:
+        time_zone_name = snapshot.appliance_runtime.timezone_name
+        if firewalla_time_zone := await dt_util.async_get_time_zone(time_zone_name):
+            return firewalla_time_zone, time_zone_name
+
+    time_zone = await dt_util.async_get_time_zone(hass.config.time_zone) or UTC
     return time_zone, getattr(time_zone, "key", None) or hass.config.time_zone
 
 
@@ -6298,7 +6559,7 @@ async def _async_handle_get_time_usage(call: ServiceCall) -> JsonObjectType:
     end_input = cast(datetime, call.data[SERVICE_FIELD_USAGE_HISTORY_END])
     begin_utc = dt_util.as_utc(begin_input)
     end_utc = dt_util.as_utc(end_input)
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     if end_utc <= begin_utc:
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_TIME_USAGE_END_BEFORE_BEGIN,
@@ -6514,7 +6775,7 @@ async def _async_handle_get_wan_usage(call: ServiceCall) -> JsonObjectType:
         warnings,
         unavailable_sections,
     ) = _resolve_wan_usage_inputs(call)
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     integration_manager = entry.runtime_data.integration_manager
     manager_detail = (
         "daily" if ("subperiods" in applied_include or detail == "full") else "summary"
@@ -6635,7 +6896,7 @@ async def _async_handle_get_flow_report(call: ServiceCall) -> JsonObjectType:
 
     detail = cast(str, call.data[SERVICE_FIELD_DETAIL])
     include_records = detail == DETAIL_FULL
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
 
     try:
         view = await entry.runtime_data.flow_manager.async_get_report(
@@ -6752,7 +7013,7 @@ async def _async_handle_get_network_usage(call: ServiceCall) -> JsonObjectType:
         call.data.get(SERVICE_FIELD_INCLUDE),
         allowed=("series",),
     )
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
     full_network = _require_full_network(entry, network)
 
     try:
@@ -6804,7 +7065,7 @@ async def _async_handle_get_wan_events(call: ServiceCall) -> JsonObjectType:
     )
     limit = cast(int, call.data[SERVICE_FIELD_LIMIT])
     offset = cast(int, call.data[SERVICE_FIELD_OFFSET])
-    time_zone, time_zone_name = _resolve_report_time_zone(call.hass, entry)
+    time_zone, time_zone_name = await _async_resolve_report_time_zone(call.hass, entry)
 
     try:
         events = await entry.runtime_data.integration_manager.async_get_wan_events(
