@@ -2824,6 +2824,68 @@ async def test_get_live_throughput_service_accepts_a_wan_scope(
     assert response["hosts"]["count"] == 0
 
 
+async def test_get_live_throughput_service_flags_an_aggregate_interface(
+    hass: HomeAssistant,
+) -> None:
+    """Test a trunk published beside its own VLANs is named, so a sum is not naive.
+
+    The box returns `bond0` and each `bond0.*` in the same answer, so adding every
+    row counts the same traffic twice. Nothing in the payload says one contains the
+    other, so the response has to.
+    """
+    entry = _live_entry(hass)
+    payload = {
+        "throughput": [
+            {"name": "bond0", "target": _PRIMARY_UUID, "rx": 179579, "tx": 976324},
+            {"name": "bond0.10", "target": _CORE_UUID, "rx": 49853, "tx": 465909},
+        ]
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_speed_test_snapshot(),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_live_throughput_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.managers.flow_manager._live_sleep",
+            new=AsyncMock(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_LIVE_THROUGHPUT,
+            {
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                SERVICE_FIELD_SAMPLE_SECONDS: 2,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert response is not None
+    codes = [w["code"] for w in response["metadata"]["warnings"]]
+    assert "live_throughput_aggregate_interface" in codes
+    warning = next(
+        w
+        for w in response["metadata"]["warnings"]
+        if w["code"] == "live_throughput_aggregate_interface"
+    )
+    # It names the trunk, not the VLANs it contains.
+    assert "bond0" in warning["message"]
+    assert "bond0.10" not in warning["message"]
+
+
 async def test_get_internet_quality_service_returns_latest_sample(
     hass: HomeAssistant,
 ) -> None:

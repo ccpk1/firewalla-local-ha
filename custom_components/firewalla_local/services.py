@@ -6377,7 +6377,7 @@ def _serialize_live_throughput(
 
     sampled_at = sample.sampled_at_timestamp if sample is not None else None
     return {
-        "scope": _live_scope(sample, host),
+        "scope": _live_scope(host),
         "host": (
             {
                 "host_id": host.mac,
@@ -6435,11 +6435,13 @@ def _serialize_live_throughput(
     }
 
 
-def _live_scope(sample: FirewallaLiveThroughput | None, host: object) -> str:
-    """Return which of the three questions this answer addressed."""
-    if sample is not None and sample.host_scope is not None:
-        return "host"
-    return "network" if host is None else "host"
+def _live_scope(host: FirewallaHostRuntime | None) -> str:
+    """Return which of the three questions this answer addressed.
+
+    Read from the request rather than the sample, so a failed host read still
+    reports the scope that was asked for.
+    """
+    return "host" if host is not None else "network"
 
 
 def _serialize_live_interface(
