@@ -2000,7 +2000,7 @@
       "fields": {
         "host_mac": {
           "name": "Host MAC (Optional)",
-          "description": "Report this one host. Cannot be combined with a network selector. Uses the box's single-host query, so the call does not wait for an averaging window."
+          "description": "Report this one host. Cannot be combined with a network selector. Uses the box's single-host query, so the answer is that device alone with no interface counters, and an idle device reports zero rather than being omitted. It samples across the same window as the other scopes."
         },
         "host_name": {
           "name": "Host name (Optional)",

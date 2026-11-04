@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import typing
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from homeassistant.core import HomeAssistant
 
@@ -29,6 +31,7 @@ from custom_components.firewalla_local.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from custom_components.firewalla_local.models import (
+    FirewallaAlarm,
     FirewallaApplianceIdentityInput,
     FirewallaApplianceRuntimeInput,
     FirewallaGroupRuntime,
@@ -236,6 +239,11 @@ _SENSITIVE_VALUES = (
     "Example ISP",
     "speed.example.net",
     "vimeo.com",
+    # An alarm's message is prose, so only the key-name pass can catch it.
+    "Kaden-PhoneMarker watched",
+    # A public address reported as a mapping is redacted by key, not by pattern;
+    # an IPv6 one only the pattern can reach.
+    "2001:db8::1",
 )
 
 
@@ -254,7 +262,7 @@ def _sensitive_snapshot() -> FirewallaRuntimeSnapshot:
             ddns="abc.ddns.net",
             timezone_name="America/New_York",
             public_ip="203.0.113.7",
-            public_ips={"wan": "203.0.113.7"},
+            public_ips={"wan": "203.0.113.7", "wan6": "2001:db8::1"},
         ),
         policy_rules=(
             FirewallaPolicyRule(
@@ -332,6 +340,29 @@ def _sensitive_snapshot() -> FirewallaRuntimeSnapshot:
                 vendor="ookla",
             ),
         ),
+        # An alarm names its host in `message` as well as in `device_name`, and the
+        # message is prose, so a key-name pass is the only thing that catches it.
+        alarms=(
+            FirewallaAlarm(
+                alarm_id="1728",
+                alarm_type="ALARM_INTEL",
+                device_name="Kaden Phone",
+                message="Kaden-PhoneMarker watched vimeo.com",
+                state="active",
+                is_archived=False,
+                fired_at=1774285600.0,
+                remote_category=None,
+                remote_host="vimeo.com",
+                remote_ip="203.0.113.7",
+                remote_app=None,
+                remote_region=None,
+                remote_latitude=None,
+                remote_longitude=None,
+                interface_name="bond0.60",
+                protocol="tcp",
+                severity="minor",
+            ),
+        ),
     )
 
 
@@ -382,3 +413,104 @@ async def test_get_config_entry_diagnostics_leaks_no_identifying_value(
     assert snapshot["policy_rules"][0]["raw_update_payload"] == (
         "**OMITTED** (3 raw protocol keys)"
     )
+
+
+# Fields that are published verbatim on purpose: they classify a device or the
+# appliance rather than name one, so they carry no household data. Anything not
+# listed here must be redacted, which is what makes a newly added field fail this
+# test until someone decides which it is.
+_SNAPSHOT_FIELDS_PUBLISHED_VERBATIM: Final = frozenset(
+    {
+        "alarm_type",
+        "blocked_by_rule_id",
+        "category",
+        "cloud_connected",
+        "connection_type",
+        "destination_kind",
+        "direction",
+        "dist_codename",
+        "enabled",
+        "firmware_release_type",
+        "host_device_type",
+        "interface_name",
+        "is_archived",
+        "kind",
+        "membership_kind",
+        "model",
+        "protocol",
+        "remote_app",
+        "remote_category",
+        "remote_region",
+        "severity",
+        "software_version",
+        "state",
+        "timezone_name",
+        "vendor",
+    }
+)
+
+
+def _is_string_annotation(annotation: object) -> bool:
+    """Return whether a resolved annotation is `str` or `str | None`."""
+    if annotation is str:
+        return True
+    return typing.get_origin(annotation) is typing.Union and str in (
+        typing.get_args(annotation) or ()
+    )
+
+
+def _reachable_string_fields(root: type) -> dict[str, type]:
+    """Return every reachable string-typed field, keyed by field name."""
+    found: dict[str, type] = {}
+    pending, seen = [root], set()
+    while pending:
+        cls = pending.pop()
+        if cls in seen or not dataclasses.is_dataclass(cls):
+            continue
+        seen.add(cls)
+        try:
+            hints = typing.get_type_hints(cls)
+        except Exception:
+            hints = {}
+        for field_info in dataclasses.fields(cls):
+            annotation = hints.get(field_info.name, field_info.type)
+            if _is_string_annotation(annotation):
+                found[field_info.name] = cls
+            # Follow containers and nested dataclasses either way, since a string
+            # field can live inside a tuple of records.
+            for argument in typing.get_args(annotation) or (annotation,):
+                for inner in typing.get_args(argument) or (argument,):
+                    if dataclasses.is_dataclass(inner):
+                        pending.append(inner)
+    return found
+
+
+def test_the_verbatim_field_list_is_not_stale() -> None:
+    """Every declared-verbatim field still exists, so the list cannot rot silently.
+
+    Checked against every reachable field rather than only the string ones: the
+    list also exempts non-string fields, which are skipped by the redaction guard
+    but must not linger after a rename.
+    """
+    known: set[str] = set()
+    pending, seen = [FirewallaRuntimeSnapshot], set()
+    while pending:
+        cls = pending.pop()
+        if cls in seen or not dataclasses.is_dataclass(cls):
+            continue
+        seen.add(cls)
+        for field_info in dataclasses.fields(cls):
+            known.add(field_info.name)
+            try:
+                annotation = typing.get_type_hints(cls).get(
+                    field_info.name, field_info.type
+                )
+            except Exception:
+                continue
+            for argument in typing.get_args(annotation) or (annotation,):
+                for inner in typing.get_args(argument) or (argument,):
+                    if dataclasses.is_dataclass(inner):
+                        pending.append(inner)
+
+    renamed = sorted(_SNAPSHOT_FIELDS_PUBLISHED_VERBATIM - known)
+    assert renamed == [], f"declared verbatim but no longer in the snapshot: {renamed}"

@@ -56,6 +56,10 @@ _IDENTIFYING_KEYS: Final = frozenset(
         "ip_address",
         "isp",
         "mac",
+        # An alarm's message names the host it is about, e.g. "kadens-phone
+        # watched example.com", which is why the raw-payload pass already treats
+        # it as sensitive (`_ALARM_SENSITIVE_KEYS`).
+        "message",
         "name",
         "network_name",
         "peer_id",
@@ -115,16 +119,20 @@ def _redact_value(key: str, value: Any) -> Any:
             return f"{_OMITTED} ({len(value)} raw protocol keys)"
         return _OMITTED
 
+    # The key name is checked before recursing, so a listed field that happens to
+    # hold a mapping is redacted as a whole. `appliance_runtime.public_ips` is one:
+    # recursing first left it to the scalar patterns, which cover IPv4 but not
+    # IPv6, so an IPv6-only public address survived.
+    if key_lower in _IDENTIFYING_KEYS or key_lower in _IDENTIFIER_LIST_KEYS:
+        if value is None or value == [] or value == {}:
+            return value
+        return _REDACTED
+
     if isinstance(value, Mapping):
         return redact_runtime_snapshot(value)
 
     if isinstance(value, list | tuple):
-        if key_lower in _IDENTIFIER_LIST_KEYS:
-            return [_REDACTED for _ in value]
         return [_redact_value(key, item) for item in value]
-
-    if key_lower in _IDENTIFYING_KEYS or key_lower in _IDENTIFIER_LIST_KEYS:
-        return _REDACTED if value is not None else value
 
     return redact_scalar(value)
 

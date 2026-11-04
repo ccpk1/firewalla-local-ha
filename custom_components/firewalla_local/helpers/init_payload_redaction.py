@@ -146,6 +146,32 @@ _EXCLUDED_TOP_LEVEL_KEYS: Final = frozenset(
 
 _MAC_RE: Final = re.compile(r"(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b")
 _IPV4_RE: Final = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
+# A compressed or full IPv6 address: at least three colon-separated groups, so it
+# cannot be confused with a MAC (six byte groups) or with a `host:port` pair.
+# An embedded IPv4 tail is allowed because a mapped address carries one.
+_IPV6_RE: Final = re.compile(
+    r"(?i)(?<![0-9a-f:])"
+    r"(?:"
+    # An IPv6-mapped IPv4 address ends in a dotted quad. Ordered first because the
+    # hex-group alternatives below would otherwise stop before the dots and match
+    # only a prefix of the address.
+    r"(?:[0-9a-f]{1,4}:)+(?:[0-9]{1,3}\.){3}[0-9]{1,3}"
+    r"|::(?:[0-9a-f]{1,4}:)*(?:[0-9]{1,3}\.){3}[0-9]{1,3}"
+    r"|(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}"
+    r"|(?:[0-9a-f]{1,4}:){1,7}:"
+    r"|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}"
+    r"|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}"
+    r"|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}"
+    r"|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}"
+    r"|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}"
+    r"|[0-9a-f]{1,4}:(?::[0-9a-f]{1,4}){1,6}"
+    r"|::(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4}"
+    r"|::"
+    r")"
+    # A trailing `.` would mean the match stopped inside a mapped address, and a
+    # trailing hex digit or colon would mean it stopped inside a group.
+    r"(?![0-9a-f:.])"
+)
 _JWT_RE: Final = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _EMAIL_RE: Final = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 # Matches a private/internal domain suffix (e.g. "int.ccpk.us", "ha.ccpk.us")
@@ -161,6 +187,9 @@ def _redact_scalar(value: Any) -> Any:
         return value
     redacted = _JWT_RE.sub(_REDACTED, value)
     redacted = _MAC_RE.sub(_REDACTED, redacted)
+    # IPv6 before IPv4: an IPv6-mapped IPv4 address (`::ffff:203.0.113.7`) is one
+    # address, and matching the IPv4 tail first would leave the prefix standing.
+    redacted = _IPV6_RE.sub(_REDACTED, redacted)
     redacted = _IPV4_RE.sub(_REDACTED, redacted)
     redacted = _EMAIL_RE.sub(_REDACTED, redacted)
     redacted = _DOMAIN_SUFFIX_RE.sub(_REDACTED, redacted)
@@ -264,6 +293,7 @@ def _redact_key(key: str) -> str:
         return key
     redacted = _JWT_RE.sub(_REDACTED, key)
     redacted = _MAC_RE.sub(_REDACTED, redacted)
+    redacted = _IPV6_RE.sub(_REDACTED, redacted)
     redacted = _IPV4_RE.sub(_REDACTED, redacted)
     redacted = _EMAIL_RE.sub(_REDACTED, redacted)
     redacted = _DOMAIN_SUFFIX_RE.sub(_REDACTED, redacted)

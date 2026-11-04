@@ -931,8 +931,9 @@ class GetLiveThroughputTool(_FirewallaReadTool):
         "\n"
         "Three scopes, and the answer says which one it used:\n"
         "- name one host (`host_mac` or `host_name`) for that device alone. This "
-        'is the right scope for "how fast is my TV going", and it is exact: '
-        "one query, no waiting for a window.\n"
+        'is the right scope for "how fast is my TV going": one device, no '
+        "interface counters, and an idle device answers zero rather than "
+        "vanishing. It samples across the same window as the other scopes.\n"
         "- name one network (`network_uuid` or `network_name`) for that segment's "
         "interfaces plus its hosts. A WAN works here too, which is what answers "
         '"what is my internet doing".\n'

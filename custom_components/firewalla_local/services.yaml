@@ -1068,7 +1068,7 @@ get_live_throughput:
       selector:
         text:
       name: Host MAC
-      description: Optional. Report this one host. Cannot be combined with a network selector. Uses the box's single-host query, so the call does not wait for an averaging window.
+      description: Optional. Report this one host. Cannot be combined with a network selector. Uses the box's single-host query, so the answer is that device alone with no interface counters, and an idle device reports zero rather than being omitted. It samples across the same window as the other scopes.
     host_name:
       required: false
       example: "Kaden Phone"
