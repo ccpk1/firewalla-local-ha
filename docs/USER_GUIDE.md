@@ -1093,10 +1093,11 @@ selectors decide which question it answers, and the response reports it as
 `scope`:
 
 - **one host** — `host_mac` or `host_name`. That device alone, using the box's own
-  single-host query: one request, no waiting for a window, and an idle device
-  answers zero instead of being left out. This is the only scope that measures
-  *that device*, including traffic it exchanged with another device on its own
-  segment
+  single-host query: no interface counters, and an idle device answers zero
+  instead of being left out. This is the only scope that measures *that device*,
+  including traffic it exchanged with another device on its own segment. It
+  samples across the same window as the other scopes, because a burst looks the
+  same whether you are watching one device or sixty.
 - **one network** — `network_uuid` or `network_name`, which accepts a WAN as well
   as a LAN or VLAN. A WAN is how to ask what the internet link is doing, and is
   what the Firewalla app's dashboard chart shows

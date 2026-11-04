@@ -5536,14 +5536,10 @@ opposite things at each edge:
 The WAN side is independently confirmed twice. Numerically, `eth0` rx (1232 kB/s)
 tracked the sum of host downloads (1074 kB/s) warm-only, while `bond0.10` tx
 (1159 kB/s) tracked the sum of those same hosts' downloads (1030 kB/s). And the
-app's own extraction code is explicit:
-
-```
-x85.m20195h(): cg8Var = new cg8(Math.abs(row.optLong("tx")), Math.abs(row.optLong("rx")));
-cg8.toString(): "UploadDownload(upload=<a>, download=<b>)"
-```
-
-so `rx` → download and `tx` → upload, in the row the app matched. The app only
+app's own extraction code settles the labels: it builds its rate pair from the
+row's `tx` first and its `rx` second, and that pair's own accessors name the first
+slot upload and the second download. So `rx` maps to download and `tx` to upload,
+in the row the app matched. The app only
 ever matches WAN interfaces (§4), so **the LAN mapping above is inferred from
 counter semantics, not confirmed by app code** — the empirical check was
 inconclusive because of §6.
@@ -5664,11 +5660,12 @@ fast is this device going", the host figure is the only correct one.
 #### 10. What remains inferred rather than confirmed
 
 - **The LAN direction mapping.** `eth0` (rx → download) is confirmed twice:
-  numerically against summed host downloads, and by `x85.m20195h()`'s
-  `cg8(upload=tx, download=rx)` construction. The LAN rows are only ever matched by
-  that same app path, which never selects them, so `bond0.*` is inferred from
-  counter semantics — the trunk aggregates the VLANs, and a trunk's counters face
-  the box, which makes `tx` the toward-hosts direction.
+  numerically against summed host downloads, and by the app's extraction path,
+  which pairs the row's `tx` with upload and its `rx` with download. The LAN rows
+  are only ever matched by that same app path, which never selects them, so
+  `bond0.*` is inferred from counter semantics — the trunk aggregates the VLANs,
+  and a trunk's counters face the box, which makes `tx` the toward-hosts
+  direction.
 - **Per-host attribution.** §6's ratios run from 1.13× to 85×, so no host sum can
   be reconciled with any interface counter, and none should be presented as if it
   could.
