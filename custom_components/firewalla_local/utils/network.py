@@ -534,6 +534,30 @@ def active_wan_ipv4_address(data: dict[str, object]) -> str | None:
     return addresses[0] if addresses else None
 
 
+def _wan_health_failures(raw_failures: object) -> tuple[str, ...]:
+    """Return the failure names from one WAN health entry.
+
+    The box lists them as ``[{"type": "carrier"}]``, and ``type`` is the part
+    that says what broke, so it is what gets published. A bare string is accepted
+    too, because the same field is a plain list elsewhere in the payload.
+    """
+    if not isinstance(raw_failures, list):
+        return ()
+    failures: list[str] = []
+    for raw_failure in raw_failures:
+        if isinstance(raw_failure, str):
+            name = raw_failure.strip()
+            if name:
+                failures.append(name)
+            continue
+        if not isinstance(raw_failure, dict):
+            continue
+        failure_type = normalized_string(raw_failure.get(_RAW_TYPE_KEY))
+        if failure_type is not None:
+            failures.append(failure_type)
+    return tuple(failures)
+
+
 def wan_health_by_interface(
     data: dict[str, object],
 ) -> dict[str, dict[str, object]]:
@@ -572,7 +596,7 @@ def wan_health_by_interface(
                 if isinstance(raw_http, dict)
                 else None
             ),
-            "failures": _normalized_string_tuple(raw_entry.get(_RAW_FAILURES_KEY)),
+            "failures": _wan_health_failures(raw_entry.get(_RAW_FAILURES_KEY)),
             "recent_down_at_timestamp": normalized_int(
                 raw_entry.get(_RAW_RECENT_DOWN_TIME_KEY)
             ),

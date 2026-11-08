@@ -1099,24 +1099,28 @@ Per-WAN state, and what each flag actually means:
 | Field | Primary (eth0) | Standby (eth1) | Meaning |
 | --- | --- | --- | --- |
 | `networkProfiles[uuid].active` | `true` | `false` | **in the active routing set** |
-| `…wanConnState.inUse` | `true` | `false` | same fact, same value |
+| `…wanConnState.active` | `true` | `false` | same fact, same value |
 | `…wanConnState.ready` | `true` | `true` | link usable; a standby is normally ready |
 | `networkProfiles[uuid].pendingTest` | `false` | `false` | awaiting the first health test |
 | `wanTestResult.wans[intf].carrier/dns/ping` | `true` | `true` | per-WAN health probes |
 
-Three things this rules out:
+**`wanConnState.inUse` is not usable as a discriminator.** Captured during a real
+failover (eth0 unplugged) it was `true` for **both** WANs, while
+`networkProfiles[uuid].active` and `wanConnState.active` correctly flipped to
+`eth0: false, eth1: true`. It is sticky — it stays set for a WAN that was in use
+— so the integration publishes `active` (`wan_in_use`) and never `inUse`.
+
+Three more things this rules out:
 
 - **`active` is not "carrying traffic".** In load balance both WANs report
-  `active: true` *and* `inUse: true`, because both are in the routing set. In
-  failover exactly one is. So `inUse` answers "in the active set", not "the one
-  carrying traffic".
+  `active: true`, because both are in the routing set. In failover exactly one
+  does, and it flips on a failover.
 - **The coarse `wanTestResult.wans[intf].active` is not the same field.** It is
   `true` for the standby too, while `wanConnState.active` is `false`. Read the
   nested `wanConnState` when the answer matters.
-- **`inUse` lags the configuration.** Immediately after switching to load balance
-  eth1 still reported `inUse: false`; it converged on the next poll. `wanTestResult`
-  is refreshed on its own cycle (one shared `ts` for every WAN), so it is a
-  snapshot, not the config write.
+- **No single integer is a reliable "which WAN" answer.** The only field that
+  names the WAN in use, in every capture including a live failover, is the
+  top-level `network` block's `name`.
 
 `networkMetrics.<intf>.rx/tx` are **not** cumulative counters, so they cannot be
 differenced into a traffic split: each is a percentile block
@@ -1211,9 +1215,31 @@ load balance has no primary to fail away from and an `off` there would read as
 
 The signal is the top-level `network` block compared to `viaIntf`: that block
 names the WAN the box is routing through, follows the primary normally, and
-follows the standby once the primary has failed. `wanSwitched` in the
-`dualwan_state` event also marks a switch, but that event only exists after one
-has happened, so it cannot answer "are we failed over now".
+follows the standby once the primary has failed. **Verified on a live failover**
+(eth0 unplugged, 2026-11-08): `network.name` became `eth1` while `viaIntf`
+stayed `eth0`, and the WAN profiles flipped to `eth0: active=false, ready=false`
+with `wanTestResult.wans.eth0.failures == [{"type": "carrier"}]`.
+
+### Failover history
+
+The events feed **does** retain WAN link-state families — they are simply absent
+while nothing happens. Unfiltered, the local store held 78 events over 7 days
+(`dap_state`, `ping`, `dns`) with no WAN families; immediately after a real
+failover it held 86, including one each of `dualwan_state`, `overall_wan_state`,
+`wan_state` and `ethernet_state`.
+
+So `get_wan_events` was never broken — an earlier reading of "zero events"
+meant "nothing had failed yet". The captured `dualwan_state` event carries
+`wanSwitched: true`, `changedInterface`, `primaryInterface`, the full
+`wanStatus` map, and `failures: [{"type": "carrier"}]`, which is what makes
+failover *history* answerable through the existing service and MCP tool.
+
+Two cautions on that event:
+
+- It also showed `inUse: true` for both WANs, confirming `inUse` is sticky.
+- `seq` (`0` primary, `1` standby) appears here but is absent from
+  `overall_wan_state`'s `wanStatus` in the init payload, so it is event-only and
+  not a published ordering.
 
 ### The box-level IP
 

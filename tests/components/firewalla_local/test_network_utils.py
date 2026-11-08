@@ -9,6 +9,7 @@ from custom_components.firewalla_local.models import (
 from custom_components.firewalla_local.utils.network import (
     build_network_inventory,
     primary_wan_interface_name,
+    wan_health_by_interface,
     wan_routing,
 )
 
@@ -421,6 +422,42 @@ def test_routing_is_absent_without_a_routing_block() -> None:
     assert wan_routing({}) is None
     assert wan_routing({"networkConfig": {"routing": None}}) is None
     assert wan_routing({"networkConfig": {"routing": {"global": {}}}}) is None
+
+
+def test_health_failures_are_read_from_the_boxes_object_shape() -> None:
+    """Test a failed probe names what broke.
+
+    The box lists failures as ``[{"type": "carrier"}]``. Reading that as a string
+    list yielded nothing, which silently dropped the only part of the health
+    block that says *why* a WAN is unhealthy.
+    """
+    health = wan_health_by_interface(
+        {
+            "wanTestResult": {
+                "wans": {
+                    "eth0": {
+                        "carrier": False,
+                        "ready": False,
+                        "failures": [{"type": "carrier"}],
+                    },
+                    "eth1": {
+                        "carrier": True,
+                        "failures": [{"type": "dns", "target": "1.1.1.1"}],
+                    },
+                }
+            }
+        }
+    )
+
+    assert health["eth0"]["failures"] == ("carrier",)
+    assert health["eth0"]["carrier"] is False
+    assert health["eth1"]["failures"] == ("dns",)
+
+
+def test_health_is_absent_when_the_box_reports_no_test_result() -> None:
+    """Test a payload without the health block yields nothing to publish."""
+    assert wan_health_by_interface({}) == {}
+    assert wan_health_by_interface({"wanTestResult": {"wans": None}}) == {}
 
 
 def test_primary_wan_interface_is_absent_when_the_box_does_not_state_one() -> None:
