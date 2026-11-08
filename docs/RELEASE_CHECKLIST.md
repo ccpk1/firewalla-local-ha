@@ -95,6 +95,35 @@ reviewer should not ask for a compatibility layer.
 - [ ] The repository still passes every HACS structure expectation, including the brands check, with no checks ignored.
 - [ ] The release posture remains compatible with the Home Assistant versions advertised in `hacs.json`.
 
+### Release asset
+
+`hacs.json` sets `zip_release: true` with `filename: firewalla_local.zip`, so HACS
+downloads the named asset from the release instead of the tag's source archive.
+That choice is what makes the download counter meaningful — HACS reports the
+GitHub asset's `download_count`, which only moves when an asset is fetched — and
+it is also a hard requirement: if the asset is missing or misnamed, every install
+and upgrade fails with `Download of firewalla_local.zip was not completed`.
+
+`.github/workflows/release.yaml` builds and attaches it on `release: published`,
+and fails the run if:
+
+- the tag does not match `manifest.json`'s `version` (HACS would otherwise
+  advertise one version and install another);
+- the archive is missing `manifest.json`, `__init__.py` or `translations/en.json`
+  at its root;
+- the archive contains a `custom_components/` wrapper directory.
+
+The archive is built from inside `custom_components/firewalla_local`, because
+HACS extracts it straight into `custom_components/` and a wrapping directory
+would nest the integration one level too deep. That failure is silent at build
+time and only breaks installs, which is why the workflow asserts the layout.
+
+- [ ] `hacs.json` still declares `zip_release` and a `filename` that matches the
+      asset the workflow uploads.
+- [ ] The published release has `firewalla_local.zip` attached, and its size is
+      plausible (a few hundred KB, not a few KB).
+- [ ] The tag equals `manifest.json`'s `version`.
+
 ## 6) Runtime smoke
 
 - [ ] Install or upgrade through the documented HACS path.
@@ -108,10 +137,29 @@ reviewer should not ask for a compatibility layer.
 - [ ] Publish a short release summary in the GitHub release body.
 - [ ] Do not rely on a separate generated changelog system; use a concise manual summary and release-note-friendly PR titles.
 
+Order matters, because the asset is produced by a workflow that reacts to the
+release:
+
+1. Push the tag.
+2. Save the release **without** `firewalla_local.zip` attached; the publish step
+   runs `release.yaml`, which builds the archive, checks its layout and attaches
+   it. Drafting a release does not trigger it — only `published` does.
+3. Confirm the `Release` workflow run went green, which also confirms the tag and
+   `manifest.json` agree.
+4. Confirm the asset is on the release.
+5. Only then treat the version as live, because HACS fetches that asset.
+
+The workflow file has to be on the **default branch** before the release is
+published. A workflow added on the release branch alone will not be picked up for
+a `release` event, and the release would publish with no asset.
+
 ## 8) Rollback readiness
 
 - [ ] Known risks and any deferred issues are documented before publishing.
 - [ ] If the release exposes a blocking setup or packaging failure, prepare a patch release instead of silently rewriting the tag.
+- [ ] If the asset is missing or malformed, re-run the `Release` workflow for that
+      release rather than re-tagging; re-running replaces the asset and leaves the
+      tag history intact.
 
 ## 9) Confirm release-specific blockers and defers
 

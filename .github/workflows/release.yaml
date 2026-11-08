@@ -1,0 +1,75 @@
+name: Release
+
+# Runs when a release is published rather than when a tag is pushed, so the
+# asset is attached to a release that already exists. HACS reads the version
+# from the release, then downloads `filename` from it; publishing the release
+# first and attaching afterwards keeps the asset and the metadata in one step.
+on:
+  release:
+    types:
+      - published
+
+permissions: {}
+
+jobs:
+  package:
+    name: Package and attach the integration zip
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the released tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # A release whose tag disagrees with `manifest.json` makes HACS advertise
+      # one version and install another, and the mismatch only surfaces for
+      # users after they upgrade. Fail before anything is published instead.
+      - name: Check the tag matches the manifest version
+        run: |
+          manifest_version="$(python -c "import json; print(json.load(open('custom_components/firewalla_local/manifest.json'))['version'])")"
+          tag="${{ github.event.release.tag_name }}"
+          echo "manifest=$manifest_version tag=$tag"
+          if [ "$manifest_version" != "$tag" ]; then
+            echo "::error::Release tag '$tag' does not match manifest version '$manifest_version'."
+            exit 1
+          fi
+
+      # HACS extracts this archive directly into `custom_components/`, so the
+      # files must sit at the archive root with no enclosing directory. Zipping
+      # from inside the integration directory is what produces that layout.
+      - name: Build the integration zip
+        run: |
+          cd custom_components/firewalla_local
+          rm -rf __pycache__
+          zip -r "${GITHUB_WORKSPACE}/firewalla_local.zip" . -x '*/__pycache__/*' '*.pyc'
+          cd "${GITHUB_WORKSPACE}"
+          echo "=== archive contents (first 20) ==="
+          unzip -l firewalla_local.zip | head -25
+
+      # The failure this guards against is silent: a zip with a wrapping
+      # directory still uploads and still attaches, and only breaks on a user's
+      # install. Assert the two files HACS and Home Assistant require.
+      - name: Verify the archive layout
+        run: |
+          contents="$(unzip -Z1 firewalla_local.zip)"
+          for required in manifest.json __init__.py translations/en.json; do
+            if ! printf '%s\n' "$contents" | grep -qx "$required"; then
+              echo "::error::$required is not at the archive root; check the zip step."
+              exit 1
+            fi
+          done
+          if printf '%s\n' "$contents" | grep -q '^custom_components/'; then
+            echo "::error::Archive contains a custom_components/ wrapper directory."
+            exit 1
+          fi
+          echo "Archive layout is correct."
+
+      - name: Attach the zip to the release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: firewalla_local.zip
+          tag_name: ${{ github.event.release.tag_name }}
