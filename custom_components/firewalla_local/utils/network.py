@@ -6,10 +6,12 @@ from collections.abc import Iterator
 from dataclasses import replace
 from typing import Final
 
+from ..const import WAN_MODE_LOAD_BALANCE, WAN_MODE_PRIMARY_STANDBY
 from ..models import (
     FirewallaNetwork,
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkKind,
+    FirewallaWanRouting,
 )
 from .values import normalized_bool, normalized_int, normalized_string
 
@@ -25,6 +27,8 @@ _RAW_TYPE_KEY: Final = "type"
 _RAW_TYPE_WAN: Final = "wan"
 _RAW_TYPE_LAN: Final = "lan"
 _RAW_ENABLED_KEY: Final = "enabled"
+_RAW_ACTIVE_KEY: Final = "active"
+_RAW_READY_KEY: Final = "ready"
 _RAW_VID_KEY: Final = "vid"
 _RAW_IPV4_KEY: Final = "ipv4"
 _RAW_IPV4_SUBNET_KEY: Final = "ipv4Subnet"
@@ -55,6 +59,17 @@ _RAW_HOST_MAC_VENDOR_KEY: Final = "macVendor"
 _RAW_HOST_INTF_KEY: Final = "intf"
 _FIREWALLA_VENDOR_MARKER: Final = "firewalla"
 _RAW_NETWORK_BLOCK_KEY: Final = "network"
+_RAW_IP_ADDRESS_KEY: Final = "ip_address"
+_RAW_IP4_ADDRESSES_KEY: Final = "ip4_addresses"
+_RAW_WAN_TEST_RESULT_KEY: Final = "wanTestResult"
+_RAW_WANS_KEY: Final = "wans"
+_RAW_TS_KEY: Final = "ts"
+_RAW_CARRIER_KEY: Final = "carrier"
+_RAW_PING_KEY: Final = "ping"
+_RAW_HTTP_KEY: Final = "http"
+_RAW_STATUS_CODE_KEY: Final = "statusCode"
+_RAW_FAILURES_KEY: Final = "failures"
+_RAW_RECENT_DOWN_TIME_KEY: Final = "recentDownTime"
 _RAW_LABELS_KEY: Final = "labels"
 _RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
 _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
@@ -70,6 +85,17 @@ _RAW_ROUTING_KEY: Final = "routing"
 _RAW_GLOBAL_KEY: Final = "global"
 _RAW_DEFAULT_ROUTE_KEY: Final = "default"
 _RAW_VIA_INTF_KEY: Final = "viaIntf"
+_RAW_VIA_INTF2_KEY: Final = "viaIntf2"
+_RAW_FAILBACK_KEY: Final = "failback"
+_RAW_NEXT_HOPS_KEY: Final = "nextHops"
+_RAW_WEIGHT_KEY: Final = "weight"
+_WAN_MODE_PRIMARY_STANDBY: Final = WAN_MODE_PRIMARY_STANDBY
+_WAN_MODE_LOAD_BALANCE: Final = WAN_MODE_LOAD_BALANCE
+# The role vocabulary a WAN can carry under one mode. `shared` is load balance's
+# equal membership of the routing set; see `wan_role`.
+WAN_ROLE_PRIMARY: Final = "primary"
+WAN_ROLE_STANDBY: Final = "standby"
+WAN_ROLE_SHARED: Final = "shared"
 _RAW_PHY_CATEGORY: Final = "phy"
 _RAW_BOND_CATEGORY: Final = "bond"
 _RAW_VLAN_CATEGORY: Final = "vlan"
@@ -356,15 +382,47 @@ def _iter_wan_event_names(
                 yield wan_uuid, wan_name
 
 
-def primary_wan_interface_name(data: dict[str, object]) -> str | None:
-    """Return the interface the box is configured to route through first.
+def wan_routing(data: dict[str, object]) -> FirewallaWanRouting | None:
+    """Return how the box distributes traffic across its WAN uplinks.
 
-    ``networkConfig.routing.global.default`` is the app's WAN preference, and it
-    is a deliberate setting rather than something to infer: ``type`` states how
-    the WANs are used (``primary_standby``) and ``viaIntf`` names the primary
-    while ``viaIntf2`` names the standby. It outranks any ordering derived from
-    interface names, which cannot distinguish a primary from a standby.
+    ``networkConfig.routing.global.default`` is the app's multi-WAN setting, and
+    ``type`` is what the box calls the mode: ``primary_standby`` names a
+    ``viaIntf`` primary and a ``viaIntf2`` standby with a ``failback`` toggle,
+    while ``load_balance`` carries ``nextHops`` with a ``weight`` per interface
+    and names no primary at all. The two shapes are disjoint, so only the fields
+    the stated mode actually uses are populated.
+
+    Absent when the payload has no routing block, which is the honest answer for
+    a box that states no preference rather than a guess at one.
     """
+    raw_default = _raw_default_route(data)
+    if raw_default is None:
+        return None
+    mode = normalized_string(raw_default.get(_RAW_TYPE_KEY))
+    if mode is None:
+        return None
+
+    if mode == _WAN_MODE_PRIMARY_STANDBY:
+        return FirewallaWanRouting(
+            mode=mode,
+            primary=normalized_string(raw_default.get(_RAW_VIA_INTF_KEY)),
+            standby=normalized_string(raw_default.get(_RAW_VIA_INTF2_KEY)),
+            failback=normalized_bool(raw_default.get(_RAW_FAILBACK_KEY)),
+        )
+
+    if mode == _WAN_MODE_LOAD_BALANCE:
+        return FirewallaWanRouting(
+            mode=mode,
+            traffic_share_percent=_traffic_share_percent(
+                raw_default.get(_RAW_NEXT_HOPS_KEY)
+            ),
+        )
+
+    return FirewallaWanRouting(mode=mode)
+
+
+def _raw_default_route(data: dict[str, object]) -> dict[str, object] | None:
+    """Return ``networkConfig.routing.global.default`` when the box states one."""
     raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
     if not isinstance(raw_network_config, dict):
         return None
@@ -375,9 +433,175 @@ def primary_wan_interface_name(data: dict[str, object]) -> str | None:
     if not isinstance(raw_global, dict):
         return None
     raw_default = raw_global.get(_RAW_DEFAULT_ROUTE_KEY)
-    if not isinstance(raw_default, dict):
+    return raw_default if isinstance(raw_default, dict) else None
+
+
+def _traffic_share_percent(raw_next_hops: object) -> dict[str, int] | None:
+    """Return the declared load-balance share per interface, if stated."""
+    if not isinstance(raw_next_hops, list):
         return None
-    return normalized_string(raw_default.get(_RAW_VIA_INTF_KEY))
+    share: dict[str, int] = {}
+    for raw_hop in raw_next_hops:
+        if not isinstance(raw_hop, dict):
+            continue
+        interface_name = normalized_string(raw_hop.get(_RAW_VIA_INTF_KEY))
+        weight = normalized_int(raw_hop.get(_RAW_WEIGHT_KEY))
+        if interface_name is None or weight is None:
+            continue
+        share[interface_name] = weight
+    return share or None
+
+
+def primary_wan_interface_name(data: dict[str, object]) -> str | None:
+    """Return the interface the box is configured to route through first.
+
+    Read from :func:`wan_routing` so there is one parser for the block. Only the
+    failover mode names a primary; load balance distributes across every
+    interface and has none, so it reports ``None`` rather than electing the first
+    next hop.
+
+    It outranks any ordering derived from interface names, which cannot
+    distinguish a primary from a standby.
+    """
+    routing = wan_routing(data)
+    return routing.primary if routing is not None else None
+
+
+def wan_role(
+    routing: FirewallaWanRouting | None,
+    interface_name: str | None,
+) -> str | None:
+    """Return a WAN's role under the active mode, or ``None`` when it has none.
+
+    Failover names a ``primary`` and a ``standby``; load balance treats every
+    participating interface as an equal member of the routing set, so each one is
+    ``shared``. That is deliberately a stated role rather than an omission: a
+    reader should never have to consult the mode to learn that a load-balanced
+    WAN is load balanced.
+
+    A single-WAN box has nothing to be primary, standby or shared relative to, so
+    it reports ``None``, as does any mode this integration has not verified.
+    """
+    if routing is None or interface_name is None:
+        return None
+    if routing.mode == _WAN_MODE_PRIMARY_STANDBY:
+        if interface_name == routing.primary:
+            return WAN_ROLE_PRIMARY
+        if interface_name == routing.standby:
+            return WAN_ROLE_STANDBY
+        return None
+    if routing.mode == _WAN_MODE_LOAD_BALANCE:
+        return WAN_ROLE_SHARED
+    return None
+
+
+def active_wan_interface_name(data: dict[str, object]) -> str | None:
+    """Return the interface of the WAN the box is routing through right now.
+
+    The top-level ``network`` block is the box's own answer to "which WAN is
+    carrying traffic": it names the interface, the label, the address, and its
+    link state. Under failover it follows the primary, and when the primary has
+    failed it follows the standby, which is what makes it the failover signal.
+
+    Under load balance it still names one interface — the first next hop — so it
+    is the box's current choice rather than a claim that only one WAN is used.
+    """
+    raw_network = data.get(_RAW_NETWORK_BLOCK_KEY)
+    if not isinstance(raw_network, dict):
+        return None
+    if normalized_string(raw_network.get(_RAW_TYPE_KEY)) != _RAW_TYPE_WAN:
+        return None
+    return normalized_string(raw_network.get(_RAW_NAME_KEY))
+
+
+def active_wan_ipv4_address(data: dict[str, object]) -> str | None:
+    """Return the box-level IPv4 the app reports for the appliance.
+
+    Read from the top-level ``network`` block rather than derived, because that
+    block is the address the box itself reports for the WAN it is using. It is
+    preferred over ``publicIp``, which some models fill with a DNS resolver
+    address instead of the WAN address.
+    """
+    raw_network = data.get(_RAW_NETWORK_BLOCK_KEY)
+    if not isinstance(raw_network, dict):
+        return None
+    if normalized_string(raw_network.get(_RAW_TYPE_KEY)) != _RAW_TYPE_WAN:
+        return None
+    address = normalized_string(raw_network.get(_RAW_IP_ADDRESS_KEY))
+    if address is not None:
+        return address
+    addresses = _normalized_string_tuple(raw_network.get(_RAW_IP4_ADDRESSES_KEY))
+    return addresses[0] if addresses else None
+
+
+def _wan_health_failures(raw_failures: object) -> tuple[str, ...]:
+    """Return the failure names from one WAN health entry.
+
+    The box lists them as ``[{"type": "carrier"}]``, and ``type`` is the part
+    that says what broke, so it is what gets published. A bare string is accepted
+    too, because the same field is a plain list elsewhere in the payload.
+    """
+    if not isinstance(raw_failures, list):
+        return ()
+    failures: list[str] = []
+    for raw_failure in raw_failures:
+        if isinstance(raw_failure, str):
+            name = raw_failure.strip()
+            if name:
+                failures.append(name)
+            continue
+        if not isinstance(raw_failure, dict):
+            continue
+        failure_type = normalized_string(raw_failure.get(_RAW_TYPE_KEY))
+        if failure_type is not None:
+            failures.append(failure_type)
+    return tuple(failures)
+
+
+def wan_health_by_interface(
+    data: dict[str, object],
+) -> dict[str, dict[str, object]]:
+    """Return the box's own per-WAN health test, keyed by interface name.
+
+    ``wanTestResult`` is a separate block from the per-WAN profile: the profile
+    states whether the WAN is in the routing set, while this states whether the
+    link actually works — carrier, DNS, ping, HTTP, and the failures recorded
+    when one of them does not. Both are needed to tell "standby, idle, healthy"
+    from "standby, idle, broken".
+
+    Every interface shares one ``ts`` because the box tests them together, so the
+    reading is a single snapshot rather than per-WAN samples.
+    """
+    raw_result = data.get(_RAW_WAN_TEST_RESULT_KEY)
+    if not isinstance(raw_result, dict):
+        return {}
+    raw_wans = raw_result.get(_RAW_WANS_KEY)
+    if not isinstance(raw_wans, dict):
+        return {}
+
+    shared_timestamp = normalized_int(raw_result.get(_RAW_TS_KEY))
+    health: dict[str, dict[str, object]] = {}
+    for interface_name, raw_entry in raw_wans.items():
+        if not isinstance(interface_name, str) or not isinstance(raw_entry, dict):
+            continue
+        raw_http = raw_entry.get(_RAW_HTTP_KEY)
+        health[interface_name] = {
+            "tested_at_timestamp": normalized_int(raw_entry.get(_RAW_TS_KEY))
+            or shared_timestamp,
+            "carrier": normalized_bool(raw_entry.get(_RAW_CARRIER_KEY)),
+            "dns": normalized_bool(raw_entry.get(_RAW_DNS_KEY)),
+            "ping": normalized_bool(raw_entry.get(_RAW_PING_KEY)),
+            "http_status": (
+                normalized_int(raw_http.get(_RAW_STATUS_CODE_KEY))
+                if isinstance(raw_http, dict)
+                else None
+            ),
+            "failures": _wan_health_failures(raw_entry.get(_RAW_FAILURES_KEY)),
+            "recent_down_at_timestamp": normalized_int(
+                raw_entry.get(_RAW_RECENT_DOWN_TIME_KEY)
+            ),
+        }
+    return health
 
 
 def _bridge_member_interface_names(data: dict[str, object]) -> set[str]:
@@ -509,14 +733,8 @@ def _enrich_network_addressing(
         if existing is None:
             continue
 
-        networks[network_id] = FirewallaNetwork(
-            uuid=existing.uuid,
-            name=existing.name,
-            kind=existing.kind,
-            interface_name=existing.interface_name,
-            interface_category=existing.interface_category,
-            vlan_id=existing.vlan_id,
-            ports=existing.ports,
+        networks[network_id] = replace(
+            existing,
             ipv4_addresses=(
                 _normalized_string_tuple(raw_profile.get(_RAW_IPV4_KEY))
                 or existing.ipv4_addresses
@@ -531,12 +749,18 @@ def _enrich_network_addressing(
             ),
             gateway=normalized_string(raw_profile.get(_RAW_GATEWAY_KEY)),
             dns_servers=_normalized_string_tuple(raw_profile.get(_RAW_DNS_KEY)),
-            dhcp=existing.dhcp,
-            device_host_count=existing.device_host_count,
-            enabled=existing.enabled,
-            mdns_relay=existing.mdns_relay,
-            ssdp_relay=existing.ssdp_relay,
-            block_icmp=existing.block_icmp,
+            # Only WAN profiles carry these, so a LAN/VLAN/VPN network keeps them
+            # absent rather than reporting a link state it was never given.
+            active=(
+                _normalized_bool(raw_profile.get(_RAW_ACTIVE_KEY))
+                if existing.kind is FirewallaNetworkKind.WAN
+                else existing.active
+            ),
+            ready=(
+                _normalized_bool(raw_profile.get(_RAW_READY_KEY))
+                if existing.kind is FirewallaNetworkKind.WAN
+                else existing.ready
+            ),
         )
 
 
@@ -628,26 +852,10 @@ def _enrich_network_ports(
             # (standalone VLAN/bond) is preserved.
             vlan_id = network.vlan_id or resolve_vlan_id(interface_name)
 
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
+        networks[network.uuid] = replace(
+            network,
             vlan_id=vlan_id,
             ports=ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
-            gateway=network.gateway,
-            dns_servers=network.dns_servers,
-            dhcp=network.dhcp,
-            device_host_count=network.device_host_count,
-            enabled=network.enabled,
-            mdns_relay=network.mdns_relay,
-            ssdp_relay=network.ssdp_relay,
-            block_icmp=network.block_icmp,
         )
 
 
@@ -681,20 +889,9 @@ def _enrich_network_dhcp(
         dhcp_gateway = normalized_string(raw_dhcp.get(_RAW_GATEWAY_KEY))
         gateway = network.gateway or dhcp_gateway
 
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
-            vlan_id=network.vlan_id,
-            ports=network.ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
+        networks[network.uuid] = replace(
+            network,
             gateway=gateway,
-            dns_servers=network.dns_servers,
             dhcp=FirewallaNetworkDhcpConfig(
                 gateway=dhcp_gateway,
                 subnet_mask=normalized_string(raw_dhcp.get(_RAW_SUBNET_MASK_KEY)),
@@ -709,11 +906,6 @@ def _enrich_network_dhcp(
                 ),
                 extra_options=_normalized_dict(raw_dhcp.get(_RAW_EXTRA_OPTIONS_KEY)),
             ),
-            device_host_count=network.device_host_count,
-            enabled=network.enabled,
-            mdns_relay=network.mdns_relay,
-            ssdp_relay=network.ssdp_relay,
-            block_icmp=network.block_icmp,
         )
 
 
@@ -761,23 +953,8 @@ def _enrich_network_advanced_options(
             if isinstance(raw_entry, dict):
                 ssdp_relay = _has_ssdp_route(raw_entry)
 
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
-            vlan_id=network.vlan_id,
-            ports=network.ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
-            gateway=network.gateway,
-            dns_servers=network.dns_servers,
-            dhcp=network.dhcp,
-            device_host_count=network.device_host_count,
-            enabled=network.enabled,
+        networks[network.uuid] = replace(
+            network,
             mdns_relay=mdns_relay,
             ssdp_relay=ssdp_relay,
             block_icmp=block_icmp,
@@ -840,24 +1017,4 @@ def _enrich_network_device_counts(
         device_count = counts.get(network.uuid)
         if device_count is None:
             continue
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
-            vlan_id=network.vlan_id,
-            ports=network.ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
-            gateway=network.gateway,
-            dns_servers=network.dns_servers,
-            dhcp=network.dhcp,
-            device_host_count=device_count,
-            enabled=network.enabled,
-            mdns_relay=network.mdns_relay,
-            ssdp_relay=network.ssdp_relay,
-            block_icmp=network.block_icmp,
-        )
+        networks[network.uuid] = replace(network, device_host_count=device_count)

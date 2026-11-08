@@ -132,6 +132,29 @@
   },
   "entity": {
     "binary_sensor": {
+      "wan_failover": {
+        "name": "WAN failover",
+        "state_attributes": {
+          "integration": {
+            "name": "Integration"
+          },
+          "purpose": {
+            "name": "Purpose",
+            "state": {
+              "purpose_wan_failover": "Shows whether a failover-configured box is running on its standby WAN"
+            }
+          },
+          "mode": {
+            "name": "WAN mode"
+          },
+          "primary": {
+            "name": "Primary WAN"
+          },
+          "active_wan": {
+            "name": "Active WAN"
+          }
+        }
+      },
       "alarm_active": {
         "name": "Alarm active",
         "state_attributes": {
@@ -244,6 +267,9 @@
           },
           "wan_ips": {
             "name": "WAN IPs"
+          },
+          "wan_routing": {
+            "name": "WAN routing"
           },
           "ports": {
             "name": "Ports"
@@ -392,6 +418,18 @@
           },
           "block_icmp": {
             "name": "Block ICMP"
+          },
+          "wan_role": {
+            "name": "WAN role"
+          },
+          "wan_in_use": {
+            "name": "WAN in use"
+          },
+          "wan_ready": {
+            "name": "WAN ready"
+          },
+          "wan_health": {
+            "name": "WAN health"
           },
           "host_count": {
             "name": "Host count"

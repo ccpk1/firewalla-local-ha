@@ -1031,9 +1031,14 @@ even a complete one.** Verified on a live box (2026-11-08):
   discriminator for an uplink the registry omits, and both the kind and the
   interface name (`intf`) are taken from the profile.
 - The **runtime init payload contains no `networkMonitorData` and no `wanStatus`
-  at all.** `networkMonitorData` is a separate `item=networkMonitorData` read used
-  for internet quality, and `wanStatus` appears only inside monitor-**event**
-  labels. Treating either as an init-payload key yields dead code.
+  under that name.** `networkMonitorData` is a separate `item=networkMonitorData`
+  read used for internet quality. `wanStatus` **is** in the init payload, but under
+  `latestAllStateEvents["overall_wan_state:overall_wan_state"].labels`, together
+  with `wanType` — not under `networkMonitorData`.
+- `overall_wan_state` and `wan_state:<intf>` are **opportunistic**: they are absent
+  from some payloads entirely, and their `wanType` was observed **stale** (reporting
+  `load_balance` while the routing block said `primary_standby`). They are used for
+  per-WAN names and state, never for the mode.
 - The top-level `network` block describes the WAN the box is routing through right
   now: `uuid`, `name` (interface), `desc` (the label the app shows), `type: "wan"`,
   `active`, `ready`.
@@ -1094,24 +1099,28 @@ Per-WAN state, and what each flag actually means:
 | Field | Primary (eth0) | Standby (eth1) | Meaning |
 | --- | --- | --- | --- |
 | `networkProfiles[uuid].active` | `true` | `false` | **in the active routing set** |
-| `…wanConnState.inUse` | `true` | `false` | same fact, same value |
+| `…wanConnState.active` | `true` | `false` | same fact, same value |
 | `…wanConnState.ready` | `true` | `true` | link usable; a standby is normally ready |
 | `networkProfiles[uuid].pendingTest` | `false` | `false` | awaiting the first health test |
 | `wanTestResult.wans[intf].carrier/dns/ping` | `true` | `true` | per-WAN health probes |
 
-Three things this rules out:
+**`wanConnState.inUse` is not usable as a discriminator.** Captured during a real
+failover (eth0 unplugged) it was `true` for **both** WANs, while
+`networkProfiles[uuid].active` and `wanConnState.active` correctly flipped to
+`eth0: false, eth1: true`. It is sticky — it stays set for a WAN that was in use
+— so the integration publishes `active` (`wan_in_use`) and never `inUse`.
+
+Three more things this rules out:
 
 - **`active` is not "carrying traffic".** In load balance both WANs report
-  `active: true` *and* `inUse: true`, because both are in the routing set. In
-  failover exactly one is. So `inUse` answers "in the active set", not "the one
-  carrying traffic".
+  `active: true`, because both are in the routing set. In failover exactly one
+  does, and it flips on a failover.
 - **The coarse `wanTestResult.wans[intf].active` is not the same field.** It is
   `true` for the standby too, while `wanConnState.active` is `false`. Read the
   nested `wanConnState` when the answer matters.
-- **`inUse` lags the configuration.** Immediately after switching to load balance
-  eth1 still reported `inUse: false`; it converged on the next poll. `wanTestResult`
-  is refreshed on its own cycle (one shared `ts` for every WAN), so it is a
-  snapshot, not the config write.
+- **No single integer is a reliable "which WAN" answer.** The only field that
+  names the WAN in use, in every capture including a live failover, is the
+  top-level `network` block's `name`.
 
 `networkMetrics.<intf>.rx/tx` are **not** cumulative counters, so they cannot be
 differenced into a traffic split: each is a percentile block
@@ -1138,6 +1147,107 @@ fire against a real box. Fixtures now declare WANs where a real box does — a `
 entry with `meta.type: "wan"`, a profile with `type: "wan"`, and event labels for
 the display name — and one test pins that an init-payload `wanStatus` block
 classifies nothing.
+
+**Published surface.** The System Status sensor carries the whole mode in one
+`wan_routing` attribute rather than a field per setting, because four of the five
+possible keys are empty in any given mode:
+
+| Mode | `wan_routing` |
+| --- | --- |
+| Failover | `{"mode": "primary_standby", "primary": "WAN-ONE", "standby": "WAN-TWO", "failback": true}` |
+| Load balance | `{"mode": "load_balance", "traffic_share_percent": {"WAN-ONE": 60, "WAN-TWO": 40}}` |
+| Stated mode with nothing to configure | `{"mode": "single"}` |
+| No routing block | `None` |
+
+Interfaces are published as WAN labels, so the keys line up with `current_wan_usage`
+and the WAN sensors. `traffic_share_percent` is deliberately **not** synthesized
+for failover: in failover the in-use WAN already carries everything, and a
+synthesized 100 would be indistinguishable from a weight the box actually stores.
+
+Each WAN network sensor carries its own share of that state, and each piece is
+added only when the box states it:
+
+| Attribute | Source | Failover | Load balance |
+| --- | --- | --- | --- |
+| `wan_role` | `routing.global.default` vs the WAN's interface | `primary` / `standby` | `shared` |
+| `wan_in_use` | `networkProfiles[uuid].active` | one true | both true |
+| `wan_ready` | `networkProfiles[uuid].ready` | true on both | true on both |
+| `wan_health` | `wanTestResult.wans[intf]` | one block each | one block each |
+
+`wan_role` is derived at publish time rather than stored on the network, because
+it is a property of the box's routing policy and not of the network's geometry.
+Load balance reports `shared` for every participant: both WANs carry traffic, so
+neither is primary, but a role is still stated so a reader never has to consult
+the mode to learn how a WAN is being used. A single-WAN box reports no role,
+because it has nothing to be primary, standby or shared relative to.
+
+`wan_health` is the box's own link test, which answers a different question from
+the profile. `wan_ready` says the box considers the link usable; `wan_health` says
+the probes agreed, with `carrier`, `dns`, `ping`, `http_status`, the `failures`
+recorded when one did not, and `recent_down_at` for the last interruption. A
+standby can therefore be `wan_ready: true` with `wan_health.dns: false`, which is
+the difference between "idle" and "quietly broken" that readiness alone hid.
+Every interface shares one `ts`, so the whole block is a single snapshot.
+
+`wan_in_use` reads `active`, which is the same value as
+`wanTestResult.wans[intf].wanConnState.active`. Despite the name it means "in the
+active routing set", not "carrying traffic" — in load balance both WANs are true.
+It is **not** read from the coarse `wanTestResult.wans[intf].active`, which is
+true for a failover standby as well.
+
+Captured output for the three fixtures:
+
+```
+failover, eth0 primary         WAN-ONE  role=primary   in_use=True   ready=True
+                               WAN-TWO  role=standby   in_use=False  ready=True
+load balance 60/40             WAN-ONE  role=shared    in_use=True   ready=True
+                               WAN-TWO  role=shared    in_use=True   ready=True
+failover, eth1 primary         WAN-ONE  role=standby   in_use=False  ready=True
+                               WAN-TWO  role=primary   in_use=True   ready=True
+```
+
+### Failover sensor
+
+`binary_sensor.<box>_wan_failover` reports whether a failover-configured box is
+running on its standby. It is **unavailable** outside `primary_standby`, because
+load balance has no primary to fail away from and an `off` there would read as
+"the primary is healthy".
+
+The signal is the top-level `network` block compared to `viaIntf`: that block
+names the WAN the box is routing through, follows the primary normally, and
+follows the standby once the primary has failed. **Verified on a live failover**
+(eth0 unplugged, 2026-11-08): `network.name` became `eth1` while `viaIntf`
+stayed `eth0`, and the WAN profiles flipped to `eth0: active=false, ready=false`
+with `wanTestResult.wans.eth0.failures == [{"type": "carrier"}]`.
+
+### Failover history
+
+The events feed **does** retain WAN link-state families — they are simply absent
+while nothing happens. Unfiltered, the local store held 78 events over 7 days
+(`dap_state`, `ping`, `dns`) with no WAN families; immediately after a real
+failover it held 86, including one each of `dualwan_state`, `overall_wan_state`,
+`wan_state` and `ethernet_state`.
+
+So `get_wan_events` was never broken — an earlier reading of "zero events"
+meant "nothing had failed yet". The captured `dualwan_state` event carries
+`wanSwitched: true`, `changedInterface`, `primaryInterface`, the full
+`wanStatus` map, and `failures: [{"type": "carrier"}]`, which is what makes
+failover *history* answerable through the existing service and MCP tool.
+
+Two cautions on that event:
+
+- It also showed `inUse: true` for both WANs, confirming `inUse` is sticky.
+- `seq` (`0` primary, `1` standby) appears here but is absent from
+  `overall_wan_state`'s `wanStatus` in the init payload, so it is event-only and
+  not a published ordering.
+
+### The box-level IP
+
+`wan_ip` is read from the top-level `network` block's `ip_address`, not derived.
+That is the address the box itself reports for the WAN it is using, so it is what
+the app shows and it moves with a failover. When the block is absent the
+configured primary's address is used, and port order remains only a last resort.
+`publicIp` is not used: some models fill it with a DNS resolver address.
 
 ### Detail fields
 
@@ -1237,6 +1347,7 @@ from the init payload:
 | --- | --- | --- | --- |
 | Box version | `longVersion` / `versionStr` | `FirewallaSystemInfo.software_version` | `software_version` |
 | WAN IP | WAN network `networkProfiles[<wan_uuid>].ipv4` (primary = `networkConfig.routing.global.default.viaIntf`; ambiguous under load balance, which has no primary) | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
+| Multi-WAN mode | `networkConfig.routing.global.default` | `FirewallaSystemStatus.wan_routing` | `wan_routing` |
 | Port MAC | `nicStates[<port>].address` | per-port `mac` | `ports[<port>].mac` |
 | Port speed | `nicStates[<port>].speed` (Mbps; `-1` = inactive) | per-port `speed_mbps` | `ports[<port>].speed_mbps` |
 | Port link | `nicStates[<port>].carrier` (`1`/`0`) | per-port `link` | `ports[<port>].link` |
