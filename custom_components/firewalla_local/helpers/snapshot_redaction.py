@@ -43,8 +43,13 @@ _IDENTIFYING_KEYS: Final = frozenset(
         "associated_host_names",
         "ddns",
         "dhcp_name",
+        "device_id",
         "device_ip",
         "device_name",
+        # A rule hit's `destination` is the same class of value as the `target`
+        # it matched: a domain, or an address. Measured on a live rule hit, it
+        # repeats the domain the rule names.
+        "destination",
         "dns_domain",
         "dns_fqdn",
         "dns_hostname",

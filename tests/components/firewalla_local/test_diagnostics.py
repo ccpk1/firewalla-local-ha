@@ -30,6 +30,9 @@ from custom_components.firewalla_local.coordinator import FirewallaConfigEntry
 from custom_components.firewalla_local.diagnostics import (
     async_get_config_entry_diagnostics,
 )
+from custom_components.firewalla_local.helpers.snapshot_redaction import (
+    redact_runtime_snapshot,
+)
 from custom_components.firewalla_local.models import (
     FirewallaAlarm,
     FirewallaApplianceIdentityInput,
@@ -419,9 +422,25 @@ async def test_get_config_entry_diagnostics_leaks_no_identifying_value(
 # appliance rather than name one, so they carry no household data. Anything not
 # listed here must be redacted, which is what makes a newly added field fail this
 # test until someone decides which it is.
+#
+# Two families live here. **Classification and configuration** values — `action`,
+# `ltype`, `target_type`, `purpose`, `block_type`, `app`, `region`,
+# `server_country`, `mount` — say what kind of thing a record is or how the box is
+# set up. **Opaque box ids** — `rule_id`, `alarm_id`, `exception_id`, `group_id`,
+# `user_id`, `affiliated_group_id`, `network_id`, `remote_network_id`,
+# `network_uuid`, `wan_uuid`, `profile_id`, `app_id` — are assigned by the box and
+# name nothing a reader could resolve to a household. They stay for the same
+# reason `rule_id` does: they are what joins a report to the rule, alarm or
+# network it is about, and a report without them cannot be triaged.
 _SNAPSHOT_FIELDS_PUBLISHED_VERBATIM: Final = frozenset(
     {
+        "action",
+        "affiliated_group_id",
+        "alarm_id",
         "alarm_type",
+        "app",
+        "app_id",
+        "block_type",
         "blocked_by_rule_id",
         "category",
         "cloud_connected",
@@ -430,22 +449,49 @@ _SNAPSHOT_FIELDS_PUBLISHED_VERBATIM: Final = frozenset(
         "direction",
         "dist_codename",
         "enabled",
+        "exception_id",
         "firmware_release_type",
+        "group_id",
         "host_device_type",
         "interface_name",
         "is_archived",
         "kind",
+        "ltype",
         "membership_kind",
         "model",
+        "mount",
+        "network_id",
+        "network_uuid",
+        "profile_id",
         "protocol",
+        "purpose",
+        "region",
         "remote_app",
         "remote_category",
+        "remote_network_id",
         "remote_region",
+        "rule_id",
+        "server_country",
         "severity",
         "software_version",
         "state",
+        "target_type",
         "timezone_name",
+        "user_id",
         "vendor",
+        "wan_uuid",
+    }
+)
+
+# Fields safe because a scalar pattern catches what they actually hold: an
+# address or a MAC. Listed separately from the published-verbatim set because the
+# two claims are different — these are redacted, just not by key name — and
+# merging them would let a value that is genuinely published hide among fields
+# that only *look* like they should be.
+_SNAPSHOT_FIELDS_REDACTED_BY_PATTERN: Final = frozenset(
+    {
+        "destination_ip",
+        "destination_mac",
     }
 )
 
@@ -457,6 +503,94 @@ def _is_string_annotation(annotation: object) -> bool:
     return typing.get_origin(annotation) is typing.Union and str in (
         typing.get_args(annotation) or ()
     )
+
+
+def test_a_rule_hit_publishes_no_destination_or_device_identity() -> None:
+    """A rule hit's destination and device are redacted, its context is not.
+
+    `last_hit` carries the flow the rule last matched, so `destination` repeats
+    the domain the rule names and `device_id` can be a `wg_peer:`/`awg_peer:` id
+    that no scalar pattern matches. Both are household data: together they say
+    which device went where. The fields that make the hit diagnosable — rule id,
+    kind, protocol, byte counts, the match time — stay.
+    """
+    snapshot = {
+        "policy_rules": [
+            {
+                "rule_id": "744",
+                "target": "tracker.example.com",
+                "last_hit": {
+                    "timestamp": 1774287984.0,
+                    "device_id": "wg_peer:6HTEM5aG2+LyG0NSPB1UzQ==",
+                    "device_ip": "192.168.1.50",
+                    "destination": "tracker.example.com",
+                    "destination_kind": "domain",
+                    "destination_ip": "203.0.113.9",
+                    "destination_mac": "AA:BB:CC:DD:EE:FF",
+                    "download_bytes": 1024,
+                    "protocol": "tcp",
+                },
+            }
+        ]
+    }
+
+    hit = redact_runtime_snapshot(snapshot)["policy_rules"][0]["last_hit"]
+
+    assert hit["device_id"] == "**REDACTED**"
+    assert hit["destination"] == "**REDACTED**"
+    assert hit["device_ip"] == "**REDACTED**"
+    assert hit["destination_ip"] == "**REDACTED**"
+    assert hit["destination_mac"] == "**REDACTED**"
+    # The context that makes the hit diagnosable survives.
+    assert hit["timestamp"] == 1774287984.0
+    assert hit["destination_kind"] == "domain"
+    assert hit["download_bytes"] == 1024
+    assert hit["protocol"] == "tcp"
+
+
+def test_every_string_field_is_redacted_by_a_key_or_a_pattern() -> None:
+    """Every reachable string field must be caught by one of the two mechanisms.
+
+    The redaction has two: a key name in the identifying sets, and the scalar
+    patterns that catch addresses, MACs, emails and internal domains. A field
+    covered by neither is published verbatim without anyone deciding that, which
+    is how a rule hit's `destination` and `device_id` reached a report.
+
+    Behavioural rather than name-based on purpose: it feeds canaries through the
+    real redactor, so it fails for a field that looks safe and is not, and it
+    keeps working when a field is renamed.
+
+    Both canaries are values the scalar patterns demonstrably ignore — a public
+    domain (only the internal-suffix pattern exists) and a peer id. If they both
+    survive, neither mechanism covers the field, and it has to be declared either
+    published-on-purpose or pattern-redacted.
+    """
+    canaries = ("canary.example.com", "wg_peer:AAAAAAAAAAAAAAAAAAAAAA==")
+
+    unguarded: list[str] = []
+    for field_name, owner in _reachable_string_fields(FirewallaRuntimeSnapshot).items():
+        if field_name in _SNAPSHOT_FIELDS_PUBLISHED_VERBATIM:
+            continue
+        if field_name in _SNAPSHOT_FIELDS_REDACTED_BY_PATTERN:
+            continue
+        if all(
+            redact_runtime_snapshot({field_name: canary})[field_name] == canary
+            for canary in canaries
+        ):
+            unguarded.append(f"{field_name} ({owner.__name__})")
+
+    assert unguarded == [], (
+        "these string fields reach a diagnostics report with neither a key set "
+        f"nor a scalar pattern catching them: {sorted(unguarded)}"
+    )
+
+
+def test_the_pattern_redacted_field_list_is_not_stale() -> None:
+    """Every declared pattern-redacted field still exists in the snapshot."""
+    known = _reachable_string_fields(FirewallaRuntimeSnapshot)
+
+    stale = sorted(set(_SNAPSHOT_FIELDS_REDACTED_BY_PATTERN) - set(known))
+    assert stale == [], f"declared pattern-redacted but no longer reachable: {stale}"
 
 
 def _reachable_string_fields(root: type) -> dict[str, type]:
