@@ -12,7 +12,7 @@ _WAN_STATUS_KEY = "networkMonitorData"
 
 
 def _wan_status(*interfaces: tuple[str, str, str]) -> dict[str, object]:
-    """Return a raw ``wanStatus`` block keyed by interface name."""
+    """Return a ``wanStatus`` block in the shape the monitor events carry."""
     return {
         "overall_wan_state:overall_wan_state": {
             "labels": {
@@ -28,57 +28,58 @@ def _wan_status(*interfaces: tuple[str, str, str]) -> dict[str, object]:
     }
 
 
-def test_a_wan_status_only_uplink_is_published_as_a_wan() -> None:
-    """Test a PPPoE uplink the interface registry omits is still a WAN.
+def test_a_profile_only_wan_is_fully_populated_from_its_profile() -> None:
+    """Test the issue #61 shape: an uplink present only in ``networkProfiles``.
 
-    The reporting box listed the PPPoE interface only in ``networkProfiles`` and
-    ``wanStatus``. The profile pass classified it as a LAN and the WAN status pass
-    refused to correct it, so it was published as a LAN and no WAN selector could
-    name it (issue #61).
+    The reporting box listed the PPPoE uplink only there, so the profile's own
+    ``type`` has to supply the kind. Its interface name has to come from the
+    profile's ``intf`` too, because nothing else states it — without that the
+    network is skipped by the port, DHCP and relay lookups.
     """
     networks = build_network_inventory(
         {
             "networkProfiles": {
                 "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d": {
                     "intf": "pppoe0",
+                    "type": "wan",
+                    "active": True,
+                    "ready": True,
                     "ipv4": "86.10.20.30",
                 },
-                "f165924c-5854-4cd7-9041-ef7b8f1170f0": {
-                    "intf": "wlan0",
-                    "ipv4": "192.168.50.20",
-                },
             },
-            "networkConfig": {
-                "interface": {
-                    "wlan": {
-                        "wlan0": {
-                            "meta": {
-                                "name": "Wireless",
-                                "type": "wan",
-                                "uuid": "f165924c-5854-4cd7-9041-ef7b8f1170f0",
-                            }
-                        }
-                    }
-                }
-            },
-            _WAN_STATUS_KEY: _wan_status(
-                ("pppoe0", "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d", "EE"),
-                ("wlan0", "f165924c-5854-4cd7-9041-ef7b8f1170f0", "Wireless"),
-            ),
+            # The registry exists but does not describe the uplink; an empty map
+            # keeps the port and relay passes running against it.
+            "networkConfig": {"interface": {}},
         }
     )
 
-    by_uuid = {network.uuid: network for network in networks}
-    pppoe = by_uuid["d564a8c7-a323-473a-9f9f-d7f0a5b1af7d"]
+    (pppoe,) = networks
 
     assert pppoe.kind is FirewallaNetworkKind.WAN
-    assert pppoe.name == "EE"
     assert pppoe.interface_name == "pppoe0"
     assert pppoe.ports == ("pppoe0",)
     assert pppoe.ipv4_addresses == ("86.10.20.30",)
-    assert by_uuid["f165924c-5854-4cd7-9041-ef7b8f1170f0"].kind is (
-        FirewallaNetworkKind.WAN
+
+
+def test_an_init_payload_wan_status_block_is_not_a_wan_source() -> None:
+    """Test ``networkMonitorData`` in an init payload cannot create a WAN.
+
+    A live box publishes no ``networkMonitorData`` there at all — ``wanStatus``
+    lives only in monitor-event labels — so an earlier version of this parser
+    read a block that never exists. Pinning the absence keeps that dead path
+    from being reintroduced: the invented source must not classify anything.
+    """
+    networks = build_network_inventory(
+        {
+            "networkProfiles": {"pppoe-uuid": {"intf": "pppoe0", "type": "lan"}},
+            _WAN_STATUS_KEY: _wan_status(("pppoe0", "pppoe-uuid", "EE")),
+        }
     )
+
+    (network,) = networks
+
+    assert network.kind is FirewallaNetworkKind.LAN
+    assert network.name == "pppoe0"
 
 
 def test_an_unknown_interface_category_is_classified_by_meta_type() -> None:

@@ -1631,12 +1631,12 @@ def test_get_available_wans_filters_wan_kind_without_speed_test_fallback() -> No
     ]
 
 
-def test_get_available_wans_includes_a_wan_status_only_uplink() -> None:
+def test_get_available_wans_includes_an_uplink_the_registry_omits() -> None:
     """Test an uplink the interface registry omits is still published as a WAN.
 
-    A PPPoE uplink only appears in ``networkProfiles`` and ``wanStatus`` on the
-    reporting box, so the profile pass used to classify it as a LAN and the WAN
-    status pass refused to correct it (issue #61).
+    This is the issue #61 shape as a live box produces it: the PPPoE uplink
+    appears only in ``networkProfiles``, where ``type: "wan"`` is the box's own
+    declaration, and the friendly name comes from the monitor-event labels.
     """
     snapshot = FirewallaRuntimeSnapshot(
         appliance_identity=FirewallaApplianceIdentityInput(
@@ -1656,10 +1656,16 @@ def test_get_available_wans_includes_a_wan_status_only_uplink() -> None:
         "networkProfiles": {
             "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d": {
                 "intf": "pppoe0",
+                "type": "wan",
+                "active": True,
+                "ready": True,
                 "ipv4": "86.10.20.30",
             },
             "f165924c-5854-4cd7-9041-ef7b8f1170f0": {
                 "intf": "wlan0",
+                "type": "wan",
+                "active": False,
+                "ready": True,
                 "ipv4": "192.168.50.20",
             },
         },
@@ -1676,21 +1682,13 @@ def test_get_available_wans_includes_a_wan_status_only_uplink() -> None:
                 }
             }
         },
-        "networkMonitorData": {
-            "overall_wan_state:overall_wan_state": {
+        "latestAllStateEvents": {
+            "ping:pppoe0-1.1.1.1": {
                 "labels": {
-                    "wanStatus": {
-                        "pppoe0": {
-                            "wan_intf_name": "EE",
-                            "wan_intf_uuid": "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d",
-                        },
-                        "wlan0": {
-                            "wan_intf_name": "Wireless",
-                            "wan_intf_uuid": "f165924c-5854-4cd7-9041-ef7b8f1170f0",
-                        },
-                    }
+                    "wan_intf_name": "EE",
+                    "wan_intf_uuid": "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d",
                 }
-            }
+            },
         },
     }
 

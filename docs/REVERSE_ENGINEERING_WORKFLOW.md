@@ -1037,9 +1037,10 @@ even a complete one.** Verified on a live box (2026-11-08):
 - The top-level `network` block describes the WAN the box is routing through right
   now: `uuid`, `name` (interface), `desc` (the label the app shows), `type: "wan"`,
   `active`, `ready`.
-- The app's **WAN preference** is `networkConfig.routing.global.default`: `type`
-  says how the WANs are used (`primary_standby`), `viaIntf` names the primary and
-  `viaIntf2` the standby, `failback` whether it returns to the primary.
+- The app's **WAN preference** is `networkConfig.routing.global.default`, whose
+  shape depends on the mode — see [Multi-WAN modes](#multi-wan-modes). In failover
+  it names a `viaIntf` primary and a `viaIntf2` standby; in load balance it carries
+  `nextHops` weights and no primary at all.
 - The WAN display names (`EE`, `Wireless`, `WAN-ONE`) live in the monitor-event
   labels as `wan_intf_uuid` + `wan_intf_name`; `networkProfiles` has no display
   name field. Event labels are used to *name* a WAN, never to classify or create
@@ -1050,6 +1051,93 @@ WAN identity is therefore resolved from those declarations after the registry an
 interface name, and adopts the declared name where the current one is only a
 fallback — the uuid or the interface name. A registry `meta.name` is an authored
 label and is kept.
+
+### Multi-WAN modes
+
+The app offers three WAN modes, and the mode is a **configuration point** rather
+than something derivable from interface counts. Verified by capturing one live
+Gold in each configuration (2026-11-08, `utils/probe_wan_mode.py`):
+
+| Mode (app) | `routing.global.default` |
+| --- | --- |
+| Single WAN | `{"type": "single"}` (mode name confirmed from the `dualwan_state` event's `wanType`, not from a routing capture) |
+| Failover | `{"type": "primary_standby", "viaIntf": "eth0", "viaIntf2": "eth1", "failback": true}` |
+| Load balance | `{"type": "load_balance", "nextHops": [{"viaIntf": "eth0", "weight": 60}, {"viaIntf": "eth1", "weight": 40}]}` |
+
+The routing block is the **only** WAN-related config difference between modes: a
+path-by-path diff of the two payloads showed `failback`/`viaIntf`/`viaIntf2`
+disappearing and `nextHops[].viaIntf`/`nextHops[].weight` appearing, with all 68
+other WAN-related paths identical.
+
+Reading the modes:
+
+- **`viaIntf` is the primary and `viaIntf2` the standby, whatever the interface
+  names sort to.** Captured with the primary reversed (`viaIntf: eth1`,
+  `viaIntf2: eth0`), which is what proves port order cannot stand in for the
+  setting: a "lowest port wins" rule reports `eth0`'s address while the box routes
+  through `eth1`.
+- **`weight` is a percentage share and only exists in load balance.** Nothing
+  else in the payload reports a split. `seq` on the `wanStatus` entries is a
+  priority order (`0` primary, `1` standby), *not* a weight, and must not be read
+  as one.
+- **`failback` exists in failover only** — it is the app's "auto fallback" toggle.
+  Load balance has no equivalent because there is nothing to fall back to.
+- **There is no primary or standby in load balance.** `nextHops` is an unordered
+  set of participating interfaces; assigning `role: primary` to `nextHops[0]` would
+  invent a hierarchy the mode does not have.
+- **`type` is the raw wire value** (`single`, `primary_standby`, `load_balance`).
+  The app's labels ("Failover", "Load Balance") are presentation, the same
+  relationship `interface_category` has to its rendered name.
+
+Per-WAN state, and what each flag actually means:
+
+| Field | Primary (eth0) | Standby (eth1) | Meaning |
+| --- | --- | --- | --- |
+| `networkProfiles[uuid].active` | `true` | `false` | **in the active routing set** |
+| `…wanConnState.inUse` | `true` | `false` | same fact, same value |
+| `…wanConnState.ready` | `true` | `true` | link usable; a standby is normally ready |
+| `networkProfiles[uuid].pendingTest` | `false` | `false` | awaiting the first health test |
+| `wanTestResult.wans[intf].carrier/dns/ping` | `true` | `true` | per-WAN health probes |
+
+Three things this rules out:
+
+- **`active` is not "carrying traffic".** In load balance both WANs report
+  `active: true` *and* `inUse: true`, because both are in the routing set. In
+  failover exactly one is. So `inUse` answers "in the active set", not "the one
+  carrying traffic".
+- **The coarse `wanTestResult.wans[intf].active` is not the same field.** It is
+  `true` for the standby too, while `wanConnState.active` is `false`. Read the
+  nested `wanConnState` when the answer matters.
+- **`inUse` lags the configuration.** Immediately after switching to load balance
+  eth1 still reported `inUse: false`; it converged on the next poll. `wanTestResult`
+  is refreshed on its own cycle (one shared `ts` for every WAN), so it is a
+  snapshot, not the config write.
+
+`networkMetrics.<intf>.rx/tx` are **not** cumulative counters, so they cannot be
+differenced into a traffic split: each is a percentile block
+(`min`/`median`/`pt75`/`pt90`/`max`) and is `null` for an interface with no
+samples. The configured `weight` is the only statement of the split.
+
+Top-level `network` is the WAN currently routing (it followed `viaIntf` in every
+capture, including the reversed one). `wanStatus` — with `active`, `ready`, `seq`,
+`ip4s`, `wan_intf_name`, `wan_intf_uuid` per interface — appears **only** in the
+`dualwan_state` event labels, together with `wanType`, `primaryInterface`,
+`changedInterface` and `wanSwitched`. That event is opportunistic: it is absent
+from `latestAllStateEvents` when it has not fired recently, so it cannot be relied
+on for state, only for naming and for switch history.
+
+Reproduce with `python utils/probe_wan_mode.py --label <mode>`, which reduces a
+capture to the fields a mode change can move and writes `<label>.json` (the
+fingerprint) beside `<label>-raw.json` (the full payload) under
+`.artifacts/wan-mode/`, so two modes diff as a few dozen lines instead of two
+60k-line payloads.
+
+The captured fixtures are also a caution. Test payloads had declared WANs through
+`networkMonitorData.wanStatus`, so that parser looked covered while it could never
+fire against a real box. Fixtures now declare WANs where a real box does — a `phy`
+entry with `meta.type: "wan"`, a profile with `type: "wan"`, and event labels for
+the display name — and one test pins that an init-payload `wanStatus` block
+classifies nothing.
 
 ### Detail fields
 
@@ -1148,7 +1236,7 @@ from the init payload:
 | App field | Raw path | Normalized | Entity attribute |
 | --- | --- | --- | --- |
 | Box version | `longVersion` / `versionStr` | `FirewallaSystemInfo.software_version` | `software_version` |
-| WAN IP | WAN network `networkProfiles[<wan_uuid>].ipv4` (primary = `networkConfig.routing.global.default.viaIntf`) | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
+| WAN IP | WAN network `networkProfiles[<wan_uuid>].ipv4` (primary = `networkConfig.routing.global.default.viaIntf`; ambiguous under load balance, which has no primary) | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
 | Port MAC | `nicStates[<port>].address` | per-port `mac` | `ports[<port>].mac` |
 | Port speed | `nicStates[<port>].speed` (Mbps; `-1` = inactive) | per-port `speed_mbps` | `ports[<port>].speed_mbps` |
 | Port link | `nicStates[<port>].carrier` (`1`/`0`) | per-port `link` | `ports[<port>].link` |
@@ -1172,11 +1260,13 @@ Notes:
   IP in the reported case) instead of the actual WAN IP, while the WAN network
   entities carry the correct per-WAN IPv4. The primary WAN is the interface the
   box is **configured** to route through first
-  (`networkConfig.routing.global.default.viaIntf`, applied 2026-11-08); port
-  order is only a tie-breaker for the remaining WANs, because it cannot tell a
-  primary from a standby and ranks `pppoe0`/`wlan0` the same as `eth0`. `wan_ip`
+  (`networkConfig.routing.global.default.viaIntf`, applied 2026-11-08 and verified
+  by reversing the primary); port order is only a tie-breaker for the remaining
+  WANs, because it cannot tell a primary from a standby and ranks
+  `pppoe0`/`wlan0` the same as `eth0`. `wan_ip`
   is the primary WAN's first IPv4 and `wan_ips` maps each WAN interface name to
-  its first IPv4.
+  its first IPv4. **Under load balance there is no primary**, so `wan_ip` is one
+  participating WAN's address and no more than that; `wan_ips` remains complete.
   IPv6 is intentionally not included here — it is surfaced per-network on the
   WAN network entities' `ipv6_addresses` attribute.
 - App version and cloud instance are app-side/cloud-side and are **not**

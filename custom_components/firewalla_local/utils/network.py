@@ -54,12 +54,10 @@ _RAW_HOSTS_KEY: Final = "hosts"
 _RAW_HOST_MAC_VENDOR_KEY: Final = "macVendor"
 _RAW_HOST_INTF_KEY: Final = "intf"
 _FIREWALLA_VENDOR_MARKER: Final = "firewalla"
-_RAW_NETWORK_MONITOR_DATA_KEY: Final = "networkMonitorData"
-_RAW_WAN_STATUS_KEY: Final = "wanStatus"
-_RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
-_RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
 _RAW_NETWORK_BLOCK_KEY: Final = "network"
 _RAW_LABELS_KEY: Final = "labels"
+_RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
+_RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
 # The only payload blocks whose entries carry event ``labels``. Enumerating them
 # keeps the WAN-name lookup proportional to the event count rather than to the
 # whole payload.
@@ -195,34 +193,6 @@ def _collect_network_interface_entries(
         )
 
 
-def _iter_wan_status_entries(
-    raw_value: object,
-) -> Iterator[tuple[str, str | None, str | None]]:
-    """Yield ``(wan_uuid, wan_name, interface_name)`` from any nested wanStatus."""
-    if isinstance(raw_value, dict):
-        raw_status = raw_value.get(_RAW_WAN_STATUS_KEY)
-        if isinstance(raw_status, dict):
-            for interface_key, raw_port in raw_status.items():
-                if not isinstance(raw_port, dict):
-                    continue
-                wan_uuid = raw_port.get(_RAW_WAN_INTERFACE_UUID_KEY)
-                if not isinstance(wan_uuid, str) or not wan_uuid:
-                    continue
-                yield (
-                    wan_uuid,
-                    normalized_string(raw_port.get(_RAW_WAN_INTERFACE_NAME_KEY)),
-                    normalized_string(interface_key),
-                )
-
-        for nested_value in raw_value.values():
-            yield from _iter_wan_status_entries(nested_value)
-        return
-
-    if isinstance(raw_value, list):
-        for nested_value in raw_value:
-            yield from _iter_wan_status_entries(nested_value)
-
-
 def _resolved_wan_name(
     network: FirewallaNetwork,
     *,
@@ -268,26 +238,27 @@ def _iter_declared_wans(
 ) -> Iterator[tuple[str, str | None, str | None]]:
     """Yield ``(wan_uuid, wan_name, interface_name)`` for every WAN declaration.
 
-    Two blocks state WAN identity directly, and neither needs the interface
-    registry. The top-level ``network`` block describes the WAN the box is
-    routing through right now (``uuid``, ``name``, ``desc``, ``type: "wan"``),
-    and ``wanStatus`` — where a firmware publishes it — lists every uplink.
+    Only the top-level ``network`` block qualifies: it describes the WAN the box
+    is routing through right now (``uuid``, ``name``, ``desc``, ``type: "wan"``).
+
+    ``wanStatus`` carries the same information, but it appears **only inside
+    monitor-event labels** (``dualwan_state``), never in an init payload, so it
+    belongs to the event path and not here. Reading it from this payload was
+    verified dead on a live box (2026-11-08).
     """
     raw_network = data.get(_RAW_NETWORK_BLOCK_KEY)
-    if isinstance(raw_network, dict):
-        wan_uuid = normalized_string(raw_network.get(_RAW_UUID_KEY))
-        if wan_uuid is not None and (
-            normalized_string(raw_network.get(_RAW_TYPE_KEY)) == _RAW_TYPE_WAN
-        ):
-            yield (
-                wan_uuid,
-                normalized_string(raw_network.get(_RAW_DESC_KEY)),
-                normalized_string(raw_network.get(_RAW_NAME_KEY)),
-            )
-
-    raw_monitor = data.get(_RAW_NETWORK_MONITOR_DATA_KEY)
-    if raw_monitor is not None:
-        yield from _iter_wan_status_entries(raw_monitor)
+    if not isinstance(raw_network, dict):
+        return
+    wan_uuid = normalized_string(raw_network.get(_RAW_UUID_KEY))
+    if wan_uuid is None:
+        return
+    if normalized_string(raw_network.get(_RAW_TYPE_KEY)) != _RAW_TYPE_WAN:
+        return
+    yield (
+        wan_uuid,
+        normalized_string(raw_network.get(_RAW_DESC_KEY)),
+        normalized_string(raw_network.get(_RAW_NAME_KEY)),
+    )
 
 
 def _enrich_wan_identity(
@@ -439,7 +410,7 @@ def build_network_inventory(data: dict[str, object]) -> tuple[FirewallaNetwork, 
     network kind; an unknown key is classified by the box's coarse
     ``meta.type``. Names prefer the registry ``meta.name``, then
     ``networkProfiles`` display-name fields, then the interface name. Finally
-    ``networkMonitorData.wanStatus`` is authoritative for WAN identity, so an
+    the box's own WAN declarations are authoritative for WAN identity, so an
     uplink the registry does not describe (a PPPoE interface, for example) is
     still published as a WAN.
     """

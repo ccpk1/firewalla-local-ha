@@ -277,6 +277,20 @@ def _runtime_payload() -> dict[str, object]:
                         "uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
                     }
                 },
+                # WANs are declared the way a real box declares them: as `phy`
+                # ports whose meta.type says `wan`. The payload used to declare
+                # them through `networkMonitorData.wanStatus` instead, which no
+                # live box publishes in an init payload.
+                "phy": {
+                    "eth0": {
+                        "enabled": True,
+                        "meta": {"name": "WAN-ONE", "type": "wan", "uuid": "wan-1"},
+                    },
+                    "eth1": {
+                        "enabled": True,
+                        "meta": {"name": "WAN-TWO", "type": "wan", "uuid": "wan-2"},
+                    },
+                },
             }
         },
         "monthlyDataUsageOnWans": {
