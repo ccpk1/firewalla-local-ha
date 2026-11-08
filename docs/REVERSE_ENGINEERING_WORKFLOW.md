@@ -1010,7 +1010,7 @@ are LAN networks; the reverse-engineered captures below cover both layouts.
 | VPN (`AmneziaWG`, `OpenVPN`, `WireGuard`) | `amneziawg` / `openvpn` / `wireguard` | `vpn` | `wgPeers`/`awgPeers` are per-peer hosts, **not** VPN networks |
 | WAN (`WAN-ONE`) | `phy` | `wan` | only a `phy` entry whose `meta.type == "wan"`; unnamed `phy` ports (eth1/2/3) are hardware, not networks |
 | WAN (wireless uplink) | `wlan` | `wan` | only when `meta.type == "wan"`; the box joins a Wi-Fi network as a client (`wpaSupplicant`), so it is a wireless WAN uplink, not a wireless LAN AP |
-| WAN (PPPoE uplink) | absent from the registry | `wan` | discovered from `networkMonitorData.wanStatus`; a PPPoE uplink can be missing from `networkConfig.interface` entirely |
+| WAN (PPPoE uplink) | absent from the registry | `wan` | `networkProfiles[uuid].type == "wan"`; a PPPoE uplink can be missing from `networkConfig.interface` entirely |
 
 Each entry carries a `meta` block: `name` (display name), `type` (`lan`/`wan`
 only — coarse), `uuid`. The `network_kind` is derived from the category key so
@@ -1022,13 +1022,34 @@ classified from the entry's `meta.type` (`wan` → `wan`, `lan` → `lan`) and k
 its raw key in `interface_category`, so a new transport is diagnosable instead of
 invisible. An entry with no `meta.type` at all is skipped rather than guessed at.
 
-`networkMonitorData.wanStatus` is **authoritative for WAN identity** and is
-applied after the registry and `networkProfiles` passes. A box can report a
-PPPoE uplink there while omitting it from the interface registry (issue #61):
-the pass then upgrades the kind to `wan`, fills in the interface name from the
-block's key (`eth0`, `pppoe0`, `wlan0`), and adopts `wan_intf_name` where the
-current name is only a fallback — the uuid or the interface name. A registry
-`meta.name` is an authored label and is kept.
+**The interface registry is not the only WAN source, and on a 2026 Gold it is not
+even a complete one.** Verified on a live box (2026-11-08):
+
+- `networkProfiles[uuid].type` is the box's own `wan`/`lan` declaration. WAN
+  profiles additionally carry the link-state keys `active`, `ready` and
+  `pendingTest`, which a LAN or VPN profile never has. This is the reliable
+  discriminator for an uplink the registry omits, and both the kind and the
+  interface name (`intf`) are taken from the profile.
+- The **runtime init payload contains no `networkMonitorData` and no `wanStatus`
+  at all.** `networkMonitorData` is a separate `item=networkMonitorData` read used
+  for internet quality, and `wanStatus` appears only inside monitor-**event**
+  labels. Treating either as an init-payload key yields dead code.
+- The top-level `network` block describes the WAN the box is routing through right
+  now: `uuid`, `name` (interface), `desc` (the label the app shows), `type: "wan"`,
+  `active`, `ready`.
+- The app's **WAN preference** is `networkConfig.routing.global.default`: `type`
+  says how the WANs are used (`primary_standby`), `viaIntf` names the primary and
+  `viaIntf2` the standby, `failback` whether it returns to the primary.
+- The WAN display names (`EE`, `Wireless`, `WAN-ONE`) live in the monitor-event
+  labels as `wan_intf_uuid` + `wan_intf_name`; `networkProfiles` has no display
+  name field. Event labels are used to *name* a WAN, never to classify or create
+  one, because an event can outlive the WAN it describes.
+
+WAN identity is therefore resolved from those declarations after the registry and
+`networkProfiles` passes: a declaration upgrades the kind to `wan`, fills in the
+interface name, and adopts the declared name where the current one is only a
+fallback — the uuid or the interface name. A registry `meta.name` is an authored
+label and is kept.
 
 ### Detail fields
 
@@ -1127,7 +1148,7 @@ from the init payload:
 | App field | Raw path | Normalized | Entity attribute |
 | --- | --- | --- | --- |
 | Box version | `longVersion` / `versionStr` | `FirewallaSystemInfo.software_version` | `software_version` |
-| WAN IP | WAN network `networkProfiles[<wan_uuid>].ipv4` (primary = lowest port) | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
+| WAN IP | WAN network `networkProfiles[<wan_uuid>].ipv4` (primary = `networkConfig.routing.global.default.viaIntf`) | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
 | Port MAC | `nicStates[<port>].address` | per-port `mac` | `ports[<port>].mac` |
 | Port speed | `nicStates[<port>].speed` (Mbps; `-1` = inactive) | per-port `speed_mbps` | `ports[<port>].speed_mbps` |
 | Port link | `nicStates[<port>].carrier` (`1`/`0`) | per-port `link` | `ports[<port>].link` |
@@ -1149,9 +1170,13 @@ Notes:
   from the init payload's `publicIp`/`publicIps`. On some models (e.g. Gold SE)
   `publicIp`/`publicIps` can report a DNS resolver address (an Amazon Route 53
   IP in the reported case) instead of the actual WAN IP, while the WAN network
-  entities carry the correct per-WAN IPv4. The primary WAN is the one with the
-  lowest port number (e.g. `eth0` over `eth1`); `wan_ip` is the primary WAN's
-  first IPv4 and `wan_ips` maps each WAN interface name to its first IPv4.
+  entities carry the correct per-WAN IPv4. The primary WAN is the interface the
+  box is **configured** to route through first
+  (`networkConfig.routing.global.default.viaIntf`, applied 2026-11-08); port
+  order is only a tie-breaker for the remaining WANs, because it cannot tell a
+  primary from a standby and ranks `pppoe0`/`wlan0` the same as `eth0`. `wan_ip`
+  is the primary WAN's first IPv4 and `wan_ips` maps each WAN interface name to
+  its first IPv4.
   IPv6 is intentionally not included here — it is surfaced per-network on the
   WAN network entities' `ipv6_addresses` attribute.
 - App version and cloud instance are app-side/cloud-side and are **not**

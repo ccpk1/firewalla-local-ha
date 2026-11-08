@@ -83,7 +83,7 @@ from ..utils.flow import (
     iter_flow_rows,
     metric_ranking_sort_key,
 )
-from ..utils.network import build_network_inventory
+from ..utils.network import build_network_inventory, primary_wan_interface_name
 from ..utils.values import (
     normalized_bool,
     normalized_float,
@@ -909,9 +909,13 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         network entities already carry the correct per-WAN IPv4 (from
         ``networkProfiles``), so derive the box-level WAN IPs from them.
 
-        The primary WAN is the one with the lowest port number (e.g. ``eth0``
-        over ``eth1``). ``wan_ip`` is the primary WAN's first IPv4, and
-        ``wan_ips`` maps each WAN interface name to its first IPv4.
+        The primary WAN is the one the box is configured to route through first
+        (``networkConfig.routing.global.default.viaIntf``). Port order is only a
+        tie-breaker for the remaining WANs, because it cannot tell a primary
+        from a standby and ranks every interface the same way once the names
+        stop ending in the port digits (``pppoe0``, ``wlan0``). ``wan_ip`` is
+        the primary WAN's first IPv4, and ``wan_ips`` maps each WAN interface
+        name to its first IPv4.
         """
         wan_networks = [
             network
@@ -921,8 +925,14 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if not wan_networks:
             return None, None
 
+        configured_primary = primary_wan_interface_name(
+            self.coordinator.last_init_payload or {}
+        )
         wan_networks.sort(
-            key=lambda network: _interface_port_number(network.interface_name)
+            key=lambda network: (
+                network.interface_name != configured_primary,
+                _interface_port_number(network.interface_name),
+            )
         )
         wan_ips = {
             network.interface_name or network.uuid: network.ipv4_addresses[0]

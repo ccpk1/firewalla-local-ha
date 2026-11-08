@@ -756,6 +756,61 @@ def test_get_available_wans_ignores_speed_test_uuid_fallback() -> None:
     assert available_wans == ()
 
 
+def test_wan_ip_follows_the_configured_primary_not_the_port_order() -> None:
+    """Test the box's WAN preference decides which WAN IP is reported.
+
+    ``networkConfig.routing.global.default`` is a deliberate setting, so a
+    standby ``eth0`` must not outrank the primary ``eth1`` merely because its
+    interface name sorts first.
+    """
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {"name": "STANDBY", "type": "wan", "uuid": "wan-s"}
+                    },
+                    "eth1": {
+                        "meta": {"name": "PRIMARY", "type": "wan", "uuid": "wan-p"}
+                    },
+                }
+            },
+            "routing": {
+                "global": {
+                    "default": {
+                        "type": "primary_standby",
+                        "viaIntf": "eth1",
+                        "viaIntf2": "eth0",
+                    }
+                }
+            },
+        },
+        "networkProfiles": {
+            "wan-s": {"intf": "eth0", "ipv4": "192.168.12.237"},
+            "wan-p": {"intf": "eth1", "ipv4": "23.245.207.179"},
+        },
+    }
+
+    wan_ip, wan_ips = manager._build_wan_ips()
+
+    assert wan_ip == "23.245.207.179"
+    assert wan_ips == {"eth1": "23.245.207.179", "eth0": "192.168.12.237"}
+
+
 def test_get_networks_discovers_all_kinds_from_interface_registry() -> None:
     """Test the unified collector classifies LAN, VLAN, VPN, and WAN networks."""
     snapshot = FirewallaRuntimeSnapshot(

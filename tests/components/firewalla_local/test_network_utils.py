@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from custom_components.firewalla_local.models import FirewallaNetworkKind
-from custom_components.firewalla_local.utils.network import build_network_inventory
+from custom_components.firewalla_local.utils.network import (
+    build_network_inventory,
+    primary_wan_interface_name,
+)
 
 _WAN_STATUS_KEY = "networkMonitorData"
 
@@ -151,7 +154,6 @@ def test_a_registry_display_name_wins_over_the_wan_status_name() -> None:
 
 
 def test_physical_ports_the_box_does_not_mark_as_wan_stay_out() -> None:
-    """Test unnamed hardware ports and non-WAN wireless entries are still skipped."""
     networks = build_network_inventory(
         {
             "networkConfig": {
@@ -180,3 +182,125 @@ def test_physical_ports_the_box_does_not_mark_as_wan_stay_out() -> None:
     )
 
     assert networks == ()
+
+
+def test_a_profile_only_uplink_is_classified_from_the_profile_type() -> None:
+    """Test the profile's own type classifies an uplink the registry omits.
+
+    This is the shape a PPPoE box actually publishes (issue #61): ``pppoe0`` has
+    no ``networkConfig.interface`` entry at all, and the runtime payload carries
+    no ``networkMonitorData`` either, so ``networkProfiles[uuid].type`` is the
+    box's only statement that the interface is a WAN.
+    """
+    networks = build_network_inventory(
+        {
+            "networkProfiles": {
+                "br0-uuid": {"intf": "br0", "type": "lan"},
+                "pppoe-uuid": {
+                    "intf": "pppoe0",
+                    "type": "wan",
+                    "active": True,
+                    "ready": True,
+                    "pendingTest": False,
+                },
+            },
+            "networkConfig": {
+                "interface": {
+                    "bridge": {
+                        "br0": {
+                            "meta": {
+                                "name": "LAN Network",
+                                "type": "lan",
+                                "uuid": "br0-uuid",
+                            }
+                        }
+                    }
+                }
+            },
+        }
+    )
+
+    by_uuid = {network.uuid: network for network in networks}
+    pppoe = by_uuid["pppoe-uuid"]
+
+    assert pppoe.kind is FirewallaNetworkKind.WAN
+    assert pppoe.interface_name == "pppoe0"
+    assert pppoe.ports == ("pppoe0",)
+    # The registry describes this one, so its kind is not overridden by the
+    # profile's coarse ``lan``/``wan`` vocabulary.
+    assert by_uuid["br0-uuid"].kind is FirewallaNetworkKind.LAN
+    assert by_uuid["br0-uuid"].interface_category == "bridge"
+
+
+def test_the_primary_wan_block_declares_a_wan_without_a_profile_type() -> None:
+    """Test the top-level ``network`` block is read as a WAN declaration."""
+    networks = build_network_inventory(
+        {
+            "networkProfiles": {"wan-uuid": {"intf": "eth0"}},
+            "network": {
+                "uuid": "wan-uuid",
+                "name": "eth0",
+                "desc": "WAN-ONE",
+                "type": "wan",
+                "active": True,
+            },
+        }
+    )
+
+    by_uuid = {network.uuid: network for network in networks}
+
+    assert by_uuid["wan-uuid"].kind is FirewallaNetworkKind.WAN
+    assert by_uuid["wan-uuid"].name == "WAN-ONE"
+
+
+def test_the_event_labels_name_a_wan_but_cannot_create_one() -> None:
+    """Test monitor-event labels supply the display name the profiles omit."""
+    payload: dict[str, object] = {
+        "networkProfiles": {"pppoe-uuid": {"intf": "pppoe0", "type": "wan"}},
+        "latestAllStateEvents": {
+            "ping:pppoe0-1.1.1.1": {
+                "labels": {
+                    "wan_intf_uuid": "pppoe-uuid",
+                    "wan_intf_name": "EE",
+                }
+            },
+            # A stale event for a WAN the box no longer configures.
+            "ping:eth9-1.1.1.1": {
+                "labels": {
+                    "wan_intf_uuid": "gone-uuid",
+                    "wan_intf_name": "OLD",
+                }
+            },
+        },
+    }
+
+    by_uuid = {network.uuid: network for network in build_network_inventory(payload)}
+
+    assert by_uuid["pppoe-uuid"].name == "EE"
+    assert "gone-uuid" not in by_uuid
+
+
+def test_primary_wan_is_the_interface_the_box_routes_through_first() -> None:
+    """Test the configured WAN preference is read rather than inferred."""
+    payload = {
+        "networkConfig": {
+            "routing": {
+                "global": {
+                    "default": {
+                        "type": "primary_standby",
+                        "viaIntf": "pppoe0",
+                        "viaIntf2": "eth0",
+                        "failback": True,
+                    }
+                }
+            }
+        }
+    }
+
+    assert primary_wan_interface_name(payload) == "pppoe0"
+
+
+def test_primary_wan_interface_is_absent_when_the_box_does_not_state_one() -> None:
+    """Test a payload without a routing block reports no primary instead of a guess."""
+    assert primary_wan_interface_name({}) is None
+    assert primary_wan_interface_name({"networkConfig": {"routing": None}}) is None

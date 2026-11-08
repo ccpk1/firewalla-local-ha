@@ -58,6 +58,20 @@ _RAW_NETWORK_MONITOR_DATA_KEY: Final = "networkMonitorData"
 _RAW_WAN_STATUS_KEY: Final = "wanStatus"
 _RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
 _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
+_RAW_NETWORK_BLOCK_KEY: Final = "network"
+_RAW_LABELS_KEY: Final = "labels"
+# The only payload blocks whose entries carry event ``labels``. Enumerating them
+# keeps the WAN-name lookup proportional to the event count rather than to the
+# whole payload.
+_WAN_NAME_EVENT_KEYS: Final = (
+    "latestAllStateEvents",
+    "latestStateEventsError",
+    "networkMonitorEvents",
+)
+_RAW_ROUTING_KEY: Final = "routing"
+_RAW_GLOBAL_KEY: Final = "global"
+_RAW_DEFAULT_ROUTE_KEY: Final = "default"
+_RAW_VIA_INTF_KEY: Final = "viaIntf"
 _RAW_PHY_CATEGORY: Final = "phy"
 _RAW_BOND_CATEGORY: Final = "bond"
 _RAW_VLAN_CATEGORY: Final = "vlan"
@@ -228,27 +242,70 @@ def _resolved_wan_name(
     return network.name
 
 
+def _resolved_profile_kind(
+    raw_profile: dict[str, object],
+    *,
+    existing: FirewallaNetwork | None,
+) -> FirewallaNetworkKind:
+    """Return the kind one ``networkProfiles`` entry states for its network.
+
+    The profile's ``type`` is the box's own declaration, and it is the only WAN
+    signal available for an uplink that ``networkConfig.interface`` omits: on a
+    real box every WAN profile carries ``type: "wan"`` together with the
+    link-state keys (``active``, ``ready``, ``pendingTest``) that a LAN or VPN
+    profile never has. A network the registry already classified keeps that
+    classification, because the registry is more specific than ``lan``/``wan``.
+    """
+    if existing is not None:
+        return existing.kind
+    if normalized_string(raw_profile.get(_RAW_TYPE_KEY)) == _RAW_TYPE_WAN:
+        return FirewallaNetworkKind.WAN
+    return FirewallaNetworkKind.LAN
+
+
+def _iter_declared_wans(
+    data: dict[str, object],
+) -> Iterator[tuple[str, str | None, str | None]]:
+    """Yield ``(wan_uuid, wan_name, interface_name)`` for every WAN declaration.
+
+    Two blocks state WAN identity directly, and neither needs the interface
+    registry. The top-level ``network`` block describes the WAN the box is
+    routing through right now (``uuid``, ``name``, ``desc``, ``type: "wan"``),
+    and ``wanStatus`` — where a firmware publishes it — lists every uplink.
+    """
+    raw_network = data.get(_RAW_NETWORK_BLOCK_KEY)
+    if isinstance(raw_network, dict):
+        wan_uuid = normalized_string(raw_network.get(_RAW_UUID_KEY))
+        if wan_uuid is not None and (
+            normalized_string(raw_network.get(_RAW_TYPE_KEY)) == _RAW_TYPE_WAN
+        ):
+            yield (
+                wan_uuid,
+                normalized_string(raw_network.get(_RAW_DESC_KEY)),
+                normalized_string(raw_network.get(_RAW_NAME_KEY)),
+            )
+
+    raw_monitor = data.get(_RAW_NETWORK_MONITOR_DATA_KEY)
+    if raw_monitor is not None:
+        yield from _iter_wan_status_entries(raw_monitor)
+
+
 def _enrich_wan_identity(
     data: dict[str, object],
     networks: dict[str, FirewallaNetwork],
 ) -> None:
-    """Make the box's ``wanStatus`` authoritative for WAN identity.
+    """Make the box's WAN declarations authoritative for WAN identity.
 
     The interface-category registry is the primary inventory, but it only
     describes what the box publishes there: a PPPoE uplink can be missing from
-    it while ``networkMonitorData.wanStatus`` still reports the interface as a
-    WAN. Those identities were dropped whenever an earlier pass had already
-    named the network, which published the uplink as a LAN. ``wanStatus``
-    states directly which interfaces carry WAN, so it upgrades the kind,
-    supplies the missing interface name, and adopts the WAN profile name where
-    the current one is only a fallback. Everything else the earlier passes
-    resolved is preserved.
+    it while the box still declares it a WAN elsewhere. Those identities were
+    dropped whenever an earlier pass had already named the network, which
+    published the uplink as a LAN. A declaration states directly that the
+    interface carries WAN, so it upgrades the kind, supplies the missing
+    interface name, and adopts the declared name where the current one is only
+    a fallback. Everything else the earlier passes resolved is preserved.
     """
-    raw_monitor = data.get(_RAW_NETWORK_MONITOR_DATA_KEY)
-    if raw_monitor is None:
-        return
-
-    for wan_uuid, wan_name, interface_name in _iter_wan_status_entries(raw_monitor):
+    for wan_uuid, wan_name, interface_name in _iter_declared_wans(data):
         existing = networks.get(wan_uuid)
         if existing is None:
             networks[wan_uuid] = FirewallaNetwork(
@@ -268,6 +325,88 @@ def _enrich_wan_identity(
                 interface_name=interface_name,
             ),
         )
+
+
+def _apply_wan_event_names(
+    data: dict[str, object],
+    networks: dict[str, FirewallaNetwork],
+) -> None:
+    """Adopt the WAN display names carried by the box's monitor-event labels.
+
+    The init payload's profile entries have no display name, so a WAN can only
+    be known by its uuid or interface until the box names it. The WAN monitor
+    events carry ``wan_intf_uuid`` beside ``wan_intf_name``, which is the label
+    the app shows and the string a user types. It is applied only as a name —
+    never to classify or create a network, since an event can outlive the WAN
+    it describes.
+    """
+    for wan_uuid, wan_name in _iter_wan_event_names(data):
+        existing = networks.get(wan_uuid)
+        if existing is None or existing.kind is not FirewallaNetworkKind.WAN:
+            continue
+        networks[wan_uuid] = replace(
+            existing,
+            name=_resolved_wan_name(
+                existing,
+                wan_name=wan_name,
+                interface_name=None,
+            ),
+        )
+
+
+def _iter_wan_event_names(
+    data: dict[str, object],
+) -> Iterator[tuple[str, str | None]]:
+    """Yield ``(wan_uuid, wan_name)`` from the payload's event blocks.
+
+    Only the blocks that carry events are read, and only their top level: each
+    event is ``{event_key: {labels: {...}}}``. Walking the whole payload instead
+    cost ~9 ms per call against ~0.2 ms here, and this runs on every
+    ``get_networks()`` read.
+    """
+    for block_key in _WAN_NAME_EVENT_KEYS:
+        raw_blocks = data.get(block_key)
+        if isinstance(raw_blocks, list):
+            events: Iterator[object] = iter(raw_blocks)
+        elif isinstance(raw_blocks, dict):
+            events = iter(raw_blocks.values())
+        else:
+            continue
+
+        for raw_event in events:
+            if not isinstance(raw_event, dict):
+                continue
+            raw_labels = raw_event.get(_RAW_LABELS_KEY)
+            if not isinstance(raw_labels, dict):
+                continue
+            wan_uuid = normalized_string(raw_labels.get(_RAW_WAN_INTERFACE_UUID_KEY))
+            wan_name = normalized_string(raw_labels.get(_RAW_WAN_INTERFACE_NAME_KEY))
+            if wan_uuid is not None and wan_name is not None:
+                yield wan_uuid, wan_name
+
+
+def primary_wan_interface_name(data: dict[str, object]) -> str | None:
+    """Return the interface the box is configured to route through first.
+
+    ``networkConfig.routing.global.default`` is the app's WAN preference, and it
+    is a deliberate setting rather than something to infer: ``type`` states how
+    the WANs are used (``primary_standby``) and ``viaIntf`` names the primary
+    while ``viaIntf2`` names the standby. It outranks any ordering derived from
+    interface names, which cannot distinguish a primary from a standby.
+    """
+    raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
+    if not isinstance(raw_network_config, dict):
+        return None
+    raw_routing = raw_network_config.get(_RAW_ROUTING_KEY)
+    if not isinstance(raw_routing, dict):
+        return None
+    raw_global = raw_routing.get(_RAW_GLOBAL_KEY)
+    if not isinstance(raw_global, dict):
+        return None
+    raw_default = raw_global.get(_RAW_DEFAULT_ROUTE_KEY)
+    if not isinstance(raw_default, dict):
+        return None
+    return normalized_string(raw_default.get(_RAW_VIA_INTF_KEY))
 
 
 def _bridge_member_interface_names(data: dict[str, object]) -> set[str]:
@@ -343,22 +482,29 @@ def build_network_inventory(data: dict[str, object]) -> tuple[FirewallaNetwork, 
                 continue
 
             existing = networks.get(network_id)
-            if existing is None or existing.name == network_id:
-                display_name = _resolve_network_display_name(raw_profile)
-                if display_name and display_name != network_id:
-                    networks[network_id] = FirewallaNetwork(
-                        uuid=network_id,
-                        name=display_name,
-                        kind=(
-                            existing.kind
-                            if existing is not None
-                            else FirewallaNetworkKind.LAN
-                        ),
-                    )
+            if existing is not None and existing.name != network_id:
+                continue
+            display_name = _resolve_network_display_name(raw_profile)
+            if not display_name or display_name == network_id:
+                continue
+            networks[network_id] = FirewallaNetwork(
+                uuid=network_id,
+                name=display_name,
+                kind=_resolved_profile_kind(raw_profile, existing=existing),
+                # The profile states the interface too, and it is the only
+                # interface name available for a network the registry omits.
+                # Without it the port, DHCP and relay lookups all skip the
+                # network, which is what a PPPoE uplink suffered from.
+                interface_name=(
+                    existing.interface_name if existing is not None else None
+                )
+                or normalized_string(raw_profile.get(_RAW_INTF_KEY)),
+            )
 
-    # The box's own WAN status is authoritative for WAN identity, and covers
-    # uplinks the registry above does not describe.
+    # The box's own WAN declarations are authoritative for WAN identity, and
+    # cover an uplink the registry above does not describe.
     _enrich_wan_identity(data, networks)
+    _apply_wan_event_names(data, networks)
 
     _enrich_network_addressing(data, networks)
     _enrich_network_dhcp(data, networks)
