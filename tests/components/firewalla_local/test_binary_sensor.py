@@ -53,6 +53,9 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_PORTS,
     ATTR_SYSTEM_TIMEZONE,
     ATTR_SYSTEM_WAN_ROUTING,
+    ATTR_WAN_IN_USE,
+    ATTR_WAN_READY,
+    ATTR_WAN_ROLE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
     ATTR_WATCHED_DEVICE_HOST_GROUP,
@@ -1138,10 +1141,101 @@ async def test_system_status_reports_no_routing_when_the_box_states_no_preferenc
     assert system_state.attributes[ATTR_SYSTEM_WAN_ROUTING] is None
 
 
+async def test_wan_network_sensors_report_failover_roles(
+    hass: HomeAssistant,
+) -> None:
+    """Test each WAN carries its role and link state in failover."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+        wan_profiles={
+            "8d5a7f20-2923-49a3-8e2b-338f9428a632": {"active": True, "ready": True},
+            "wan-two": {"active": False, "ready": True},
+        },
+    )
+
+    primary = _network_state_for_uuid(hass, "8d5a7f20-2923-49a3-8e2b-338f9428a632")
+    standby = _network_state_for_uuid(hass, "wan-two")
+
+    assert primary.attributes[ATTR_WAN_ROLE] == "primary"
+    assert primary.attributes[ATTR_WAN_IN_USE] is True
+    assert primary.attributes[ATTR_WAN_READY] is True
+    # A standby is ready while idle, which is healthy rather than a fault.
+    assert standby.attributes[ATTR_WAN_ROLE] == "standby"
+    assert standby.attributes[ATTR_WAN_IN_USE] is False
+    assert standby.attributes[ATTR_WAN_READY] is True
+
+
+async def test_wan_network_sensors_report_no_role_in_load_balance(
+    hass: HomeAssistant,
+) -> None:
+    """Test load balance leaves the role off rather than electing a primary.
+
+    Both WANs are equal members of the routing set, so both report themselves in
+    use and neither carries a role.
+    """
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "load_balance",
+            "nextHops": [
+                {"viaIntf": "eth0", "weight": 60},
+                {"viaIntf": "eth1", "weight": 40},
+            ],
+        },
+        wan_profiles={
+            "8d5a7f20-2923-49a3-8e2b-338f9428a632": {"active": True, "ready": True},
+            "wan-two": {"active": True, "ready": True},
+        },
+    )
+
+    first = _network_state_for_uuid(hass, "8d5a7f20-2923-49a3-8e2b-338f9428a632")
+    second = _network_state_for_uuid(hass, "wan-two")
+
+    assert ATTR_WAN_ROLE not in first.attributes
+    assert ATTR_WAN_ROLE not in second.attributes
+    assert first.attributes[ATTR_WAN_IN_USE] is True
+    assert second.attributes[ATTR_WAN_IN_USE] is True
+
+
+async def test_lan_network_sensor_carries_no_wan_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test routing attributes stay off non-WAN networks."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+    )
+
+    vlan_state = _network_state_for_uuid(hass, "95169e6a-a7c9-4d6a-8e83-6061b4812bf2")
+
+    assert ATTR_WAN_ROLE not in vlan_state.attributes
+    assert ATTR_WAN_IN_USE not in vlan_state.attributes
+    assert ATTR_WAN_READY not in vlan_state.attributes
+
+
+def _network_state_for_uuid(hass: HomeAssistant, network_uuid: str):
+    """Return the per-network binary sensor for one network uuid."""
+    return _binary_sensor_state_for_unique_suffix(
+        hass, f"_network_{network_uuid}_binary_sensor"
+    )
+
+
 async def _setup_routing_entry(
     hass: HomeAssistant,
     *,
     routing: dict[str, object] | None,
+    wan_profiles: dict[str, dict[str, object]] | None = None,
 ) -> MockConfigEntry:
     """Set up one entry whose payload declares two WANs and the given routing."""
     entry = MockConfigEntry(
@@ -1166,6 +1260,15 @@ async def _setup_routing_entry(
         "meta": {"name": "WAN-TWO", "type": "wan", "uuid": "wan-two"},
         "enabled": True,
     }
+    profiles = payload["networkProfiles"]
+    assert isinstance(profiles, dict)
+    profiles["wan-two"] = {"intf": "eth1", "ipv4": "192.168.12.237", "type": "wan"}
+    for profile_uuid, wan_state in (wan_profiles or {}).items():
+        profiles[profile_uuid] = {
+            **profiles.get(profile_uuid, {}),
+            "type": "wan",
+            **wan_state,
+        }
     if routing is not None:
         network_config["routing"] = {"global": {"default": routing}}
 

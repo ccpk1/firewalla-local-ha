@@ -135,6 +135,11 @@ ATTR_NETWORK_USAGE: Final = "network_usage"
 ATTR_NETWORK_ENABLED: Final = "enabled"
 ATTR_NETWORK_MDNS_RELAY: Final = "mdns_relay"
 ATTR_NETWORK_SSDP_RELAY: Final = "ssdp_relay"
+# WAN routing state. `wan_role` and friends are per-WAN; the same facts at box
+# level are the `wan_routing` mapping on the System Status sensor.
+ATTR_WAN_ROLE: Final = "wan_role"
+ATTR_WAN_IN_USE: Final = "wan_in_use"
+ATTR_WAN_READY: Final = "wan_ready"
 ATTR_SSID_NAME: Final = "ssid_name"
 ATTR_SSID_BAND: Final = "band"
 ATTR_SSID_ENCRYPTION: Final = "encryption"

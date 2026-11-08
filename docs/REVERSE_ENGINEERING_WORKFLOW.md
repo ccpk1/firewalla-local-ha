@@ -1154,7 +1154,39 @@ Interfaces are published as WAN labels, so the keys line up with `current_wan_us
 and the WAN sensors. `traffic_share_percent` is deliberately **not** synthesized
 for failover: in failover the in-use WAN already carries everything, and a
 synthesized 100 would be indistinguishable from a weight the box actually stores.
-Per-WAN `in_use`/`ready`/`role` attributes are not published yet.
+
+Each WAN network sensor carries its own share of that state, and each piece is
+added only when the box states it:
+
+| Attribute | Source | Failover | Load balance |
+| --- | --- | --- | --- |
+| `wan_role` | `routing.global.default` vs the WAN's interface | `primary` / `standby` | absent |
+| `wan_in_use` | `networkProfiles[uuid].active` | one true | both true |
+| `wan_ready` | `networkProfiles[uuid].ready` | true on both | true on both |
+
+`wan_role` is derived at publish time rather than stored on the network, because
+it is a property of the box's routing policy and not of the network's geometry.
+It is absent — not `null` — in load balance, where every interface is an equal
+member of the routing set and naming one primary would describe a hierarchy the
+mode does not have. A consumer distinguishes "this mode has no role" from "not
+reported" by the `mode` it already has from `wan_routing`.
+
+`wan_in_use` reads `active`, which is the same value as
+`wanTestResult.wans[intf].wanConnState.active`. Despite the name it means "in the
+active routing set", not "carrying traffic" — in load balance both WANs are true.
+It is **not** read from the coarse `wanTestResult.wans[intf].active`, which is
+true for a failover standby as well.
+
+Captured output for the three fixtures:
+
+```
+failover, eth0 primary         WAN-ONE  role=primary   in_use=True   ready=True
+                               WAN-TWO  role=standby   in_use=False  ready=True
+load balance 60/40             WAN-ONE  role=-         in_use=True   ready=True
+                               WAN-TWO  role=-         in_use=True   ready=True
+failover, eth1 primary         WAN-ONE  role=standby   in_use=False  ready=True
+                               WAN-TWO  role=primary   in_use=True   ready=True
+```
 
 ### Detail fields
 

@@ -86,6 +86,9 @@ from .const import (
     ATTR_SYSTEM_WAN_IP,
     ATTR_SYSTEM_WAN_IPS,
     ATTR_SYSTEM_WAN_ROUTING,
+    ATTR_WAN_IN_USE,
+    ATTR_WAN_READY,
+    ATTR_WAN_ROLE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DNS_DOMAIN,
     ATTR_WATCHED_DEVICE_DNS_FQDN,
@@ -142,6 +145,7 @@ from .models import (
     FirewallaNetworkKind,
     FirewallaWanUsageSummary,
 )
+from .utils.network import wan_role
 from .utils.values import iso_instant, normalized_int
 
 PARALLEL_UPDATES = 0
@@ -607,6 +611,21 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
         # does not render as "unknown" for untagged networks.
         if network is not None and network.vlan_id is not None:
             attributes[ATTR_NETWORK_VLAN_ID] = network.vlan_id
+        # Routing state is a WAN question, and each piece is added only when the
+        # box actually states it: `role` exists in failover alone, and `in_use` /
+        # `ready` only once the WAN's profile reports link state.
+        if network is not None and network.kind is FirewallaNetworkKind.WAN:
+            routing = self.integration_manager.system_status
+            role = wan_role(
+                routing.wan_routing if routing is not None else None,
+                network.interface_name,
+            )
+            if role is not None:
+                attributes[ATTR_WAN_ROLE] = role
+            if network.active is not None:
+                attributes[ATTR_WAN_IN_USE] = network.active
+            if network.ready is not None:
+                attributes[ATTR_WAN_READY] = network.ready
         return attributes
 
     @staticmethod

@@ -636,6 +636,34 @@ attribute is `null` when the box states no preference.
 Firewalla box does not report observed per-WAN traffic. In failover there is no
 share to report, because the in-use WAN carries everything by definition.
 
+#### Per-WAN routing attributes
+
+Each WAN network entity also carries the WAN's own place in that setup:
+
+| Attribute | Failover | Load balance | Meaning |
+| --- | --- | --- | --- |
+| `wan_role` | `primary` / `standby` | *absent* | the WAN's job under the configured mode |
+| `wan_in_use` | one `true` | both `true` | in the box's active routing set |
+| `wan_ready` | `true` on both | `true` on both | the link itself is usable |
+
+A standby reporting `wan_ready: true` with `wan_in_use: false` is healthy: the
+link works, and the box is simply not routing through it. `wan_role` is absent
+in load balance because that mode has no primary or standby — both WANs share the
+traffic — and absent on LAN, VLAN and VPN networks, which have no such role at
+all.
+
+`wan_in_use` means "in the active routing set", not "carrying traffic": under
+load balance every participating WAN reports `true`.
+
+Example: alert when a failover has happened, meaning the standby is in use.
+
+```yaml
+condition: template
+value_template: >
+  {{ state_attr('binary_sensor.firewalla_wan_two_status', 'wan_role') == 'standby'
+     and is_state_attr('binary_sensor.firewalla_wan_two_status', 'wan_in_use', true) }}
+```
+
 Example: check which WAN is primary before running a speed test.
 
 ```yaml

@@ -396,6 +396,15 @@
           "block_icmp": {
             "name": "Block ICMP"
           },
+          "wan_role": {
+            "name": "WAN role"
+          },
+          "wan_in_use": {
+            "name": "WAN in use"
+          },
+          "wan_ready": {
+            "name": "WAN ready"
+          },
           "host_count": {
             "name": "Host count"
           }

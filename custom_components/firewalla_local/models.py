@@ -718,6 +718,13 @@ class FirewallaNetwork:
     dhcp: FirewallaNetworkDhcpConfig | None = None
     device_host_count: int | None = None
     enabled: bool | None = None
+    # WAN link state, as ``networkProfiles[uuid]`` states it. ``active`` means the
+    # WAN is in the box's active routing set, which in load balance is true for
+    # every participating WAN; ``ready`` means the link itself is usable, and a
+    # healthy standby is ready while idle. Both are absent for non-WAN networks,
+    # whose profiles carry neither key.
+    active: bool | None = None
+    ready: bool | None = None
     mdns_relay: bool | None = None
     ssdp_relay: bool | None = None
     block_icmp: bool | None = None

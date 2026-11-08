@@ -26,6 +26,8 @@ _RAW_TYPE_KEY: Final = "type"
 _RAW_TYPE_WAN: Final = "wan"
 _RAW_TYPE_LAN: Final = "lan"
 _RAW_ENABLED_KEY: Final = "enabled"
+_RAW_ACTIVE_KEY: Final = "active"
+_RAW_READY_KEY: Final = "ready"
 _RAW_VID_KEY: Final = "vid"
 _RAW_IPV4_KEY: Final = "ipv4"
 _RAW_IPV4_SUBNET_KEY: Final = "ipv4Subnet"
@@ -77,6 +79,9 @@ _RAW_NEXT_HOPS_KEY: Final = "nextHops"
 _RAW_WEIGHT_KEY: Final = "weight"
 _WAN_MODE_PRIMARY_STANDBY: Final = "primary_standby"
 _WAN_MODE_LOAD_BALANCE: Final = "load_balance"
+# The role vocabulary a WAN can carry. Only failover assigns one; see `wan_role`.
+WAN_ROLE_PRIMARY: Final = "primary"
+WAN_ROLE_STANDBY: Final = "standby"
 _RAW_PHY_CATEGORY: Final = "phy"
 _RAW_BOND_CATEGORY: Final = "bond"
 _RAW_VLAN_CATEGORY: Final = "vlan"
@@ -448,6 +453,31 @@ def primary_wan_interface_name(data: dict[str, object]) -> str | None:
     return routing.primary if routing is not None else None
 
 
+def wan_role(
+    routing: FirewallaWanRouting | None,
+    interface_name: str | None,
+) -> str | None:
+    """Return a WAN's role under the active mode, or ``None`` when it has none.
+
+    Only failover gives a WAN a role. Load balance treats every participating
+    interface as an equal member of the routing set, so inventing a primary there
+    would describe a hierarchy the mode does not have, and a single-WAN box has
+    nothing to be primary or standby relative to.
+
+    ``None`` therefore means "this mode has no such role", which a consumer tells
+    apart from "not reported" by reading the mode it already has.
+    """
+    if routing is None or interface_name is None:
+        return None
+    if routing.mode != _WAN_MODE_PRIMARY_STANDBY:
+        return None
+    if interface_name == routing.primary:
+        return WAN_ROLE_PRIMARY
+    if interface_name == routing.standby:
+        return WAN_ROLE_STANDBY
+    return None
+
+
 def _bridge_member_interface_names(data: dict[str, object]) -> set[str]:
     """Return interface names referenced as members by any bridge."""
     raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
@@ -577,14 +607,8 @@ def _enrich_network_addressing(
         if existing is None:
             continue
 
-        networks[network_id] = FirewallaNetwork(
-            uuid=existing.uuid,
-            name=existing.name,
-            kind=existing.kind,
-            interface_name=existing.interface_name,
-            interface_category=existing.interface_category,
-            vlan_id=existing.vlan_id,
-            ports=existing.ports,
+        networks[network_id] = replace(
+            existing,
             ipv4_addresses=(
                 _normalized_string_tuple(raw_profile.get(_RAW_IPV4_KEY))
                 or existing.ipv4_addresses
@@ -599,12 +623,18 @@ def _enrich_network_addressing(
             ),
             gateway=normalized_string(raw_profile.get(_RAW_GATEWAY_KEY)),
             dns_servers=_normalized_string_tuple(raw_profile.get(_RAW_DNS_KEY)),
-            dhcp=existing.dhcp,
-            device_host_count=existing.device_host_count,
-            enabled=existing.enabled,
-            mdns_relay=existing.mdns_relay,
-            ssdp_relay=existing.ssdp_relay,
-            block_icmp=existing.block_icmp,
+            # Only WAN profiles carry these, so a LAN/VLAN/VPN network keeps them
+            # absent rather than reporting a link state it was never given.
+            active=(
+                _normalized_bool(raw_profile.get(_RAW_ACTIVE_KEY))
+                if existing.kind is FirewallaNetworkKind.WAN
+                else existing.active
+            ),
+            ready=(
+                _normalized_bool(raw_profile.get(_RAW_READY_KEY))
+                if existing.kind is FirewallaNetworkKind.WAN
+                else existing.ready
+            ),
         )
 
 
@@ -696,26 +726,10 @@ def _enrich_network_ports(
             # (standalone VLAN/bond) is preserved.
             vlan_id = network.vlan_id or resolve_vlan_id(interface_name)
 
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
+        networks[network.uuid] = replace(
+            network,
             vlan_id=vlan_id,
             ports=ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
-            gateway=network.gateway,
-            dns_servers=network.dns_servers,
-            dhcp=network.dhcp,
-            device_host_count=network.device_host_count,
-            enabled=network.enabled,
-            mdns_relay=network.mdns_relay,
-            ssdp_relay=network.ssdp_relay,
-            block_icmp=network.block_icmp,
         )
 
 
@@ -749,20 +763,9 @@ def _enrich_network_dhcp(
         dhcp_gateway = normalized_string(raw_dhcp.get(_RAW_GATEWAY_KEY))
         gateway = network.gateway or dhcp_gateway
 
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
-            vlan_id=network.vlan_id,
-            ports=network.ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
+        networks[network.uuid] = replace(
+            network,
             gateway=gateway,
-            dns_servers=network.dns_servers,
             dhcp=FirewallaNetworkDhcpConfig(
                 gateway=dhcp_gateway,
                 subnet_mask=normalized_string(raw_dhcp.get(_RAW_SUBNET_MASK_KEY)),
@@ -777,11 +780,6 @@ def _enrich_network_dhcp(
                 ),
                 extra_options=_normalized_dict(raw_dhcp.get(_RAW_EXTRA_OPTIONS_KEY)),
             ),
-            device_host_count=network.device_host_count,
-            enabled=network.enabled,
-            mdns_relay=network.mdns_relay,
-            ssdp_relay=network.ssdp_relay,
-            block_icmp=network.block_icmp,
         )
 
 
@@ -829,23 +827,8 @@ def _enrich_network_advanced_options(
             if isinstance(raw_entry, dict):
                 ssdp_relay = _has_ssdp_route(raw_entry)
 
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
-            vlan_id=network.vlan_id,
-            ports=network.ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
-            gateway=network.gateway,
-            dns_servers=network.dns_servers,
-            dhcp=network.dhcp,
-            device_host_count=network.device_host_count,
-            enabled=network.enabled,
+        networks[network.uuid] = replace(
+            network,
             mdns_relay=mdns_relay,
             ssdp_relay=ssdp_relay,
             block_icmp=block_icmp,
@@ -908,24 +891,4 @@ def _enrich_network_device_counts(
         device_count = counts.get(network.uuid)
         if device_count is None:
             continue
-        networks[network.uuid] = FirewallaNetwork(
-            uuid=network.uuid,
-            name=network.name,
-            kind=network.kind,
-            interface_name=network.interface_name,
-            interface_category=network.interface_category,
-            vlan_id=network.vlan_id,
-            ports=network.ports,
-            ipv4_addresses=network.ipv4_addresses,
-            ipv4_subnets=network.ipv4_subnets,
-            ipv6_addresses=network.ipv6_addresses,
-            ipv6_subnets=network.ipv6_subnets,
-            gateway=network.gateway,
-            dns_servers=network.dns_servers,
-            dhcp=network.dhcp,
-            device_host_count=device_count,
-            enabled=network.enabled,
-            mdns_relay=network.mdns_relay,
-            ssdp_relay=network.ssdp_relay,
-            block_icmp=network.block_icmp,
-        )
+        networks[network.uuid] = replace(network, device_host_count=device_count)
