@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from typing import Final
 
+from ..const import WAN_MODE_LOAD_BALANCE, WAN_MODE_PRIMARY_STANDBY
 from ..models import (
     FirewallaNetwork,
     FirewallaNetworkDhcpConfig,
@@ -58,6 +59,17 @@ _RAW_HOST_MAC_VENDOR_KEY: Final = "macVendor"
 _RAW_HOST_INTF_KEY: Final = "intf"
 _FIREWALLA_VENDOR_MARKER: Final = "firewalla"
 _RAW_NETWORK_BLOCK_KEY: Final = "network"
+_RAW_IP_ADDRESS_KEY: Final = "ip_address"
+_RAW_IP4_ADDRESSES_KEY: Final = "ip4_addresses"
+_RAW_WAN_TEST_RESULT_KEY: Final = "wanTestResult"
+_RAW_WANS_KEY: Final = "wans"
+_RAW_TS_KEY: Final = "ts"
+_RAW_CARRIER_KEY: Final = "carrier"
+_RAW_PING_KEY: Final = "ping"
+_RAW_HTTP_KEY: Final = "http"
+_RAW_STATUS_CODE_KEY: Final = "statusCode"
+_RAW_FAILURES_KEY: Final = "failures"
+_RAW_RECENT_DOWN_TIME_KEY: Final = "recentDownTime"
 _RAW_LABELS_KEY: Final = "labels"
 _RAW_WAN_INTERFACE_NAME_KEY: Final = "wan_intf_name"
 _RAW_WAN_INTERFACE_UUID_KEY: Final = "wan_intf_uuid"
@@ -77,11 +89,13 @@ _RAW_VIA_INTF2_KEY: Final = "viaIntf2"
 _RAW_FAILBACK_KEY: Final = "failback"
 _RAW_NEXT_HOPS_KEY: Final = "nextHops"
 _RAW_WEIGHT_KEY: Final = "weight"
-_WAN_MODE_PRIMARY_STANDBY: Final = "primary_standby"
-_WAN_MODE_LOAD_BALANCE: Final = "load_balance"
-# The role vocabulary a WAN can carry. Only failover assigns one; see `wan_role`.
+_WAN_MODE_PRIMARY_STANDBY: Final = WAN_MODE_PRIMARY_STANDBY
+_WAN_MODE_LOAD_BALANCE: Final = WAN_MODE_LOAD_BALANCE
+# The role vocabulary a WAN can carry under one mode. `shared` is load balance's
+# equal membership of the routing set; see `wan_role`.
 WAN_ROLE_PRIMARY: Final = "primary"
 WAN_ROLE_STANDBY: Final = "standby"
+WAN_ROLE_SHARED: Final = "shared"
 _RAW_PHY_CATEGORY: Final = "phy"
 _RAW_BOND_CATEGORY: Final = "bond"
 _RAW_VLAN_CATEGORY: Final = "vlan"
@@ -459,23 +473,111 @@ def wan_role(
 ) -> str | None:
     """Return a WAN's role under the active mode, or ``None`` when it has none.
 
-    Only failover gives a WAN a role. Load balance treats every participating
-    interface as an equal member of the routing set, so inventing a primary there
-    would describe a hierarchy the mode does not have, and a single-WAN box has
-    nothing to be primary or standby relative to.
+    Failover names a ``primary`` and a ``standby``; load balance treats every
+    participating interface as an equal member of the routing set, so each one is
+    ``shared``. That is deliberately a stated role rather than an omission: a
+    reader should never have to consult the mode to learn that a load-balanced
+    WAN is load balanced.
 
-    ``None`` therefore means "this mode has no such role", which a consumer tells
-    apart from "not reported" by reading the mode it already has.
+    A single-WAN box has nothing to be primary, standby or shared relative to, so
+    it reports ``None``, as does any mode this integration has not verified.
     """
     if routing is None or interface_name is None:
         return None
-    if routing.mode != _WAN_MODE_PRIMARY_STANDBY:
+    if routing.mode == _WAN_MODE_PRIMARY_STANDBY:
+        if interface_name == routing.primary:
+            return WAN_ROLE_PRIMARY
+        if interface_name == routing.standby:
+            return WAN_ROLE_STANDBY
         return None
-    if interface_name == routing.primary:
-        return WAN_ROLE_PRIMARY
-    if interface_name == routing.standby:
-        return WAN_ROLE_STANDBY
+    if routing.mode == _WAN_MODE_LOAD_BALANCE:
+        return WAN_ROLE_SHARED
     return None
+
+
+def active_wan_interface_name(data: dict[str, object]) -> str | None:
+    """Return the interface of the WAN the box is routing through right now.
+
+    The top-level ``network`` block is the box's own answer to "which WAN is
+    carrying traffic": it names the interface, the label, the address, and its
+    link state. Under failover it follows the primary, and when the primary has
+    failed it follows the standby, which is what makes it the failover signal.
+
+    Under load balance it still names one interface — the first next hop — so it
+    is the box's current choice rather than a claim that only one WAN is used.
+    """
+    raw_network = data.get(_RAW_NETWORK_BLOCK_KEY)
+    if not isinstance(raw_network, dict):
+        return None
+    if normalized_string(raw_network.get(_RAW_TYPE_KEY)) != _RAW_TYPE_WAN:
+        return None
+    return normalized_string(raw_network.get(_RAW_NAME_KEY))
+
+
+def active_wan_ipv4_address(data: dict[str, object]) -> str | None:
+    """Return the box-level IPv4 the app reports for the appliance.
+
+    Read from the top-level ``network`` block rather than derived, because that
+    block is the address the box itself reports for the WAN it is using. It is
+    preferred over ``publicIp``, which some models fill with a DNS resolver
+    address instead of the WAN address.
+    """
+    raw_network = data.get(_RAW_NETWORK_BLOCK_KEY)
+    if not isinstance(raw_network, dict):
+        return None
+    if normalized_string(raw_network.get(_RAW_TYPE_KEY)) != _RAW_TYPE_WAN:
+        return None
+    address = normalized_string(raw_network.get(_RAW_IP_ADDRESS_KEY))
+    if address is not None:
+        return address
+    addresses = _normalized_string_tuple(raw_network.get(_RAW_IP4_ADDRESSES_KEY))
+    return addresses[0] if addresses else None
+
+
+def wan_health_by_interface(
+    data: dict[str, object],
+) -> dict[str, dict[str, object]]:
+    """Return the box's own per-WAN health test, keyed by interface name.
+
+    ``wanTestResult`` is a separate block from the per-WAN profile: the profile
+    states whether the WAN is in the routing set, while this states whether the
+    link actually works — carrier, DNS, ping, HTTP, and the failures recorded
+    when one of them does not. Both are needed to tell "standby, idle, healthy"
+    from "standby, idle, broken".
+
+    Every interface shares one ``ts`` because the box tests them together, so the
+    reading is a single snapshot rather than per-WAN samples.
+    """
+    raw_result = data.get(_RAW_WAN_TEST_RESULT_KEY)
+    if not isinstance(raw_result, dict):
+        return {}
+    raw_wans = raw_result.get(_RAW_WANS_KEY)
+    if not isinstance(raw_wans, dict):
+        return {}
+
+    shared_timestamp = normalized_int(raw_result.get(_RAW_TS_KEY))
+    health: dict[str, dict[str, object]] = {}
+    for interface_name, raw_entry in raw_wans.items():
+        if not isinstance(interface_name, str) or not isinstance(raw_entry, dict):
+            continue
+        raw_http = raw_entry.get(_RAW_HTTP_KEY)
+        health[interface_name] = {
+            "tested_at_timestamp": normalized_int(raw_entry.get(_RAW_TS_KEY))
+            or shared_timestamp,
+            "carrier": normalized_bool(raw_entry.get(_RAW_CARRIER_KEY)),
+            "dns": normalized_bool(raw_entry.get(_RAW_DNS_KEY)),
+            "ping": normalized_bool(raw_entry.get(_RAW_PING_KEY)),
+            "http_status": (
+                normalized_int(raw_http.get(_RAW_STATUS_CODE_KEY))
+                if isinstance(raw_http, dict)
+                else None
+            ),
+            "failures": _normalized_string_tuple(raw_entry.get(_RAW_FAILURES_KEY)),
+            "recent_down_at_timestamp": normalized_int(
+                raw_entry.get(_RAW_RECENT_DOWN_TIME_KEY)
+            ),
+        }
+    return health
 
 
 def _bridge_member_interface_names(data: dict[str, object]) -> set[str]:

@@ -1031,9 +1031,14 @@ even a complete one.** Verified on a live box (2026-11-08):
   discriminator for an uplink the registry omits, and both the kind and the
   interface name (`intf`) are taken from the profile.
 - The **runtime init payload contains no `networkMonitorData` and no `wanStatus`
-  at all.** `networkMonitorData` is a separate `item=networkMonitorData` read used
-  for internet quality, and `wanStatus` appears only inside monitor-**event**
-  labels. Treating either as an init-payload key yields dead code.
+  under that name.** `networkMonitorData` is a separate `item=networkMonitorData`
+  read used for internet quality. `wanStatus` **is** in the init payload, but under
+  `latestAllStateEvents["overall_wan_state:overall_wan_state"].labels`, together
+  with `wanType` — not under `networkMonitorData`.
+- `overall_wan_state` and `wan_state:<intf>` are **opportunistic**: they are absent
+  from some payloads entirely, and their `wanType` was observed **stale** (reporting
+  `load_balance` while the routing block said `primary_standby`). They are used for
+  per-WAN names and state, never for the mode.
 - The top-level `network` block describes the WAN the box is routing through right
   now: `uuid`, `name` (interface), `desc` (the label the app shows), `type: "wan"`,
   `active`, `ready`.
@@ -1160,16 +1165,25 @@ added only when the box states it:
 
 | Attribute | Source | Failover | Load balance |
 | --- | --- | --- | --- |
-| `wan_role` | `routing.global.default` vs the WAN's interface | `primary` / `standby` | absent |
+| `wan_role` | `routing.global.default` vs the WAN's interface | `primary` / `standby` | `shared` |
 | `wan_in_use` | `networkProfiles[uuid].active` | one true | both true |
 | `wan_ready` | `networkProfiles[uuid].ready` | true on both | true on both |
+| `wan_health` | `wanTestResult.wans[intf]` | one block each | one block each |
 
 `wan_role` is derived at publish time rather than stored on the network, because
 it is a property of the box's routing policy and not of the network's geometry.
-It is absent — not `null` — in load balance, where every interface is an equal
-member of the routing set and naming one primary would describe a hierarchy the
-mode does not have. A consumer distinguishes "this mode has no role" from "not
-reported" by the `mode` it already has from `wan_routing`.
+Load balance reports `shared` for every participant: both WANs carry traffic, so
+neither is primary, but a role is still stated so a reader never has to consult
+the mode to learn how a WAN is being used. A single-WAN box reports no role,
+because it has nothing to be primary, standby or shared relative to.
+
+`wan_health` is the box's own link test, which answers a different question from
+the profile. `wan_ready` says the box considers the link usable; `wan_health` says
+the probes agreed, with `carrier`, `dns`, `ping`, `http_status`, the `failures`
+recorded when one did not, and `recent_down_at` for the last interruption. A
+standby can therefore be `wan_ready: true` with `wan_health.dns: false`, which is
+the difference between "idle" and "quietly broken" that readiness alone hid.
+Every interface shares one `ts`, so the whole block is a single snapshot.
 
 `wan_in_use` reads `active`, which is the same value as
 `wanTestResult.wans[intf].wanConnState.active`. Despite the name it means "in the
@@ -1182,11 +1196,32 @@ Captured output for the three fixtures:
 ```
 failover, eth0 primary         WAN-ONE  role=primary   in_use=True   ready=True
                                WAN-TWO  role=standby   in_use=False  ready=True
-load balance 60/40             WAN-ONE  role=-         in_use=True   ready=True
-                               WAN-TWO  role=-         in_use=True   ready=True
+load balance 60/40             WAN-ONE  role=shared    in_use=True   ready=True
+                               WAN-TWO  role=shared    in_use=True   ready=True
 failover, eth1 primary         WAN-ONE  role=standby   in_use=False  ready=True
                                WAN-TWO  role=primary   in_use=True   ready=True
 ```
+
+### Failover sensor
+
+`binary_sensor.<box>_wan_failover` reports whether a failover-configured box is
+running on its standby. It is **unavailable** outside `primary_standby`, because
+load balance has no primary to fail away from and an `off` there would read as
+"the primary is healthy".
+
+The signal is the top-level `network` block compared to `viaIntf`: that block
+names the WAN the box is routing through, follows the primary normally, and
+follows the standby once the primary has failed. `wanSwitched` in the
+`dualwan_state` event also marks a switch, but that event only exists after one
+has happened, so it cannot answer "are we failed over now".
+
+### The box-level IP
+
+`wan_ip` is read from the top-level `network` block's `ip_address`, not derived.
+That is the address the box itself reports for the WAN it is using, so it is what
+the app shows and it moves with a failover. When the block is absent the
+configured primary's address is used, and port order remains only a last resort.
+`publicIp` is not used: some models fill it with a DNS resolver address.
 
 ### Detail fields
 

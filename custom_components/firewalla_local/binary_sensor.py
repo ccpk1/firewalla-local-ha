@@ -86,6 +86,10 @@ from .const import (
     ATTR_SYSTEM_WAN_IP,
     ATTR_SYSTEM_WAN_IPS,
     ATTR_SYSTEM_WAN_ROUTING,
+    ATTR_WAN_FAILOVER_ACTIVE_WAN,
+    ATTR_WAN_FAILOVER_MODE,
+    ATTR_WAN_FAILOVER_PRIMARY,
+    ATTR_WAN_HEALTH,
     ATTR_WAN_IN_USE,
     ATTR_WAN_READY,
     ATTR_WAN_ROLE,
@@ -114,17 +118,20 @@ from .const import (
     TRANS_KEY_ENTITY_BINARY_SENSOR_NETWORK,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SSID,
     TRANS_KEY_ENTITY_BINARY_SENSOR_SYSTEM_STATUS,
+    TRANS_KEY_ENTITY_BINARY_SENSOR_WAN_FAILOVER,
     TRANS_KEY_ENTITY_BINARY_SENSOR_WATCHED_DEVICE,
     TRANS_KEY_PURPOSE_ALARM_ACTIVITY,
     TRANS_KEY_PURPOSE_AP_STATUS,
     TRANS_KEY_PURPOSE_NETWORK,
     TRANS_KEY_PURPOSE_SSID,
     TRANS_KEY_PURPOSE_SYSTEM_BOOT_STATUS,
+    TRANS_KEY_PURPOSE_WAN_FAILOVER,
     TRANS_KEY_PURPOSE_WATCHED_DEVICE_CONNECTIVITY,
     TRANS_PLACEHOLDER_NETWORK_KIND,
     TRANS_PLACEHOLDER_NETWORK_NAME,
     TRANS_PLACEHOLDER_SSID_KIND,
     TRANS_PLACEHOLDER_SSID_NAME,
+    WAN_MODE_PRIMARY_STANDBY,
 )
 from .coordinator import (
     FirewallaConfigEntry,
@@ -133,6 +140,7 @@ from .coordinator import (
 )
 from .entity import FirewallaEntity
 from .helpers.usage_report import serialize_usage_summary
+from .helpers.wan_publish import serialize_wan_health, serialize_wan_routing
 from .managers.wireless_manager import (
     FirewallaAccessPoint,
     FirewallaSsidProfile,
@@ -143,14 +151,20 @@ from .models import (
     FirewallaHostRuntime,
     FirewallaNetwork,
     FirewallaNetworkKind,
+    FirewallaWanRouting,
     FirewallaWanUsageSummary,
 )
-from .utils.network import wan_role
+from .utils.network import (
+    active_wan_interface_name,
+    wan_health_by_interface,
+    wan_role,
+)
 from .utils.values import iso_instant, normalized_int
 
 PARALLEL_UPDATES = 0
 
 _SYSTEM_STATUS_OBJECT_ID = "system_status"
+_WAN_FAILOVER_OBJECT_ID = "wan_failover"
 _SSID_KIND_DISPLAY_NAME = "SSID"
 
 
@@ -183,6 +197,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             FirewallaSystemStatusBinarySensor(entry),
+            FirewallaWanFailoverBinarySensor(entry),
             FirewallaAlarmActiveBinarySensor(entry),
             *network_entities,
             *ssid_entities,
@@ -356,22 +371,10 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
         """
         system_status = self.integration_manager.system_status
         routing = system_status.wan_routing if system_status is not None else None
-        if routing is None:
-            return None
-
-        attribute: dict[str, object] = {"mode": routing.mode}
-        if routing.primary is not None:
-            attribute["primary"] = self._wan_label(routing.primary)
-        if routing.standby is not None:
-            attribute["standby"] = self._wan_label(routing.standby)
-        if routing.failback is not None:
-            attribute["failback"] = routing.failback
-        if routing.traffic_share_percent is not None:
-            attribute["traffic_share_percent"] = {
-                self._wan_label(interface_name): percent
-                for interface_name, percent in routing.traffic_share_percent.items()
-            }
-        return attribute
+        return serialize_wan_routing(
+            routing,
+            label_for_interface=self._wan_label,
+        )
 
     def _wan_label(self, interface_name: str) -> str:
         """Return the WAN label for one interface, falling back to its name."""
@@ -626,6 +629,13 @@ class FirewallaNetworkBinarySensor(FirewallaEntity, BinarySensorEntity):
                 attributes[ATTR_WAN_IN_USE] = network.active
             if network.ready is not None:
                 attributes[ATTR_WAN_READY] = network.ready
+            health = serialize_wan_health(
+                wan_health_by_interface(self.coordinator.last_init_payload or {}).get(
+                    network.interface_name or ""
+                )
+            )
+            if health is not None:
+                attributes[ATTR_WAN_HEALTH] = health
         return attributes
 
     @staticmethod
@@ -709,6 +719,87 @@ class FirewallaAlarmActiveBinarySensor(FirewallaEntity, BinarySensorEntity):
             ),
             ATTR_ALARM_ID: latest_alarm.alarm_id if latest_alarm else None,
         }
+
+
+class FirewallaWanFailoverBinarySensor(FirewallaEntity, BinarySensorEntity):
+    """Expose whether a failover box is running on its standby WAN.
+
+    Only meaningful in failover mode: load balance has no primary to fail away
+    from, so the entity is unavailable there rather than reporting an off that
+    would read as "primary is healthy".
+
+    The signal is the box's own top-level ``network`` block, which names the WAN
+    it is routing through. It follows the configured primary normally and the
+    standby once the primary has failed, so comparing it to ``viaIntf`` answers
+    "are we failed over" without inferring anything from link flags.
+    """
+
+    # A failover is a degraded state worth noticing, not a fault.
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_translation_key = TRANS_KEY_ENTITY_BINARY_SENSOR_WAN_FAILOVER
+
+    def __init__(self, entry: FirewallaConfigEntry) -> None:
+        """Initialize the WAN failover binary sensor."""
+        super().__init__(entry, entry.runtime_data.coordinator)
+        self._attr_unique_id = self.integration_manager.build_entity_unique_id(
+            object_id=_WAN_FAILOVER_OBJECT_ID,
+            suffix=ENTITY_SUFFIX_BINARY_SENSOR,
+        )
+
+    @property
+    def _routing(self) -> FirewallaWanRouting | None:
+        """Return the box's multi-WAN mode, if it states one."""
+        system_status = self.system_status
+        return system_status.wan_routing if system_status is not None else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether the box is in a mode that can fail over."""
+        routing = self._routing
+        return (
+            super().available
+            and routing is not None
+            and routing.mode == WAN_MODE_PRIMARY_STANDBY
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether traffic is going through the standby."""
+        routing = self._routing
+        if routing is None or routing.mode != WAN_MODE_PRIMARY_STANDBY:
+            return None
+        active_interface = active_wan_interface_name(
+            self.coordinator.last_init_payload or {}
+        )
+        if active_interface is None or routing.primary is None:
+            return None
+        return active_interface != routing.primary
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return the configured primary and the WAN actually in use."""
+        routing = self._routing
+        return {
+            **self.build_state_attributes(TRANS_KEY_PURPOSE_WAN_FAILOVER),
+            ATTR_WAN_FAILOVER_MODE: routing.mode if routing is not None else None,
+            ATTR_WAN_FAILOVER_PRIMARY: (
+                self._wan_label(routing.primary)
+                if routing is not None and routing.primary is not None
+                else None
+            ),
+            ATTR_WAN_FAILOVER_ACTIVE_WAN: self._wan_label(
+                active_wan_interface_name(self.coordinator.last_init_payload or {})
+            ),
+        }
+
+    def _wan_label(self, interface_name: str | None) -> str | None:
+        """Return the WAN label for one interface, falling back to its name."""
+        if interface_name is None:
+            return None
+        for wan in self.integration_manager.get_available_wans():
+            if wan.interface_name == interface_name:
+                return wan.name
+        return interface_name
 
 
 class FirewallaSsidBinarySensor(FirewallaEntity, BinarySensorEntity):

@@ -4893,6 +4893,90 @@ async def test_get_system_overview_reports_counts_without_identities(
     assert "Read only" in overview["llm_access"]["note"]
 
 
+async def test_get_system_overview_publishes_the_wan_routing(
+    hass: HomeAssistant,
+) -> None:
+    """The overview states the WAN mode and each WAN's part in it.
+
+    Without it a caller sees two entries in `wan_ips` and cannot tell which is
+    primary, which is the question `run_internet_speed_test` needs answered.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    payload = _runtime_payload()
+    network_config = payload["networkConfig"]
+    assert isinstance(network_config, dict)
+    network_config["routing"] = {
+        "global": {
+            "default": {
+                "type": "primary_standby",
+                "viaIntf": "eth0",
+                "viaIntf2": "eth1",
+                "failback": True,
+            }
+        }
+    }
+    profiles = payload["networkProfiles"]
+    assert isinstance(profiles, dict)
+    profiles["wan-1"] = {"intf": "eth0", "type": "wan", "active": True, "ready": True}
+    profiles["wan-2"] = {
+        "intf": "eth1",
+        "type": "wan",
+        "active": False,
+        "ready": True,
+    }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient."
+            "build_runtime_snapshot",
+            return_value=_snapshot(),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        overview = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_GET_SYSTEM_OVERVIEW,
+            {SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert overview is not None
+    assert overview["wan"]["routing"] == {
+        "mode": "primary_standby",
+        "primary": "WAN-ONE",
+        "standby": "WAN-TWO",
+        "failback": True,
+    }
+    by_name = {wan["name"]: wan for wan in overview["wan"]["items"]}
+    assert by_name["WAN-ONE"]["role"] == "primary"
+    assert by_name["WAN-ONE"]["in_use"] is True
+    assert by_name["WAN-TWO"]["role"] == "standby"
+    assert by_name["WAN-TWO"]["in_use"] is False
+    assert by_name["WAN-TWO"]["ready"] is True
+
+
 async def test_llm_access_note_describes_the_active_tier(
     hass: HomeAssistant,
 ) -> None:

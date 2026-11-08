@@ -642,18 +642,37 @@ Each WAN network entity also carries the WAN's own place in that setup:
 
 | Attribute | Failover | Load balance | Meaning |
 | --- | --- | --- | --- |
-| `wan_role` | `primary` / `standby` | *absent* | the WAN's job under the configured mode |
+| `wan_role` | `primary` / `standby` | `shared` | the WAN's job under the configured mode |
 | `wan_in_use` | one `true` | both `true` | in the box's active routing set |
 | `wan_ready` | `true` on both | `true` on both | the link itself is usable |
+| `wan_health` | per-WAN block | per-WAN block | the box's own link test |
 
 A standby reporting `wan_ready: true` with `wan_in_use: false` is healthy: the
-link works, and the box is simply not routing through it. `wan_role` is absent
-in load balance because that mode has no primary or standby — both WANs share the
-traffic — and absent on LAN, VLAN and VPN networks, which have no such role at
-all.
+link works, and the box is simply not routing through it. `wan_role` is absent on
+LAN, VLAN and VPN networks, which have no such role at all.
+
+`wan_health` carries the box's own probe results for that WAN — `carrier`, `dns`,
+`ping`, `http_status`, any `failures`, and when it was last down. It answers the
+question `wan_ready` cannot: a standby can be ready while a probe is failing.
 
 `wan_in_use` means "in the active routing set", not "carrying traffic": under
 load balance every participating WAN reports `true`.
+
+#### WAN failover sensor
+
+If your box is configured for **Failover**, `binary_sensor.<box>_wan_failover`
+turns on when traffic is going through the standby WAN instead of the configured
+primary. Its attributes name the configured primary and the WAN actually in use.
+
+The entity is unavailable in load balance, where there is no primary to fail away
+from. Use it for a direct alert:
+
+```yaml
+trigger:
+  - platform: state
+    entity_id: binary_sensor.firewalla_wan_failover
+    to: "on"
+```
 
 Example: alert when a failover has happened, meaning the standby is in use.
 
