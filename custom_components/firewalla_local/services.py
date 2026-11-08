@@ -247,8 +247,8 @@ from .const import (
     TRANS_PLACEHOLDER_SCOPE_TARGET,
     TRANS_PLACEHOLDER_SELECTOR_FIELDS,
     TRANS_PLACEHOLDER_SSID_PROFILE_ID,
-    TRANS_PLACEHOLDER_WAN_NAME,
-    TRANS_PLACEHOLDER_WAN_UUID,
+    TRANS_PLACEHOLDER_WAN_CHOICES,
+    TRANS_PLACEHOLDER_WAN_SELECTOR,
     build_tag_reference,
 )
 from .coordinator import FirewallaConfigEntry, get_llm_tool_mode
@@ -798,6 +798,9 @@ _LIVE_HOST_FACING_NETWORK_KINDS: Final = frozenset(
         FirewallaNetworkKind.VPN,
     }
 )
+
+# Placeholder text for a failed WAN selector when the box reported no WAN at all.
+_NO_WAN_CHOICES: Final = "none reported by the box"
 
 GET_TIME_USAGE_SCHEMA = vol.Schema(
     {
@@ -3877,6 +3880,17 @@ def _serialize_wan_event(event: FirewallaWanEvent) -> JsonObjectType:
     }
 
 
+def _format_wan_choices(available_wans: tuple[FirewallaWanInterface, ...]) -> str:
+    """Return the selectable WANs as ``name (interface)`` pairs."""
+    return (
+        ", ".join(
+            f"{wan.name} ({wan.interface_name})" if wan.interface_name else wan.name
+            for wan in available_wans
+        )
+        or _NO_WAN_CHOICES
+    )
+
+
 def _resolve_requested_wan(
     entry: FirewallaConfigEntry,
     *,
@@ -3900,22 +3914,36 @@ def _resolve_requested_wan(
             return resolved_wan
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
-            translation_placeholders={TRANS_PLACEHOLDER_WAN_UUID: wan_uuid},
+            translation_placeholders={
+                TRANS_PLACEHOLDER_WAN_SELECTOR: wan_uuid,
+                TRANS_PLACEHOLDER_WAN_CHOICES: _format_wan_choices(available_wans),
+            },
         )
 
     if wan_name:
-        matching_wans = [
-            wan for wan in available_wans if wan.name.casefold() == wan_name.casefold()
-        ]
-        if not matching_wans:
+        # A user names a WAN either by its label or by the interface the box
+        # shows (``pppoe0``), and the two must not count as two candidates.
+        wans_by_uuid = {wan.uuid: wan for wan in available_wans}
+        matching_uuids = match_names(
+            wan_name,
+            ((wan.uuid, (wan.name, wan.interface_name)) for wan in available_wans),
+        )
+        if not matching_uuids:
             raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
-                translation_placeholders={TRANS_PLACEHOLDER_WAN_NAME: wan_name},
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_WAN_SELECTOR: wan_name,
+                    TRANS_PLACEHOLDER_WAN_CHOICES: _format_wan_choices(available_wans),
+                },
             )
+        matching_wans = tuple(wans_by_uuid[wan_id] for wan_id in matching_uuids)
         if len(matching_wans) > 1:
             raise _service_validation_error(
                 translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NAME_AMBIGUOUS,
-                translation_placeholders={TRANS_PLACEHOLDER_WAN_NAME: wan_name},
+                translation_placeholders={
+                    TRANS_PLACEHOLDER_WAN_SELECTOR: wan_name,
+                    TRANS_PLACEHOLDER_WAN_CHOICES: _format_wan_choices(matching_wans),
+                },
             )
         return matching_wans[0]
 
@@ -3924,6 +3952,9 @@ def _resolve_requested_wan(
             return available_wans[0]
         raise _service_validation_error(
             translation_key=TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_REQUIRED,
+            translation_placeholders={
+                TRANS_PLACEHOLDER_WAN_CHOICES: _format_wan_choices(available_wans),
+            },
         )
 
     return None

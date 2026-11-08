@@ -756,6 +756,61 @@ def test_get_available_wans_ignores_speed_test_uuid_fallback() -> None:
     assert available_wans == ()
 
 
+def test_wan_ip_follows_the_configured_primary_not_the_port_order() -> None:
+    """Test the box's WAN preference decides which WAN IP is reported.
+
+    ``networkConfig.routing.global.default`` is a deliberate setting, so a
+    standby ``eth0`` must not outrank the primary ``eth1`` merely because its
+    interface name sorts first.
+    """
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {"name": "STANDBY", "type": "wan", "uuid": "wan-s"}
+                    },
+                    "eth1": {
+                        "meta": {"name": "PRIMARY", "type": "wan", "uuid": "wan-p"}
+                    },
+                }
+            },
+            "routing": {
+                "global": {
+                    "default": {
+                        "type": "primary_standby",
+                        "viaIntf": "eth1",
+                        "viaIntf2": "eth0",
+                    }
+                }
+            },
+        },
+        "networkProfiles": {
+            "wan-s": {"intf": "eth0", "ipv4": "192.168.12.237"},
+            "wan-p": {"intf": "eth1", "ipv4": "23.245.207.179"},
+        },
+    }
+
+    wan_ip, wan_ips = manager._build_wan_ips()
+
+    assert wan_ip == "23.245.207.179"
+    assert wan_ips == {"eth1": "23.245.207.179", "eth0": "192.168.12.237"}
+
+
 def test_get_networks_discovers_all_kinds_from_interface_registry() -> None:
     """Test the unified collector classifies LAN, VLAN, VPN, and WAN networks."""
     snapshot = FirewallaRuntimeSnapshot(
@@ -1574,6 +1629,85 @@ def test_get_available_wans_filters_wan_kind_without_speed_test_fallback() -> No
     assert [wan.uuid for wan in available_wans] == [
         "8d5a7f20-2923-49a3-8e2b-338f9428a632"
     ]
+
+
+def test_get_available_wans_includes_an_uplink_the_registry_omits() -> None:
+    """Test an uplink the interface registry omits is still published as a WAN.
+
+    This is the issue #61 shape as a live box produces it: the PPPoE uplink
+    appears only in ``networkProfiles``, where ``type: "wan"`` is the box's own
+    declaration, and the friendly name comes from the monitor-event labels.
+    """
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkProfiles": {
+            "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d": {
+                "intf": "pppoe0",
+                "type": "wan",
+                "active": True,
+                "ready": True,
+                "ipv4": "86.10.20.30",
+            },
+            "f165924c-5854-4cd7-9041-ef7b8f1170f0": {
+                "intf": "wlan0",
+                "type": "wan",
+                "active": False,
+                "ready": True,
+                "ipv4": "192.168.50.20",
+            },
+        },
+        "networkConfig": {
+            "interface": {
+                "wlan": {
+                    "wlan0": {
+                        "meta": {
+                            "name": "Wireless",
+                            "type": "wan",
+                            "uuid": "f165924c-5854-4cd7-9041-ef7b8f1170f0",
+                        }
+                    }
+                }
+            }
+        },
+        "latestAllStateEvents": {
+            "ping:pppoe0-1.1.1.1": {
+                "labels": {
+                    "wan_intf_name": "EE",
+                    "wan_intf_uuid": "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d",
+                }
+            },
+        },
+    }
+
+    assert [
+        (wan.uuid, wan.name, wan.interface_name) for wan in manager.get_available_wans()
+    ] == [
+        (
+            "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d",
+            "EE",
+            "pppoe0",
+        ),
+        (
+            "f165924c-5854-4cd7-9041-ef7b8f1170f0",
+            "Wireless",
+            "wlan0",
+        ),
+    ]
+    # The PPPoE uplink is a WAN, so it must not be offered as a LAN segment.
+    assert manager.get_available_networks() == ()
 
 
 @pytest.mark.asyncio

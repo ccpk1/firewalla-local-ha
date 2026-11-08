@@ -372,7 +372,9 @@ run_internet_speed_test:
       selector:
         text:
       name: WAN name
-      description: Optional. Use the WAN display name shown by Firewalla. If only one WAN is available, you can omit both WAN selectors.
+      description: Optional. Use the WAN display name shown by Firewalla, or the
+        interface name the box uses (eth0, pppoe0, wlan0). If only one WAN is
+        available, you can omit both WAN selectors.
     config_entry_id:
       required: false
       example: "0123456789abcdef"
@@ -975,7 +977,8 @@ get_speed_tests:
       selector:
         text:
       name: WAN name
-      description: Optional. Filter results to one WAN display name.
+      description: Optional. Filter results to one WAN by display name or
+        interface name.
     limit:
       required: false
       example: 1
@@ -1025,7 +1028,8 @@ get_internet_quality:
       selector:
         text:
       name: WAN name
-      description: Optional. Filter samples to one WAN display name.
+      description: Optional. Filter samples to one WAN by display name or
+        interface name.
     limit:
       required: false
       example: 1
@@ -1276,7 +1280,8 @@ get_wan_usage:
       selector:
         text:
       name: WAN name
-      description: Optional. Filter results to one WAN display name.
+      description: Optional. Filter results to one WAN by display name or
+        interface name.
     refresh:
       required: false
       example: true
@@ -1379,7 +1384,8 @@ get_wan_events:
       selector:
         text:
       name: WAN name
-      description: Optional. Filter events to one WAN display name.
+      description: Optional. Filter events to one WAN by display name or
+        interface name.
     limit:
       required: false
       example: 100

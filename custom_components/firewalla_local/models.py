@@ -405,6 +405,10 @@ class FirewallaWanInterface:
 
     uuid: str
     name: str
+    # The box's own interface name (``eth0``, ``pppoe0``, ``wlan0``). It is a
+    # second way to name the WAN for a user looking at the Firewalla app, and
+    # it is absent when the identity came from a source that does not state it.
+    interface_name: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

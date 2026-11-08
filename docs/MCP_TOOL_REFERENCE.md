@@ -391,7 +391,8 @@ Reads that tell you what exists — the first step before any control action.
   `networks[]` (uuid, name, kind, `interface_category` — the vendor's `bond` /
   `bridge` / `phy` / `wlan` / `wireguard` / `amneziawg` / `openvpn` / `vlan`, which
   is what makes two VPNs distinguishable since `kind` calls them both `vpn` —
-  `ipv4_subnets`, host/online/offline counts),
+  `null` when the registry does not describe the network at all (an uplink known
+  only from `networkProfiles`), where `kind` is still authoritative — `ipv4_subnets`, host/online/offline counts),
   `groups` and `users` counts, `rules` counts, `alarms` counts, per-WAN `items[]`
   with nested `latest_speed_test` and `internet_quality`, and `llm_access`
   (`mode`, plus a `note` written **from the active mode** — it states what the
@@ -592,7 +593,10 @@ Reads that tell you what exists — the first step before any control action.
   fields rather than two ambiguous ones. `network_kind` is the box's coarse type
   (`lan`/`vlan`/`vpn`/`wan`), under the same name `target.network_kind` uses.
   `interface_category` is the vendor's registry key (`bond`, `bridge`, `vlan`,
-  `phy`, `wlan`, `wireguard`, `amneziawg`, `openvpn`). `interface_type` is the
+  `phy`, `wlan`, `wireguard`, `amneziawg`, `openvpn`), and is absent for a network
+  the registry does not describe — a PPPoE uplink is published only from
+  `networkProfiles`, which carries no category — where `network_kind` still
+  reports `wan`. `interface_type` is the
   box's own `meta.type`. The last two are **not** derivable from each other: an
   `amneziawg` interface reports `meta.type` of `lan` or `vpn`, and a `wlan` one
   reports `wan` (wireless WAN uplink) or `lan` (wireless LAN access point), so

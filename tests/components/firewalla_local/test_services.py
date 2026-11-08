@@ -145,6 +145,7 @@ from custom_components.firewalla_local.const import (
     SERVICE_UNMUTE_ALARM,
     SERVICE_WAKE_HOST,
     TRANS_KEY_EXCEPTION_DELETE_HOST_CONFIRM_REQUIRED,
+    TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND,
     TRANS_KEY_EXCEPTION_TIME_USAGE_SCOPE_NOT_FOUND,
     TRANS_KEY_EXCEPTION_WAKE_HOST_FAILED,
 )
@@ -275,6 +276,20 @@ def _runtime_payload() -> dict[str, object]:
                         "name": "Primary LAN",
                         "uuid": "d7e5a5c4-0b28-4010-b3c6-dad1a868693f",
                     }
+                },
+                # WANs are declared the way a real box declares them: as `phy`
+                # ports whose meta.type says `wan`. The payload used to declare
+                # them through `networkMonitorData.wanStatus` instead, which no
+                # live box publishes in an init payload.
+                "phy": {
+                    "eth0": {
+                        "enabled": True,
+                        "meta": {"name": "WAN-ONE", "type": "wan", "uuid": "wan-1"},
+                    },
+                    "eth1": {
+                        "enabled": True,
+                        "meta": {"name": "WAN-TWO", "type": "wan", "uuid": "wan-2"},
+                    },
                 },
             }
         },
@@ -2266,6 +2281,113 @@ async def test_run_internet_speed_test_service_returns_acknowledgement(
             "value": {"wan_uuid": "wan-1"},
         },
         "command_response": {"ok": True},
+    }
+
+
+async def test_run_internet_speed_test_service_resolves_a_wan_by_interface_name(
+    hass: HomeAssistant,
+) -> None:
+    """Test a WAN can be selected by the interface name the box shows.
+
+    A PPPoE uplink is named after its WAN profile in the app while the box calls
+    the interface ``pppoe0``, so both have to select the same WAN.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_run_internet_speed_test",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as mock_run_speed_test,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        response = await hass.services.async_call(
+            DOMAIN,
+            SERVICE_RUN_INTERNET_SPEED_TEST,
+            {
+                SERVICE_FIELD_WAN_NAME: "eth0",
+                SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert mock_run_speed_test.await_args is not None
+    assert mock_run_speed_test.await_args.args == ("wan-1",)
+    assert response["wan"] == {"uuid": "wan-1", "name": "WAN-ONE"}
+
+
+async def test_run_internet_speed_test_service_lists_the_available_wans(
+    hass: HomeAssistant,
+) -> None:
+    """Test an unmatched WAN selector names the WANs that could have matched."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=_runtime_payload()),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            side_effect=(_speed_test_snapshot(), _speed_test_snapshot()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with pytest.raises(ServiceValidationError) as err:
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_RUN_INTERNET_SPEED_TEST,
+                {
+                    SERVICE_FIELD_WAN_NAME: "EE",
+                    SERVICE_FIELD_CONFIG_ENTRY_ID: entry.entry_id,
+                },
+                blocking=True,
+                return_response=True,
+            )
+
+    assert err.value.translation_key == TRANS_KEY_EXCEPTION_SPEED_TEST_WAN_NOT_FOUND
+    assert err.value.translation_placeholders == {
+        "wan_selector": "EE",
+        "wan_choices": "WAN-ONE (eth0), WAN-TWO (eth1)",
     }
 
 
