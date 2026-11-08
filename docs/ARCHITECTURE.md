@@ -240,9 +240,10 @@ Rules:
   box's `lan` / `vlan` / `vpn` / `wan` distinction is real information, so
   collapsing it into the kind loses it; it belongs on a `network_kind` field.
 - **Where a coarse kind is lossy, publish the specific one beside it.** `kind`
-  collapses **eight** vendor categories into four — `bond` and `bridge` both become
-  LAN, `wireguard`/`amneziawg`/`openvpn` all become VPN, `phy` and `wlan` both
-  become WAN. That collapse is deliberate and worth keeping: it is what lets a
+  collapses the **eight known** vendor categories into four — `bond` and `bridge`
+  both become LAN, `wireguard`/`amneziawg`/`openvpn` all become VPN, `phy` and
+  `wlan` both become WAN — and an unlisted category falls back to the box's own
+  `meta.type`. The collapse is deliberate and worth keeping: it is what lets a
   caller ask for a VPN without knowing the three ways a VPN can be built. But it
   was previously also the *only* thing published, so AmneziaWG and WireGuard were
   indistinguishable. `interface_category` carries the vendor's own category

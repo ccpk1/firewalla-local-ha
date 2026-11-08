@@ -1295,8 +1295,10 @@ service. Automations and scripts are unaffected — Home Assistant only enforces
 the check for calls made by a signed-in user, so a non-admin user cannot invoke
 it directly.
 
-- choose the WAN with `wan_uuid` or `wan_name`
-- if only one WAN is available, you can omit the WAN selector
+- choose the WAN with `wan_uuid` or `wan_name`; `wan_name` also accepts the
+  interface name the box uses (`eth0`, `pppoe0`, `wlan0`)
+- if only one WAN is available, you can omit the WAN selector; with several, the
+  error lists the WANs you can choose from
 - the service returns an acknowledgement and does not wait for the completed
   measurement
 - if you want completed results, use `firewalla_local.get_speed_tests`

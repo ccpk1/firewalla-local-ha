@@ -1576,6 +1576,87 @@ def test_get_available_wans_filters_wan_kind_without_speed_test_fallback() -> No
     ]
 
 
+def test_get_available_wans_includes_a_wan_status_only_uplink() -> None:
+    """Test an uplink the interface registry omits is still published as a WAN.
+
+    A PPPoE uplink only appears in ``networkProfiles`` and ``wanStatus`` on the
+    reporting box, so the profile pass used to classify it as a LAN and the WAN
+    status pass refused to correct it (issue #61).
+    """
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkProfiles": {
+            "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d": {
+                "intf": "pppoe0",
+                "ipv4": "86.10.20.30",
+            },
+            "f165924c-5854-4cd7-9041-ef7b8f1170f0": {
+                "intf": "wlan0",
+                "ipv4": "192.168.50.20",
+            },
+        },
+        "networkConfig": {
+            "interface": {
+                "wlan": {
+                    "wlan0": {
+                        "meta": {
+                            "name": "Wireless",
+                            "type": "wan",
+                            "uuid": "f165924c-5854-4cd7-9041-ef7b8f1170f0",
+                        }
+                    }
+                }
+            }
+        },
+        "networkMonitorData": {
+            "overall_wan_state:overall_wan_state": {
+                "labels": {
+                    "wanStatus": {
+                        "pppoe0": {
+                            "wan_intf_name": "EE",
+                            "wan_intf_uuid": "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d",
+                        },
+                        "wlan0": {
+                            "wan_intf_name": "Wireless",
+                            "wan_intf_uuid": "f165924c-5854-4cd7-9041-ef7b8f1170f0",
+                        },
+                    }
+                }
+            }
+        },
+    }
+
+    assert [
+        (wan.uuid, wan.name, wan.interface_name) for wan in manager.get_available_wans()
+    ] == [
+        (
+            "d564a8c7-a323-473a-9f9f-d7f0a5b1af7d",
+            "EE",
+            "pppoe0",
+        ),
+        (
+            "f165924c-5854-4cd7-9041-ef7b8f1170f0",
+            "Wireless",
+            "wlan0",
+        ),
+    ]
+    # The PPPoE uplink is a WAN, so it must not be offered as a LAN segment.
+    assert manager.get_available_networks() == ()
+
+
 @pytest.mark.asyncio
 async def test_async_delete_host_forwards_to_client_and_evicts_index() -> None:
     """Test host delete forwards the MAC and drops it from the host index."""

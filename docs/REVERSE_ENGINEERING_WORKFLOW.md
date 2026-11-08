@@ -1010,10 +1010,25 @@ are LAN networks; the reverse-engineered captures below cover both layouts.
 | VPN (`AmneziaWG`, `OpenVPN`, `WireGuard`) | `amneziawg` / `openvpn` / `wireguard` | `vpn` | `wgPeers`/`awgPeers` are per-peer hosts, **not** VPN networks |
 | WAN (`WAN-ONE`) | `phy` | `wan` | only a `phy` entry whose `meta.type == "wan"`; unnamed `phy` ports (eth1/2/3) are hardware, not networks |
 | WAN (wireless uplink) | `wlan` | `wan` | only when `meta.type == "wan"`; the box joins a Wi-Fi network as a client (`wpaSupplicant`), so it is a wireless WAN uplink, not a wireless LAN AP |
+| WAN (PPPoE uplink) | absent from the registry | `wan` | discovered from `networkMonitorData.wanStatus`; a PPPoE uplink can be missing from `networkConfig.interface` entirely |
 
 Each entry carries a `meta` block: `name` (display name), `type` (`lan`/`wan`
 only — coarse), `uuid`. The `network_kind` is derived from the category key so
 `vlan` and `vpn` are distinguishable despite all reporting `meta.type='lan'`.
+
+The category map is a record of what has been reverse-engineered, not a
+statement about what the box can publish. A category the map does not list is
+classified from the entry's `meta.type` (`wan` → `wan`, `lan` → `lan`) and keeps
+its raw key in `interface_category`, so a new transport is diagnosable instead of
+invisible. An entry with no `meta.type` at all is skipped rather than guessed at.
+
+`networkMonitorData.wanStatus` is **authoritative for WAN identity** and is
+applied after the registry and `networkProfiles` passes. A box can report a
+PPPoE uplink there while omitting it from the interface registry (issue #61):
+the pass then upgrades the kind to `wan`, fills in the interface name from the
+block's key (`eth0`, `pppoe0`, `wlan0`), and adopts `wan_intf_name` where the
+current name is only a fallback — the uuid or the interface name. A registry
+`meta.name` is an authored label and is kept.
 
 ### Detail fields
 

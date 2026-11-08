@@ -262,7 +262,11 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         return tuple(
             sorted(
                 (
-                    FirewallaWanInterface(uuid=network.uuid, name=network.name)
+                    FirewallaWanInterface(
+                        uuid=network.uuid,
+                        name=network.name,
+                        interface_name=network.interface_name,
+                    )
                     for network in self.get_networks()
                     if network.kind is FirewallaNetworkKind.WAN
                 ),

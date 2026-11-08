@@ -1332,13 +1332,13 @@
       "message": "The integration could not update the host notification setting. Check the Firewalla connection and try again."
     },
     "speed_test_wan_name_ambiguous": {
-      "message": "More than one Firewalla WAN matches the name \"{wan_name}\". Use the WAN UUID instead."
+      "message": "More than one Firewalla WAN matches \"{wan_selector}\": {wan_choices}. Use the WAN UUID instead."
     },
     "speed_test_wan_not_found": {
-      "message": "No Firewalla WAN matched the requested selector. Check the WAN name or UUID and try again."
+      "message": "No Firewalla WAN matched \"{wan_selector}\". Available WANs: {wan_choices}. Use the WAN name, the interface name, or the WAN UUID."
     },
     "speed_test_wan_required": {
-      "message": "Choose a WAN name or WAN UUID before running the internet speed test."
+      "message": "Choose a WAN name or WAN UUID before running the internet speed test. Available WANs: {wan_choices}."
     },
     "speed_test_wan_selector_conflict": {
       "message": "Provide either a WAN UUID or a WAN name, not both."
