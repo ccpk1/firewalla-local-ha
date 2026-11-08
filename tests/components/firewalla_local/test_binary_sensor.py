@@ -52,6 +52,14 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_BLUETOOTH_MAC,
     ATTR_SYSTEM_PORTS,
     ATTR_SYSTEM_TIMEZONE,
+    ATTR_SYSTEM_WAN_ROUTING,
+    ATTR_WAN_FAILOVER_ACTIVE_WAN,
+    ATTR_WAN_FAILOVER_MODE,
+    ATTR_WAN_FAILOVER_PRIMARY,
+    ATTR_WAN_HEALTH,
+    ATTR_WAN_IN_USE,
+    ATTR_WAN_READY,
+    ATTR_WAN_ROLE,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
     ATTR_WATCHED_DEVICE_HOST_GROUP,
@@ -666,7 +674,11 @@ async def test_watched_device_binary_sensor_unique_ids_are_entry_scoped(
         )
         if entity_entry.entity_id.startswith("binary_sensor.")
         and not entity_entry.unique_id.endswith(
-            ("_system_status_binary_sensor", "_alarm_active_binary_sensor")
+            (
+                "_system_status_binary_sensor",
+                "_alarm_active_binary_sensor",
+                "_wan_failover_binary_sensor",
+            )
         )
     ]
 
@@ -1063,6 +1075,363 @@ async def test_system_status_exposes_ports_attribute(
     }
     assert system_state.attributes[ATTR_SYSTEM_BLUETOOTH_MAC] == "20:6D:31:FC:1C:56"
     assert system_state.attributes[ATTR_SYSTEM_TIMEZONE] is None
+
+
+async def test_system_status_exposes_the_failover_routing(
+    hass: HomeAssistant,
+) -> None:
+    """Test the System Status sensor reports the failover mode and its settings."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+    )
+
+    system_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_system_status_binary_sensor"
+    )
+
+    assert system_state.attributes[ATTR_SYSTEM_WAN_ROUTING] == {
+        "mode": "primary_standby",
+        "primary": "WAN-ONE",
+        "standby": "WAN-TWO",
+        "failback": True,
+    }
+
+
+async def test_system_status_exposes_the_load_balance_share(
+    hass: HomeAssistant,
+) -> None:
+    """Test load balance reports the declared share and no primary.
+
+    Captured shape from a live box: ``nextHops`` replaces ``viaIntf``/``viaIntf2``
+    entirely, so publishing a primary here would invent one.
+    """
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "load_balance",
+            "nextHops": [
+                {"viaIntf": "eth0", "weight": 60},
+                {"viaIntf": "eth1", "weight": 40},
+            ],
+        },
+    )
+
+    system_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_system_status_binary_sensor"
+    )
+
+    assert system_state.attributes[ATTR_SYSTEM_WAN_ROUTING] == {
+        "mode": "load_balance",
+        "traffic_share_percent": {"WAN-ONE": 60, "WAN-TWO": 40},
+    }
+
+
+async def test_system_status_reports_no_routing_when_the_box_states_no_preference(
+    hass: HomeAssistant,
+) -> None:
+    """Test a box with no routing block reports ``None`` rather than a mode.
+
+    ``None`` and not an invented ``single``: the box states no preference, and a
+    guessed mode would be indistinguishable from a stated one.
+    """
+    await _setup_routing_entry(hass, routing=None)
+
+    system_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_system_status_binary_sensor"
+    )
+
+    assert system_state.attributes[ATTR_SYSTEM_WAN_ROUTING] is None
+
+
+async def test_wan_network_sensors_report_failover_roles(
+    hass: HomeAssistant,
+) -> None:
+    """Test each WAN carries its role and link state in failover."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+        wan_profiles={
+            "8d5a7f20-2923-49a3-8e2b-338f9428a632": {"active": True, "ready": True},
+            "wan-two": {"active": False, "ready": True},
+        },
+    )
+
+    primary = _network_state_for_uuid(hass, "8d5a7f20-2923-49a3-8e2b-338f9428a632")
+    standby = _network_state_for_uuid(hass, "wan-two")
+
+    assert primary.attributes[ATTR_WAN_ROLE] == "primary"
+    assert primary.attributes[ATTR_WAN_IN_USE] is True
+    assert primary.attributes[ATTR_WAN_READY] is True
+    # A standby is ready while idle, which is healthy rather than a fault.
+    assert standby.attributes[ATTR_WAN_ROLE] == "standby"
+    assert standby.attributes[ATTR_WAN_IN_USE] is False
+    assert standby.attributes[ATTR_WAN_READY] is True
+
+
+async def test_wan_network_sensors_report_no_role_in_load_balance(
+    hass: HomeAssistant,
+) -> None:
+    """Test load balance leaves the role off rather than electing a primary.
+
+    Both WANs are equal members of the routing set, so both report themselves in
+    use and neither carries a role.
+    """
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "load_balance",
+            "nextHops": [
+                {"viaIntf": "eth0", "weight": 60},
+                {"viaIntf": "eth1", "weight": 40},
+            ],
+        },
+        wan_profiles={
+            "8d5a7f20-2923-49a3-8e2b-338f9428a632": {"active": True, "ready": True},
+            "wan-two": {"active": True, "ready": True},
+        },
+    )
+
+    first = _network_state_for_uuid(hass, "8d5a7f20-2923-49a3-8e2b-338f9428a632")
+    second = _network_state_for_uuid(hass, "wan-two")
+
+    # Load balance gives every member the same role rather than no role, so a
+    # reader never has to consult the mode to learn how a WAN is being used.
+    assert first.attributes[ATTR_WAN_ROLE] == "shared"
+    assert second.attributes[ATTR_WAN_ROLE] == "shared"
+    assert first.attributes[ATTR_WAN_IN_USE] is True
+    assert second.attributes[ATTR_WAN_IN_USE] is True
+
+
+async def test_lan_network_sensor_carries_no_wan_attributes(
+    hass: HomeAssistant,
+) -> None:
+    """Test routing attributes stay off non-WAN networks."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+    )
+
+    vlan_state = _network_state_for_uuid(hass, "95169e6a-a7c9-4d6a-8e83-6061b4812bf2")
+
+    assert ATTR_WAN_ROLE not in vlan_state.attributes
+    assert ATTR_WAN_IN_USE not in vlan_state.attributes
+    assert ATTR_WAN_READY not in vlan_state.attributes
+
+
+async def test_wan_network_sensor_exposes_the_box_health_test(
+    hass: HomeAssistant,
+) -> None:
+    """Test the WAN sensor carries the box's own link health test."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+        wan_profiles={
+            "8d5a7f20-2923-49a3-8e2b-338f9428a632": {"active": True, "ready": True},
+            "wan-two": {"active": False, "ready": True},
+        },
+        wan_test_result={
+            "ts": 1794159471,
+            "wans": {
+                "eth0": {
+                    "active": True,
+                    "carrier": True,
+                    "dns": True,
+                    "ping": True,
+                    "http": {"statusCode": 200},
+                    "failures": [],
+                },
+                "eth1": {
+                    "active": True,
+                    "carrier": True,
+                    "dns": False,
+                    "ping": True,
+                    "http": {"statusCode": None},
+                    "failures": ["dns"],
+                    "recentDownTime": 1793248443,
+                },
+            },
+        },
+    )
+
+    primary = _network_state_for_uuid(hass, "8d5a7f20-2923-49a3-8e2b-338f9428a632")
+    standby = _network_state_for_uuid(hass, "wan-two")
+
+    assert primary.attributes[ATTR_WAN_HEALTH]["carrier"] is True
+    assert primary.attributes[ATTR_WAN_HEALTH]["http_status"] == 200
+    assert primary.attributes[ATTR_WAN_HEALTH]["failures"] == []
+    # A standby whose DNS probe fails still reports ready from the profile, which
+    # is why the health block exists: readiness alone would hide the failure.
+    assert standby.attributes[ATTR_WAN_READY] is True
+    assert standby.attributes[ATTR_WAN_HEALTH]["dns"] is False
+    assert standby.attributes[ATTR_WAN_HEALTH]["failures"] == ["dns"]
+    assert standby.attributes[ATTR_WAN_HEALTH]["recent_down_at_timestamp"] == (
+        1793248443
+    )
+
+
+async def test_failover_sensor_is_off_while_the_primary_carries_traffic(
+    hass: HomeAssistant,
+) -> None:
+    """Test the failover sensor is off while the configured primary is in use."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+        active_interface="eth0",
+    )
+
+    state = _binary_sensor_state_for_unique_suffix(hass, "_wan_failover_binary_sensor")
+
+    assert state.state == STATE_OFF
+    assert state.attributes[ATTR_WAN_FAILOVER_PRIMARY] == "WAN-ONE"
+    assert state.attributes[ATTR_WAN_FAILOVER_ACTIVE_WAN] == "WAN-ONE"
+    assert state.attributes[ATTR_WAN_FAILOVER_MODE] == "primary_standby"
+
+
+async def test_failover_sensor_is_on_while_the_standby_carries_traffic(
+    hass: HomeAssistant,
+) -> None:
+    """Test the failover sensor reports a failover when the standby is in use."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+        active_interface="eth1",
+    )
+
+    state = _binary_sensor_state_for_unique_suffix(hass, "_wan_failover_binary_sensor")
+
+    assert state.state == STATE_ON
+    assert state.attributes[ATTR_WAN_FAILOVER_PRIMARY] == "WAN-ONE"
+    assert state.attributes[ATTR_WAN_FAILOVER_ACTIVE_WAN] == "WAN-TWO"
+
+
+async def test_failover_sensor_is_unavailable_outside_failover_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Test load balance has no failover to report, so the entity is unavailable."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "load_balance",
+            "nextHops": [
+                {"viaIntf": "eth0", "weight": 50},
+                {"viaIntf": "eth1", "weight": 50},
+            ],
+        },
+    )
+
+    state = _binary_sensor_state_for_unique_suffix(hass, "_wan_failover_binary_sensor")
+
+    assert state.state == STATE_UNAVAILABLE
+
+
+def _network_state_for_uuid(hass: HomeAssistant, network_uuid: str):
+    """Return the per-network binary sensor for one network uuid."""
+    return _binary_sensor_state_for_unique_suffix(
+        hass, f"_network_{network_uuid}_binary_sensor"
+    )
+
+
+async def _setup_routing_entry(
+    hass: HomeAssistant,
+    *,
+    routing: dict[str, object] | None,
+    wan_profiles: dict[str, dict[str, object]] | None = None,
+    wan_test_result: dict[str, object] | None = None,
+    active_interface: str | None = None,
+) -> MockConfigEntry:
+    """Set up one entry whose payload declares two WANs and the given routing."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    payload = _network_payload()
+    network_config = payload["networkConfig"]
+    assert isinstance(network_config, dict)
+    network_config["interface"]["phy"]["eth1"] = {
+        "meta": {"name": "WAN-TWO", "type": "wan", "uuid": "wan-two"},
+        "enabled": True,
+    }
+    profiles = payload["networkProfiles"]
+    assert isinstance(profiles, dict)
+    profiles["wan-two"] = {"intf": "eth1", "ipv4": "192.168.12.237", "type": "wan"}
+    for profile_uuid, wan_state in (wan_profiles or {}).items():
+        profiles[profile_uuid] = {
+            **profiles.get(profile_uuid, {}),
+            "type": "wan",
+            **wan_state,
+        }
+    if routing is not None:
+        network_config["routing"] = {"global": {"default": routing}}
+    if wan_test_result is not None:
+        payload["wanTestResult"] = wan_test_result
+    if active_interface is not None:
+        payload["network"] = {
+            "uuid": "8d5a7f20-2923-49a3-8e2b-338f9428a632"
+            if active_interface == "eth0"
+            else "wan-two",
+            "name": active_interface,
+            "desc": "WAN-ONE" if active_interface == "eth0" else "WAN-TWO",
+            "type": "wan",
+            "active": True,
+            "ready": True,
+            "ip_address": "23.245.207.179",
+        }
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    return entry
 
 
 def _count_network_binary_sensors(hass: HomeAssistant) -> int:

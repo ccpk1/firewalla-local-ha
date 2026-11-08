@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-firewalla-local"
-version = "2.5.4"
+version = "2.5.5"
 description = "Local-first Home Assistant custom integration for Firewalla"
 readme = "README.md"
 # Home Assistant 2025.10 (the declared floor in hacs.json) runs on Python 3.13, so

@@ -83,7 +83,12 @@ from ..utils.flow import (
     iter_flow_rows,
     metric_ranking_sort_key,
 )
-from ..utils.network import build_network_inventory, primary_wan_interface_name
+from ..utils.network import (
+    active_wan_ipv4_address,
+    build_network_inventory,
+    primary_wan_interface_name,
+    wan_routing,
+)
 from ..utils.values import (
     normalized_bool,
     normalized_float,
@@ -873,6 +878,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             ddns=appliance_runtime.ddns,
             firmware_release_type=appliance_runtime.firmware_release_type,
             timezone_name=appliance_runtime.timezone_name,
+            wan_routing=wan_routing(self.coordinator.last_init_payload or {}),
             wan_ip=wan_ip,
             wan_ips=wan_ips,
             cpu_usage_1m=appliance_runtime.cpu_usage_1m,
@@ -901,22 +907,21 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         return f"Ubuntu {release_version} ({release_name})"
 
     def _build_wan_ips(self) -> tuple[str | None, dict[str, str] | None]:
-        """Build the box WAN IPs from the WAN network inventory.
+        """Build the box WAN IPs, preferring the address the box itself reports.
 
-        The init payload's ``publicIp``/``publicIps`` fields are not reliable
-        as the WAN IP source on some models (e.g. Gold SE), where they can
-        report a DNS resolver address instead of the actual WAN IP. The WAN
-        network entities already carry the correct per-WAN IPv4 (from
-        ``networkProfiles``), so derive the box-level WAN IPs from them.
+        The top-level ``network`` block is the box's own statement of the WAN it
+        is routing through: its interface, label and address. That is the value
+        the app shows, so it is used as-is rather than derived — the app's answer
+        is not ours to recompute. ``publicIp``/``publicIps`` are not used because
+        some models (e.g. Gold SE) fill them with a DNS resolver address.
 
-        The primary WAN is the one the box is configured to route through first
-        (``networkConfig.routing.global.default.viaIntf``). Port order is only a
-        tie-breaker for the remaining WANs, because it cannot tell a primary
-        from a standby and ranks every interface the same way once the names
-        stop ending in the port digits (``pppoe0``, ``wlan0``). ``wan_ip`` is
-        the primary WAN's first IPv4, and ``wan_ips`` maps each WAN interface
-        name to its first IPv4.
+        ``wan_ips`` maps every WAN's interface name to its first IPv4 from
+        ``networkProfiles``, which is per-WAN data the block above does not carry.
+        When the payload has no ``network`` block, ``wan_ip`` falls back to the
+        configured primary's address; it never falls back to port ordering, which
+        cannot tell a primary from a standby.
         """
+        payload = self.coordinator.last_init_payload or {}
         wan_networks = [
             network
             for network in self.get_networks()
@@ -925,21 +930,25 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
         if not wan_networks:
             return None, None
 
-        configured_primary = primary_wan_interface_name(
-            self.coordinator.last_init_payload or {}
-        )
-        wan_networks.sort(
-            key=lambda network: (
-                network.interface_name != configured_primary,
-                _interface_port_number(network.interface_name),
-            )
-        )
         wan_ips = {
             network.interface_name or network.uuid: network.ipv4_addresses[0]
             for network in wan_networks
         }
-        primary = wan_networks[0]
-        return primary.ipv4_addresses[0], wan_ips
+
+        reported_address = active_wan_ipv4_address(payload)
+        if reported_address is not None:
+            return reported_address, wan_ips
+
+        configured_primary = primary_wan_interface_name(payload)
+        if configured_primary is not None:
+            for network in wan_networks:
+                if network.interface_name == configured_primary:
+                    return network.ipv4_addresses[0], wan_ips
+
+        wan_networks.sort(
+            key=lambda network: _interface_port_number(network.interface_name)
+        )
+        return wan_networks[0].ipv4_addresses[0], wan_ips
 
     def _build_memory_usage_percent(
         self, appliance_runtime: FirewallaApplianceRuntimeInput

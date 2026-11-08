@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from custom_components.firewalla_local.models import FirewallaNetworkKind
+from custom_components.firewalla_local.models import (
+    FirewallaNetworkKind,
+    FirewallaWanRouting,
+)
 from custom_components.firewalla_local.utils.network import (
     build_network_inventory,
     primary_wan_interface_name,
+    wan_health_by_interface,
+    wan_routing,
 )
 
 _WAN_STATUS_KEY = "networkMonitorData"
@@ -299,6 +304,160 @@ def test_primary_wan_is_the_interface_the_box_routes_through_first() -> None:
     }
 
     assert primary_wan_interface_name(payload) == "pppoe0"
+
+
+def test_routing_reads_the_failover_settings() -> None:
+    """Test failover reports a primary, a standby and the auto-fallback toggle."""
+    routing = wan_routing(
+        {
+            "networkConfig": {
+                "routing": {
+                    "global": {
+                        "default": {
+                            "type": "primary_standby",
+                            "viaIntf": "eth1",
+                            "viaIntf2": "eth0",
+                            "failback": False,
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert routing == FirewallaWanRouting(
+        mode="primary_standby",
+        primary="eth1",
+        standby="eth0",
+        failback=False,
+    )
+
+
+def test_routing_reads_the_load_balance_share_without_inventing_a_primary() -> None:
+    """Test load balance reports the configured share and no primary.
+
+    Captured from a live box: load balance carries ``nextHops`` and names no
+    primary, so electing one would state a hierarchy the mode does not have.
+    """
+    routing = wan_routing(
+        {
+            "networkConfig": {
+                "routing": {
+                    "global": {
+                        "default": {
+                            "type": "load_balance",
+                            "nextHops": [
+                                {"viaIntf": "eth0", "weight": 60},
+                                {"viaIntf": "eth1", "weight": 40},
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert routing == FirewallaWanRouting(
+        mode="load_balance",
+        traffic_share_percent={"eth0": 60, "eth1": 40},
+    )
+    assert (
+        primary_wan_interface_name(
+            {
+                "networkConfig": {
+                    "routing": {
+                        "global": {
+                            "default": {
+                                "type": "load_balance",
+                                "nextHops": [{"viaIntf": "eth0", "weight": 100}],
+                            }
+                        }
+                    }
+                }
+            }
+        )
+        is None
+    )
+
+
+def test_routing_states_the_mode_alone_when_it_has_no_settings() -> None:
+    """Test a mode with nothing to configure reports only its name."""
+    payload = {
+        "networkConfig": {
+            "routing": {"global": {"default": {"type": "single"}}},
+        }
+    }
+
+    assert wan_routing(payload) == FirewallaWanRouting(mode="single")
+    assert primary_wan_interface_name(payload) is None
+
+
+def test_routing_ignores_a_next_hop_without_a_weight() -> None:
+    """Test a malformed next hop is dropped rather than published as zero."""
+    routing = wan_routing(
+        {
+            "networkConfig": {
+                "routing": {
+                    "global": {
+                        "default": {
+                            "type": "load_balance",
+                            "nextHops": [
+                                {"viaIntf": "eth0", "weight": 60},
+                                {"viaIntf": "eth1"},
+                                {"weight": 40},
+                            ],
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    assert routing is not None
+    assert routing.traffic_share_percent == {"eth0": 60}
+
+
+def test_routing_is_absent_without_a_routing_block() -> None:
+    """Test a box that states no preference reports nothing, not a default mode."""
+    assert wan_routing({}) is None
+    assert wan_routing({"networkConfig": {"routing": None}}) is None
+    assert wan_routing({"networkConfig": {"routing": {"global": {}}}}) is None
+
+
+def test_health_failures_are_read_from_the_boxes_object_shape() -> None:
+    """Test a failed probe names what broke.
+
+    The box lists failures as ``[{"type": "carrier"}]``. Reading that as a string
+    list yielded nothing, which silently dropped the only part of the health
+    block that says *why* a WAN is unhealthy.
+    """
+    health = wan_health_by_interface(
+        {
+            "wanTestResult": {
+                "wans": {
+                    "eth0": {
+                        "carrier": False,
+                        "ready": False,
+                        "failures": [{"type": "carrier"}],
+                    },
+                    "eth1": {
+                        "carrier": True,
+                        "failures": [{"type": "dns", "target": "1.1.1.1"}],
+                    },
+                }
+            }
+        }
+    )
+
+    assert health["eth0"]["failures"] == ("carrier",)
+    assert health["eth0"]["carrier"] is False
+    assert health["eth1"]["failures"] == ("dns",)
+
+
+def test_health_is_absent_when_the_box_reports_no_test_result() -> None:
+    """Test a payload without the health block yields nothing to publish."""
+    assert wan_health_by_interface({}) == {}
+    assert wan_health_by_interface({"wanTestResult": {"wans": None}}) == {}
 
 
 def test_primary_wan_interface_is_absent_when_the_box_does_not_state_one() -> None:

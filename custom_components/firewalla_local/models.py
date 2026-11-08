@@ -294,6 +294,31 @@ class FirewallaApplianceRuntimeInput:
     disk_usages: tuple[FirewallaDiskUsageInput, ...] = ()
 
 
+@dataclass(slots=True, frozen=True)
+class FirewallaWanRouting:
+    """How the box distributes traffic across its WAN uplinks.
+
+    The mode is a configuration point rather than something derivable, and it
+    decides which of the remaining fields are meaningful: ``primary`` and
+    ``standby`` exist only in failover, ``traffic_share_percent`` only in load
+    balance. A field the active mode does not use is ``None`` rather than
+    invented, so a consumer can tell "not applicable" from "not reported".
+
+    Interfaces are the raw identities (``eth0``, ``pppoe0``); naming them is the
+    publish layer's job, as it is everywhere else.
+    """
+
+    mode: str
+    primary: str | None = None
+    standby: str | None = None
+    # The app's "auto fallback": return to the primary once it recovers.
+    failback: bool | None = None
+    # Load-balance share per interface, as the box states it. It is a configured
+    # split, not a measurement — nothing in the payload reports observed traffic
+    # per WAN.
+    traffic_share_percent: dict[str, int] | None = None
+
+
 @dataclass(slots=True)
 class FirewallaSystemStatus:
     """Normalized system-status state for the Firewalla appliance."""
@@ -307,6 +332,7 @@ class FirewallaSystemStatus:
     timezone_name: str | None = None
     wan_ip: str | None = None
     wan_ips: dict[str, str] | None = None
+    wan_routing: FirewallaWanRouting | None = None
     cpu_usage_1m: float | None = None
     memory_usage_percent: float | None = None
     memory_free_mb: float | None = None
@@ -692,6 +718,13 @@ class FirewallaNetwork:
     dhcp: FirewallaNetworkDhcpConfig | None = None
     device_host_count: int | None = None
     enabled: bool | None = None
+    # WAN link state, as ``networkProfiles[uuid]`` states it. ``active`` means the
+    # WAN is in the box's active routing set, which in load balance is true for
+    # every participating WAN; ``ready`` means the link itself is usable, and a
+    # healthy standby is ready while idle. Both are absent for non-WAN networks,
+    # whose profiles carry neither key.
+    active: bool | None = None
+    ready: bool | None = None
     mdns_relay: bool | None = None
     ssdp_relay: bool | None = None
     block_icmp: bool | None = None

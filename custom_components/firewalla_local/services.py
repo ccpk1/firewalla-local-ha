@@ -253,6 +253,7 @@ from .const import (
 )
 from .coordinator import FirewallaConfigEntry, get_llm_tool_mode
 from .helpers.usage_report import serialize_usage_summary
+from .helpers.wan_publish import serialize_wan_health, serialize_wan_routing
 
 # Safe at module level: `llm_tools_common` is deliberately free of
 # `homeassistant.helpers.llm` imports so it stays importable outside the version
@@ -319,12 +320,14 @@ from .models import (
     FirewallaWanEventFailure,
     FirewallaWanEventStatus,
     FirewallaWanInterface,
+    FirewallaWanRouting,
     build_rule_hit_attributes,
     format_policy_rule_name,
 )
 from .utils.duration import parse_duration_to_seconds
 from .utils.host_activity import is_host_online
 from .utils.mac import normalize_mac_address
+from .utils.network import wan_health_by_interface, wan_role
 from .utils.selectors import (
     SelectorMatch,
     SelectorSelection,
@@ -4483,6 +4486,33 @@ def _build_network_overview_entries(
     return entries
 
 
+def _system_wan_routing(entry: FirewallaConfigEntry) -> FirewallaWanRouting | None:
+    """Return the box's multi-WAN mode for this entry."""
+    system_status = entry.runtime_data.integration_manager.system_status
+    return system_status.wan_routing if system_status is not None else None
+
+
+def _wan_label_resolver(entry: FirewallaConfigEntry) -> Callable[[str], str]:
+    """Return a function mapping a WAN interface name to its published label."""
+    labels = {
+        wan.interface_name: wan.name
+        for wan in entry.runtime_data.integration_manager.get_available_wans()
+        if wan.interface_name is not None
+    }
+    return lambda interface_name: labels.get(interface_name, interface_name)
+
+
+def _serialize_wan_routing(entry: FirewallaConfigEntry) -> JsonObjectType | None:
+    """Return the multi-WAN mode with its interfaces as published WAN labels."""
+    return cast(
+        JsonObjectType | None,
+        serialize_wan_routing(
+            _system_wan_routing(entry),
+            label_for_interface=_wan_label_resolver(entry),
+        ),
+    )
+
+
 def _build_wan_overview_entries(
     entry: FirewallaConfigEntry,
 ) -> list[JsonObjectType]:
@@ -4495,6 +4525,10 @@ def _build_wan_overview_entries(
     manager = entry.runtime_data.integration_manager
     speed_tests = manager.get_speed_tests(limit=1)
     quality_samples = manager.get_internet_quality_samples(limit=1)
+    routing = _system_wan_routing(entry)
+    health_by_interface = wan_health_by_interface(
+        entry.runtime_data.coordinator.last_init_payload or {}
+    )
 
     entries: list[JsonObjectType] = []
     for network in manager.get_networks():
@@ -4514,6 +4548,17 @@ def _build_wan_overview_entries(
                 "name": network.name,
                 "kind": network.kind.value,
                 "enabled": network.enabled,
+                # The WAN's part in the mode stated above, so a reader does not
+                # have to cross-reference the routing block itself.
+                "role": wan_role(routing, network.interface_name),
+                "in_use": network.active,
+                "ready": network.ready,
+                "health": cast(
+                    JsonValueType,
+                    serialize_wan_health(
+                        health_by_interface.get(network.interface_name or "")
+                    ),
+                ),
                 "latest_speed_test": (
                     {
                         "tested_at": iso_instant(latest_speed_test.tested_at_timestamp),
@@ -4707,6 +4752,10 @@ async def _async_handle_get_system_overview(call: ServiceCall) -> JsonObjectType
         },
         "wan": {
             "count": len(wan_entries),
+            # The mode decides what the rest means — which WAN is primary, whether
+            # a share exists — so it is stated before the WANs themselves rather
+            # than left for a reader to infer from `wan_ips` having two entries.
+            "routing": _serialize_wan_routing(entry),
             "items": cast(JsonValueType, wan_entries),
         },
     }

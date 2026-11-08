@@ -756,6 +756,118 @@ def test_get_available_wans_ignores_speed_test_uuid_fallback() -> None:
     assert available_wans == ()
 
 
+def test_wan_ip_follows_the_address_the_box_reports() -> None:
+    """Test `wan_ip` is the address the box states, not one derived from sorting.
+
+    The top-level ``network`` block is the box's own answer for the WAN it is
+    routing through, and it is what the app shows. Recomputing it would let the
+    integration disagree with the appliance.
+    """
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {"name": "STANDBY", "type": "wan", "uuid": "wan-s"}
+                    },
+                    "eth1": {
+                        "meta": {"name": "PRIMARY", "type": "wan", "uuid": "wan-p"}
+                    },
+                }
+            },
+            "routing": {
+                "global": {
+                    "default": {
+                        "type": "primary_standby",
+                        "viaIntf": "eth1",
+                        "viaIntf2": "eth0",
+                    }
+                }
+            },
+        },
+        "networkProfiles": {
+            "wan-s": {"intf": "eth0", "ipv4": "192.168.12.237"},
+            "wan-p": {"intf": "eth1", "ipv4": "23.245.207.179"},
+        },
+        # The box is failed over: it reports eth0, not the configured primary.
+        "network": {
+            "uuid": "wan-s",
+            "name": "eth0",
+            "desc": "STANDBY",
+            "type": "wan",
+            "ip_address": "192.168.12.237",
+        },
+    }
+
+    wan_ip, wan_ips = manager._build_wan_ips()
+
+    assert wan_ip == "192.168.12.237"
+    assert wan_ips == {"eth0": "192.168.12.237", "eth1": "23.245.207.179"}
+
+
+def test_wan_ip_falls_back_to_the_configured_primary_without_a_network_block() -> None:
+    """Test the primary's address is used when the box states no active WAN."""
+    snapshot = FirewallaRuntimeSnapshot(
+        appliance_identity=FirewallaApplianceIdentityInput(
+            host="192.168.200.1",
+            group_name="Firewalla",
+            device_name=None,
+            model="gold",
+            serial_number="serial-123",
+            software_version="1.0.0",
+        ),
+        appliance_runtime=FirewallaApplianceRuntimeInput(),
+        policy_rules=(),
+        exception_rule_count=0,
+    )
+    manager = _build_manager(snapshot)
+    manager.coordinator.last_init_payload = {
+        "networkConfig": {
+            "interface": {
+                "phy": {
+                    "eth0": {
+                        "meta": {"name": "STANDBY", "type": "wan", "uuid": "wan-s"}
+                    },
+                    "eth1": {
+                        "meta": {"name": "PRIMARY", "type": "wan", "uuid": "wan-p"}
+                    },
+                }
+            },
+            "routing": {
+                "global": {
+                    "default": {
+                        "type": "primary_standby",
+                        "viaIntf": "eth1",
+                        "viaIntf2": "eth0",
+                    }
+                }
+            },
+        },
+        "networkProfiles": {
+            "wan-s": {"intf": "eth0", "ipv4": "192.168.12.237"},
+            "wan-p": {"intf": "eth1", "ipv4": "23.245.207.179"},
+        },
+    }
+
+    wan_ip, _wan_ips = manager._build_wan_ips()
+
+    assert wan_ip == "23.245.207.179"
+
+
 def test_wan_ip_follows_the_configured_primary_not_the_port_order() -> None:
     """Test the box's WAN preference decides which WAN IP is reported.
 
