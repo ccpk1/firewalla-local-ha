@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import types
 import typing
 from types import SimpleNamespace
 from typing import Any, Final, cast
@@ -497,12 +498,20 @@ _SNAPSHOT_FIELDS_REDACTED_BY_PATTERN: Final = frozenset(
 
 
 def _is_string_annotation(annotation: object) -> bool:
-    """Return whether a resolved annotation is `str` or `str | None`."""
+    """Return whether a resolved annotation is `str` or `str | None`.
+
+    Both union spellings are accepted because they are not the same object across
+    the Python versions the declared Home Assistant floor runs on: `str | None` is
+    a `types.UnionType`, which `typing.get_origin` reports as `typing.Union` on
+    Python 3.14 but not on 3.13. Checking only `typing.Union` made the walk find
+    no optional string fields there, so this guard silently covered less on the
+    oldest supported version than on the newest.
+    """
     if annotation is str:
         return True
-    return typing.get_origin(annotation) is typing.Union and str in (
-        typing.get_args(annotation) or ()
-    )
+    if typing.get_origin(annotation) not in (typing.Union, types.UnionType):
+        return False
+    return str in (typing.get_args(annotation) or ())
 
 
 def test_a_rule_hit_publishes_no_destination_or_device_identity() -> None:
