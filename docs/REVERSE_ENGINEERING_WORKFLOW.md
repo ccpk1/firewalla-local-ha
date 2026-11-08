@@ -1139,6 +1139,23 @@ entry with `meta.type: "wan"`, a profile with `type: "wan"`, and event labels fo
 the display name — and one test pins that an init-payload `wanStatus` block
 classifies nothing.
 
+**Published surface.** The System Status sensor carries the whole mode in one
+`wan_routing` attribute rather than a field per setting, because four of the five
+possible keys are empty in any given mode:
+
+| Mode | `wan_routing` |
+| --- | --- |
+| Failover | `{"mode": "primary_standby", "primary": "WAN-ONE", "standby": "WAN-TWO", "failback": true}` |
+| Load balance | `{"mode": "load_balance", "traffic_share_percent": {"WAN-ONE": 60, "WAN-TWO": 40}}` |
+| Stated mode with nothing to configure | `{"mode": "single"}` |
+| No routing block | `None` |
+
+Interfaces are published as WAN labels, so the keys line up with `current_wan_usage`
+and the WAN sensors. `traffic_share_percent` is deliberately **not** synthesized
+for failover: in failover the in-use WAN already carries everything, and a
+synthesized 100 would be indistinguishable from a weight the box actually stores.
+Per-WAN `in_use`/`ready`/`role` attributes are not published yet.
+
 ### Detail fields
 
 | App field | Raw path | Normalized | Entity attribute |
@@ -1237,6 +1254,7 @@ from the init payload:
 | --- | --- | --- | --- |
 | Box version | `longVersion` / `versionStr` | `FirewallaSystemInfo.software_version` | `software_version` |
 | WAN IP | WAN network `networkProfiles[<wan_uuid>].ipv4` (primary = `networkConfig.routing.global.default.viaIntf`; ambiguous under load balance, which has no primary) | `FirewallaSystemStatus.wan_ip` / `wan_ips` | `wan_ip` / `wan_ips` |
+| Multi-WAN mode | `networkConfig.routing.global.default` | `FirewallaSystemStatus.wan_routing` | `wan_routing` |
 | Port MAC | `nicStates[<port>].address` | per-port `mac` | `ports[<port>].mac` |
 | Port speed | `nicStates[<port>].speed` (Mbps; `-1` = inactive) | per-port `speed_mbps` | `ports[<port>].speed_mbps` |
 | Port link | `nicStates[<port>].carrier` (`1`/`0`) | per-port `link` | `ports[<port>].link` |

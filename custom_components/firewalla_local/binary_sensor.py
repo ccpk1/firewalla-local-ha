@@ -85,6 +85,7 @@ from .const import (
     ATTR_SYSTEM_VPN_HOSTS_TOTAL,
     ATTR_SYSTEM_WAN_IP,
     ATTR_SYSTEM_WAN_IPS,
+    ATTR_SYSTEM_WAN_ROUTING,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DNS_DOMAIN,
     ATTR_WATCHED_DEVICE_DNS_FQDN,
@@ -251,6 +252,7 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
             ATTR_SYSTEM_WAN_IPS: (
                 system_status.wan_ips if system_status is not None else None
             ),
+            ATTR_SYSTEM_WAN_ROUTING: self._build_wan_routing_attribute(),
             ATTR_SYSTEM_CURRENT_WAN_USAGE: self._build_current_wan_usage_attribute(),
             ATTR_SYSTEM_HOSTS_TOTAL: self.host_manager.count_total_devices(),
             ATTR_SYSTEM_HOSTS_ONLINE: self.host_manager.count_online_devices(),
@@ -333,6 +335,46 @@ class FirewallaSystemStatusBinarySensor(FirewallaEntity, BinarySensorEntity):
         if not isinstance(raw_bt_mac, str) or not raw_bt_mac.strip():
             return None
         return raw_bt_mac.strip()
+
+    def _build_wan_routing_attribute(self) -> dict[str, object] | None:
+        """Return how the box distributes traffic across its WANs.
+
+        One attribute rather than a field per setting, because most of the fields
+        are mode-specific: a flat set would carry four keys that are empty in any
+        given mode and hide which ones the mode actually uses. Interfaces are
+        published as the WAN labels the user sees, matching the naming already
+        used by ``current_wan_usage`` and the WAN sensors.
+
+        ``None`` when the box states no preference, which is the same convention
+        every other attribute on this entity uses. Inside the mapping, a field the
+        active mode does not use is omitted, so a consumer can tell "not
+        applicable" from "not reported".
+        """
+        system_status = self.integration_manager.system_status
+        routing = system_status.wan_routing if system_status is not None else None
+        if routing is None:
+            return None
+
+        attribute: dict[str, object] = {"mode": routing.mode}
+        if routing.primary is not None:
+            attribute["primary"] = self._wan_label(routing.primary)
+        if routing.standby is not None:
+            attribute["standby"] = self._wan_label(routing.standby)
+        if routing.failback is not None:
+            attribute["failback"] = routing.failback
+        if routing.traffic_share_percent is not None:
+            attribute["traffic_share_percent"] = {
+                self._wan_label(interface_name): percent
+                for interface_name, percent in routing.traffic_share_percent.items()
+            }
+        return attribute
+
+    def _wan_label(self, interface_name: str) -> str:
+        """Return the WAN label for one interface, falling back to its name."""
+        for wan in self.integration_manager.get_available_wans():
+            if wan.interface_name == interface_name:
+                return wan.name
+        return interface_name
 
     def _build_current_wan_usage_attribute(
         self,

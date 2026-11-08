@@ -52,6 +52,7 @@ from custom_components.firewalla_local.const import (
     ATTR_SYSTEM_BLUETOOTH_MAC,
     ATTR_SYSTEM_PORTS,
     ATTR_SYSTEM_TIMEZONE,
+    ATTR_SYSTEM_WAN_ROUTING,
     ATTR_WATCHED_DEVICE_CONNECTION_TYPE,
     ATTR_WATCHED_DEVICE_DOWNLOAD_USAGE,
     ATTR_WATCHED_DEVICE_HOST_GROUP,
@@ -1063,6 +1064,124 @@ async def test_system_status_exposes_ports_attribute(
     }
     assert system_state.attributes[ATTR_SYSTEM_BLUETOOTH_MAC] == "20:6D:31:FC:1C:56"
     assert system_state.attributes[ATTR_SYSTEM_TIMEZONE] is None
+
+
+async def test_system_status_exposes_the_failover_routing(
+    hass: HomeAssistant,
+) -> None:
+    """Test the System Status sensor reports the failover mode and its settings."""
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "primary_standby",
+            "viaIntf": "eth0",
+            "viaIntf2": "eth1",
+            "failback": True,
+        },
+    )
+
+    system_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_system_status_binary_sensor"
+    )
+
+    assert system_state.attributes[ATTR_SYSTEM_WAN_ROUTING] == {
+        "mode": "primary_standby",
+        "primary": "WAN-ONE",
+        "standby": "WAN-TWO",
+        "failback": True,
+    }
+
+
+async def test_system_status_exposes_the_load_balance_share(
+    hass: HomeAssistant,
+) -> None:
+    """Test load balance reports the declared share and no primary.
+
+    Captured shape from a live box: ``nextHops`` replaces ``viaIntf``/``viaIntf2``
+    entirely, so publishing a primary here would invent one.
+    """
+    await _setup_routing_entry(
+        hass,
+        routing={
+            "type": "load_balance",
+            "nextHops": [
+                {"viaIntf": "eth0", "weight": 60},
+                {"viaIntf": "eth1", "weight": 40},
+            ],
+        },
+    )
+
+    system_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_system_status_binary_sensor"
+    )
+
+    assert system_state.attributes[ATTR_SYSTEM_WAN_ROUTING] == {
+        "mode": "load_balance",
+        "traffic_share_percent": {"WAN-ONE": 60, "WAN-TWO": 40},
+    }
+
+
+async def test_system_status_reports_no_routing_when_the_box_states_no_preference(
+    hass: HomeAssistant,
+) -> None:
+    """Test a box with no routing block reports ``None`` rather than a mode.
+
+    ``None`` and not an invented ``single``: the box states no preference, and a
+    guessed mode would be indistinguishable from a stated one.
+    """
+    await _setup_routing_entry(hass, routing=None)
+
+    system_state = _binary_sensor_state_for_unique_suffix(
+        hass, "_system_status_binary_sensor"
+    )
+
+    assert system_state.attributes[ATTR_SYSTEM_WAN_ROUTING] is None
+
+
+async def _setup_routing_entry(
+    hass: HomeAssistant,
+    *,
+    routing: dict[str, object] | None,
+) -> MockConfigEntry:
+    """Set up one entry whose payload declares two WANs and the given routing."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="license-123",
+        title="Firewalla (192.168.200.1)",
+        data={
+            CONF_LICENSE: "license-123",
+            CONF_HOST: "192.168.200.1",
+            CONF_GID: "gid-123",
+            CONF_EID: "eid-123",
+            CONF_AID: "aid-123",
+            CONF_SYMMETRIC_KEY: "symmetric-key",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    payload = _network_payload()
+    network_config = payload["networkConfig"]
+    assert isinstance(network_config, dict)
+    network_config["interface"]["phy"]["eth1"] = {
+        "meta": {"name": "WAN-TWO", "type": "wan", "uuid": "wan-two"},
+        "enabled": True,
+    }
+    if routing is not None:
+        network_config["routing"] = {"global": {"default": routing}}
+
+    with (
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.async_get_runtime_init_payload",
+            new=AsyncMock(return_value=payload),
+        ),
+        patch(
+            "custom_components.firewalla_local.api.client.FirewallaApiClient.build_runtime_snapshot",
+            return_value=_snapshot_with_hosts(_box_host()),
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    return entry
 
 
 def _count_network_binary_sensors(hass: HomeAssistant) -> int:

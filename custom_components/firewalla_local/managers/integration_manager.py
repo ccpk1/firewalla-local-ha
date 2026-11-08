@@ -83,7 +83,11 @@ from ..utils.flow import (
     iter_flow_rows,
     metric_ranking_sort_key,
 )
-from ..utils.network import build_network_inventory, primary_wan_interface_name
+from ..utils.network import (
+    build_network_inventory,
+    primary_wan_interface_name,
+    wan_routing,
+)
 from ..utils.values import (
     normalized_bool,
     normalized_float,
@@ -873,6 +877,7 @@ class FirewallaIntegrationManager(FirewallaBaseManager):
             ddns=appliance_runtime.ddns,
             firmware_release_type=appliance_runtime.firmware_release_type,
             timezone_name=appliance_runtime.timezone_name,
+            wan_routing=wan_routing(self.coordinator.last_init_payload or {}),
             wan_ip=wan_ip,
             wan_ips=wan_ips,
             cpu_usage_1m=appliance_runtime.cpu_usage_1m,

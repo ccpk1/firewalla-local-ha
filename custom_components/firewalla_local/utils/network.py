@@ -10,6 +10,7 @@ from ..models import (
     FirewallaNetwork,
     FirewallaNetworkDhcpConfig,
     FirewallaNetworkKind,
+    FirewallaWanRouting,
 )
 from .values import normalized_bool, normalized_int, normalized_string
 
@@ -70,6 +71,12 @@ _RAW_ROUTING_KEY: Final = "routing"
 _RAW_GLOBAL_KEY: Final = "global"
 _RAW_DEFAULT_ROUTE_KEY: Final = "default"
 _RAW_VIA_INTF_KEY: Final = "viaIntf"
+_RAW_VIA_INTF2_KEY: Final = "viaIntf2"
+_RAW_FAILBACK_KEY: Final = "failback"
+_RAW_NEXT_HOPS_KEY: Final = "nextHops"
+_RAW_WEIGHT_KEY: Final = "weight"
+_WAN_MODE_PRIMARY_STANDBY: Final = "primary_standby"
+_WAN_MODE_LOAD_BALANCE: Final = "load_balance"
 _RAW_PHY_CATEGORY: Final = "phy"
 _RAW_BOND_CATEGORY: Final = "bond"
 _RAW_VLAN_CATEGORY: Final = "vlan"
@@ -356,15 +363,47 @@ def _iter_wan_event_names(
                 yield wan_uuid, wan_name
 
 
-def primary_wan_interface_name(data: dict[str, object]) -> str | None:
-    """Return the interface the box is configured to route through first.
+def wan_routing(data: dict[str, object]) -> FirewallaWanRouting | None:
+    """Return how the box distributes traffic across its WAN uplinks.
 
-    ``networkConfig.routing.global.default`` is the app's WAN preference, and it
-    is a deliberate setting rather than something to infer: ``type`` states how
-    the WANs are used (``primary_standby``) and ``viaIntf`` names the primary
-    while ``viaIntf2`` names the standby. It outranks any ordering derived from
-    interface names, which cannot distinguish a primary from a standby.
+    ``networkConfig.routing.global.default`` is the app's multi-WAN setting, and
+    ``type`` is what the box calls the mode: ``primary_standby`` names a
+    ``viaIntf`` primary and a ``viaIntf2`` standby with a ``failback`` toggle,
+    while ``load_balance`` carries ``nextHops`` with a ``weight`` per interface
+    and names no primary at all. The two shapes are disjoint, so only the fields
+    the stated mode actually uses are populated.
+
+    Absent when the payload has no routing block, which is the honest answer for
+    a box that states no preference rather than a guess at one.
     """
+    raw_default = _raw_default_route(data)
+    if raw_default is None:
+        return None
+    mode = normalized_string(raw_default.get(_RAW_TYPE_KEY))
+    if mode is None:
+        return None
+
+    if mode == _WAN_MODE_PRIMARY_STANDBY:
+        return FirewallaWanRouting(
+            mode=mode,
+            primary=normalized_string(raw_default.get(_RAW_VIA_INTF_KEY)),
+            standby=normalized_string(raw_default.get(_RAW_VIA_INTF2_KEY)),
+            failback=normalized_bool(raw_default.get(_RAW_FAILBACK_KEY)),
+        )
+
+    if mode == _WAN_MODE_LOAD_BALANCE:
+        return FirewallaWanRouting(
+            mode=mode,
+            traffic_share_percent=_traffic_share_percent(
+                raw_default.get(_RAW_NEXT_HOPS_KEY)
+            ),
+        )
+
+    return FirewallaWanRouting(mode=mode)
+
+
+def _raw_default_route(data: dict[str, object]) -> dict[str, object] | None:
+    """Return ``networkConfig.routing.global.default`` when the box states one."""
     raw_network_config = data.get(_RAW_NETWORK_CONFIG_KEY)
     if not isinstance(raw_network_config, dict):
         return None
@@ -375,9 +414,38 @@ def primary_wan_interface_name(data: dict[str, object]) -> str | None:
     if not isinstance(raw_global, dict):
         return None
     raw_default = raw_global.get(_RAW_DEFAULT_ROUTE_KEY)
-    if not isinstance(raw_default, dict):
+    return raw_default if isinstance(raw_default, dict) else None
+
+
+def _traffic_share_percent(raw_next_hops: object) -> dict[str, int] | None:
+    """Return the declared load-balance share per interface, if stated."""
+    if not isinstance(raw_next_hops, list):
         return None
-    return normalized_string(raw_default.get(_RAW_VIA_INTF_KEY))
+    share: dict[str, int] = {}
+    for raw_hop in raw_next_hops:
+        if not isinstance(raw_hop, dict):
+            continue
+        interface_name = normalized_string(raw_hop.get(_RAW_VIA_INTF_KEY))
+        weight = normalized_int(raw_hop.get(_RAW_WEIGHT_KEY))
+        if interface_name is None or weight is None:
+            continue
+        share[interface_name] = weight
+    return share or None
+
+
+def primary_wan_interface_name(data: dict[str, object]) -> str | None:
+    """Return the interface the box is configured to route through first.
+
+    Read from :func:`wan_routing` so there is one parser for the block. Only the
+    failover mode names a primary; load balance distributes across every
+    interface and has none, so it reports ``None`` rather than electing the first
+    next hop.
+
+    It outranks any ordering derived from interface names, which cannot
+    distinguish a primary from a standby.
+    """
+    routing = wan_routing(data)
+    return routing.primary if routing is not None else None
 
 
 def _bridge_member_interface_names(data: dict[str, object]) -> set[str]:

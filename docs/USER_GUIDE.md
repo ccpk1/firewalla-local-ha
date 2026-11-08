@@ -605,6 +605,46 @@ The system-status entity exposes stable attributes such as:
 Use this entity when you want a quick appliance-health view plus a stable set
 of status attributes for automations or dashboards.
 
+#### Multi-WAN routing
+
+If you have more than one WAN, the System Status entity exposes how the box is
+set up to use them in a single `wan_routing` attribute. Its keys depend on the
+mode configured in the Firewalla app:
+
+```yaml
+# Failover, WAN-ONE primary with auto-fallback on
+wan_routing:
+  mode: primary_standby
+  primary: WAN-ONE
+  standby: WAN-TWO
+  failback: true
+
+# Load balance, 60/40
+wan_routing:
+  mode: load_balance
+  traffic_share_percent:
+    WAN-ONE: 60
+    WAN-TWO: 40
+```
+
+`mode` is the box's own value (`primary_standby`, `load_balance`, `single`).
+Only the keys that mode uses are present, so `primary`/`standby` never appear in
+load balance and `traffic_share_percent` never appears in failover. The
+attribute is `null` when the box states no preference.
+
+`traffic_share_percent` is the **configured** split, not a measurement — the
+Firewalla box does not report observed per-WAN traffic. In failover there is no
+share to report, because the in-use WAN carries everything by definition.
+
+Example: check which WAN is primary before running a speed test.
+
+```yaml
+action: firewalla_local.run_internet_speed_test
+data:
+  wan_name: >
+    {{ state_attr('binary_sensor.firewalla_system_status', 'wan_routing')['primary'] }}
+```
+
 ### WAN-scoped speed-test sensors
 
 Each discovered WAN gets three speed-test sensors: download, upload, and
